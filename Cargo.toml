@@ -1,0 +1,19 @@
+[package]
+name = "subrandr"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+thiserror = "1"
+
+text-sys = { path = "./text-sys" }
+# miniquad = "0.4"
+# macroquad = "0.4"
+xcb = { version = "1.4", features = ["res"] }
+# macroquad = { version = "0.4", features = ["log"] }
+# env_logger = "0.11"
+
+macros = { path = "./macros" }

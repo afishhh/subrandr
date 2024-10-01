@@ -1,5 +1,5 @@
 use std::{
-    ffi::{CStr, CString},
+    ffi::CString,
     mem::MaybeUninit,
     os::unix::ffi::OsStrExt,
     path::Path,
@@ -150,6 +150,7 @@ impl Font {
                 self.dpi
             ));
         }
+
         if let Some(mm) = FaceMmVar::get(self.ft_face) {
             let mut coords = [FT_Fixed::default(); T1_MAX_MM_AXIS as usize];
             for (i, axis) in mm.axes().iter().enumerate() {
@@ -168,6 +169,7 @@ impl Font {
                 ));
             }
         }
+
         self.ft_face
     }
 
@@ -190,6 +192,12 @@ impl Font {
             assert!(hb_font_get_v_extents(self.hb_font, result.as_mut_ptr()) > 0);
             result.assume_init()
         }
+    }
+}
+
+impl Drop for Font {
+    fn drop(&mut self) {
+        unsafe { hb_font_destroy(self.hb_font) };
     }
 }
 

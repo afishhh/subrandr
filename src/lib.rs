@@ -1,5 +1,4 @@
-use text::{ShapedText, TextExtents, TextRenderer};
-use text_sys::*;
+use text::{Glyphs, TextExtents, TextRenderer};
 
 pub mod ass;
 pub mod srv3;
@@ -17,8 +16,13 @@ pub enum Alignment {
     BottomRight,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextWrappingMode {
+    None,
+}
+
 #[derive(Debug, Clone)]
-pub struct Event {
+struct Event {
     start: u32,
     end: u32,
     x: f32,
@@ -28,7 +32,7 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone)]
-pub struct Segment {
+struct Segment {
     font: String,
     font_size: f32,
     font_weight: u32,
@@ -36,6 +40,7 @@ pub struct Segment {
     underline: bool,
     strike_out: bool,
     color: u32,
+    text_wrap: TextWrappingMode,
     text: String,
 }
 
@@ -66,6 +71,7 @@ impl Subtitles {
                         underline: false,
                         strike_out: false,
                         color: 0xFF0000FF,
+                        text_wrap: TextWrappingMode::None,
                         text: "this is normal".to_string(),
                     }],
                 },
@@ -83,6 +89,7 @@ impl Subtitles {
                         underline: false,
                         strike_out: false,
                         color: 0xFFFFFFFF,
+                        text_wrap: TextWrappingMode::None,
                         text: "this is bold..".to_string(),
                     }],
                 },
@@ -224,7 +231,7 @@ impl<'a> Renderer<'a> {
         (&mut self.buffer[start..start + 4]).try_into().unwrap()
     }
 
-    fn paint_text(&mut self, x: u32, y: u32, font: &text::Font, text: &ShapedText, color: u32) {
+    fn paint_text(&mut self, x: u32, y: u32, font: &text::Font, text: &Glyphs, color: u32) {
         self.text.paint(
             &mut self.buffer,
             x as usize,
@@ -334,7 +341,7 @@ impl<'a> Renderer<'a> {
                     let (ox, oy) = Self::translate_for_aligned_text(
                         &font,
                         true,
-                        &self.text.compute_extents(&font, &shaped),
+                        &shaped.compute_extents(&font),
                         event.alignment,
                     );
                     println!("alignment translation: {ox} {oy}");

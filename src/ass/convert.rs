@@ -1,4 +1,4 @@
-use crate::Segment;
+use crate::{Segment, TextWrappingMode};
 
 use super::parse::*;
 
@@ -121,6 +121,7 @@ pub fn ass_to_subs(ass: Script) -> crate::Subtitles {
                 italic: style.italic,
                 underline: style.underline,
                 strike_out: style.strike_out,
+                text_wrap: TextWrappingMode::None,
                 color: (style.primary_colour & 0xFF00 << 16)
                     | (style.primary_colour & 0xFF0000)
                     | (style.primary_colour & 0xFF000000 >> 16)

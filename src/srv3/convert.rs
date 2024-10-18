@@ -23,6 +23,7 @@ pub fn convert(document: Document) -> Subtitles {
                 underline: false,
                 strike_out: false,
                 color: segment.pen().foreground_color,
+                text_wrap: crate::TextWrappingMode::None,
                 text: segment.text.clone(),
             })
         }

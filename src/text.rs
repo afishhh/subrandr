@@ -72,6 +72,7 @@ impl FaceMmVar {
         unsafe { std::slice::from_raw_parts((*self.0).axis, (*self.0).num_axis as usize) }
     }
 
+    #[expect(dead_code)]
     fn namedstyles(&self) -> &[FT_Var_Named_Style] {
         unsafe {
             std::slice::from_raw_parts((*self.0).namedstyle, (*self.0).num_namedstyles as usize)
@@ -115,6 +116,7 @@ impl Face {
     }
 
     #[inline(always)]
+    #[expect(dead_code)]
     pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
         self.with_size_and_weight(point_size, dpi, 400.)
     }
@@ -186,6 +188,7 @@ impl Font {
         }
     }
 
+    #[expect(dead_code)]
     pub fn vertical_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {
@@ -225,32 +228,164 @@ impl Drop for Font {
 ///     0.5,
 /// );
 /// ```
-pub struct TextRenderer {
-    ft: &'static Library,
+pub struct TextRenderer {}
+
+pub struct Glyphs {
+    // NOTE: These are not 'static, just self referential
+    infos: &'static mut [hb_glyph_info_t],
+    positions: &'static mut [hb_glyph_position_t],
+    buffer: *mut hb_buffer_t,
 }
 
-pub struct ShapedText(*mut hb_buffer_t);
+macro_rules! define_glyph_accessors {
+    () => {
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub fn codepoint(&self) -> u32 {
+            self.info.codepoint
+        }
 
-impl ShapedText {
-    fn glyph_infos(&self) -> &[hb_glyph_info_t] {
-        unsafe {
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub fn x_advance(&self) -> i32 {
+            self.position.x_advance
+        }
+
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub fn y_advance(&self) -> i32 {
+            self.position.y_advance
+        }
+
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub fn x_offset(&self) -> i32 {
+            self.position.x_offset
+        }
+
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub fn y_offset(&self) -> i32 {
+            self.position.y_offset
+        }
+    };
+}
+
+pub struct Glyph<'a> {
+    info: &'a hb_glyph_info_t,
+    position: &'a hb_glyph_position_t,
+}
+
+impl Glyph<'_> {
+    define_glyph_accessors!();
+}
+
+pub struct GlyphMut<'a> {
+    info: &'a mut hb_glyph_info_t,
+    position: &'a mut hb_glyph_position_t,
+}
+
+impl GlyphMut<'_> {
+    define_glyph_accessors!();
+}
+
+impl Glyphs {
+    fn from_shaped_buffer(buffer: *mut hb_buffer_t) -> Self {
+        let infos = unsafe {
             let mut nglyphs = 0;
-            let infos = hb_buffer_get_glyph_infos(self.0, &mut nglyphs);
+            let infos = hb_buffer_get_glyph_infos(buffer, &mut nglyphs);
             if infos.is_null() {
-                return &[];
+                &mut []
+            } else {
+                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
             }
-            std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
+        };
+
+        let positions = unsafe {
+            let mut nglyphs = 0;
+            let infos = hb_buffer_get_glyph_positions(buffer, &mut nglyphs);
+            if infos.is_null() {
+                &mut []
+            } else {
+                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
+            }
+        };
+
+        assert_eq!(infos.len(), positions.len());
+
+        Self {
+            infos,
+            positions,
+            buffer,
         }
     }
 
-    fn glyph_positions(&self) -> &[hb_glyph_position_t] {
+    #[expect(dead_code)]
+    pub fn get(&self, index: usize) -> Option<Glyph> {
+        self.infos.get(index).map(|info| unsafe {
+            let position = self.positions.get_unchecked(index);
+            Glyph { info, position }
+        })
+    }
+
+    #[expect(dead_code)]
+    pub fn get_mut(&mut self, index: usize) -> Option<GlyphMut> {
+        self.infos.get_mut(index).map(|info| unsafe {
+            let position = self.positions.get_unchecked_mut(index);
+            GlyphMut { info, position }
+        })
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
+        (0..self.infos.len()).into_iter().map(|i| Glyph {
+            info: &self.infos[i],
+            position: &self.positions[i],
+        })
+    }
+
+    pub fn compute_extents(&self, font: &Font) -> TextExtents {
         unsafe {
-            let mut nglyphs = 0;
-            let infos = hb_buffer_get_glyph_positions(self.0, &mut nglyphs);
-            if infos.is_null() {
-                return &[];
+            let (_, hb_font) = font.with_applied_size_and_hb();
+
+            let direction = hb_buffer_get_direction(self.buffer);
+
+            let mut results = TextExtents {
+                paint_height: 0,
+                paint_width: 0,
+            };
+
+            let mut iterator = self.iter();
+
+            if let Some(glyph) = iterator.next_back() {
+                let mut extents = MaybeUninit::uninit();
+                assert!(
+                    hb_font_get_glyph_extents(hb_font, glyph.codepoint(), extents.as_mut_ptr(),)
+                        > 0
+                );
+                let extents = extents.assume_init();
+                results.paint_height += extents.height.abs();
+                results.paint_width += extents.width;
             }
-            std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
+
+            for glyph in iterator {
+                let mut extents = MaybeUninit::uninit();
+                assert!(
+                    hb_font_get_glyph_extents(hb_font, glyph.codepoint(), extents.as_mut_ptr()) > 0
+                );
+                let extents = extents.assume_init();
+                if direction_is_horizontal(direction) {
+                    results.paint_height = results.paint_height.max(extents.height.abs());
+                    results.paint_width += glyph.x_advance();
+                } else {
+                    results.paint_width = results.paint_width.max(extents.width.abs());
+                    results.paint_height += glyph.y_advance();
+                }
+            }
+
+            results.paint_height /= 64;
+            results.paint_width /= 64;
+
+            results
         }
     }
 }
@@ -287,67 +422,19 @@ pub struct TextExtents {
 
 impl TextRenderer {
     pub fn new() -> Self {
-        let library = Library::get_or_init();
-
-        Self { ft: library }
+        Self {}
     }
 
-    pub fn shape_text(&self, font: &Font, text: &str) -> ShapedText {
+    pub fn shape_text(&self, font: &Font, text: &str) -> Glyphs {
         let (_, hb_font) = font.with_applied_size_and_hb();
         unsafe {
             let buf: *mut hb_buffer_t = hb_buffer_create();
+
             hb_buffer_add_utf8(buf, text.as_ptr() as *const _, text.len() as i32, 0, -1);
             hb_buffer_guess_segment_properties(buf);
             hb_shape(hb_font, buf, std::ptr::null(), 0);
 
-            ShapedText(buf)
-        }
-    }
-
-    pub fn compute_extents(&self, font: &Font, text: &ShapedText) -> TextExtents {
-        unsafe {
-            let infos = text.glyph_infos();
-            let positions = text.glyph_positions();
-            let (_, hb_font) = font.with_applied_size_and_hb();
-
-            let direction = hb_buffer_get_direction(text.0);
-
-            let mut results = TextExtents {
-                paint_height: 0,
-                paint_width: 0,
-            };
-
-            let mut iterator = infos.iter().zip(positions.iter()).enumerate();
-
-            if let Some((_, (info, _))) = iterator.next_back() {
-                let mut extents = MaybeUninit::uninit();
-                assert!(
-                    hb_font_get_glyph_extents(hb_font, info.codepoint, extents.as_mut_ptr(),) > 0
-                );
-                let extents = extents.assume_init();
-                results.paint_height += extents.height.abs();
-                results.paint_width += extents.width;
-            }
-
-            for (_, (info, position)) in iterator {
-                let mut extents = MaybeUninit::uninit();
-                assert!(
-                    hb_font_get_glyph_extents(hb_font, info.codepoint, extents.as_mut_ptr()) > 0
-                );
-                let extents = extents.assume_init();
-                if direction_is_horizontal(direction) {
-                    results.paint_height = results.paint_height.max(extents.height.abs());
-                    results.paint_width += position.x_advance;
-                } else {
-                    results.paint_width = results.paint_width.max(extents.width.abs());
-                    results.paint_height += position.y_advance;
-                }
-            }
-
-            results.paint_height /= 64;
-            results.paint_width /= 64;
-
-            results
+            Glyphs::from_shaped_buffer(buf)
         }
     }
 
@@ -361,21 +448,17 @@ impl TextRenderer {
         height: usize,
         stride: usize,
         font: &Font,
-        text: &ShapedText,
+        glyphs: &Glyphs,
         // In desired output buffer order, i.e. if the output buffer is supposed to be RGBA then this should also be RGBA
         color: [u8; 3],
         alpha: f32,
     ) {
         unsafe {
-            let infos = text.glyph_infos();
-            let positions = text.glyph_positions();
             let face = font.with_applied_size();
-
-            assert_eq!(infos.len(), positions.len());
 
             let mut x = baseline_x as u32;
             let mut y = baseline_y as u32;
-            for (info, position) in infos.iter().zip(positions.iter()) {
+            for Glyph { info, position } in glyphs.iter() {
                 fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
                 let glyph = (*face).glyph;
                 fttry!(FT_Render_Glyph(

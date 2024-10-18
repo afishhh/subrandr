@@ -123,7 +123,7 @@ impl Face {
         Font {
             ft_face: self.face,
             hb_font: unsafe { hb_ft_font_create_referenced(self.face) },
-            frac_point_size: f32_to_fractional_points(point_size * 8.0),
+            frac_point_size: f32_to_fractional_points(point_size * 2.0),
             dpi,
             fixed_point_weight: f32_to_fixed_point(weight),
         }
@@ -236,6 +236,9 @@ impl ShapedText {
         unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_infos(self.0, &mut nglyphs);
+            if infos.is_null() {
+                return &[];
+            }
             std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
         }
     }
@@ -244,6 +247,9 @@ impl ShapedText {
         unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_positions(self.0, &mut nglyphs);
+            if infos.is_null() {
+                return &[];
+            }
             std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
         }
     }
@@ -265,6 +271,7 @@ fn linear_to_srgb(color: f32) -> u8 {
     (color.powf(2.2 / 1.0) * 255.0).round() as u8
 }
 
+#[inline(always)]
 fn direction_is_horizontal(dir: hb_direction_t) -> bool {
     dir == hb_direction_t_HB_DIRECTION_LTR || dir == hb_direction_t_HB_DIRECTION_RTL
 }
@@ -355,6 +362,7 @@ impl TextRenderer {
         stride: usize,
         font: &Font,
         text: &ShapedText,
+        // In desired output buffer order, i.e. if the output buffer is supposed to be RGBA then this should also be RGBA
         color: [u8; 3],
         alpha: f32,
     ) {

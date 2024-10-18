@@ -9,11 +9,15 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 [dependencies]
 thiserror = "1"
 
+aliasable = "0.1"
+quick-xml = "0.36"
+
 text-sys = { path = "./text-sys" }
 # miniquad = "0.4"
 # macroquad = "0.4"
-xcb = { version = "1.4", features = ["res"] }
 # macroquad = { version = "0.4", features = ["log"] }
 # env_logger = "0.11"
 
-macros = { path = "./macros" }
+[dev-dependencies]
+xcb = { version = "1", features = ["res"] }
+clap = { version = "4", features = ["derive"] }

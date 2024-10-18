@@ -2,98 +2,7 @@ use text::{ShapedText, TextExtents, TextRenderer};
 use text_sys::*;
 
 pub mod ass;
-
-impl From<ass::Alignment> for Alignment {
-    fn from(value: ass::Alignment) -> Self {
-        match value {
-            ass::Alignment::BottomLeft => Alignment::BottomLeft,
-            ass::Alignment::BottomCenter => Alignment::Bottom,
-            ass::Alignment::BottomRight => Alignment::BottomRight,
-            ass::Alignment::MiddleLeft => Alignment::Left,
-            ass::Alignment::MiddleCenter => Alignment::Center,
-            ass::Alignment::MiddleRight => Alignment::Right,
-            ass::Alignment::TopLeft => Alignment::TopLeft,
-            ass::Alignment::TopCenter => Alignment::Top,
-            ass::Alignment::TopRight => Alignment::TopRight,
-        }
-    }
-}
-
-pub fn ass_to_subs(ass: ass::Script) -> Subtitles {
-    let mut subs = Subtitles { events: vec![] };
-
-    let layout_resolution = if ass.layout_resolution.0 > 0 && ass.layout_resolution.1 > 0 {
-        ass.layout_resolution
-    } else {
-        ass.play_resolution
-    };
-
-    for event in ass.events {
-        let style = ass
-            .styles
-            .binary_search_by(|x| x.name.cmp(&event.style))
-            .map(|idx| &ass.styles[idx])
-            .unwrap_or(&ass::DEFAULT_STYLE);
-
-        let mut text = String::new();
-        // TODO: correct and alignment specific values
-        let mut x = 0.5;
-        let mut y = 0.8;
-        let mut alignment = style.alignment;
-
-        for part in ass::segment_event_text(&event.text) {
-            match part {
-                ass::TextPart::Commands(r) => {
-                    let command_block = &event.text[r];
-                    let mut it = command_block.chars();
-
-                    while !it.as_str().is_empty() {
-                        while it.next().is_some_and(|c| c != '\\') {}
-
-                        let remainder = it.as_str();
-                        if remainder.len() >= 3 && &remainder[..3] == "pos" {
-                            assert_eq!(&remainder[3..4], "(");
-                            let args_end = remainder.find(')').unwrap();
-                            let args = &remainder[4..args_end];
-                            let (left, right) = args.split_once(',').unwrap();
-                            let tx = left.parse::<u32>().unwrap();
-                            let ty = right.parse::<u32>().unwrap();
-                            let (max_x, max_y) = layout_resolution;
-                            x = tx as f32 / max_x as f32;
-                            y = ty as f32 / max_y as f32
-                        };
-                        if remainder.len() >= 2 && &remainder[..2] == "an" {
-                            alignment = ass::Alignment::from_ass(&remainder[2..3]).unwrap();
-                        }
-                        println!("{x} {y}");
-                    }
-                }
-                ass::TextPart::Content(c) => {
-                    text += &event.text[c];
-                }
-            }
-        }
-
-        subs.events.push(Event {
-            start: event.start,
-            end: event.end,
-            x,
-            y,
-            alignment: alignment.into(),
-            segments: vec![Segment {
-                font: style.fontname.to_string(),
-                font_size: style.fontsize,
-                font_weight: style.weight,
-                italic: style.italic,
-                underline: style.underline,
-                strike_out: style.strike_out,
-                text,
-            }],
-        })
-    }
-
-    subs
-}
+pub mod srv3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
@@ -126,6 +35,7 @@ pub struct Segment {
     italic: bool,
     underline: bool,
     strike_out: bool,
+    color: u32,
     text: String,
 }
 
@@ -155,6 +65,7 @@ impl Subtitles {
                         italic: false,
                         underline: false,
                         strike_out: false,
+                        color: 0xFF0000FF,
                         text: "this is normal".to_string(),
                     }],
                 },
@@ -171,6 +82,7 @@ impl Subtitles {
                         italic: false,
                         underline: false,
                         strike_out: false,
+                        color: 0xFFFFFFFF,
                         text: "this is bold..".to_string(),
                     }],
                 },
@@ -312,7 +224,7 @@ impl<'a> Renderer<'a> {
         (&mut self.buffer[start..start + 4]).try_into().unwrap()
     }
 
-    fn paint_text(&mut self, x: u32, y: u32, font: &text::Font, text: &ShapedText, alpha: f32) {
+    fn paint_text(&mut self, x: u32, y: u32, font: &text::Font, text: &ShapedText, color: u32) {
         self.text.paint(
             &mut self.buffer,
             x as usize,
@@ -322,8 +234,12 @@ impl<'a> Renderer<'a> {
             (self.width * 4) as usize,
             font,
             text,
-            [255, 255, 255],
-            alpha,
+            [
+                ((color & 0xFF000000) >> 24) as u8,
+                ((color & 0x00FF0000) >> 16) as u8,
+                ((color & 0x0000FF00) >> 8) as u8,
+            ],
+            ((color & 0xFF) as f32) / 255.0,
         );
     }
 
@@ -333,6 +249,8 @@ impl<'a> Renderer<'a> {
         extents: &TextExtents,
         alignment: Alignment,
     ) -> (i32, i32) {
+        assert!(horizontal);
+
         enum Vertical {
             Top,
             BaselineCentered,
@@ -403,6 +321,7 @@ impl<'a> Renderer<'a> {
                 .iter()
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
+                println!("{event:?}");
                 let mut x = (self.width as f32 * event.x) as u32;
                 let mut y = (self.height as f32 * event.y) as u32;
                 for segment in event.segments.iter() {
@@ -418,9 +337,11 @@ impl<'a> Renderer<'a> {
                         &self.text.compute_extents(&font, &shaped),
                         event.alignment,
                     );
+                    println!("alignment translation: {ox} {oy}");
+                    println!();
                     let x = x.saturating_add_signed(ox);
                     let y = y.saturating_add_signed(oy);
-                    self.paint_text(x, y, &font, &shaped, 1.0);
+                    self.paint_text(x, y, &font, &shaped, segment.color);
                 }
             }
         }

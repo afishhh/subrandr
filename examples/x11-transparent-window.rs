@@ -1,44 +1,36 @@
-use core::f32;
-use std::{error::Error, time::Instant};
+use std::{
+    borrow::BorrowMut, error::Error, fmt::Debug, os::unix::ffi::OsStrExt, path::PathBuf,
+    time::Instant,
+};
 
-// use macroquad::{
-//     camera::{set_camera, Camera2D},
-//     color::WHITE,
-//     math::vec2,
-//     miniquad::window::screen_size,
-//     texture::Texture2D,
-//     window::next_frame,
-// };
-// use miniquad::window::dpi_scale;
+use clap::Parser;
 use subrandr::{Renderer, Subtitles};
-use xcb::Xid;
 
-// fn window_conf() -> miniquad::conf::Conf {
-//     miniquad::conf::Conf {
-//         window_title: "subrandr test".to_owned(),
-//         high_dpi: true,
-//         platform: miniquad::conf::Platform {
-//             framebuffer_alpha: true,
-//             linux_x11_gl: miniquad::conf::LinuxX11Gl::EGLOnly,
-//             linux_backend: miniquad::conf::LinuxBackend::X11Only,
-//             ..Default::default()
-//         },
-//         ..Default::default()
-//     }
-// }
+#[derive(clap::Parser)]
+struct Args {
+    file: PathBuf,
+    #[clap(long = "dpi", default_value_t = 72)]
+    dpi: u32,
+}
 
 fn main() -> Result<(), Box<dyn Error + 'static>> {
-    let mut render = Renderer::new(0, 0, &Subtitles::empty(), 72 /* (dpi_scale() * 72.0) */ as u32);
-    // dbg!(subrandr::ass::split_into_sections(
-    //     &std::fs::read_to_string("/home/fishhh/sync/downloads/m2/test/test.ass").unwrap()
-    // )
-    // .unwrap());
-    let script = subrandr::ass::parse_ass(
-        &std::fs::read_to_string("/home/fishhh/sync/downloads/m2/test/test.ass").unwrap(),
-    )
-    .unwrap();
-    // dbg!(&script);
-    let script_subs = subrandr::ass_to_subs(script);
+    let args = Args::parse();
+
+    let subs = match args.file.extension().map(|x| x.as_bytes()) {
+        Some(b"srv3" | b"ytt") => {
+            let document =
+                subrandr::srv3::parse(&std::fs::read_to_string(args.file).unwrap()).unwrap();
+            subrandr::srv3::convert(document)
+        }
+        Some(b"ass") => {
+            let script =
+                subrandr::ass::parse(&std::fs::read_to_string(args.file).unwrap()).unwrap();
+            subrandr::ass::convert(script)
+        }
+        _ => panic!("Unrecognised subtitle file extension"),
+    };
+
+    // let subs = Subtitles::test_new();
 
     let (conn, screen_number) = xcb::Connection::connect(None)?;
 
@@ -50,6 +42,9 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
     let window = conn.generate_id();
     let colormap = conn.generate_id();
 
+    // let r = conn.wait_for_reply(conn.send_request(&xcb::bigreq::Enable {}))?;
+    // println!("{} {} {:?}", r.length(), r.maximum_request_length(), r);
+
     let visuals = screen
         .allowed_depths()
         .find(|d| d.depth() == 32)
@@ -57,7 +52,11 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         .visuals();
     let visual = visuals
         .iter()
-        .find(|x| x.bits_per_rgb_value() == 8)
+        .find(|x| {
+            x.bits_per_rgb_value() == 8 && {
+                x.red_mask() == 0xFF0000 && x.green_mask() == 0x00FF00 && x.blue_mask() == 0x0000FF
+            }
+        })
         .unwrap();
 
     let cookie = conn.send_request_checked(&xcb::x::CreateColormap {
@@ -98,8 +97,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     // TODO: get and scale by dpi
 
-    let aaa = Subtitles::test_new();
-    let mut render = Renderer::new(0, 0, &script_subs, 72 /* (dpi_scale() * 72.0) */ as u32);
+    let mut render = Renderer::new(0, 0, &subs, args.dpi);
     let start = Instant::now();
     loop {
         let geometry = conn.wait_for_reply(conn.send_request(&xcb::x::GetGeometry {
@@ -117,6 +115,16 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         let end = Instant::now();
         println!("took {:.2}ms", (end - now).as_micros() as f64 / 1000.);
 
+        // FIXME: WHY DOES X11 EXPECT BGRA HERE??
+        let bitmap = render.bitmap();
+        let mut new_bitmap = vec![0u8; s_width as usize * s_height as usize * 4];
+        for i in (0..new_bitmap.len()).step_by(4) {
+            new_bitmap[i] = bitmap[i + 2];
+            new_bitmap[i + 1] = bitmap[i + 1];
+            new_bitmap[i + 2] = bitmap[i];
+            new_bitmap[i + 3] = bitmap[i + 3];
+        }
+
         conn.check_request(conn.send_request_checked(&xcb::x::PutImage {
             format: xcb::x::ImageFormat::ZPixmap,
             drawable: xcb::x::Drawable::Window(window),
@@ -127,9 +135,9 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             dst_y: 0,
             left_pad: 0,
             depth: 32,
-            data: render.bitmap(),
+            data: &new_bitmap,
         }))?;
     }
 
-    Ok(())
+    // Ok(())
 }

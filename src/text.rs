@@ -1,6 +1,6 @@
 use std::{
     ffi::CString,
-    mem::MaybeUninit,
+    mem::{ManuallyDrop, MaybeUninit},
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Mutex, OnceLock},
@@ -271,6 +271,7 @@ macro_rules! define_glyph_accessors {
     };
 }
 
+#[derive(Clone, Copy)]
 pub struct Glyph<'a> {
     info: &'a hb_glyph_info_t,
     position: &'a hb_glyph_position_t,
@@ -289,8 +290,30 @@ impl GlyphMut<'_> {
     define_glyph_accessors!();
 }
 
+macro_rules! define_glyph_fmt {
+    () => {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("Glyph")
+                .field("codepoint", &self.codepoint())
+                .field("x_advance", &self.x_advance())
+                .field("y_advance", &self.y_advance())
+                .field("x_offset", &self.x_offset())
+                .field("y_offset", &self.y_offset())
+                .finish()
+        }
+    };
+}
+
+impl std::fmt::Debug for Glyph<'_> {
+    define_glyph_fmt!();
+}
+
+impl std::fmt::Debug for GlyphMut<'_> {
+    define_glyph_fmt!();
+}
+
 impl Glyphs {
-    fn from_shaped_buffer(buffer: *mut hb_buffer_t) -> Self {
+    unsafe fn from_shaped_buffer(buffer: *mut hb_buffer_t) -> Self {
         let infos = unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_infos(buffer, &mut nglyphs);
@@ -336,7 +359,7 @@ impl Glyphs {
         })
     }
 
-    fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
+    pub fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
         (0..self.infos.len()).into_iter().map(|i| Glyph {
             info: &self.infos[i],
             position: &self.positions[i],
@@ -390,6 +413,14 @@ impl Glyphs {
     }
 }
 
+impl Drop for Glyphs {
+    fn drop(&mut self) {
+        unsafe {
+            hb_buffer_destroy(self.buffer);
+        }
+    }
+}
+
 // TODO: exact lookup table instead of this approximation?
 #[inline(always)]
 fn srgb_to_linear(color: u8) -> f32 {
@@ -411,13 +442,54 @@ fn direction_is_horizontal(dir: hb_direction_t) -> bool {
     dir == hb_direction_t_HB_DIRECTION_LTR || dir == hb_direction_t_HB_DIRECTION_RTL
 }
 
+pub struct ShapingBuffer {
+    buffer: *mut hb_buffer_t,
+}
+
+impl ShapingBuffer {
+    pub fn new() -> Self {
+        Self {
+            buffer: unsafe { hb_buffer_create() },
+        }
+    }
+
+    pub fn add(&mut self, text: &str) -> usize {
+        unsafe {
+            hb_buffer_add_utf8(
+                self.buffer,
+                text.as_ptr() as *const _,
+                text.len() as i32,
+                0,
+                -1,
+            );
+            hb_buffer_get_length(self.buffer) as usize
+        }
+    }
+
+    pub fn shape(self, font: &Font) -> Glyphs {
+        let (_, hb_font) = font.with_applied_size_and_hb();
+
+        unsafe {
+            hb_buffer_guess_segment_properties(self.buffer);
+            hb_shape(hb_font, self.buffer, std::ptr::null(), 0);
+
+            Glyphs::from_shaped_buffer(ManuallyDrop::new(self).buffer)
+        }
+    }
+}
+
+impl Drop for ShapingBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            hb_buffer_destroy(self.buffer);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TextExtents {
     pub paint_height: i32,
     pub paint_width: i32,
-    // TODO: with font extents for non-primary dimension
-    //  logical_width: usize,
-    //  logical_height: usize,
 }
 
 impl TextRenderer {
@@ -426,16 +498,9 @@ impl TextRenderer {
     }
 
     pub fn shape_text(&self, font: &Font, text: &str) -> Glyphs {
-        let (_, hb_font) = font.with_applied_size_and_hb();
-        unsafe {
-            let buf: *mut hb_buffer_t = hb_buffer_create();
-
-            hb_buffer_add_utf8(buf, text.as_ptr() as *const _, text.len() as i32, 0, -1);
-            hb_buffer_guess_segment_properties(buf);
-            hb_shape(hb_font, buf, std::ptr::null(), 0);
-
-            Glyphs::from_shaped_buffer(buf)
-        }
+        let mut buffer = ShapingBuffer::new();
+        buffer.add(text);
+        buffer.shape(font)
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -1,6 +1,7 @@
 use std::{
     ffi::CString,
     mem::{ManuallyDrop, MaybeUninit},
+    ops::Range,
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Mutex, OnceLock},
@@ -180,6 +181,10 @@ impl Font {
         (ft_face, self.hb_font)
     }
 
+    pub fn dpi(&self) -> u32 {
+        self.dpi
+    }
+
     pub fn horizontal_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {
@@ -197,6 +202,29 @@ impl Font {
         }
     }
 }
+
+impl Clone for Font {
+    fn clone(&self) -> Self {
+        Self {
+            ft_face: self.ft_face,
+            hb_font: { unsafe { hb_font_reference(self.hb_font) } },
+            frac_point_size: self.frac_point_size,
+            dpi: self.dpi,
+            fixed_point_weight: self.fixed_point_weight,
+        }
+    }
+}
+
+impl PartialEq for Font {
+    fn eq(&self, other: &Self) -> bool {
+        self.ft_face == other.ft_face
+            && self.frac_point_size == other.frac_point_size
+            && self.dpi == other.dpi
+            && self.fixed_point_weight == other.fixed_point_weight
+    }
+}
+
+impl Eq for Font {}
 
 impl Drop for Font {
     fn drop(&mut self) {
@@ -230,6 +258,7 @@ impl Drop for Font {
 /// ```
 pub struct TextRenderer {}
 
+// TODO: Just copy the glyphs...
 pub struct Glyphs {
     // NOTE: These are not 'static, just self referential
     infos: &'static mut [hb_glyph_info_t],
@@ -343,6 +372,10 @@ impl Glyphs {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.infos.len()
+    }
+
     #[expect(dead_code)]
     pub fn get(&self, index: usize) -> Option<Glyph> {
         self.infos.get(index).map(|info| unsafe {
@@ -359,14 +392,22 @@ impl Glyphs {
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
-        (0..self.infos.len()).into_iter().map(|i| Glyph {
+    pub fn iter_slice(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
+        (start..end).into_iter().map(|i| Glyph {
             info: &self.infos[i],
             position: &self.positions[i],
         })
     }
 
-    pub fn compute_extents(&self, font: &Font) -> TextExtents {
+    pub fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
+        self.iter_slice(0, self.infos.len())
+    }
+
+    pub fn compute_extents_for_slice(&self, font: &Font, range: Range<usize>) -> TextExtents {
         unsafe {
             let (_, hb_font) = font.with_applied_size_and_hb();
 
@@ -377,7 +418,7 @@ impl Glyphs {
                 paint_width: 0,
             };
 
-            let mut iterator = self.iter();
+            let mut iterator = self.iter_slice(range.start, range.end);
 
             if let Some(glyph) = iterator.next_back() {
                 let mut extents = MaybeUninit::uninit();
@@ -410,6 +451,10 @@ impl Glyphs {
 
             results
         }
+    }
+
+    pub fn compute_extents(&self, font: &Font) -> TextExtents {
+        self.compute_extents_for_slice(font, 0..self.infos.len())
     }
 }
 
@@ -453,7 +498,7 @@ impl ShapingBuffer {
         }
     }
 
-    pub fn add(&mut self, text: &str) -> usize {
+    pub fn add(&mut self, text: &str) {
         unsafe {
             hb_buffer_add_utf8(
                 self.buffer,
@@ -462,8 +507,11 @@ impl ShapingBuffer {
                 0,
                 -1,
             );
-            hb_buffer_get_length(self.buffer) as usize
         }
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { hb_buffer_get_length(self.buffer) as usize }
     }
 
     pub fn shape(self, font: &Font) -> Glyphs {
@@ -486,6 +534,12 @@ impl Drop for ShapingBuffer {
     }
 }
 
+pub fn shape_text(font: &Font, text: &str) -> Glyphs {
+    let mut buffer = ShapingBuffer::new();
+    buffer.add(text);
+    buffer.shape(font)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TextExtents {
     pub paint_height: i32,
@@ -497,14 +551,8 @@ impl TextRenderer {
         Self {}
     }
 
-    pub fn shape_text(&self, font: &Font, text: &str) -> Glyphs {
-        let mut buffer = ShapingBuffer::new();
-        buffer.add(text);
-        buffer.shape(font)
-    }
-
     #[allow(clippy::too_many_arguments)]
-    pub fn paint(
+    pub fn paint<'a>(
         &self,
         buffer: &mut [u8],
         baseline_x: usize,
@@ -513,17 +561,17 @@ impl TextRenderer {
         height: usize,
         stride: usize,
         font: &Font,
-        glyphs: &Glyphs,
+        glyphs: impl IntoIterator<Item = Glyph<'a>>,
         // In desired output buffer order, i.e. if the output buffer is supposed to be RGBA then this should also be RGBA
         color: [u8; 3],
         alpha: f32,
-    ) {
+    ) -> (u32, u32) {
         unsafe {
             let face = font.with_applied_size();
 
             let mut x = baseline_x as u32;
             let mut y = baseline_y as u32;
-            for Glyph { info, position } in glyphs.iter() {
+            for Glyph { info, position } in glyphs {
                 fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
                 let glyph = (*face).glyph;
                 fttry!(FT_Render_Glyph(
@@ -604,6 +652,8 @@ impl TextRenderer {
                 x = x.checked_add_signed(position.x_advance / 64).unwrap();
                 y = y.checked_add_signed(position.y_advance / 64).unwrap();
             }
+
+            (x, y)
         }
     }
 }

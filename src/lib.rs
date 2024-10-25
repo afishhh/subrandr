@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range};
 
-use text::{Axis, Glyphs, TextExtents, TextRenderer};
+use text::{Glyphs, TextExtents, TextRenderer};
 
 pub mod ass;
 pub mod srv3;
@@ -103,7 +103,7 @@ impl Subtitles {
                         },
                         Segment {
                             font: "monospace".to_string(),
-                            font_size: 64.0,
+                            font_size: 48.0,
                             font_weight: 700,
                             italic: false,
                             underline: false,
@@ -112,7 +112,7 @@ impl Subtitles {
                             text: "ltil".to_string(),
                         },
                         Segment {
-                            font: "monospace".to_string(),
+                            font: "Arial".to_string(),
                             font_size: 80.0,
                             font_weight: 400,
                             italic: false,
@@ -127,7 +127,7 @@ impl Subtitles {
                     start: 0,
                     end: 600000,
                     x: 0.5,
-                    y: 0.2,
+                    y: 0.1,
                     alignment: Alignment::Top,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment {
@@ -532,7 +532,7 @@ pub struct Renderer<'a> {
     height: u32,
     buffer: Vec<u8>,
     text: TextRenderer,
-    faces: HashMap<String, text::Face>,
+    fonts: text::FontManager,
     // always should be 72 for ass?
     dpi: u32,
     subs: &'a Subtitles,
@@ -545,27 +545,7 @@ impl<'a> Renderer<'a> {
             height,
             text: TextRenderer::new(),
 
-            faces: {
-                let mut map = HashMap::new();
-                map.insert(
-                    "monospace".to_string(),
-                    text::Face::load_from_file("./NotoSansMono[wdth,wght].ttf"),
-                );
-                map.insert(
-                    "Arial".to_string(),
-                    text::Face::load_from_file("./DejaVuSans.ttf"),
-                );
-                map.insert(
-                    "CJK".to_string(),
-                    text::Face::load_from_file("./NotoSansCJK-VF.otf.ttc"),
-                );
-                map.insert("".to_string(), map.get("CJK").unwrap().clone());
-                map.insert(              "emoji".to_string(),text::Face::load_from_file(
-"/nix/store/53rh12issv7fc2y8mdvk5dx664gxfw9b-noto-fonts-color-emoji-2.047/share/fonts/noto/NotoColorEmoji.ttf") 
-            );
-                map
-            },
-            // face: text::Face::load_from_file("/nix/store/7y7fyf2jdkl0ny7smybvcwj48nncdws2-home-manager-path/share/fonts/truetype/JetBrainsMono-Regular.ttf"),
+            fonts: text::FontManager::new(text::font_backend::platform_default().unwrap()),
             buffer: vec![0; (width * height * 4) as usize],
             dpi,
             subs,
@@ -789,43 +769,20 @@ impl<'a> Renderer<'a> {
                 let mut shaper = MultilineTextShaper::new();
                 let mut segment_fonts = vec![];
                 for segment in event.segments.iter() {
-                    println!(
-                        "SHAPING V2 INPUT SEGMENT: {:?} font {} {}",
-                        segment.text, segment.font_size, segment.font_weight
-                    );
+                    let font = self
+                        .fonts
+                        .get_or_load(&segment.font, segment.font_weight as f32, segment.italic)
+                        .unwrap()
+                        .with_size(segment.font_size, self.dpi);
 
-                    let mut face = self.faces.get(&segment.font).unwrap().clone();
-                    face.set_axis(
-                        face.axis(text::WEIGHT_AXIS).unwrap().index,
-                        segment.font_weight as f32,
-                    );
-                    let font = face.with_size(segment.font_size, self.dpi);
+                    println!("SHAPING V2 INPUT SEGMENT: {:?} {:?}", segment.text, font);
+
                     shaper.add(&segment.text, &font);
                     segment_fonts.push(font);
                 }
 
                 let (glyphstrings, lines, extents) = shaper.shape(TextWrappingMode::None);
                 println!("SHAPING V2 RESULT: {:?} {:#?}", extents, lines);
-
-                // HACK: Handle alignment during layout
-
-                let mut face = self
-                    .faces
-                    .get(&event.segments.first().unwrap().font)
-                    .unwrap()
-                    .clone();
-                face.set_axis(
-                    face.axis(text::WEIGHT_AXIS).unwrap().index,
-                    event.segments.first().unwrap().font_weight as f32,
-                );
-                let dummy_font =
-                    face.with_size(event.segments.first().unwrap().font_size, self.dpi);
-
-                let (ox, oy) =
-                    Self::translate_for_aligned_text(&dummy_font, true, &extents, event.alignment);
-
-                let x = x; // x.saturating_add_signed(ox);
-                let mut y = y; // y.saturating_add_signed(oy);
 
                 let mut last = 0;
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {

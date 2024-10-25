@@ -1,7 +1,7 @@
 use std::{
     any::Any,
     ffi::{CStr, CString},
-    mem::MaybeUninit,
+    mem::{ManuallyDrop, MaybeUninit},
     path::Path,
 };
 
@@ -135,7 +135,7 @@ impl Face {
             hb_font: unsafe { hb_ft_font_create_referenced(self.face) },
             frac_point_size: f32_to_fractional_points(point_size * 2.0),
             dpi,
-            coords: self.shared_data().default_coords,
+            coords: self.coords,
         }
     }
 
@@ -207,7 +207,7 @@ impl std::fmt::Debug for Face {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Font({:?}@{:?}, ",
+            "Face({:?}@{:?}, ",
             unsafe { CStr::from_ptr((*self.face).family_name) },
             self.face,
         )?;
@@ -380,6 +380,23 @@ impl Font {
             assert!(hb_font_get_v_extents(self.hb_font, result.as_mut_ptr()) > 0);
             result.assume_init()
         }
+    }
+}
+
+impl std::fmt::Debug for Font {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tmp_face = ManuallyDrop::new(Face {
+            face: self.ft_face,
+            coords: self.coords,
+        });
+        f.debug_struct("Font")
+            .field("face", &*tmp_face)
+            .field(
+                "point_size",
+                &fractional_points_to_f32(self.frac_point_size),
+            )
+            .field("dpi", &self.dpi)
+            .finish()
     }
 }
 

@@ -1,6 +1,6 @@
 use std::{
-    borrow::BorrowMut, error::Error, fmt::Debug, os::unix::ffi::OsStrExt, path::PathBuf,
-    time::Instant,
+    borrow::BorrowMut, error::Error, fmt::Debug, ops::IndexMut, os::unix::ffi::OsStrExt,
+    path::PathBuf, time::Instant,
 };
 
 use clap::Parser;

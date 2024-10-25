@@ -10,9 +10,9 @@ use ft_utils::*;
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct FamilySlot {
-    variable_weight: Option<(Face, Axis)>,
+    variable_weight: Option<(Face, usize)>,
     // NOTE: This is a variable italic variant, not a font with an ital axis.
-    italic_variable_weight: Option<(Face, Axis)>,
+    italic_variable_weight: Option<(Face, usize)>,
     /// The currently loaded non-variadic faces of this family.
     variants: HashMap<(/* weight */ FT_Fixed, /* italic */ bool), Face>,
 }
@@ -30,7 +30,7 @@ impl Default for FamilySlot {
 impl FamilySlot {
     fn add_font(&mut self, face: Face, weight: f32, italic: bool) {
         if let Some(weight_axis) = face.axis(WEIGHT_AXIS) {
-            let face_and_axis = (face.clone(), weight_axis);
+            let face_and_axis = (face.clone(), weight_axis.index);
             if italic {
                 self.italic_variable_weight.get_or_insert(face_and_axis);
             } else {
@@ -50,9 +50,9 @@ impl FamilySlot {
             &self.variable_weight
         };
 
-        if let Some((face, axis)) = variable_weight {
+        if let Some((face, axis_index)) = variable_weight {
             let mut face = face.clone();
-            face.set_axis(axis.index, weight);
+            face.set_axis(*axis_index, weight);
             return Some(face);
         } else {
             return self

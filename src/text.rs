@@ -16,6 +16,16 @@ pub mod font_backend {
     #[cfg(target_family = "unix")]
     pub mod fontconfig;
     pub use fontconfig::FontconfigFontBackend;
+
+    use super::FontBackend;
+    use crate::util::AnyError;
+
+    pub fn platform_default() -> Result<Box<dyn FontBackend>, AnyError> {
+        #[cfg(target_family = "unix")]
+        FontconfigFontBackend::new()
+            .map(|x| Box::new(x) as Box<dyn FontBackend>)
+            .map_err(Into::into)
+    }
 }
 
 /// Renders text, see example below.

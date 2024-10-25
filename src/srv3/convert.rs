@@ -4,8 +4,12 @@ use super::Document;
 
 const BASE_FONT_SIZE: u32 = 38;
 
-pub fn font_size_to_pt(size: u16) -> f32 {
+fn font_size_to_pt(size: u16) -> f32 {
     BASE_FONT_SIZE as f32 * (1.0 + ((size as f32 / 100.0) - 1.0) / 4.0)
+}
+
+fn convert_coordinate(coord: f32) -> f32 {
+    (2.0 + coord * 0.96) / 100.
 }
 
 pub fn convert(document: Document) -> Subtitles {
@@ -30,8 +34,8 @@ pub fn convert(document: Document) -> Subtitles {
         result.events.push(crate::Event {
             start: event.time,
             end: event.time + event.duration,
-            x: event.position().x as f32 / 100.,
-            y: event.position().y as f32 / 100.,
+            x: convert_coordinate(event.position().x as f32),
+            y: convert_coordinate(event.position().y as f32),
             alignment: match event.position().point {
                 super::Point::TopLeft => crate::Alignment::TopLeft,
                 super::Point::TopCenter => crate::Alignment::Top,

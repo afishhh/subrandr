@@ -5,10 +5,18 @@ use std::{
 
 use text_sys::*;
 
-mod face;
-pub use face::*;
 mod ft_utils;
 use ft_utils::*;
+mod face;
+pub use face::*;
+mod font_manager;
+pub use font_manager::*;
+
+pub mod font_backend {
+    #[cfg(target_family = "unix")]
+    pub mod fontconfig;
+    pub use fontconfig::FontconfigFontBackend;
+}
 
 /// Renders text, see example below.
 ///

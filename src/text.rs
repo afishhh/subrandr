@@ -1,236 +1,14 @@
 use std::{
-    ffi::CString,
     mem::{ManuallyDrop, MaybeUninit},
     ops::Range,
-    os::unix::ffi::OsStrExt,
-    path::Path,
-    sync::{Mutex, OnceLock},
 };
 
 use text_sys::*;
 
-macro_rules! fttry {
-    ($expr: expr) => {
-        let code = $expr;
-        #[allow(unused_unsafe)]
-        if code != 0 {
-            panic!("ft error: 0x{code:X}")
-        }
-    };
-}
-
-struct Library {
-    ptr: FT_Library,
-    // [Since 2.5.6] In multi-threaded applications it is easiest to use one FT_Library object per thread. In case this is too cumbersome, a single FT_Library object across threads is possible also, as long as a mutex lock is used around FT_New_Face and FT_Done_Face.
-    face_mutation_mutex: Mutex<()>,
-}
-
-static FT_LIBRARY: OnceLock<Library> = OnceLock::new();
-
-impl Library {
-    fn get_or_init() -> &'static Library {
-        FT_LIBRARY.get_or_init(|| unsafe {
-            let mut ft = std::ptr::null_mut();
-            fttry!(FT_Init_FreeType(&mut ft));
-            Library {
-                ptr: ft,
-                face_mutation_mutex: Mutex::default(),
-            }
-        })
-    }
-}
-
-unsafe impl Send for Library {}
-unsafe impl Sync for Library {}
-
-fn f32_to_fractional_points(value: f32) -> FT_F26Dot6 {
-    (value * 26.6).round() as i64
-}
-
-fn f32_to_fixed_point(value: f32) -> FT_Fixed {
-    (value * 65536.0).round() as i64
-}
-
-#[repr(transparent)]
-struct FaceMmVar(*mut FT_MM_Var);
-
-impl FaceMmVar {
-    fn get(face: FT_Face) -> Option<FaceMmVar> {
-        unsafe {
-            if ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as i64) != 0 {
-                Some(FaceMmVar({
-                    let mut output = MaybeUninit::uninit();
-                    fttry!(FT_Get_MM_Var(face, output.as_mut_ptr()));
-                    output.assume_init()
-                }))
-            } else {
-                None
-            }
-        }
-    }
-
-    fn axes(&self) -> &[FT_Var_Axis] {
-        unsafe { std::slice::from_raw_parts((*self.0).axis, (*self.0).num_axis as usize) }
-    }
-
-    #[expect(dead_code)]
-    fn namedstyles(&self) -> &[FT_Var_Named_Style] {
-        unsafe {
-            std::slice::from_raw_parts((*self.0).namedstyle, (*self.0).num_namedstyles as usize)
-        }
-    }
-}
-
-impl Drop for FaceMmVar {
-    fn drop(&mut self) {
-        unsafe {
-            FT_Done_MM_Var(Library::get_or_init().ptr, self.0);
-        }
-    }
-}
-
-pub struct Face {
-    face: FT_Face,
-}
-
-const fn create_freetype_tag(text: [u8; 4]) -> u64 {
-    (((text[0] as u32) << 24)
-        + ((text[1] as u32) << 16)
-        + ((text[2] as u32) << 8)
-        + (text[3] as u32)) as u64
-}
-
-const WEIGHT_AXIS_TAG: u64 = create_freetype_tag(*b"wght");
-
-impl Face {
-    pub fn load_from_file(path: impl AsRef<Path>) -> Self {
-        let library = Library::get_or_init();
-        let _guard = library.face_mutation_mutex.lock().unwrap();
-        let cstr = CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
-
-        let mut face = std::ptr::null_mut();
-        unsafe {
-            fttry!(FT_New_Face(library.ptr, cstr.as_ptr(), 0, &mut face));
-        }
-
-        Self { face }
-    }
-
-    #[inline(always)]
-    #[expect(dead_code)]
-    pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
-        self.with_size_and_weight(point_size, dpi, 400.)
-    }
-
-    pub fn with_size_and_weight(&self, point_size: f32, dpi: u32, weight: f32) -> Font {
-        Font {
-            ft_face: self.face,
-            hb_font: unsafe { hb_ft_font_create_referenced(self.face) },
-            frac_point_size: f32_to_fractional_points(point_size * 2.0),
-            dpi,
-            fixed_point_weight: f32_to_fixed_point(weight),
-        }
-    }
-}
-
-pub struct Font {
-    // owned by hb_font
-    ft_face: FT_Face,
-    hb_font: *mut hb_font_t,
-    frac_point_size: FT_F26Dot6,
-    dpi: u32,
-    fixed_point_weight: FT_Fixed,
-}
-
-impl Font {
-    fn with_applied_size(&self) -> FT_Face {
-        unsafe {
-            fttry!(FT_Set_Char_Size(
-                self.ft_face,
-                self.frac_point_size,
-                self.frac_point_size,
-                self.dpi,
-                self.dpi
-            ));
-        }
-
-        if let Some(mm) = FaceMmVar::get(self.ft_face) {
-            let mut coords = [FT_Fixed::default(); T1_MAX_MM_AXIS as usize];
-            for (i, axis) in mm.axes().iter().enumerate() {
-                if axis.tag == WEIGHT_AXIS_TAG {
-                    coords[i] = self.fixed_point_weight.clamp(axis.minimum, axis.maximum);
-                } else {
-                    coords[i] = axis.def;
-                }
-            }
-
-            unsafe {
-                fttry!(FT_Set_Var_Design_Coordinates(
-                    self.ft_face,
-                    mm.axes().len() as u32,
-                    coords.as_mut_ptr()
-                ));
-            }
-        }
-
-        self.ft_face
-    }
-
-    fn with_applied_size_and_hb(&self) -> (FT_Face, *mut hb_font_t) {
-        let ft_face = self.with_applied_size();
-        (ft_face, self.hb_font)
-    }
-
-    pub fn dpi(&self) -> u32 {
-        self.dpi
-    }
-
-    pub fn horizontal_extents(&self) -> hb_font_extents_t {
-        let mut result = MaybeUninit::uninit();
-        unsafe {
-            assert!(hb_font_get_h_extents(self.hb_font, result.as_mut_ptr()) > 0);
-            result.assume_init()
-        }
-    }
-
-    #[expect(dead_code)]
-    pub fn vertical_extents(&self) -> hb_font_extents_t {
-        let mut result = MaybeUninit::uninit();
-        unsafe {
-            assert!(hb_font_get_v_extents(self.hb_font, result.as_mut_ptr()) > 0);
-            result.assume_init()
-        }
-    }
-}
-
-impl Clone for Font {
-    fn clone(&self) -> Self {
-        Self {
-            ft_face: self.ft_face,
-            hb_font: { unsafe { hb_font_reference(self.hb_font) } },
-            frac_point_size: self.frac_point_size,
-            dpi: self.dpi,
-            fixed_point_weight: self.fixed_point_weight,
-        }
-    }
-}
-
-impl PartialEq for Font {
-    fn eq(&self, other: &Self) -> bool {
-        self.ft_face == other.ft_face
-            && self.frac_point_size == other.frac_point_size
-            && self.dpi == other.dpi
-            && self.fixed_point_weight == other.fixed_point_weight
-    }
-}
-
-impl Eq for Font {}
-
-impl Drop for Font {
-    fn drop(&mut self) {
-        unsafe { hb_font_destroy(self.hb_font) };
-    }
-}
+mod face;
+pub use face::*;
+mod ft_utils;
+use ft_utils::*;
 
 /// Renders text, see example below.
 ///
@@ -384,6 +162,13 @@ impl Glyphs {
         })
     }
 
+    pub fn last(&self) -> Option<Glyph> {
+        self.infos.last().map(|info| unsafe {
+            let position = self.positions.last().unwrap_unchecked();
+            Glyph { info, position }
+        })
+    }
+
     #[expect(dead_code)]
     pub fn get_mut(&mut self, index: usize) -> Option<GlyphMut> {
         self.infos.get_mut(index).map(|info| unsafe {
@@ -407,7 +192,11 @@ impl Glyphs {
         self.iter_slice(0, self.infos.len())
     }
 
-    pub fn compute_extents_for_slice(&self, font: &Font, range: Range<usize>) -> TextExtents {
+    pub fn compute_extents_for_slice_ex(
+        &self,
+        font: &Font,
+        range: Range<usize>,
+    ) -> (TextExtents, (i32, i32)) {
         unsafe {
             let (_, hb_font) = font.with_applied_size_and_hb();
 
@@ -420,6 +209,8 @@ impl Glyphs {
 
             let mut iterator = self.iter_slice(range.start, range.end);
 
+            let trailing_advance;
+
             if let Some(glyph) = iterator.next_back() {
                 let mut extents = MaybeUninit::uninit();
                 assert!(
@@ -429,6 +220,13 @@ impl Glyphs {
                 let extents = extents.assume_init();
                 results.paint_height += extents.height.abs();
                 results.paint_width += extents.width;
+                if direction_is_horizontal(direction) {
+                    trailing_advance = ((glyph.x_advance() - extents.width) / 64, 0);
+                } else {
+                    trailing_advance = (0, (glyph.y_advance() - extents.height) / 64);
+                }
+            } else {
+                trailing_advance = (0, 0);
             }
 
             for glyph in iterator {
@@ -446,15 +244,16 @@ impl Glyphs {
                 }
             }
 
-            results.paint_height /= 64;
-            results.paint_width /= 64;
-
-            results
+            (results, trailing_advance)
         }
     }
 
+    pub fn compute_extents_ex(&self, font: &Font) -> (TextExtents, (i32, i32)) {
+        self.compute_extents_for_slice_ex(font, 0..self.infos.len())
+    }
+
     pub fn compute_extents(&self, font: &Font) -> TextExtents {
-        self.compute_extents_for_slice(font, 0..self.infos.len())
+        self.compute_extents_ex(font).0
     }
 }
 

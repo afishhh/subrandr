@@ -23,12 +23,11 @@ pub fn convert(document: Document) -> Subtitles {
                 underline: false,
                 strike_out: false,
                 color: segment.pen().foreground_color,
-                text_wrap: crate::TextWrappingMode::None,
                 text: segment.text.clone(),
             })
         }
 
-        result.events.push(dbg!(crate::Event {
+        result.events.push(crate::Event {
             start: event.time,
             end: event.time + event.duration,
             x: event.position().x as f32 / 100.,
@@ -44,8 +43,9 @@ pub fn convert(document: Document) -> Subtitles {
                 super::Point::BottomCenter => crate::Alignment::Bottom,
                 super::Point::BottomRight => crate::Alignment::BottomRight,
             },
+            text_wrap: crate::TextWrappingMode::None,
             segments,
-        }))
+        })
     }
 
     result

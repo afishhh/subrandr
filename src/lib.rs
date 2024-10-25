@@ -1,9 +1,12 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
-use text::{Font, Glyphs, TextExtents, TextRenderer};
+use text::{Axis, Glyphs, TextExtents, TextRenderer};
 
 pub mod ass;
 pub mod srv3;
+#[doc(hidden)] // for testing purposes only
+pub mod text;
+mod util;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
@@ -69,7 +72,7 @@ impl Subtitles {
                     text_wrap: TextWrappingMode::None,
                     segments: vec![
                         Segment {
-                            font: "ignored".to_string(),
+                            font: "monospace".to_string(),
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -79,7 +82,7 @@ impl Subtitles {
                             text: "this ".to_string(),
                         },
                         Segment {
-                            font: "ignored".to_string(),
+                            font: "monospace".to_string(),
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -89,14 +92,34 @@ impl Subtitles {
                             text: "is\n".to_string(),
                         },
                         Segment {
-                            font: "ignored".to_string(),
+                            font: "monospace".to_string(),
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
                             underline: false,
                             strike_out: false,
                             color: 0xFF0000FF,
-                            text: "multiline".to_string(),
+                            text: "mu".to_string(),
+                        },
+                        Segment {
+                            font: "monospace".to_string(),
+                            font_size: 64.0,
+                            font_weight: 700,
+                            italic: false,
+                            underline: false,
+                            strike_out: false,
+                            color: 0xFF0000FF,
+                            text: "ltil".to_string(),
+                        },
+                        Segment {
+                            font: "monospace".to_string(),
+                            font_size: 80.0,
+                            font_weight: 400,
+                            italic: false,
+                            underline: false,
+                            strike_out: false,
+                            color: 0xFF0000FF,
+                            text: "ine".to_string(),
                         },
                     ],
                 },
@@ -108,7 +131,7 @@ impl Subtitles {
                     alignment: Alignment::Top,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment {
-                        font: "ignored".to_string(),
+                        font: "monospace".to_string(),
                         font_size: 64.0,
                         font_weight: 400,
                         italic: false,
@@ -126,7 +149,7 @@ impl Subtitles {
                     alignment: Alignment::Bottom,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment {
-                        font: "ignored".to_string(),
+                        font: "monospace".to_string(),
                         font_size: 64.0,
                         font_weight: 700,
                         italic: false,
@@ -136,6 +159,25 @@ impl Subtitles {
                         text: "this is bold..".to_string(),
                     }],
                 },
+                // FIXME: Doesn't work, scaling emoji font fails
+                // Event {
+                //     start: 0,
+                //     end: 600000,
+                //     x: 0.5,
+                //     y: 0.6,
+                //     alignment: Alignment::Bottom,
+                //     text_wrap: TextWrappingMode::None,
+                //     segments: vec![Segment {
+                //         font: "emoji".to_string(),
+                //         font_size: 32.,
+                //         font_weight: 700,
+                //         italic: false,
+                //         underline: false,
+                //         strike_out: false,
+                //         color: 0xFFFFFFFF,
+                //         text: "😭".to_string(),
+                //     }],
+                // },
             ],
         }
     }
@@ -244,15 +286,31 @@ struct ShapedLineSegment {
         /* glyphstring idx */ usize,
         /* glyph range */ Range<usize>,
     ),
-    offset: (i32, i32),
-    extents: TextExtents,
+    baseline_offset: (i32, i32),
+    paint_rect: Rect,
+    // Implementation detail
+    max_bearing_y: i64,
     corresponding_input_segment: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Rect {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Size2 {
+    w: u32,
+    h: u32,
 }
 
 #[derive(Debug)]
 struct ShapedLine {
     segments: Vec<ShapedLineSegment>,
-    extents: TextExtents,
+    paint_size: Size2,
 }
 
 impl MultilineTextShaper {
@@ -297,7 +355,7 @@ impl MultilineTextShaper {
             self.explicit_line_bounaries
         );
 
-        let mut glyphstrings = vec![];
+        let mut glyphstrings: Vec<Glyphs> = vec![];
         let mut lines = vec![];
         let mut total_extents = TextExtents {
             paint_width: 0,
@@ -311,7 +369,14 @@ impl MultilineTextShaper {
             .copied()
             .chain(std::iter::once(self.text.len()))
         {
-            let mut segments = vec![];
+            // TODO: Where to get spacing?
+            // let spacing = font.horizontal_extents().line_gap as i32 + 10;
+            let spacing = 10 * 64;
+            if !lines.is_empty() {
+                total_extents.paint_height += spacing;
+            }
+
+            let mut segments: Vec<ShapedLineSegment> = vec![];
             let mut line_extents = TextExtents {
                 paint_height: 0,
                 paint_width: 0,
@@ -333,13 +398,23 @@ impl MultilineTextShaper {
                 starting_font_segment
             );
 
+            let mut max_bearing_y = 0;
+
             for current_font_segment in starting_font_segment..self.font_boundaries.len() {
                 let (font, font_boundary) = &self.font_boundaries[current_font_segment];
                 let end = (*font_boundary).min(line_boundary);
                 let segment_slice = last..end;
 
                 let glyphs = text::shape_text(font, &self.text[segment_slice]);
-                let extents = glyphs.compute_extents(font);
+                let (extents, (trailing_x_advance, _)) = glyphs.compute_extents_ex(font);
+
+                let segment_max_bearing_y = glyphs
+                    .iter()
+                    .map(|x| font.glyph_extents(x.codepoint()).horiBearingY)
+                    .max()
+                    .unwrap_or(0);
+
+                max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
 
                 let first_internal_split_idx =
                     match self.intra_font_segment_splits.binary_search(&last) {
@@ -358,13 +433,23 @@ impl MultilineTextShaper {
                 {
                     segments.push(ShapedLineSegment {
                         glyphs: (glyphstrings.len(), 0..glyphs.len()),
-                        offset: (line_extents.paint_width, total_extents.paint_height),
-                        extents,
+                        baseline_offset: (
+                            line_extents.paint_width / 64,
+                            total_extents.paint_height / 64,
+                        ),
+                        paint_rect: Rect {
+                            x: line_extents.paint_width / 64,
+                            y: total_extents.paint_height / 64,
+                            w: extents.paint_width as u32 / 64,
+                            h: extents.paint_height as u32 / 64,
+                        },
+                        max_bearing_y: segment_max_bearing_y,
                         corresponding_input_segment: current_font_segment
                             + first_internal_split_idx,
                     });
                 } else {
                     let mut last_glyph_idx = 0;
+                    let mut x = 0;
                     for (i, split_end) in self.intra_font_segment_splits[first_internal_split_idx..]
                         .iter()
                         .copied()
@@ -374,43 +459,56 @@ impl MultilineTextShaper {
                     {
                         let end_glyph_idx = split_end - last;
                         let glyph_range = last_glyph_idx..end_glyph_idx;
+                        let (extents, (x_advance, _)) =
+                            glyphs.compute_extents_for_slice_ex(font, glyph_range.clone());
                         segments.push(ShapedLineSegment {
-                            glyphs: (glyphstrings.len(), glyph_range.clone()),
-                            offset: (line_extents.paint_width, total_extents.paint_height),
-                            extents: glyphs.compute_extents_for_slice(font, glyph_range),
+                            glyphs: (glyphstrings.len(), glyph_range),
+                            baseline_offset: (x / 64, total_extents.paint_height / 64),
+                            paint_rect: Rect {
+                                x: x / 64,
+                                y: total_extents.paint_height / 64,
+                                w: extents.paint_width as u32 / 64,
+                                h: extents.paint_height as u32 / 64,
+                            },
+                            max_bearing_y: segment_max_bearing_y,
                             corresponding_input_segment: current_font_segment
                                 + first_internal_split_idx
                                 + i,
                         });
                         last_glyph_idx = end_glyph_idx;
+                        x += extents.paint_width + x_advance;
                     }
                 }
 
-                glyphstrings.push(glyphs);
-
                 line_extents.paint_width += extents.paint_width;
+
+                // FIXME: THIS IS WRONG!!
+                //        It will add trailing advance when the last segments contains zero or only invisible glyphs.
+                if end != line_boundary {
+                    line_extents.paint_width += trailing_x_advance;
+                }
+
                 if line_extents.paint_height < extents.paint_height {
                     line_extents.paint_height = extents.paint_height;
                 }
 
                 last = end;
 
+                glyphstrings.push(glyphs);
+
                 if end == line_boundary {
                     break;
-                } else {
-                    debug_assert!(end < line_boundary);
                 }
             }
 
             debug_assert_eq!(last, line_boundary);
 
-            // println!("line boundary {line_slice:?} {current_extents:?}");
-            // TODO: Where to get spacing?
-            // let spacing = font.horizontal_extents().line_gap as i32 + 10;
-            let spacing = 10;
-            if !lines.is_empty() {
-                total_extents.paint_height += spacing;
+            for segment in segments.iter_mut() {
+                segment.baseline_offset.1 += (max_bearing_y / 64) as i32;
+                segment.paint_rect.y += ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
             }
+
+            // println!("line boundary {line_slice:?} {current_extents:?}");
 
             total_extents.paint_height += line_extents.paint_height;
             total_extents.paint_width =
@@ -418,7 +516,10 @@ impl MultilineTextShaper {
 
             lines.push(ShapedLine {
                 segments,
-                extents: line_extents,
+                paint_size: Size2 {
+                    w: (line_extents.paint_width / 64) as u32,
+                    h: (line_extents.paint_height / 64) as u32,
+                },
             });
         }
 
@@ -431,13 +532,11 @@ pub struct Renderer<'a> {
     height: u32,
     buffer: Vec<u8>,
     text: TextRenderer,
-    face: text::Face,
+    faces: HashMap<String, text::Face>,
     // always should be 72 for ass?
     dpi: u32,
     subs: &'a Subtitles,
 }
-
-mod text;
 
 impl<'a> Renderer<'a> {
     pub fn new(width: u32, height: u32, subs: &'a Subtitles, dpi: u32) -> Self {
@@ -445,11 +544,27 @@ impl<'a> Renderer<'a> {
             width,
             height,
             text: TextRenderer::new(),
-            face: text::Face::load_from_file(
-                /* "/nix/store/7y7fyf2jdkl0ny7smybvcwj48nncdws2-home-manager-path/share/fonts/noto/NotoSans[wdth,wght].ttf" */
-                "./NotoSansMono[wdth,wght].ttf",
-                // "./NotoSansCJK-VF.otf.ttc",
-            ),
+
+            faces: {
+                let mut map = HashMap::new();
+                map.insert(
+                    "monospace".to_string(),
+                    text::Face::load_from_file("./NotoSansMono[wdth,wght].ttf"),
+                );
+                map.insert(
+                    "Arial".to_string(),
+                    text::Face::load_from_file("./DejaVuSans.ttf"),
+                );
+                map.insert(
+                    "CJK".to_string(),
+                    text::Face::load_from_file("./NotoSansCJK-VF.otf.ttc"),
+                );
+                map.insert("".to_string(), map.get("CJK").unwrap().clone());
+                map.insert(              "emoji".to_string(),text::Face::load_from_file(
+"/nix/store/53rh12issv7fc2y8mdvk5dx664gxfw9b-noto-fonts-color-emoji-2.047/share/fonts/noto/NotoColorEmoji.ttf") 
+            );
+                map
+            },
             // face: text::Face::load_from_file("/nix/store/7y7fyf2jdkl0ny7smybvcwj48nncdws2-home-manager-path/share/fonts/truetype/JetBrainsMono-Regular.ttf"),
             buffer: vec![0; (width * height * 4) as usize],
             dpi,
@@ -468,6 +583,48 @@ impl<'a> Renderer<'a> {
         let start = ((y * self.width + x) * 4) as usize;
         assert!(x < self.width && y < self.height);
         (&mut self.buffer[start..start + 4]).try_into().unwrap()
+    }
+
+    fn horizontal_line(&mut self, x: u32, y: u32, w: u32, color: u32) {
+        let rgba = [
+            ((color & 0xFF000000) >> 24) as u8,
+            ((color & 0x00FF0000) >> 16) as u8,
+            ((color & 0x0000FF00) >> 8) as u8,
+            (color & 0x000000FF) as u8,
+        ];
+
+        if y >= self.height {
+            return;
+        }
+        for x in x..(x + w).min(self.width) {
+            *self.pixel(x, y) = rgba;
+        }
+    }
+
+    fn rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
+        let rgba = [
+            ((color & 0xFF000000) >> 24) as u8,
+            ((color & 0x00FF0000) >> 16) as u8,
+            ((color & 0x0000FF00) >> 8) as u8,
+            (color & 0x000000FF) as u8,
+        ];
+
+        if x >= self.width || y >= self.height {
+            return;
+        }
+
+        for y in y..(y + h).min(self.height) {
+            *self.pixel(x, y) = rgba;
+            if x + w < self.width {
+                *self.pixel(x + w, y) = rgba;
+            }
+        }
+        for x in x..(x + w).min(self.width) {
+            *self.pixel(x, y) = rgba;
+            if y + h < self.height {
+                *self.pixel(x, y + h) = rgba;
+            }
+        }
     }
 
     fn paint_text<'g>(
@@ -529,7 +686,7 @@ impl<'a> Renderer<'a> {
         for boundary in line_boundaries.iter().copied() {
             let slice = last..boundary;
 
-            let current_extents = glyphs.compute_extents_for_slice(font, slice.clone());
+            let current_extents = glyphs.compute_extents_for_slice_ex(font, slice.clone()).0;
             println!("line boundary {slice:?} {current_extents:?}");
             let spacing = font.horizontal_extents().line_gap as i32 + 10;
             if !line_extents.is_empty() {
@@ -630,87 +787,82 @@ impl<'a> Renderer<'a> {
                 let mut y = (self.height as f32 * event.y) as u32;
 
                 let mut shaper = MultilineTextShaper::new();
+                let mut segment_fonts = vec![];
                 for segment in event.segments.iter() {
                     println!(
                         "SHAPING V2 INPUT SEGMENT: {:?} font {} {}",
                         segment.text, segment.font_size, segment.font_weight
                     );
-                    shaper.add(
-                        &segment.text,
-                        &self.face.with_size_and_weight(
-                            segment.font_size,
-                            self.dpi,
-                            segment.font_weight as f32,
-                        ),
-                    )
+
+                    let mut face = self.faces.get(&segment.font).unwrap().clone();
+                    face.set_axis(
+                        face.axis(text::WEIGHT_AXIS).unwrap().index,
+                        segment.font_weight as f32,
+                    );
+                    let font = face.with_size(segment.font_size, self.dpi);
+                    shaper.add(&segment.text, &font);
+                    segment_fonts.push(font);
                 }
 
                 let (glyphstrings, lines, extents) = shaper.shape(TextWrappingMode::None);
                 println!("SHAPING V2 RESULT: {:?} {:#?}", extents, lines);
 
-                // TODO: Don't do it like this, instead make segments use &str to some other String
-                let mut combined = String::new();
-                let mut segment_boundaries = vec![];
-                for segment in event.segments.iter() {
-                    segment_boundaries.push(combined.len());
-                    combined.push_str(&segment.text);
-                }
+                // HACK: Handle alignment during layout
 
-                // TODO: Support mixed font_size and font_weight by treating them as separate chunks, this will require more complicated multiline shaping!
-                let font = self.face.with_size_and_weight(
-                    event.segments.first().unwrap().font_size,
-                    self.dpi,
+                let mut face = self
+                    .faces
+                    .get(&event.segments.first().unwrap().font)
+                    .unwrap()
+                    .clone();
+                face.set_axis(
+                    face.axis(text::WEIGHT_AXIS).unwrap().index,
                     event.segments.first().unwrap().font_weight as f32,
                 );
-
-                let (glyphs, line_boundaries, line_extents, extents) =
-                    self.shape_text_multiline(&font, event.text_wrap, &combined);
+                let dummy_font =
+                    face.with_size(event.segments.first().unwrap().font_size, self.dpi);
 
                 let (ox, oy) =
-                    Self::translate_for_aligned_text(&font, true, &extents, event.alignment);
+                    Self::translate_for_aligned_text(&dummy_font, true, &extents, event.alignment);
 
-                let x = x.saturating_add_signed(ox);
-                let mut y = y.saturating_add_signed(oy);
+                let x = x; // x.saturating_add_signed(ox);
+                let mut y = y; // y.saturating_add_signed(oy);
 
                 let mut last = 0;
-                for (end, ((lox, loy), line_extents)) in
-                    line_boundaries.into_iter().zip(line_extents.into_iter())
-                {
-                    let mut x = x + lox;
-                    let mut y = y + loy;
-                    let mut i = match segment_boundaries.binary_search(&last) {
-                        Ok(current) => current,
-                        Err(next) => next - 1,
-                    };
+                for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
+                    let segment = &event.segments[shaped_segment.corresponding_input_segment];
+                    let glyphs_it = glyphstrings[shaped_segment.glyphs.0]
+                        .iter_slice(shaped_segment.glyphs.1.start, shaped_segment.glyphs.1.end);
 
-                    let mut segment_start = segment_boundaries[i];
+                    self.rect(
+                        x.checked_add_signed(shaped_segment.paint_rect.x).unwrap(),
+                        y.checked_add_signed(shaped_segment.paint_rect.y).unwrap(),
+                        shaped_segment.paint_rect.w as u32,
+                        shaped_segment.paint_rect.h as u32,
+                        0xFF0000FF,
+                    );
 
-                    println!("starting at segment {i} char index {last}");
+                    self.horizontal_line(
+                        x.checked_add_signed(shaped_segment.paint_rect.x).unwrap(),
+                        y.checked_add_signed(shaped_segment.baseline_offset.1)
+                            .unwrap(),
+                        shaped_segment.paint_rect.w as u32,
+                        0x0000FFFF,
+                    );
 
-                    while last < end {
-                        let segment = &event.segments[i];
-                        let next = (segment_start + segment.text.len()
-                            - segment.text.chars().filter(|x| *x == '\n').count())
-                        .min(end);
-                        let glyphs_it = glyphs.iter_slice(last, next);
+                    let x = x
+                        .checked_add_signed(shaped_segment.baseline_offset.0)
+                        .unwrap();
+                    let y = y
+                        .checked_add_signed(shaped_segment.baseline_offset.1)
+                        .unwrap();
 
-                        println!(
-                            "drawing {:?}[{:?}] line at {},{} with segment {}",
-                            combined,
-                            (last)..next,
-                            x,
-                            y,
-                            i
-                        );
-
-                        let (nx, ny) = self.paint_text(x, y, &font, glyphs_it, segment.color);
-                        x = nx;
-                        y = ny;
-
-                        last = next;
-                        segment_start = next;
-                        i += 1;
-                    }
+                    let (nx, ny) = self.paint_text(
+                        x,
+                        y,
+                        &segment_fonts[shaped_segment.corresponding_input_segment],
+                        glyphs_it,
+                        segment.color,
+                    );
                 }
             }
         }

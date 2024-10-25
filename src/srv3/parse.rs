@@ -88,8 +88,8 @@ pub struct WindowPos {
 const DEFAULT_WINDOW_POS: WindowPos = WindowPos {
     id: -1,
     point: Point::BottomCenter,
-    x: 0,
-    y: 0,
+    x: 50,
+    y: 70,
 };
 
 impl Default for WindowPos {
@@ -506,6 +506,13 @@ fn parse_body(
             XmlEvent::Start(element) if depth == 1 => {
                 match element.local_name().into_inner() {
                     b"s" => {
+                        if !current_text.is_empty() {
+                            current.as_mut().unwrap().segments.push(Segment {
+                                pen: current_event_pen,
+                                text: std::mem::take(&mut current_text),
+                            });
+                        }
+
                         current_segment_pen = current_event_pen;
 
                         match_attributes! {
@@ -545,6 +552,13 @@ fn parse_body(
                 depth = 1;
             }
             XmlEvent::End(_) if depth == 1 => {
+                if !current_text.is_empty() {
+                    current.as_mut().unwrap().segments.push(Segment {
+                        pen: current_event_pen,
+                        text: std::mem::take(&mut current_text),
+                    });
+                }
+
                 let event = current.take().unwrap();
                 if !event.segments.is_empty() {
                     events.push(event);
@@ -556,7 +570,7 @@ fn parse_body(
             }
             XmlEvent::End(_) => break,
             XmlEvent::Empty(_) => unreachable!(),
-            XmlEvent::Text(x) if current.is_some() && depth == 2 => {
+            XmlEvent::Text(x) if current.is_some() && (depth > 0 && depth <= 2) => {
                 clean_segment_text(&mut current_text, &x.unescape()?);
             }
             XmlEvent::Text(x)
@@ -633,6 +647,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
         }
     }
 
+    let mut has_head = true;
     let mut depth = 0;
     loop {
         match dbg!(reader.read_event()?) {
@@ -640,9 +655,8 @@ pub fn parse(text: &str) -> Result<Document, Error> {
                 match element.local_name().into_inner() {
                     b"head" => break,
                     b"body" => {
-                        return Err(Error::InvalidStructure(
-                            "Body element encountered before head element",
-                        ))
+                        has_head = false;
+                        break;
                     }
                     _ => {
                         println!("Non-head element encountered: {}", unsafe {
@@ -676,7 +690,11 @@ pub fn parse(text: &str) -> Result<Document, Error> {
         }
     }
 
-    let (pens, wps) = parse_head(&mut reader)?;
+    let (pens, wps) = if has_head {
+        parse_head(&mut reader)?
+    } else {
+        (vec![], vec![])
+    };
 
     let mut doc = Document {
         pens: pens.into_boxed_slice().into(),
@@ -702,44 +720,49 @@ pub fn parse(text: &str) -> Result<Document, Error> {
         }
     }
 
-    let mut depth = 0;
-    loop {
-        match dbg!(reader.read_event()?) {
-            XmlEvent::Start(element) if depth == 0 => {
-                match element.local_name().into_inner() {
-                    b"head" => {
-                        return Err(Error::InvalidStructure("Head element encountered twice"))
+    if has_head {
+        let mut depth = 0;
+        loop {
+            match dbg!(reader.read_event()?) {
+                XmlEvent::Start(element) if depth == 0 => {
+                    match element.local_name().into_inner() {
+                        b"head" => {
+                            return Err(Error::InvalidStructure("Head element encountered twice"))
+                        }
+                        b"body" => break,
+                        _ => {
+                            println!("Non-body element encountered: {}", unsafe {
+                                std::str::from_utf8_unchecked(element.local_name().into_inner())
+                            })
+                            // warn!("")
+                        }
                     }
-                    b"body" => break,
-                    _ => {
-                        println!("Non-body element encountered: {}", unsafe {
-                            std::str::from_utf8_unchecked(element.local_name().into_inner())
-                        })
-                        // warn!("")
-                    }
+                    depth += 1;
                 }
-                depth += 1;
+                XmlEvent::Start(_) => (),
+                XmlEvent::End(_) if depth > 0 => depth -= 1,
+                XmlEvent::End(_) => {
+                    return Err(Error::InvalidStructure(
+                        "Encountered EOF before a body element",
+                    ))
+                }
+                XmlEvent::Empty(_) => unreachable!(),
+                XmlEvent::Text(x)
+                    if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
+                {
+                    ()
+                }
+                XmlEvent::Text(_) | XmlEvent::CData(_) => {
+                    return Err(Error::InvalidStructure(
+                        "Encountered content outside of a head or body element",
+                    ));
+                }
+                XmlEvent::Comment(_)
+                | XmlEvent::Decl(_)
+                | XmlEvent::PI(_)
+                | XmlEvent::DocType(_) => (),
+                XmlEvent::Eof => unreachable!(),
             }
-            XmlEvent::Start(_) => (),
-            XmlEvent::End(_) if depth > 0 => depth -= 1,
-            XmlEvent::End(_) => {
-                return Err(Error::InvalidStructure(
-                    "Encountered EOF before a body element",
-                ))
-            }
-            XmlEvent::Empty(_) => unreachable!(),
-            XmlEvent::Text(x)
-                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
-            {
-                ()
-            }
-            XmlEvent::Text(_) | XmlEvent::CData(_) => {
-                return Err(Error::InvalidStructure(
-                    "Encountered content outside of a head or body element",
-                ));
-            }
-            XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => unreachable!(),
         }
     }
 

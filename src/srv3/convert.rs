@@ -20,7 +20,7 @@ pub fn convert(document: Document) -> Subtitles {
 
         for segment in event.segments.iter() {
             segments.push(crate::Segment {
-                font: "".to_string(),
+                font: "DejaVu Sans".to_string(),
                 font_size: font_size_to_pt(segment.pen().font_size),
                 font_weight: if segment.pen().bold { 700 } else { 400 },
                 italic: false,

@@ -23,6 +23,7 @@
           libxkbcommon
           freetype
           harfbuzz
+          fontconfig
         ];
       in
       with pkgs.lib; {

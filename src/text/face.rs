@@ -365,6 +365,11 @@ impl Font {
         }
     }
 
+    pub fn metrics(&self) -> FT_Size_Metrics {
+        let face = self.with_applied_size();
+        unsafe { (*(*face).size).metrics }
+    }
+
     pub fn horizontal_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {

@@ -239,9 +239,9 @@ impl Glyphs {
                 results.paint_height += extents.height.abs();
                 results.paint_width += extents.width;
                 if direction_is_horizontal(direction) {
-                    trailing_advance = ((glyph.x_advance() - extents.width) / 64, 0);
+                    trailing_advance = ((glyph.x_advance() - extents.width), 0);
                 } else {
-                    trailing_advance = (0, (glyph.y_advance() - extents.height) / 64);
+                    trailing_advance = (0, (glyph.y_advance() - extents.height));
                 }
             } else {
                 trailing_advance = (0, 0);
@@ -311,7 +311,13 @@ pub struct ShapingBuffer {
 impl ShapingBuffer {
     pub fn new() -> Self {
         Self {
-            buffer: unsafe { hb_buffer_create() },
+            buffer: unsafe {
+                let buffer = hb_buffer_create();
+                if hb_buffer_allocation_successful(buffer) == 0 {
+                    panic!("failed to allocate a harfbuzz buffer")
+                }
+                buffer
+            },
         }
     }
 

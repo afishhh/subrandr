@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range};
 
-use text::{Glyphs, TextExtents, TextRenderer};
+use text::{Font, Glyphs, TextExtents, TextRenderer};
 
 pub mod ass;
 pub mod srv3;
@@ -290,6 +290,7 @@ struct ShapedLineSegment {
     paint_rect: Rect,
     // Implementation detail
     max_bearing_y: i64,
+    corresponding_font_boundary: usize,
     corresponding_input_segment: usize,
 }
 
@@ -356,7 +357,7 @@ impl MultilineTextShaper {
         );
 
         let mut glyphstrings: Vec<Glyphs> = vec![];
-        let mut lines = vec![];
+        let mut lines: Vec<ShapedLine> = vec![];
         let mut total_extents = TextExtents {
             paint_width: 0,
             paint_height: 0,
@@ -444,6 +445,7 @@ impl MultilineTextShaper {
                             h: extents.paint_height as u32 / 64,
                         },
                         max_bearing_y: segment_max_bearing_y,
+                        corresponding_font_boundary: current_font_segment,
                         corresponding_input_segment: current_font_segment
                             + first_internal_split_idx,
                     });
@@ -471,6 +473,7 @@ impl MultilineTextShaper {
                                 h: extents.paint_height as u32 / 64,
                             },
                             max_bearing_y: segment_max_bearing_y,
+                            corresponding_font_boundary: current_font_segment,
                             corresponding_input_segment: current_font_segment
                                 + first_internal_split_idx
                                 + i,
@@ -633,6 +636,32 @@ impl<'a> Renderer<'a> {
         )
     }
 
+    fn debug_text(
+        &mut self,
+        x: u32,
+        y: u32,
+        text: &str,
+        alignment: Alignment,
+        size: f32,
+        color: u32,
+    ) {
+        let font = self
+            .fonts
+            .get_or_load("monospace", 400., false)
+            .unwrap()
+            .with_size(size, self.dpi);
+        let shape = text::shape_text(&font, text);
+        let (ox, oy) =
+            Self::translate_for_aligned_text(&font, true, &shape.compute_extents(&font), alignment);
+        self.paint_text(
+            x.saturating_add_signed(ox),
+            y.saturating_add_signed(oy),
+            &font,
+            shape.iter(),
+            color,
+        );
+    }
+
     /// Shapes and lays out multiple lines of horizontal text.
     fn shape_text_multiline(
         &mut self,
@@ -719,8 +748,8 @@ impl<'a> Renderer<'a> {
         // TODO: Numbers chosen arbitrarily
         let ox = match horizontal {
             Horizontal::Left => -font.horizontal_extents().descender / 64 / 2,
-            Horizontal::Center => -extents.paint_width / 2,
-            Horizontal::Right => -extents.paint_width + font.horizontal_extents().descender / 64,
+            Horizontal::Center => -extents.paint_width / 128,
+            Horizontal::Right => (-extents.paint_width + font.horizontal_extents().descender) / 64,
         };
 
         let oy = match vertical {
@@ -755,6 +784,15 @@ impl<'a> Renderer<'a> {
         // self.paint_text(100, 600, &font, &shaped, 0.85);
         // self.paint_text(0, 100, &font, &shaped, 0.85);
 
+        self.debug_text(
+            self.width,
+            0,
+            &format!("{}x{} dpi:{}", self.width, self.height, self.dpi),
+            Alignment::TopRight,
+            16.0,
+            0xFFFFFFFF,
+        );
+
         {
             for event in self
                 .subs
@@ -784,26 +822,89 @@ impl<'a> Renderer<'a> {
                 let (glyphstrings, lines, extents) = shaper.shape(TextWrappingMode::None);
                 println!("SHAPING V2 RESULT: {:?} {:#?}", extents, lines);
 
+                self.rect(
+                    x - 1,
+                    y - 1,
+                    (extents.paint_width / 64) as u32 + 1,
+                    (extents.paint_height / 64) as u32 + 1,
+                    0xFF00FFFF,
+                );
+
+                self.debug_text(
+                    x.saturating_add_signed(extents.paint_width / 128),
+                    y.saturating_add_signed(extents.paint_height / 64) + 20,
+                    &format!(
+                        "x:{} y:{} w:{} h:{}",
+                        x,
+                        y,
+                        extents.paint_width / 64,
+                        extents.paint_height / 64
+                    ),
+                    Alignment::Top,
+                    16.0,
+                    0xFF00FFFF,
+                );
+
                 let mut last = 0;
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
                     let glyphs_it = glyphstrings[shaped_segment.glyphs.0]
                         .iter_slice(shaped_segment.glyphs.1.start, shaped_segment.glyphs.1.end);
 
-                    self.rect(
+                    let paint_box = (
                         x.checked_add_signed(shaped_segment.paint_rect.x).unwrap(),
                         y.checked_add_signed(shaped_segment.paint_rect.y).unwrap(),
-                        shaped_segment.paint_rect.w as u32,
-                        shaped_segment.paint_rect.h as u32,
+                    );
+
+                    self.debug_text(
+                        paint_box.0,
+                        paint_box.1,
+                        &format!(
+                            "{},{}",
+                            x.saturating_add_signed(shaped_segment.paint_rect.x),
+                            y.saturating_add_signed(shaped_segment.paint_rect.y)
+                        ),
+                        Alignment::BottomLeft,
+                        16.0,
                         0xFF0000FF,
                     );
 
+                    self.debug_text(
+                        paint_box.0,
+                        paint_box.1 + shaped_segment.paint_rect.h,
+                        &format!(
+                            "{},{}",
+                            x.saturating_add_signed(shaped_segment.baseline_offset.0),
+                            y.saturating_add_signed(shaped_segment.baseline_offset.1)
+                        ),
+                        Alignment::TopLeft,
+                        16.0,
+                        0xFF0000FF,
+                    );
+
+                    self.debug_text(
+                        paint_box.0 + shaped_segment.paint_rect.w,
+                        paint_box.1,
+                        &format!("{:.0}pt", segment.font_size),
+                        Alignment::BottomRight,
+                        16.0,
+                        0xFFFFFFFF,
+                    );
+
+                    self.rect(
+                        paint_box.0,
+                        paint_box.1,
+                        shaped_segment.paint_rect.w as u32,
+                        shaped_segment.paint_rect.h as u32,
+                        0x0000FFFF,
+                    );
+
                     self.horizontal_line(
-                        x.checked_add_signed(shaped_segment.paint_rect.x).unwrap(),
+                        paint_box.0,
                         y.checked_add_signed(shaped_segment.baseline_offset.1)
                             .unwrap(),
                         shaped_segment.paint_rect.w as u32,
-                        0x0000FFFF,
+                        0x00FF00FF,
                     );
 
                     let x = x

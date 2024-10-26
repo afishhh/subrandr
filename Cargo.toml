@@ -19,5 +19,5 @@ text-sys = { path = "./text-sys" }
 # env_logger = "0.11"
 
 [dev-dependencies]
-xcb = { version = "1", features = ["res"] }
+xcb = { version = "1", features = ["res", "shape"] }
 clap = { version = "4", features = ["derive"] }

@@ -21,8 +21,11 @@ impl From<AssAlignment> for Alignment {
     }
 }
 
-pub fn bgra_to_rgba(bgra: u32) -> u32 {
-    (bgra & 0xFF00 << 16) | (bgra & 0xFF0000) | (bgra & 0xFF000000 >> 16) | (0xFF - (bgra & 0xFF))
+pub fn ass_to_rgba(abgr: u32) -> u32 {
+    ((abgr & 0xFF) << 24)
+        | ((abgr & 0xFF00) << 8)
+        | ((abgr & 0xFF0000) >> 8)
+        | (0xFF - ((abgr & 0xFF000000) >> 24))
 }
 
 pub fn apply_style_to_segment(segment: &mut Segment, style: &Style) {
@@ -32,7 +35,7 @@ pub fn apply_style_to_segment(segment: &mut Segment, style: &Style) {
     segment.italic = style.italic;
     segment.underline = style.underline;
     segment.strike_out = style.strike_out;
-    segment.color = bgra_to_rgba(style.primary_colour);
+    segment.color = ass_to_rgba(style.primary_colour);
 }
 
 pub fn ass_to_subs(ass: Script) -> crate::Subtitles {

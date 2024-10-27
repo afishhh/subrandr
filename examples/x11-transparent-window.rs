@@ -1,4 +1,10 @@
-use std::{error::Error, os::unix::ffi::OsStrExt, path::PathBuf, time::Instant};
+use std::{
+    error::Error,
+    io::{BufRead, BufReader, Write},
+    os::unix::{ffi::OsStrExt, net::UnixStream},
+    path::PathBuf,
+    time::Instant,
+};
 
 use clap::Parser;
 use subrandr::{Renderer, Subtitles};
@@ -11,10 +17,44 @@ struct Args {
     dpi: u32,
     #[clap(long = "start", default_value_t = 0)]
     start_at: u32,
+    #[clap(long = "speed", default_value_t = 1.0)]
+    speed: f64,
     #[clap(long = "parse")]
     parse: bool,
     #[clap(long = "overlay")]
     overlay_window: Option<u32>,
+    #[clap(long = "follow-mpv")]
+    mpv_socket: Option<PathBuf>,
+}
+
+struct MpvSocket {
+    stream: BufReader<UnixStream>,
+}
+
+impl MpvSocket {
+    fn connect(path: PathBuf) -> MpvSocket {
+        MpvSocket {
+            stream: BufReader::new(UnixStream::connect(path).unwrap()),
+        }
+    }
+
+    fn get_playback_time(&mut self) -> u32 {
+        self.stream
+            .get_mut()
+            .write_all(br#"{ "command": ["get_property", "playback-time"] }"#)
+            .unwrap();
+        self.stream.get_mut().write_all(b"\n").unwrap();
+
+        let mut line = String::new();
+        loop {
+            self.stream.read_line(&mut line).unwrap();
+            if let Some(data_idx) = line.find(r#""data""#) {
+                let colon_idx = data_idx + line[data_idx..].find(":").unwrap() + 1;
+                let comma_idx = colon_idx + line[colon_idx..].find(',').unwrap();
+                return (line[colon_idx..comma_idx].trim().parse::<f32>().unwrap() * 1000.) as u32;
+            }
+        }
+    }
 }
 
 fn large_zpixmap32_putimage(
@@ -76,6 +116,8 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         println!("{subs:?}");
         return Ok(());
     }
+
+    let mut mpv_socket = args.mpv_socket.map(MpvSocket::connect);
 
     let (conn, screen_number) = xcb::Connection::connect(None)?;
 
@@ -193,7 +235,12 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         let (width, height) = (s_width as u32, s_height as u32);
         render.resize(width, height);
         let now = Instant::now();
-        let t = (now - start).as_millis() as u32 + args.start_at;
+        let t = if let Some(ref mut mpv_socket) = mpv_socket {
+            mpv_socket.get_playback_time()
+        } else {
+            ((now - start).as_secs_f64() * args.speed * 1000.) as u32 + args.start_at
+        };
+
         println!("render t = {}ms to {}x{}", t, width, height);
         render.render(t);
         let end = Instant::now();

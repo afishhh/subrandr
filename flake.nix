@@ -32,6 +32,7 @@
             bashInteractive
             rust-bindgen
             pkg-config
+            xdotool # useful for testing
           ] ++ runtimeLibs;
           buildInputs = runtimeLibs;
           shellHook = ''

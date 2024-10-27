@@ -1,6 +1,6 @@
 use crate::{Segment, TextWrappingMode};
 
-use super::parse::*;
+use super::*;
 
 type AssAlignment = super::parse::Alignment;
 type Alignment = crate::Alignment;
@@ -38,7 +38,7 @@ pub fn apply_style_to_segment(segment: &mut Segment, style: &Style) {
     segment.color = ass_to_rgba(style.primary_colour);
 }
 
-pub fn ass_to_subs(ass: Script) -> crate::Subtitles {
+pub fn convert(ass: Script) -> crate::Subtitles {
     let mut subs = crate::Subtitles { events: vec![] };
 
     let layout_resolution = if ass.layout_resolution.0 > 0 && ass.layout_resolution.1 > 0 {
@@ -48,21 +48,32 @@ pub fn ass_to_subs(ass: Script) -> crate::Subtitles {
     };
 
     for event in ass.events.iter() {
-        let style = ass.get_style(&event.style).unwrap_or(&DEFAULT_STYLE);
+        let event_style = ass.get_style(&event.style).unwrap_or(&DEFAULT_STYLE);
 
-        let mut text = String::new();
         // TODO: correct and alignment specific values
         let mut x = 0.5;
         let mut y = 0.8;
-        let mut alignment = style.alignment;
+        let mut alignment = event_style.alignment;
 
         let tokens = parse_event_text(&event.text);
-        dbg!(&tokens);
+
+        let mut segments: Vec<Segment> = vec![];
+        let mut current_style = event_style.clone();
 
         for token in tokens {
             use ParsedTextPart::*;
+
             match token {
-                Text(content) => text += content,
+                Text(content) => segments.push(Segment {
+                    font: current_style.fontname.to_string(),
+                    font_size: current_style.fontsize,
+                    font_weight: current_style.weight,
+                    italic: current_style.italic,
+                    underline: current_style.underline,
+                    strike_out: current_style.strike_out,
+                    color: ass_to_rgba(current_style.primary_colour),
+                    text: content.to_string(),
+                }),
                 Override(Command::An(a) | Command::A(a)) => alignment = a,
                 Override(Command::Pos(nx, ny)) => {
                     let (max_x, max_y) = layout_resolution;
@@ -70,46 +81,13 @@ pub fn ass_to_subs(ass: Script) -> crate::Subtitles {
                     y = ny as f32 / max_y as f32;
                 }
                 Override(Command::R(style)) => {
-                    let style = ass.get_style(&event.style).unwrap_or(&DEFAULT_STYLE);
+                    current_style = ass.get_style(&style).unwrap_or(&DEFAULT_STYLE).clone();
                 }
                 Override(other) => {
-                    println!("ignoring {other:?}");
+                    eprintln!("ignoring {other:?}");
                 }
             }
         }
-
-        // for part in ass::segment_event_text(&event.text) {
-        //     match part {
-        //         ass::TextPart::Commands(r) => {
-        //             let command_block = &event.text[r];
-        //             let mut it = command_block.chars();
-        //
-        //             while !it.as_str().is_empty() {
-        //                 while it.next().is_some_and(|c| c != '\\') {}
-        //
-        //                 let remainder = it.as_str();
-        //                 if remainder.len() >= 3 && &remainder[..3] == "pos" {
-        //                     assert_eq!(&remainder[3..4], "(");
-        //                     let args_end = remainder.find(')').unwrap();
-        //                     let args = &remainder[4..args_end];
-        //                     let (left, right) = args.split_once(',').unwrap();
-        //                     let tx = left.parse::<u32>().unwrap();
-        //                     let ty = right.parse::<u32>().unwrap();
-        //                     let (max_x, max_y) = layout_resolution;
-        //                     x = tx as f32 / max_x as f32;
-        //                     y = ty as f32 / max_y as f32
-        //                 };
-        //                 if remainder.len() >= 2 && &remainder[..2] == "an" {
-        //                     alignment = ass::Alignment::from_ass(&remainder[2..3]).unwrap();
-        //                 }
-        //                 println!("{x} {y}");
-        //             }
-        //         }
-        //         ass::TextPart::Content(c) => {
-        //             text += &event.text[c];
-        //         }
-        //     }
-        // }
 
         subs.events.push(crate::Event {
             start: event.start,
@@ -117,20 +95,8 @@ pub fn ass_to_subs(ass: Script) -> crate::Subtitles {
             x,
             y,
             alignment: alignment.into(),
-            segments: vec![Segment {
-                font: style.fontname.to_string(),
-                font_size: style.fontsize,
-                font_weight: style.weight,
-                italic: style.italic,
-                underline: style.underline,
-                strike_out: style.strike_out,
-                text_wrap: TextWrappingMode::None,
-                color: (style.primary_colour & 0xFF00 << 16)
-                    | (style.primary_colour & 0xFF0000)
-                    | (style.primary_colour & 0xFF000000 >> 16)
-                    | (0xFF - (style.primary_colour & 0xFF)),
-                text,
-            }],
+            text_wrap: TextWrappingMode::None,
+            segments,
         })
     }
 

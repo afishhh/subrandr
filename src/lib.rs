@@ -21,6 +21,43 @@ pub enum Alignment {
     BottomRight,
 }
 
+impl Alignment {
+    pub fn into_parts(self) -> (HorizontalAlignment, VerticalAlignment) {
+        match self {
+            Alignment::TopLeft => (HorizontalAlignment::Left, VerticalAlignment::Top),
+            Alignment::Top => (HorizontalAlignment::Center, VerticalAlignment::Top),
+            Alignment::TopRight => (HorizontalAlignment::Right, VerticalAlignment::Top),
+            Alignment::Left => (
+                HorizontalAlignment::Left,
+                VerticalAlignment::BaselineCentered,
+            ),
+            Alignment::Center => (
+                HorizontalAlignment::Center,
+                VerticalAlignment::BaselineCentered,
+            ),
+            Alignment::Right => (
+                HorizontalAlignment::Right,
+                VerticalAlignment::BaselineCentered,
+            ),
+            Alignment::BottomLeft => (HorizontalAlignment::Left, VerticalAlignment::Bottom),
+            Alignment::Bottom => (HorizontalAlignment::Center, VerticalAlignment::Bottom),
+            Alignment::BottomRight => (HorizontalAlignment::Right, VerticalAlignment::Bottom),
+        }
+    }
+}
+
+enum VerticalAlignment {
+    Top,
+    BaselineCentered,
+    Bottom,
+}
+
+enum HorizontalAlignment {
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextWrappingMode {
     None,
@@ -294,7 +331,7 @@ struct ShapedLineSegment {
     corresponding_input_segment: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Rect {
     x: i32,
     y: i32,
@@ -347,7 +384,11 @@ impl MultilineTextShaper {
         self.font_boundaries.push((font.clone(), self.text.len()));
     }
 
-    fn shape(&self, wrapping: TextWrappingMode) -> (Vec<Glyphs>, Vec<ShapedLine>, TextExtents) {
+    fn shape(
+        &self,
+        line_alignment: HorizontalAlignment,
+        wrapping: TextWrappingMode,
+    ) -> (Vec<Glyphs>, Vec<ShapedLine>, Rect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
         println!("SHAPING V2 TEXT {:?}", self.text);
@@ -362,6 +403,12 @@ impl MultilineTextShaper {
             paint_width: 0,
             paint_height: 0,
         };
+        let mut total_rect = Rect {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+        };
 
         let mut last = 0;
         for line_boundary in self
@@ -372,10 +419,18 @@ impl MultilineTextShaper {
         {
             // TODO: Where to get spacing?
             // let spacing = font.horizontal_extents().line_gap as i32 + 10;
-            let spacing = 10 * 64;
-            if !lines.is_empty() {
-                total_extents.paint_height += spacing;
-            }
+            // if let Some(last) = lines.last() {
+            //     let x = last
+            //         .segments
+            //         .iter()
+            //         .map(|x| &self.font_boundaries[x.corresponding_font_boundary].0)
+            //         .map(|f| f.metrics().height)
+            //         .collect::<Vec<_>>();
+            //     println!("spacing {x:?}");
+            // }
+            // if !lines.is_empty() {
+            //     total_extents.paint_height += 10 * 64;
+            // }
 
             let mut segments: Vec<ShapedLineSegment> = vec![];
             let mut line_extents = TextExtents {
@@ -506,14 +561,44 @@ impl MultilineTextShaper {
 
             debug_assert_eq!(last, line_boundary);
 
+            let aligning_x_offset = match line_alignment {
+                HorizontalAlignment::Left => 0,
+                HorizontalAlignment::Center => -line_extents.paint_width / 128,
+                HorizontalAlignment::Right => -line_extents.paint_width / 64,
+            };
+
             for segment in segments.iter_mut() {
+                segment.baseline_offset.0 += aligning_x_offset;
+                segment.paint_rect.x += aligning_x_offset;
                 segment.baseline_offset.1 += (max_bearing_y / 64) as i32;
                 segment.paint_rect.y += ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
             }
 
-            // println!("line boundary {line_slice:?} {current_extents:?}");
+            if segments.len() > 0 {
+                total_rect.x = total_rect
+                    .x
+                    .min(segments.first().map(|x| x.paint_rect.x).unwrap());
+                total_rect.w = total_rect.w.max(
+                    (segments
+                        .last()
+                        .map(|x| (x.paint_rect.x + x.paint_rect.w as i32))
+                        .unwrap()
+                        - segments.first().map(|x| x.paint_rect.x).unwrap())
+                        as u32,
+                );
+            }
 
-            total_extents.paint_height += line_extents.paint_height;
+            if line_boundary == self.text.len() {
+                total_extents.paint_height += line_extents.paint_height;
+            } else {
+                total_extents.paint_height += segments
+                    .iter()
+                    .map(|x| &self.font_boundaries[x.corresponding_font_boundary].0)
+                    .map(|f| f.metrics().height)
+                    .max()
+                    .unwrap_or(0) as i32;
+            }
+
             total_extents.paint_width =
                 std::cmp::max(total_extents.paint_width, line_extents.paint_width);
 
@@ -526,7 +611,9 @@ impl MultilineTextShaper {
             });
         }
 
-        (glyphstrings, lines, total_extents)
+        total_rect.h = (total_extents.paint_height / 64) as u32;
+
+        (glyphstrings, lines, total_rect)
     }
 }
 
@@ -566,7 +653,7 @@ impl<'a> Renderer<'a> {
         (&mut self.buffer[start..start + 4]).try_into().unwrap()
     }
 
-    fn horizontal_line(&mut self, x: u32, y: u32, w: u32, color: u32) {
+    fn horizontal_line(&mut self, x: i32, y: i32, w: u32, color: u32) {
         let rgba = [
             ((color & 0xFF000000) >> 24) as u8,
             ((color & 0x00FF0000) >> 16) as u8,
@@ -574,15 +661,18 @@ impl<'a> Renderer<'a> {
             (color & 0x000000FF) as u8,
         ];
 
+        let x = if x < 0 { 0u32 } else { x as u32 };
+        let y = if y < 0 { return } else { y as u32 };
         if y >= self.height {
             return;
         }
+
         for x in x..(x + w).min(self.width) {
             *self.pixel(x, y) = rgba;
         }
     }
 
-    fn rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
+    fn rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32) {
         let rgba = [
             ((color & 0xFF000000) >> 24) as u8,
             ((color & 0x00FF0000) >> 16) as u8,
@@ -590,36 +680,42 @@ impl<'a> Renderer<'a> {
             (color & 0x000000FF) as u8,
         ];
 
-        if x >= self.width || y >= self.height {
+        if x >= self.width as i32 || y >= self.height as i32 {
             return;
         }
+        let rx = x + w as i32;
+        let by = y + h as i32;
 
-        for y in y..(y + h).min(self.height) {
-            *self.pixel(x, y) = rgba;
-            if x + w < self.width {
-                *self.pixel(x + w, y) = rgba;
+        for y in (y.max(0) as u32)..by.clamp(0, self.height as i32) as u32 {
+            if x >= 0 {
+                *self.pixel(x as u32, y) = rgba;
+            }
+            if rx >= 0 && rx < self.width as i32 {
+                *self.pixel(rx as u32, y) = rgba;
             }
         }
-        for x in x..(x + w).min(self.width) {
-            *self.pixel(x, y) = rgba;
-            if y + h < self.height {
-                *self.pixel(x, y + h) = rgba;
+        for x in (x.max(0) as u32)..rx.clamp(0, self.width as i32) as u32 {
+            if y >= 0 {
+                *self.pixel(x, y as u32) = rgba;
+            }
+            if by >= 0 && by < self.height as i32 {
+                *self.pixel(x, by as u32) = rgba;
             }
         }
     }
 
     fn paint_text<'g>(
         &mut self,
-        x: u32,
-        y: u32,
+        x: i32,
+        y: i32,
         font: &text::Font,
         text: impl IntoIterator<Item = text::Glyph<'g>>,
         color: u32,
-    ) -> (u32, u32) {
+    ) -> (i32, i32) {
         text::paint(
             &mut self.buffer,
-            x as usize,
-            y as usize,
+            x,
+            y,
             self.width as usize,
             self.height as usize,
             (self.width * 4) as usize,
@@ -636,8 +732,8 @@ impl<'a> Renderer<'a> {
 
     fn debug_text(
         &mut self,
-        x: u32,
-        y: u32,
+        x: i32,
+        y: i32,
         text: &str,
         alignment: Alignment,
         size: f32,
@@ -651,64 +747,7 @@ impl<'a> Renderer<'a> {
         let shape = text::shape_text(&font, text);
         let (ox, oy) =
             Self::translate_for_aligned_text(&font, true, &shape.compute_extents(&font), alignment);
-        self.paint_text(
-            x.saturating_add_signed(ox),
-            y.saturating_add_signed(oy),
-            &font,
-            shape.iter(),
-            color,
-        );
-    }
-
-    /// Shapes and lays out multiple lines of horizontal text.
-    fn shape_text_multiline(
-        &mut self,
-        font: &text::Font,
-        wrapping: TextWrappingMode,
-        text: &str,
-    ) -> (
-        Glyphs,
-        Vec<usize>,
-        Vec<((u32, u32), TextExtents)>,
-        TextExtents,
-    ) {
-        assert_eq!(wrapping, TextWrappingMode::None);
-
-        let mut buffer = text::ShapingBuffer::new();
-        let mut line_boundaries = vec![];
-        let mut line_extents = vec![];
-        let mut extents = TextExtents {
-            paint_width: 0,
-            paint_height: 0,
-        };
-
-        for line in text.lines() {
-            buffer.add(line);
-            line_boundaries.push(buffer.len());
-        }
-
-        let glyphs = buffer.shape(font);
-
-        let mut last = 0;
-        for boundary in line_boundaries.iter().copied() {
-            let slice = last..boundary;
-
-            let current_extents = glyphs.compute_extents_for_slice_ex(font, slice.clone()).0;
-            println!("line boundary {slice:?} {current_extents:?}");
-            let spacing = font.horizontal_extents().line_gap as i32 + 10;
-            if !line_extents.is_empty() {
-                extents.paint_height += spacing;
-            }
-
-            line_extents.push(((0, extents.paint_height as u32), current_extents));
-
-            extents.paint_height += current_extents.paint_height;
-            extents.paint_width = std::cmp::max(extents.paint_width, current_extents.paint_width);
-
-            last = boundary + 1;
-        }
-
-        (glyphs, line_boundaries, line_extents, extents)
+        self.paint_text(x + ox, y + oy, &font, shape.iter(), color);
     }
 
     fn translate_for_aligned_text(
@@ -719,41 +758,21 @@ impl<'a> Renderer<'a> {
     ) -> (i32, i32) {
         assert!(horizontal);
 
-        enum Vertical {
-            Top,
-            BaselineCentered,
-            Bottom,
-        }
-
-        enum Horizontal {
-            Left,
-            Center,
-            Right,
-        }
-
-        let (vertical, horizontal) = match alignment {
-            Alignment::TopLeft => (Vertical::Top, Horizontal::Left),
-            Alignment::Top => (Vertical::Top, Horizontal::Center),
-            Alignment::TopRight => (Vertical::Top, Horizontal::Right),
-            Alignment::Left => (Vertical::BaselineCentered, Horizontal::Left),
-            Alignment::Center => (Vertical::BaselineCentered, Horizontal::Center),
-            Alignment::Right => (Vertical::BaselineCentered, Horizontal::Right),
-            Alignment::BottomLeft => (Vertical::Bottom, Horizontal::Left),
-            Alignment::Bottom => (Vertical::Bottom, Horizontal::Center),
-            Alignment::BottomRight => (Vertical::Bottom, Horizontal::Right),
-        };
+        let (horizontal, vertical) = alignment.into_parts();
 
         // TODO: Numbers chosen arbitrarily
         let ox = match horizontal {
-            Horizontal::Left => -font.horizontal_extents().descender / 64 / 2,
-            Horizontal::Center => -extents.paint_width / 128,
-            Horizontal::Right => (-extents.paint_width + font.horizontal_extents().descender) / 64,
+            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
+            HorizontalAlignment::Center => -extents.paint_width / 128,
+            HorizontalAlignment::Right => {
+                (-extents.paint_width + font.horizontal_extents().descender) / 64
+            }
         };
 
         let oy = match vertical {
-            Vertical::Top => font.horizontal_extents().ascender / 64,
-            Vertical::BaselineCentered => 0,
-            Vertical::Bottom => font.horizontal_extents().descender / 64,
+            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
+            VerticalAlignment::BaselineCentered => 0,
+            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
         };
 
         (ox, oy)
@@ -783,7 +802,7 @@ impl<'a> Renderer<'a> {
         // self.paint_text(0, 100, &font, &shaped, 0.85);
 
         self.debug_text(
-            self.width,
+            self.width as i32,
             0,
             &format!("{}x{} dpi:{}", self.width, self.height, self.dpi),
             Alignment::TopRight,
@@ -817,28 +836,46 @@ impl<'a> Renderer<'a> {
                     segment_fonts.push(font);
                 }
 
-                let (glyphstrings, lines, extents) = shaper.shape(TextWrappingMode::None);
-                println!("SHAPING V2 RESULT: {:?} {:#?}", extents, lines);
+                let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
+                let (glyphstrings, lines, total_rect) =
+                    shaper.shape(horizontal_alignment, TextWrappingMode::None);
+                println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
+
+                let x = x as i32;
+                let y = y as i32
+                    + match vertical_alignment {
+                        VerticalAlignment::Top => 0,
+                        VerticalAlignment::BaselineCentered => -(total_rect.h as i32) / 2,
+                        VerticalAlignment::Bottom => -(total_rect.h as i32),
+                    };
 
                 self.rect(
-                    x - 1,
-                    y - 1,
-                    (extents.paint_width / 64) as u32 + 1,
-                    (extents.paint_height / 64) as u32 + 1,
+                    x + total_rect.x - 1,
+                    y + total_rect.y - 1,
+                    total_rect.w + 1,
+                    total_rect.h + 1,
                     0xFF00FFFF,
                 );
 
+                let total_position_debug_pos = match vertical_alignment {
+                    VerticalAlignment::Top => (total_rect.h as i32 + 20, Alignment::Top),
+                    VerticalAlignment::BaselineCentered => {
+                        (total_rect.h as i32 + 20, Alignment::Top)
+                    }
+                    VerticalAlignment::Bottom => (-32, Alignment::Bottom),
+                };
+
                 self.debug_text(
-                    x.saturating_add_signed(extents.paint_width / 128),
-                    y.saturating_add_signed(extents.paint_height / 64) + 20,
+                    (x + total_rect.x + total_rect.w as i32 / 2) as i32,
+                    (y + total_rect.y + total_position_debug_pos.0) as i32,
                     &format!(
                         "x:{} y:{} w:{} h:{}",
-                        x,
-                        y,
-                        extents.paint_width / 64,
-                        extents.paint_height / 64
+                        x + total_rect.x,
+                        y + total_rect.y,
+                        total_rect.w,
+                        total_rect.h
                     ),
-                    Alignment::Top,
+                    total_position_debug_pos.1,
                     16.0,
                     0xFF00FFFF,
                 );
@@ -850,8 +887,8 @@ impl<'a> Renderer<'a> {
                         .iter_slice(shaped_segment.glyphs.1.start, shaped_segment.glyphs.1.end);
 
                     let paint_box = (
-                        x.checked_add_signed(shaped_segment.paint_rect.x).unwrap(),
-                        y.checked_add_signed(shaped_segment.paint_rect.y).unwrap(),
+                        x + shaped_segment.paint_rect.x,
+                        y + shaped_segment.paint_rect.y,
                     );
 
                     self.debug_text(
@@ -859,8 +896,8 @@ impl<'a> Renderer<'a> {
                         paint_box.1,
                         &format!(
                             "{},{}",
-                            x.saturating_add_signed(shaped_segment.paint_rect.x),
-                            y.saturating_add_signed(shaped_segment.paint_rect.y)
+                            x + shaped_segment.paint_rect.x,
+                            y + shaped_segment.paint_rect.y
                         ),
                         Alignment::BottomLeft,
                         16.0,
@@ -869,11 +906,11 @@ impl<'a> Renderer<'a> {
 
                     self.debug_text(
                         paint_box.0,
-                        paint_box.1 + shaped_segment.paint_rect.h,
+                        paint_box.1 + shaped_segment.paint_rect.h as i32,
                         &format!(
                             "{},{}",
-                            x.saturating_add_signed(shaped_segment.baseline_offset.0),
-                            y.saturating_add_signed(shaped_segment.baseline_offset.1)
+                            x + shaped_segment.baseline_offset.0,
+                            y + shaped_segment.baseline_offset.1
                         ),
                         Alignment::TopLeft,
                         16.0,
@@ -881,7 +918,7 @@ impl<'a> Renderer<'a> {
                     );
 
                     self.debug_text(
-                        paint_box.0 + shaped_segment.paint_rect.w,
+                        paint_box.0 + shaped_segment.paint_rect.w as i32,
                         paint_box.1,
                         &format!("{:.0}pt", segment.font_size),
                         Alignment::BottomRight,
@@ -898,19 +935,14 @@ impl<'a> Renderer<'a> {
                     );
 
                     self.horizontal_line(
-                        paint_box.0,
-                        y.checked_add_signed(shaped_segment.baseline_offset.1)
-                            .unwrap(),
+                        paint_box.0 as i32,
+                        y + shaped_segment.baseline_offset.1,
                         shaped_segment.paint_rect.w as u32,
                         0x00FF00FF,
                     );
 
-                    let x = x
-                        .checked_add_signed(shaped_segment.baseline_offset.0)
-                        .unwrap();
-                    let y = y
-                        .checked_add_signed(shaped_segment.baseline_offset.1)
-                        .unwrap();
+                    let x = x + shaped_segment.baseline_offset.0;
+                    let y = y + shaped_segment.baseline_offset.1;
 
                     let (nx, ny) = self.paint_text(
                         x,

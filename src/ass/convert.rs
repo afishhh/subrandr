@@ -28,16 +28,6 @@ pub fn ass_to_rgba(abgr: u32) -> u32 {
         | (0xFF - ((abgr & 0xFF000000) >> 24))
 }
 
-pub fn apply_style_to_segment(segment: &mut Segment, style: &Style) {
-    segment.font = style.fontname.to_string();
-    segment.font_size = style.fontsize;
-    segment.font_weight = style.weight;
-    segment.italic = style.italic;
-    segment.underline = style.underline;
-    segment.strike_out = style.strike_out;
-    segment.color = ass_to_rgba(style.primary_colour);
-}
-
 pub fn convert(ass: Script) -> crate::Subtitles {
     let mut subs = crate::Subtitles { events: vec![] };
 
@@ -64,16 +54,37 @@ pub fn convert(ass: Script) -> crate::Subtitles {
             use ParsedTextPart::*;
 
             match token {
-                Text(content) => segments.push(Segment {
-                    font: current_style.fontname.to_string(),
-                    font_size: current_style.fontsize,
-                    font_weight: current_style.weight,
-                    italic: current_style.italic,
-                    underline: current_style.underline,
-                    strike_out: current_style.strike_out,
-                    color: ass_to_rgba(current_style.primary_colour),
-                    text: content.to_string(),
-                }),
+                Text(content) => {
+                    let mut text = String::new();
+                    let mut it = content.chars();
+                    // TODO: How should this behave?
+                    while let Some(c) = it.next() {
+                        if c == '\\' {
+                            match it.next() {
+                                Some('\\') => text.push('\\'),
+                                Some('N') => text.push('\n'),
+                                Some(c) => {
+                                    text.push('\\');
+                                    text.push(c)
+                                }
+                                None => text.push('\\'),
+                            }
+                        } else {
+                            text.push(c);
+                        }
+                    }
+
+                    segments.push(Segment {
+                        font: current_style.fontname.to_string(),
+                        font_size: current_style.fontsize,
+                        font_weight: current_style.weight,
+                        italic: current_style.italic,
+                        underline: current_style.underline,
+                        strike_out: current_style.strike_out,
+                        color: ass_to_rgba(current_style.primary_colour),
+                        text,
+                    })
+                }
                 Override(Command::An(a) | Command::A(a)) => alignment = a,
                 Override(Command::Pos(nx, ny)) => {
                     let (max_x, max_y) = layout_resolution;

@@ -89,7 +89,7 @@ const DEFAULT_WINDOW_POS: WindowPos = WindowPos {
     id: -1,
     point: Point::BottomCenter,
     x: 50,
-    y: 70,
+    y: 100,
 };
 
 impl Default for WindowPos {

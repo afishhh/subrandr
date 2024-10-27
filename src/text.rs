@@ -347,8 +347,8 @@ pub struct TextExtents {
 pub fn paint<'a>(
     // RGBA8 buffer
     buffer: &mut [u8],
-    baseline_x: usize,
-    baseline_y: usize,
+    baseline_x: i32,
+    baseline_y: i32,
     width: usize,
     height: usize,
     stride: usize,
@@ -357,12 +357,12 @@ pub fn paint<'a>(
     // RGB color components
     color: [u8; 3],
     alpha: f32,
-) -> (u32, u32) {
+) -> (i32, i32) {
     unsafe {
         let face = font.with_applied_size();
 
-        let mut x = baseline_x as u32;
-        let mut y = baseline_y as u32;
+        let mut x = baseline_x;
+        let mut y = baseline_y;
         for Glyph { info, position } in glyphs {
             fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
             let glyph = (*face).glyph;
@@ -441,8 +441,8 @@ pub fn paint<'a>(
             }
 
             // eprintln!("advance: {} {}", (position.x_advance as f32) / 64., (position.y_advance as f32) / 64.);
-            x = x.checked_add_signed(position.x_advance / 64).unwrap();
-            y = y.checked_add_signed(position.y_advance / 64).unwrap();
+            x = x + position.x_advance / 64;
+            y = y + position.y_advance / 64;
         }
 
         (x, y)

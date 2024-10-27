@@ -1,10 +1,8 @@
-use std::{
-    error::Error, fmt::Debug, ops::IndexMut, os::unix::ffi::OsStrExt, path::PathBuf, time::Instant,
-};
+use std::{error::Error, os::unix::ffi::OsStrExt, path::PathBuf, time::Instant};
 
 use clap::Parser;
 use subrandr::{Renderer, Subtitles};
-use xcb::{Xid, XidNew};
+use xcb::XidNew;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -17,6 +15,41 @@ struct Args {
     parse: bool,
     #[clap(long = "overlay")]
     overlay_window: Option<u32>,
+}
+
+fn large_zpixmap32_putimage(
+    conn: &xcb::Connection,
+    drawable: xcb::x::Drawable,
+    gc: xcb::x::Gcontext,
+    image: &[u8],
+    width: u16,
+    pitch: usize,
+    height: u16,
+) -> xcb::Result<()> {
+    // the PutImage request itself will naturally have some overhead we want to account for
+    let max_length = (conn.get_maximum_request_length() as usize * 4) - 1024;
+    let chunk_height = max_length as usize / pitch;
+
+    for y in (0..height).step_by(chunk_height).map(|x| x as usize) {
+        let current_end_y = (y + chunk_height).min(height as usize);
+        let current_height = current_end_y - y;
+        let data = &image[y * pitch..current_end_y * pitch];
+
+        conn.check_request(conn.send_request_checked(&xcb::x::PutImage {
+            format: xcb::x::ImageFormat::ZPixmap,
+            drawable,
+            gc,
+            width,
+            height: current_height as u16,
+            dst_x: 0,
+            dst_y: y as i16,
+            left_pad: 0,
+            depth: 32,
+            data: &data,
+        }))?;
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error + 'static>> {
@@ -46,6 +79,8 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     let (conn, screen_number) = xcb::Connection::connect(None)?;
 
+    conn.prefetch_maximum_request_length();
+
     let screen = conn
         .get_setup()
         .roots()
@@ -53,9 +88,6 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         .unwrap();
     let window = conn.generate_id();
     let colormap = conn.generate_id();
-
-    // let r = conn.wait_for_reply(conn.send_request(&xcb::bigreq::Enable {}))?;
-    // println!("{} {} {:?}", r.length(), r.maximum_request_length(), r);
 
     let visuals = screen
         .allowed_depths()
@@ -154,7 +186,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             }))?
         };
 
-        let (mut s_width, mut s_height) = (geometry.width(), geometry.height());
+        let (s_width, s_height) = (geometry.width(), geometry.height());
         // s_width = 1280;
         // s_height = 720;
 
@@ -177,18 +209,15 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             new_bitmap[i + 3] = bitmap[i + 3];
         }
 
-        conn.check_request(conn.send_request_checked(&xcb::x::PutImage {
-            format: xcb::x::ImageFormat::ZPixmap,
-            drawable: xcb::x::Drawable::Window(window),
+        large_zpixmap32_putimage(
+            &conn,
+            xcb::x::Drawable::Window(window),
             gc,
-            width: s_width,
-            height: s_height,
-            dst_x: 0,
-            dst_y: 0,
-            left_pad: 0,
-            depth: 32,
-            data: &new_bitmap,
-        }))?;
+            &new_bitmap,
+            s_width,
+            s_width as usize * 4,
+            s_height,
+        )?;
     }
 
     // Ok(())

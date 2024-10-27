@@ -1,6 +1,6 @@
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
-use text::{Font, Glyphs, TextExtents, TextRenderer};
+use text::{Glyphs, TextExtents};
 
 pub mod ass;
 pub mod srv3;
@@ -534,7 +534,6 @@ pub struct Renderer<'a> {
     width: u32,
     height: u32,
     buffer: Vec<u8>,
-    text: TextRenderer,
     fonts: text::FontManager,
     // always should be 72 for ass?
     dpi: u32,
@@ -546,7 +545,6 @@ impl<'a> Renderer<'a> {
         Self {
             width,
             height,
-            text: TextRenderer::new(),
 
             fonts: text::FontManager::new(text::font_backend::platform_default().unwrap()),
             buffer: vec![0; (width * height * 4) as usize],
@@ -618,7 +616,7 @@ impl<'a> Renderer<'a> {
         text: impl IntoIterator<Item = text::Glyph<'g>>,
         color: u32,
     ) -> (u32, u32) {
-        self.text.paint(
+        text::paint(
             &mut self.buffer,
             x as usize,
             y as usize,

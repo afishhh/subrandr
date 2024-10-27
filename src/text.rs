@@ -28,32 +28,6 @@ pub mod font_backend {
     }
 }
 
-/// Renders text, see example below.
-///
-/// # Examples
-///
-/// ```
-/// let renderer = TextRenderer::new();
-/// let face = text::Face::load_from_file("./NotoSansMono[wdth,wght].ttf");
-/// let normal_64pt = face.with_size(64. /* pt */, 72);
-/// let bold_32pt = face.with_size_and_weight(32. /* pt */, 72, 700.);
-/// let shaped = renderer.shape_text(&normal_64pt, "hello world");
-/// let extents = renderer.compute_extents(&normal_64pt, &shaped);
-/// renderer.paint(
-///     panic!(), /* 8-bit RGBA */
-///     0, /* baseline offset */
-///     0,
-///     0, /* buffer dimensions */
-///     0,
-///     0,
-///     &normal_64pt,
-///     &shaped,
-///     [255, 0, 0],
-///     0.5,
-/// );
-/// ```
-pub struct TextRenderer {}
-
 // TODO: Just copy the glyphs...
 pub struct Glyphs {
     // NOTE: These are not 'static, just self referential
@@ -369,114 +343,108 @@ pub struct TextExtents {
     pub paint_width: i32,
 }
 
-impl TextRenderer {
-    pub fn new() -> Self {
-        Self {}
-    }
+#[allow(clippy::too_many_arguments)]
+pub fn paint<'a>(
+    // RGBA8 buffer
+    buffer: &mut [u8],
+    baseline_x: usize,
+    baseline_y: usize,
+    width: usize,
+    height: usize,
+    stride: usize,
+    font: &Font,
+    glyphs: impl IntoIterator<Item = Glyph<'a>>,
+    // RGB color components
+    color: [u8; 3],
+    alpha: f32,
+) -> (u32, u32) {
+    unsafe {
+        let face = font.with_applied_size();
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn paint<'a>(
-        &self,
-        buffer: &mut [u8],
-        baseline_x: usize,
-        baseline_y: usize,
-        width: usize,
-        height: usize,
-        stride: usize,
-        font: &Font,
-        glyphs: impl IntoIterator<Item = Glyph<'a>>,
-        // In desired output buffer order, i.e. if the output buffer is supposed to be RGBA then this should also be RGBA
-        color: [u8; 3],
-        alpha: f32,
-    ) -> (u32, u32) {
-        unsafe {
-            let face = font.with_applied_size();
+        let mut x = baseline_x as u32;
+        let mut y = baseline_y as u32;
+        for Glyph { info, position } in glyphs {
+            fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
+            let glyph = (*face).glyph;
+            fttry!(FT_Render_Glyph(
+                glyph,
+                FT_Render_Mode__FT_RENDER_MODE_NORMAL
+            ));
 
-            let mut x = baseline_x as u32;
-            let mut y = baseline_y as u32;
-            for Glyph { info, position } in glyphs {
-                fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
-                let glyph = (*face).glyph;
-                fttry!(FT_Render_Glyph(
-                    glyph,
-                    FT_Render_Mode__FT_RENDER_MODE_NORMAL
-                ));
+            let (ox, oy) = (
+                (*glyph).bitmap_left + position.x_offset / 64,
+                -(*glyph).bitmap_top + position.y_offset / 64,
+            );
+            let bitmap = &(*glyph).bitmap;
 
-                let (ox, oy) = (
-                    (*glyph).bitmap_left + position.x_offset / 64,
-                    -(*glyph).bitmap_top + position.y_offset / 64,
-                );
-                let bitmap = &(*glyph).bitmap;
+            // dbg!(bitmap.width, bitmap.rows);
+            // dbg!((*glyph).bitmap_left, (*glyph).bitmap_top);
 
-                // dbg!(bitmap.width, bitmap.rows);
-                // dbg!((*glyph).bitmap_left, (*glyph).bitmap_top);
+            #[expect(non_upper_case_globals)]
+            let pixel_width = match bitmap.pixel_mode.into() {
+                FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => 1,
+                _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
+            };
 
-                #[expect(non_upper_case_globals)]
-                let pixel_width = match bitmap.pixel_mode.into() {
-                    FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => 1,
-                    _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
-                };
+            for biy in 0..bitmap.rows {
+                for bix in 0..(bitmap.width / pixel_width) {
+                    let fx = x as i32 + ox + bix as i32;
+                    let fy = y as i32 + oy + biy as i32;
 
-                for biy in 0..bitmap.rows {
-                    for bix in 0..(bitmap.width / pixel_width) {
-                        let fx = x as i32 + ox + bix as i32;
-                        let fy = y as i32 + oy + biy as i32;
-
-                        if fx < 0 || fy < 0 {
-                            continue;
-                        }
-
-                        let fx = fx as usize;
-                        let fy = fy as usize;
-                        if fx >= width || fy >= height {
-                            continue;
-                        }
-
-                        let bpos = (biy as i32 * bitmap.pitch) + (bix * pixel_width) as i32;
-                        let bslice = std::slice::from_raw_parts(
-                            bitmap.buffer.offset(bpos as isize),
-                            pixel_width as usize,
-                        );
-                        #[expect(non_upper_case_globals)]
-                        let (colors, alpha) = match bitmap.pixel_mode.into() {
-                            FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => (
-                                [color[0], color[1], color[2]],
-                                (bslice[0] as f32 / 255.0) * alpha,
-                            ),
-                            _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
-                        };
-
-                        let i = fy * stride + fx * 4;
-                        buffer[i] = linear_to_srgb(blend_over(
-                            srgb_to_linear(buffer[i]),
-                            srgb_to_linear(colors[0]),
-                            alpha,
-                        ));
-                        buffer[i + 1] = linear_to_srgb(blend_over(
-                            srgb_to_linear(buffer[i + 1]),
-                            srgb_to_linear(colors[1]),
-                            alpha,
-                        ));
-                        buffer[i + 2] = linear_to_srgb(blend_over(
-                            srgb_to_linear(buffer[i + 2]),
-                            srgb_to_linear(colors[2]),
-                            alpha,
-                        ));
-                        buffer[i + 3] = ((alpha + (buffer[i + 3] as f32 / 255.0) * (1.0 - alpha))
-                            * 255.0) as u8;
-                        // eprintln!(
-                        //     "{fx} {fy} = [{i}] = {colors:?} =over= {:?}",
-                        //     &buffer[i..i + 4]
-                        // );
+                    if fx < 0 || fy < 0 {
+                        continue;
                     }
-                }
 
-                // eprintln!("advance: {} {}", (position.x_advance as f32) / 64., (position.y_advance as f32) / 64.);
-                x = x.checked_add_signed(position.x_advance / 64).unwrap();
-                y = y.checked_add_signed(position.y_advance / 64).unwrap();
+                    let fx = fx as usize;
+                    let fy = fy as usize;
+                    if fx >= width || fy >= height {
+                        continue;
+                    }
+
+                    let bpos = (biy as i32 * bitmap.pitch) + (bix * pixel_width) as i32;
+                    let bslice = std::slice::from_raw_parts(
+                        bitmap.buffer.offset(bpos as isize),
+                        pixel_width as usize,
+                    );
+                    #[expect(non_upper_case_globals)]
+                    let (colors, alpha) = match bitmap.pixel_mode.into() {
+                        FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => (
+                            [color[0], color[1], color[2]],
+                            (bslice[0] as f32 / 255.0) * alpha,
+                        ),
+                        _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
+                    };
+
+                    let i = fy * stride + fx * 4;
+                    buffer[i] = linear_to_srgb(blend_over(
+                        srgb_to_linear(buffer[i]),
+                        srgb_to_linear(colors[0]),
+                        alpha,
+                    ));
+                    buffer[i + 1] = linear_to_srgb(blend_over(
+                        srgb_to_linear(buffer[i + 1]),
+                        srgb_to_linear(colors[1]),
+                        alpha,
+                    ));
+                    buffer[i + 2] = linear_to_srgb(blend_over(
+                        srgb_to_linear(buffer[i + 2]),
+                        srgb_to_linear(colors[2]),
+                        alpha,
+                    ));
+                    buffer[i + 3] =
+                        ((alpha + (buffer[i + 3] as f32 / 255.0) * (1.0 - alpha)) * 255.0) as u8;
+                    // eprintln!(
+                    //     "{fx} {fy} = [{i}] = {colors:?} =over= {:?}",
+                    //     &buffer[i..i + 4]
+                    // );
+                }
             }
 
-            (x, y)
+            // eprintln!("advance: {} {}", (position.x_advance as f32) / 64., (position.y_advance as f32) / 64.);
+            x = x.checked_add_signed(position.x_advance / 64).unwrap();
+            y = y.checked_add_signed(position.y_advance / 64).unwrap();
         }
+
+        (x, y)
     }
 }

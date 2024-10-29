@@ -2,6 +2,9 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
+pub mod math;
+pub use math::*;
+
 // Formatting helpers
 // Remove once [debug_closure_helpers](https://github.com/rust-lang/rust/issues/117729) is stabilized.
 

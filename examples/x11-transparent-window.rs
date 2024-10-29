@@ -25,6 +25,8 @@ struct Args {
     overlay_window: Option<u32>,
     #[clap(long = "follow-mpv")]
     mpv_socket: Option<PathBuf>,
+    #[clap(long = "fps", default_value_t = 30.0)]
+    target_fps: f32,
 }
 
 struct MpvSocket {
@@ -265,6 +267,10 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             s_width as usize * 4,
             s_height,
         )?;
+
+        std::thread::sleep(std::time::Duration::from_secs_f32(
+            (args.target_fps.recip() - (end - now).as_secs_f32()).max(0.0),
+        ));
     }
 
     // Ok(())

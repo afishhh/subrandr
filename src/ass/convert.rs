@@ -1,4 +1,4 @@
-use crate::{Segment, TextWrappingMode};
+use crate::{Segment, TextSegment, TextWrappingMode};
 
 use super::*;
 
@@ -74,7 +74,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                         }
                     }
 
-                    segments.push(Segment {
+                    segments.push(Segment::Text(TextSegment {
                         font: current_style.fontname.to_string(),
                         font_size: current_style.fontsize,
                         font_weight: current_style.weight,
@@ -83,7 +83,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                         strike_out: current_style.strike_out,
                         color: ass_to_rgba(current_style.primary_colour),
                         text,
-                    })
+                    }))
                 }
                 Override(Command::An(a) | Command::A(a)) => alignment = a,
                 Override(Command::Pos(nx, ny)) => {

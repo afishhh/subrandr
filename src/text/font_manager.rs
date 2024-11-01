@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use crate::util::{AnyError, Sealed};
 
 use super::*;
-use ft_utils::*;
 
 // TODO: Is the `ital` axis worth supporting?
 //       I don't even think I have one like that so I could use it for testing...

@@ -1,7 +1,4 @@
-use std::{
-    mem::{ManuallyDrop, MaybeUninit},
-    ops::Range,
-};
+use std::mem::MaybeUninit;
 
 use text_sys::*;
 
@@ -28,233 +25,156 @@ pub mod font_backend {
     }
 }
 
-// TODO: Just copy the glyphs...
-pub struct Glyphs {
-    // NOTE: These are not 'static, just self referential
-    infos: &'static mut [hb_glyph_info_t],
-    positions: &'static mut [hb_glyph_position_t],
-    buffer: *mut hb_buffer_t,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Ltr = HB_DIRECTION_LTR as isize,
+    Rtl = HB_DIRECTION_RTL as isize,
+    Ttb = HB_DIRECTION_TTB as isize,
+    Btt = HB_DIRECTION_BTT as isize,
 }
 
-macro_rules! define_glyph_accessors {
-    () => {
-        #[inline(always)]
-        #[allow(dead_code)]
-        pub fn codepoint(&self) -> u32 {
-            self.info.codepoint
+impl Direction {
+    fn from_hb(value: hb_direction_t) -> Self {
+        match value {
+            HB_DIRECTION_LTR => Self::Ltr,
+            HB_DIRECTION_RTL => Self::Rtl,
+            HB_DIRECTION_TTB => Self::Ttb,
+            HB_DIRECTION_BTT => Self::Btt,
+            _ => panic!("Invalid harfbuzz direction: {value}"),
         }
+    }
 
-        #[inline(always)]
-        #[allow(dead_code)]
-        pub fn x_advance(&self) -> i32 {
-            self.position.x_advance
+    fn from_hb_optional(value: hb_direction_t) -> Option<Self> {
+        if value == HB_DIRECTION_INVALID {
+            None
+        } else {
+            Some(Self::from_hb(value))
         }
+    }
 
-        #[inline(always)]
-        #[allow(dead_code)]
-        pub fn y_advance(&self) -> i32 {
-            self.position.y_advance
+    pub fn is_horizontal(self) -> bool {
+        self == Direction::Ltr || self == Direction::Rtl
+    }
+
+    pub fn is_vertical(self) -> bool {
+        !self.is_horizontal()
+    }
+
+    #[must_use]
+    pub fn make_horizontal(self) -> Direction {
+        match self {
+            Direction::Ltr => Direction::Ltr,
+            Direction::Rtl => Direction::Rtl,
+            Direction::Ttb => Direction::Ltr,
+            Direction::Btt => Direction::Rtl,
         }
-
-        #[inline(always)]
-        #[allow(dead_code)]
-        pub fn x_offset(&self) -> i32 {
-            self.position.x_offset
-        }
-
-        #[inline(always)]
-        #[allow(dead_code)]
-        pub fn y_offset(&self) -> i32 {
-            self.position.y_offset
-        }
-    };
+    }
 }
 
-#[derive(Clone, Copy)]
-pub struct Glyph<'a> {
-    info: &'a hb_glyph_info_t,
-    position: &'a hb_glyph_position_t,
+#[derive(Debug, Clone, Copy)]
+pub struct Glyph {
+    pub codepoint: hb_codepoint_t,
+    pub x_advance: hb_position_t,
+    pub y_advance: hb_position_t,
+    pub x_offset: hb_position_t,
+    pub y_offset: hb_position_t,
 }
 
-impl Glyph<'_> {
-    define_glyph_accessors!();
-}
-
-pub struct GlyphMut<'a> {
-    info: &'a mut hb_glyph_info_t,
-    position: &'a mut hb_glyph_position_t,
-}
-
-impl GlyphMut<'_> {
-    define_glyph_accessors!();
-}
-
-macro_rules! define_glyph_fmt {
-    () => {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("Glyph")
-                .field("codepoint", &self.codepoint())
-                .field("x_advance", &self.x_advance())
-                .field("y_advance", &self.y_advance())
-                .field("x_offset", &self.x_offset())
-                .field("y_offset", &self.y_offset())
-                .finish()
+fn copy_hb_buffer_glyphs(buffer: *mut hb_buffer_t) -> Box<[Glyph]> {
+    let infos: &[hb_glyph_info_t] = unsafe {
+        let mut nglyphs = 0;
+        let infos = hb_buffer_get_glyph_infos(buffer, &mut nglyphs);
+        if infos.is_null() {
+            &mut []
+        } else {
+            std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
         }
     };
+
+    let positions: &[hb_glyph_position_t] = unsafe {
+        let mut nglyphs = 0;
+        let infos = hb_buffer_get_glyph_positions(buffer, &mut nglyphs);
+        if infos.is_null() {
+            &mut []
+        } else {
+            std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
+        }
+    };
+
+    assert_eq!(infos.len(), positions.len());
+
+    let mut result = Box::new_uninit_slice(infos.len());
+
+    for (i, (info, position)) in infos.iter().zip(positions.iter()).enumerate() {
+        result[i].write(Glyph {
+            codepoint: info.codepoint,
+            x_advance: position.x_advance,
+            y_advance: position.y_advance,
+            x_offset: position.x_offset,
+            y_offset: position.y_offset,
+        });
+    }
+
+    unsafe { result.assume_init() }
 }
 
-impl std::fmt::Debug for Glyph<'_> {
-    define_glyph_fmt!();
-}
+pub fn compute_extents_ex(
+    horizontal: bool,
+    font: &Font,
+    mut glyphs: &[Glyph],
+) -> (TextExtents, (i32, i32)) {
+    unsafe {
+        let (_, hb_font) = font.with_applied_size_and_hb();
 
-impl std::fmt::Debug for GlyphMut<'_> {
-    define_glyph_fmt!();
-}
-
-impl Glyphs {
-    unsafe fn from_shaped_buffer(buffer: *mut hb_buffer_t) -> Self {
-        let infos = unsafe {
-            let mut nglyphs = 0;
-            let infos = hb_buffer_get_glyph_infos(buffer, &mut nglyphs);
-            if infos.is_null() {
-                &mut []
-            } else {
-                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
-            }
+        let mut results = TextExtents {
+            paint_height: 0,
+            paint_width: 0,
         };
 
-        let positions = unsafe {
-            let mut nglyphs = 0;
-            let infos = hb_buffer_get_glyph_positions(buffer, &mut nglyphs);
-            if infos.is_null() {
-                &mut []
+        let trailing_advance;
+
+        if let Some(glyph) = {
+            if !glyphs.is_empty() {
+                let glyph = glyphs.last().unwrap_unchecked();
+                glyphs = &glyphs[..glyphs.len() - 1];
+                Some(glyph)
             } else {
-                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
+                None
             }
-        };
-
-        assert_eq!(infos.len(), positions.len());
-
-        Self {
-            infos,
-            positions,
-            buffer,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.infos.len()
-    }
-
-    #[expect(dead_code)]
-    pub fn get(&self, index: usize) -> Option<Glyph> {
-        self.infos.get(index).map(|info| unsafe {
-            let position = self.positions.get_unchecked(index);
-            Glyph { info, position }
-        })
-    }
-
-    pub fn last(&self) -> Option<Glyph> {
-        self.infos.last().map(|info| unsafe {
-            let position = self.positions.last().unwrap_unchecked();
-            Glyph { info, position }
-        })
-    }
-
-    #[expect(dead_code)]
-    pub fn get_mut(&mut self, index: usize) -> Option<GlyphMut> {
-        self.infos.get_mut(index).map(|info| unsafe {
-            let position = self.positions.get_unchecked_mut(index);
-            GlyphMut { info, position }
-        })
-    }
-
-    pub fn iter_slice(
-        &self,
-        start: usize,
-        end: usize,
-    ) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
-        (start..end).into_iter().map(|i| Glyph {
-            info: &self.infos[i],
-            position: &self.positions[i],
-        })
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = Glyph> + ExactSizeIterator + DoubleEndedIterator {
-        self.iter_slice(0, self.infos.len())
-    }
-
-    pub fn compute_extents_for_slice_ex(
-        &self,
-        font: &Font,
-        range: Range<usize>,
-    ) -> (TextExtents, (i32, i32)) {
-        unsafe {
-            let (_, hb_font) = font.with_applied_size_and_hb();
-
-            let direction = hb_buffer_get_direction(self.buffer);
-
-            let mut results = TextExtents {
-                paint_height: 0,
-                paint_width: 0,
-            };
-
-            let mut iterator = self.iter_slice(range.start, range.end);
-
-            let trailing_advance;
-
-            if let Some(glyph) = iterator.next_back() {
-                let mut extents = MaybeUninit::uninit();
-                assert!(
-                    hb_font_get_glyph_extents(hb_font, glyph.codepoint(), extents.as_mut_ptr(),)
-                        > 0
-                );
-                let extents = extents.assume_init();
-                results.paint_height += extents.height.abs();
-                results.paint_width += extents.width;
-                if direction_is_horizontal(direction) {
-                    trailing_advance = ((glyph.x_advance() - extents.width), 0);
-                } else {
-                    trailing_advance = (0, (glyph.y_advance() - extents.height));
-                }
+        } {
+            let mut extents = MaybeUninit::uninit();
+            assert!(hb_font_get_glyph_extents(hb_font, glyph.codepoint, extents.as_mut_ptr(),) > 0);
+            let extents = extents.assume_init();
+            results.paint_height += extents.height.abs();
+            results.paint_width += extents.width;
+            if horizontal {
+                trailing_advance = ((glyph.x_advance - extents.width), 0);
             } else {
-                trailing_advance = (0, 0);
+                trailing_advance = (0, (glyph.y_advance - extents.height));
             }
-
-            for glyph in iterator {
-                let mut extents = MaybeUninit::uninit();
-                assert!(
-                    hb_font_get_glyph_extents(hb_font, glyph.codepoint(), extents.as_mut_ptr()) > 0
-                );
-                let extents = extents.assume_init();
-                if direction_is_horizontal(direction) {
-                    results.paint_height = results.paint_height.max(extents.height.abs());
-                    results.paint_width += glyph.x_advance();
-                } else {
-                    results.paint_width = results.paint_width.max(extents.width.abs());
-                    results.paint_height += glyph.y_advance();
-                }
-            }
-
-            (results, trailing_advance)
+        } else {
+            trailing_advance = (0, 0);
         }
-    }
 
-    pub fn compute_extents_ex(&self, font: &Font) -> (TextExtents, (i32, i32)) {
-        self.compute_extents_for_slice_ex(font, 0..self.infos.len())
-    }
+        for glyph in glyphs {
+            let mut extents = MaybeUninit::uninit();
+            assert!(hb_font_get_glyph_extents(hb_font, glyph.codepoint, extents.as_mut_ptr()) > 0);
+            let extents = extents.assume_init();
+            if horizontal {
+                results.paint_height = results.paint_height.max(extents.height.abs());
+                results.paint_width += glyph.x_advance;
+            } else {
+                results.paint_width = results.paint_width.max(extents.width.abs());
+                results.paint_height += glyph.y_advance;
+            }
+        }
 
-    pub fn compute_extents(&self, font: &Font) -> TextExtents {
-        self.compute_extents_ex(font).0
+        (results, trailing_advance)
     }
 }
 
-impl Drop for Glyphs {
-    fn drop(&mut self) {
-        unsafe {
-            hb_buffer_destroy(self.buffer);
-        }
-    }
+pub fn compute_extents(horizontal: bool, font: &Font, glyphs: &[Glyph]) -> TextExtents {
+    compute_extents_ex(horizontal, font, glyphs).0
 }
 
 // TODO: exact lookup table instead of this approximation?
@@ -271,11 +191,6 @@ fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
 #[inline(always)]
 fn linear_to_srgb(color: f32) -> u8 {
     (color.powf(2.2 / 1.0) * 255.0).round() as u8
-}
-
-#[inline(always)]
-fn direction_is_horizontal(dir: hb_direction_t) -> bool {
-    dir == hb_direction_t_HB_DIRECTION_LTR || dir == hb_direction_t_HB_DIRECTION_RTL
 }
 
 pub struct ShapingBuffer {
@@ -311,14 +226,37 @@ impl ShapingBuffer {
         unsafe { hb_buffer_get_length(self.buffer) as usize }
     }
 
-    pub fn shape(self, font: &Font) -> Glyphs {
+    pub fn direction(&self) -> Option<Direction> {
+        unsafe { Direction::from_hb_optional(hb_buffer_get_direction(self.buffer)) }
+    }
+
+    pub fn set_direction(&mut self, direction: Direction) {
+        unsafe {
+            hb_buffer_set_direction(self.buffer, direction as hb_direction_t);
+        }
+    }
+
+    pub fn guess_properties(&mut self) -> Direction {
+        unsafe {
+            hb_buffer_guess_segment_properties(self.buffer);
+        }
+        self.direction().unwrap()
+    }
+
+    pub fn shape(&mut self, font: &Font) -> Box<[Glyph]> {
         let (_, hb_font) = font.with_applied_size_and_hb();
 
         unsafe {
             hb_buffer_guess_segment_properties(self.buffer);
             hb_shape(hb_font, self.buffer, std::ptr::null(), 0);
 
-            Glyphs::from_shaped_buffer(ManuallyDrop::new(self).buffer)
+            copy_hb_buffer_glyphs(self.buffer)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        unsafe {
+            hb_buffer_reset(self.buffer);
         }
     }
 }
@@ -331,10 +269,20 @@ impl Drop for ShapingBuffer {
     }
 }
 
-pub fn shape_text(font: &Font, text: &str) -> Glyphs {
+#[derive(Debug, Clone)]
+pub struct ShapedText {
+    pub direction: Direction,
+    pub glyphs: Box<[Glyph]>,
+}
+
+pub fn shape_text(font: &Font, text: &str) -> ShapedText {
     let mut buffer = ShapingBuffer::new();
     buffer.add(text);
-    buffer.shape(font)
+    let glyphs = buffer.shape(font);
+    ShapedText {
+        direction: buffer.direction().unwrap(),
+        glyphs,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -353,7 +301,7 @@ pub fn paint<'a>(
     height: usize,
     stride: usize,
     font: &Font,
-    glyphs: impl IntoIterator<Item = Glyph<'a>>,
+    glyphs: &[Glyph],
     // RGB color components
     color: [u8; 3],
     alpha: f32,
@@ -363,26 +311,23 @@ pub fn paint<'a>(
 
         let mut x = baseline_x;
         let mut y = baseline_y;
-        for Glyph { info, position } in glyphs {
-            fttry!(FT_Load_Glyph(face, info.codepoint, FT_LOAD_COLOR as i32));
-            let glyph = (*face).glyph;
-            fttry!(FT_Render_Glyph(
-                glyph,
-                FT_Render_Mode__FT_RENDER_MODE_NORMAL
+        for shaped_glyph in glyphs {
+            fttry!(FT_Load_Glyph(
+                face,
+                shaped_glyph.codepoint,
+                FT_LOAD_COLOR as i32
             ));
+            let glyph = (*face).glyph;
+            fttry!(FT_Render_Glyph(glyph, FT_RENDER_MODE_NORMAL));
 
             let (ox, oy) = (
-                (*glyph).bitmap_left + position.x_offset / 64,
-                -(*glyph).bitmap_top + position.y_offset / 64,
+                (*glyph).bitmap_left + shaped_glyph.x_offset / 64,
+                -(*glyph).bitmap_top + shaped_glyph.y_offset / 64,
             );
             let bitmap = &(*glyph).bitmap;
 
-            // dbg!(bitmap.width, bitmap.rows);
-            // dbg!((*glyph).bitmap_left, (*glyph).bitmap_top);
-
-            #[expect(non_upper_case_globals)]
             let pixel_width = match bitmap.pixel_mode.into() {
-                FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => 1,
+                FT_PIXEL_MODE_GRAY => 1,
                 _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
             };
 
@@ -406,9 +351,8 @@ pub fn paint<'a>(
                         bitmap.buffer.offset(bpos as isize),
                         pixel_width as usize,
                     );
-                    #[expect(non_upper_case_globals)]
                     let (colors, alpha) = match bitmap.pixel_mode.into() {
-                        FT_Pixel_Mode__FT_PIXEL_MODE_GRAY => (
+                        FT_PIXEL_MODE_GRAY => (
                             [color[0], color[1], color[2]],
                             (bslice[0] as f32 / 255.0) * alpha,
                         ),
@@ -433,16 +377,11 @@ pub fn paint<'a>(
                     ));
                     buffer[i + 3] =
                         ((alpha + (buffer[i + 3] as f32 / 255.0) * (1.0 - alpha)) * 255.0) as u8;
-                    // eprintln!(
-                    //     "{fx} {fy} = [{i}] = {colors:?} =over= {:?}",
-                    //     &buffer[i..i + 4]
-                    // );
                 }
             }
 
-            // eprintln!("advance: {} {}", (position.x_advance as f32) / 64., (position.y_advance as f32) / 64.);
-            x = x + position.x_advance / 64;
-            y = y + position.y_advance / 64;
+            x = x + shaped_glyph.x_advance / 64;
+            y = y + shaped_glyph.y_advance / 64;
         }
 
         (x, y)

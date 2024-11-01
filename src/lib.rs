@@ -1,18 +1,18 @@
-use std::ops::Range;
+// The library is still under active development
+#![allow(dead_code)]
 
 use outline::Outline;
-use text::{Glyphs, TextExtents};
-use util::{BoundingBox, Point2};
+use text::TextExtents;
+use util::{BoundingBox, Point2, RcArray};
 
 pub mod ass;
 mod outline;
 pub mod srv3;
-#[doc(hidden)] // for testing purposes only
-pub mod text;
+mod text;
 mod util;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Alignment {
+enum Alignment {
     TopLeft,
     Top,
     TopRight,
@@ -360,11 +360,7 @@ struct MultilineTextShaper {
 
 #[derive(Debug)]
 struct ShapedLineSegment {
-    // TODO: Clean this up
-    glyphs: (
-        /* glyphstring idx */ usize,
-        /* glyph range */ Range<usize>,
-    ),
+    glyphs: Option<RcArray<text::Glyph>>,
     baseline_offset: (i32, i32),
     paint_rect: Rect,
     corresponding_input_segment: usize,
@@ -452,7 +448,7 @@ impl MultilineTextShaper {
         &self,
         line_alignment: HorizontalAlignment,
         wrapping: TextWrappingMode,
-    ) -> (Vec<Glyphs>, Vec<ShapedLine>, Rect) {
+    ) -> (Vec<ShapedLine>, Rect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
         println!("SHAPING V2 TEXT {:?}", self.text);
@@ -461,7 +457,6 @@ impl MultilineTextShaper {
             self.explicit_line_bounaries
         );
 
-        let mut glyphstrings: Vec<Glyphs> = vec![];
         let mut lines: Vec<ShapedLine> = vec![];
         let mut total_extents = TextExtents {
             paint_width: 0,
@@ -535,16 +530,27 @@ impl MultilineTextShaper {
 
                 match segment {
                     ShaperSegment::Text(font) => {
-                        let glyphs = text::shape_text(font, &self.text[segment_slice]);
-                        let (extents, (trailing_x_advance, _)) = glyphs.compute_extents_ex(font);
+                        let glyphs = {
+                            let mut buffer = text::ShapingBuffer::new();
+                            let direction = buffer.guess_properties();
+                            if !direction.is_horizontal() {
+                                buffer.set_direction(direction.make_horizontal());
+                            }
+                            buffer.add(&self.text[segment_slice]);
+                            buffer.shape(font)
+                        };
+                        let (extents, (trailing_x_advance, _)) =
+                            text::compute_extents_ex(true, font, &glyphs);
 
                         let segment_max_bearing_y = glyphs
                             .iter()
-                            .map(|x| font.glyph_extents(x.codepoint()).horiBearingY)
+                            .map(|x| font.glyph_extents(x.codepoint).horiBearingY)
                             .max()
                             .unwrap_or(0);
 
                         max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
+
+                        let rc_glyphs = RcArray::from_boxed(glyphs);
 
                         println!(
                             "last: {last}, end: {end}, intra font splits: {:?}, binary search result: {}",
@@ -556,7 +562,7 @@ impl MultilineTextShaper {
                             .is_none_or(|split| *split >= end)
                         {
                             segments.push(ShapedLineSegment {
-                                glyphs: (glyphstrings.len(), 0..glyphs.len()),
+                                glyphs: Some(rc_glyphs),
                                 baseline_offset: (
                                     line_extents.paint_width / 64,
                                     total_extents.paint_height / 64,
@@ -585,10 +591,11 @@ impl MultilineTextShaper {
                             {
                                 let end_glyph_idx = split_end - last;
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
+                                let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
                                 let (extents, (x_advance, _)) =
-                                    glyphs.compute_extents_for_slice_ex(font, glyph_range.clone());
+                                    text::compute_extents_ex(true, font, &glyph_slice);
                                 segments.push(ShapedLineSegment {
-                                    glyphs: (glyphstrings.len(), glyph_range),
+                                    glyphs: Some(glyph_slice),
                                     baseline_offset: (x / 64, total_extents.paint_height / 64),
                                     paint_rect: Rect {
                                         x: x / 64,
@@ -618,16 +625,13 @@ impl MultilineTextShaper {
                         if line_extents.paint_height < extents.paint_height {
                             line_extents.paint_height = extents.paint_height;
                         }
-
-                        glyphstrings.push(glyphs);
                     }
                     ShaperSegment::Shape(dim) => {
-                        println!("{dim:?}");
                         let logical_w = dim.w - (-dim.x).max(0) as u32;
                         let logical_h = dim.h - (-dim.y).max(0) as u32;
                         let segment_max_bearing_y = (logical_h * 64) as i64;
                         segments.push(ShapedLineSegment {
-                            glyphs: (0, 0..0),
+                            glyphs: None,
                             baseline_offset: (
                                 line_extents.paint_width / 64,
                                 total_extents.paint_height / 64,
@@ -639,8 +643,8 @@ impl MultilineTextShaper {
                                 h: logical_h,
                             },
                             corresponding_input_segment: current_segment + first_internal_split_idx,
+                            corresponding_font_boundary: current_segment + first_internal_split_idx,
                             max_bearing_y: segment_max_bearing_y,
-                            corresponding_font_boundary: 0,
                         });
                         line_extents.paint_width += (logical_w * 64) as i32;
                         max_bearing_y = max_bearing_y.max(segment_max_bearing_y);
@@ -667,7 +671,7 @@ impl MultilineTextShaper {
             for segment in segments.iter_mut() {
                 segment.baseline_offset.0 += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset;
-                if segment.glyphs.1 == (0..0) {
+                if segment.glyphs.is_none() {
                     segment.baseline_offset.1 +=
                         ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
                 } else {
@@ -693,15 +697,17 @@ impl MultilineTextShaper {
             if line_boundary == self.text.len() {
                 total_extents.paint_height += line_extents.paint_height;
             } else {
-                total_extents.paint_height += segments
+                total_extents.paint_height += dbg!(segments
                     .iter()
-                    .map(|x| &self.segment_boundaries[x.corresponding_font_boundary].0)
-                    .map(|s| match s {
-                        ShaperSegment::Text(f) => f.metrics().height,
-                        ShaperSegment::Shape(s) => (s.h - s.y.min(0) as u32) as i64 * 64,
-                    })
+                    .map(
+                        |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
+                            ShaperSegment::Text(f) =>
+                                x.paint_rect.y as i64 * 64 + f.metrics().height,
+                            ShaperSegment::Shape(_) => (x.paint_rect.h * 64) as i64,
+                        }
+                    )
                     .max()
-                    .unwrap_or(0) as i32;
+                    .unwrap_or(0) as i32);
             }
 
             total_extents.paint_width =
@@ -718,7 +724,7 @@ impl MultilineTextShaper {
 
         total_rect.h = (total_extents.paint_height / 64) as u32;
 
-        (glyphstrings, lines, total_rect)
+        (lines, total_rect)
     }
 }
 
@@ -814,7 +820,7 @@ impl<'a> Renderer<'a> {
         x: i32,
         y: i32,
         font: &text::Font,
-        text: impl IntoIterator<Item = text::Glyph<'g>>,
+        text: &[text::Glyph],
         color: u32,
     ) -> (i32, i32) {
         text::paint(
@@ -849,10 +855,14 @@ impl<'a> Renderer<'a> {
             .get_or_load("monospace", 400., false)
             .unwrap()
             .with_size(size, self.dpi);
-        let shape = text::shape_text(&font, text);
-        let (ox, oy) =
-            Self::translate_for_aligned_text(&font, true, &shape.compute_extents(&font), alignment);
-        self.paint_text(x + ox, y + oy, &font, shape.iter(), color);
+        let shaped = text::shape_text(&font, text);
+        let (ox, oy) = Self::translate_for_aligned_text(
+            &font,
+            true,
+            &text::compute_extents(true, &font, &shaped.glyphs),
+            alignment,
+        );
+        self.paint_text(x + ox, y + oy, &font, &shaped.glyphs, color);
     }
 
     fn translate_for_aligned_text(
@@ -925,7 +935,6 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    #[allow(warnings)]
     pub fn render(&mut self, t: u32) {
         if self.width == 0 || self.height == 0 {
             return;
@@ -959,67 +968,6 @@ impl<'a> Renderer<'a> {
             0xFFFFFFFF,
         );
 
-        let linear_spline = outline::Outline {
-            points: vec![
-                Point2::new(200.0, 500.0),
-                Point2::new(150.0, 550.0),
-                Point2::new(100.0, 300.0),
-                Point2::new(160.0, 100.0),
-                Point2::new(210.0, 110.0),
-                Point2::new(190.0, 350.0),
-                Point2::new(500.0, 380.0),
-            ],
-            segments: vec![(outline::SplineDegree::Linear, 6)],
-        };
-        let quad_spline = outline::Outline {
-            points: vec![
-                Point2::new(200.0, 500.0),
-                Point2::new(150.0, 550.0),
-                Point2::new(100.0, 300.0),
-                Point2::new(160.0, 100.0),
-                Point2::new(210.0, 110.0),
-                Point2::new(190.0, 350.0),
-                Point2::new(500.0, 380.0),
-            ],
-            segments: vec![(outline::SplineDegree::Quadratic, 6)],
-        };
-        // let cubic_spline = spline::Outline {
-        //     points: vec![
-        //         Point2::new(200.0, 500.0),
-        //         Point2::new(150.0, 550.0),
-        //         Point2::new(100.0, 300.0),
-        //         Point2::new(160.0, 100.0),
-        //         Point2::new(210.0, 110.0),
-        //         Point2::new(190.0, 350.0),
-        //         Point2::new(500.0, 380.0),
-        //     ],
-        //     segments: vec![(spline::SplineDegree::Cubic, 6)],
-        // };
-        let mut cubic_spline = dbg!(outline::Outline::from_cubic_bezier(
-            Point2::new(0.0, 0.0),
-            Point2::new(50.0, 200.0),
-            Point2::new(300.0, 150.0),
-            Point2::new(400.0, 400.0),
-        ));
-
-        // self.draw_outline(0, 0, &linear_spline, 0xFF0000FF);
-        // self.draw_outline(0, 0, &quad_spline, 0x00FF00FF);
-        self.draw_outline(100, 100, &cubic_spline, 0x0000FFFF);
-
-        let bezier_curve = outline::Curve {
-            kind: outline::CurveKind::CubicBezier,
-            control_points: [
-                Point2::new(0.0, 0.0),
-                Point2::new(50.0, 200.0),
-                Point2::new(300.0, 150.0),
-                Point2::new(400.0, 400.0),
-            ],
-        };
-
-        self.draw_curve(10, 10, &bezier_curve, 0xFF0000FF);
-
-        // return;
-
         {
             for event in self
                 .subs
@@ -1046,19 +994,25 @@ impl<'a> Renderer<'a> {
                                 .unwrap()
                                 .with_size(segment.font_size, self.dpi);
 
-                            println!("SHAPING V2 INPUT SEGMENT: {:?} {:?}", segment.text, font);
+                            println!("SHAPING V2 INPUT TEXT: {:?} {:?}", segment.text, font);
 
                             shaper.add_text(&segment.text, &font);
-                            segment_fonts.push(font);
+                            segment_fonts.push(Some(font));
                         }
                         Segment::Shape(shape) => {
+                            println!(
+                                "SHAPING V2 INPUT SHAPE: {:?} {:?}",
+                                shape.outlines, shape.size
+                            );
+
                             shaper.add_shape(shape.size.clone());
+                            segment_fonts.push(None);
                         }
                     }
                 }
 
                 let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
-                let (glyphstrings, lines, total_rect) =
+                let (lines, total_rect) =
                     shaper.shape(horizontal_alignment, TextWrappingMode::None);
                 println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
 
@@ -1104,8 +1058,6 @@ impl<'a> Renderer<'a> {
                 let mut last = 0;
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
-                    let glyphs_it = glyphstrings[shaped_segment.glyphs.0]
-                        .iter_slice(shaped_segment.glyphs.1.start, shaped_segment.glyphs.1.end);
 
                     let paint_box = (
                         x + shaped_segment.paint_rect.x,
@@ -1174,8 +1126,10 @@ impl<'a> Renderer<'a> {
                             let (nx, ny) = self.paint_text(
                                 x,
                                 y,
-                                &segment_fonts[shaped_segment.corresponding_input_segment],
-                                glyphs_it,
+                                segment_fonts[shaped_segment.corresponding_input_segment]
+                                    .as_ref()
+                                    .unwrap(),
+                                shaped_segment.glyphs.as_deref().unwrap(),
                                 t.color,
                             );
                         }

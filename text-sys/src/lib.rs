@@ -3,6 +3,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(improper_ctypes)]
 #[cfg(target_family = "unix")]
 pub mod unix;
 
@@ -23,7 +24,7 @@ pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_Y4: u32 = 0;
 pub const _LIBC_LIMITS_H_: u32 = 1;
 pub const _FEATURES_H: u32 = 1;
 pub const _DEFAULT_SOURCE: u32 = 1;
-pub const __GLIBC_USE_ISOC2X: u32 = 0;
+pub const __GLIBC_USE_ISOC23: u32 = 0;
 pub const __USE_ISOC11: u32 = 1;
 pub const __USE_ISOC99: u32 = 1;
 pub const __USE_ISOC95: u32 = 1;
@@ -41,12 +42,13 @@ pub const __WORDSIZE: u32 = 64;
 pub const __WORDSIZE_TIME64_COMPAT32: u32 = 1;
 pub const __SYSCALL_WORDSIZE: u32 = 64;
 pub const __TIMESIZE: u32 = 64;
+pub const __USE_TIME_BITS64: u32 = 1;
 pub const __USE_MISC: u32 = 1;
 pub const __USE_ATFILE: u32 = 1;
 pub const __USE_FORTIFY_LEVEL: u32 = 0;
 pub const __GLIBC_USE_DEPRECATED_GETS: u32 = 0;
 pub const __GLIBC_USE_DEPRECATED_SCANF: u32 = 0;
-pub const __GLIBC_USE_C2X_STRTOL: u32 = 0;
+pub const __GLIBC_USE_C23_STRTOL: u32 = 0;
 pub const _STDC_PREDEF_H: u32 = 1;
 pub const __STDC_IEC_559__: u32 = 1;
 pub const __STDC_IEC_60559_BFP__: u32 = 201404;
@@ -55,17 +57,17 @@ pub const __STDC_IEC_60559_COMPLEX__: u32 = 201404;
 pub const __STDC_ISO_10646__: u32 = 201706;
 pub const __GNU_LIBRARY__: u32 = 6;
 pub const __GLIBC__: u32 = 2;
-pub const __GLIBC_MINOR__: u32 = 39;
+pub const __GLIBC_MINOR__: u32 = 40;
 pub const _SYS_CDEFS_H: u32 = 1;
 pub const __glibc_c99_flexarr_available: u32 = 1;
 pub const __LDOUBLE_REDIRECTS_TO_FLOAT128_ABI: u32 = 0;
 pub const __HAVE_GENERIC_SELECTION: u32 = 1;
 pub const __GLIBC_USE_LIB_EXT2: u32 = 0;
 pub const __GLIBC_USE_IEC_60559_BFP_EXT: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_BFP_EXT_C2X: u32 = 0;
+pub const __GLIBC_USE_IEC_60559_BFP_EXT_C23: u32 = 0;
 pub const __GLIBC_USE_IEC_60559_EXT: u32 = 0;
 pub const __GLIBC_USE_IEC_60559_FUNCS_EXT: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_FUNCS_EXT_C2X: u32 = 0;
+pub const __GLIBC_USE_IEC_60559_FUNCS_EXT_C23: u32 = 0;
 pub const __GLIBC_USE_IEC_60559_TYPES_EXT: u32 = 0;
 pub const MB_LEN_MAX: u32 = 16;
 pub const _BITS_POSIX1_LIM_H: u32 = 1;
@@ -370,9 +372,9 @@ pub const FT_FSTYPE_NO_SUBSETTING: u32 = 256;
 pub const FT_FSTYPE_BITMAP_EMBEDDING_ONLY: u32 = 512;
 pub const FREETYPE_MAJOR: u32 = 2;
 pub const FREETYPE_MINOR: u32 = 13;
-pub const FREETYPE_PATCH: u32 = 2;
-pub const T1_MAX_MM_DESIGNS: u32 = 16;
+pub const FREETYPE_PATCH: u32 = 3;
 pub const T1_MAX_MM_AXIS: u32 = 4;
+pub const T1_MAX_MM_DESIGNS: u32 = 16;
 pub const T1_MAX_MM_MAP_POINTS: u32 = 20;
 pub const FT_VAR_AXIS_FLAG_HIDDEN: u32 = 1;
 pub const TT_PLATFORM_APPLE_UNICODE: u32 = 0;
@@ -1997,7 +1999,7 @@ pub struct _IO_FILE {
     pub _wide_data: *mut _IO_wide_data,
     pub _freeres_list: *mut _IO_FILE,
     pub _freeres_buf: *mut ::std::os::raw::c_void,
-    pub __pad5: usize,
+    pub _prevchain: *mut *mut _IO_FILE,
     pub _mode: ::std::os::raw::c_int,
     pub _unused2: [::std::os::raw::c_char; 20usize],
 }
@@ -2276,13 +2278,13 @@ fn bindgen_test_layout__IO_FILE() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).__pad5) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr)._prevchain) as usize - ptr as usize },
         184usize,
         concat!(
             "Offset of field: ",
             stringify!(_IO_FILE),
             "::",
-            stringify!(__pad5)
+            stringify!(_prevchain)
         )
     );
     assert_eq!(
@@ -5274,15 +5276,15 @@ fn bindgen_test_layout_FT_BBox_() {
     );
 }
 pub type FT_BBox = FT_BBox_;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_NONE: FT_Pixel_Mode_ = 0;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_MONO: FT_Pixel_Mode_ = 1;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_GRAY: FT_Pixel_Mode_ = 2;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_GRAY2: FT_Pixel_Mode_ = 3;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_GRAY4: FT_Pixel_Mode_ = 4;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_LCD: FT_Pixel_Mode_ = 5;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_LCD_V: FT_Pixel_Mode_ = 6;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_BGRA: FT_Pixel_Mode_ = 7;
-pub const FT_Pixel_Mode__FT_PIXEL_MODE_MAX: FT_Pixel_Mode_ = 8;
+pub const FT_PIXEL_MODE_NONE: FT_Pixel_Mode_ = 0;
+pub const FT_PIXEL_MODE_MONO: FT_Pixel_Mode_ = 1;
+pub const FT_PIXEL_MODE_GRAY: FT_Pixel_Mode_ = 2;
+pub const FT_PIXEL_MODE_GRAY2: FT_Pixel_Mode_ = 3;
+pub const FT_PIXEL_MODE_GRAY4: FT_Pixel_Mode_ = 4;
+pub const FT_PIXEL_MODE_LCD: FT_Pixel_Mode_ = 5;
+pub const FT_PIXEL_MODE_LCD_V: FT_Pixel_Mode_ = 6;
+pub const FT_PIXEL_MODE_BGRA: FT_Pixel_Mode_ = 7;
+pub const FT_PIXEL_MODE_MAX: FT_Pixel_Mode_ = 8;
 pub type FT_Pixel_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Pixel_Mode_ as FT_Pixel_Mode;
 #[repr(C)]
@@ -5396,11 +5398,11 @@ pub type FT_Bitmap = FT_Bitmap_;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct FT_Outline_ {
-    pub n_contours: ::std::os::raw::c_short,
-    pub n_points: ::std::os::raw::c_short,
+    pub n_contours: ::std::os::raw::c_ushort,
+    pub n_points: ::std::os::raw::c_ushort,
     pub points: *mut FT_Vector,
-    pub tags: *mut ::std::os::raw::c_char,
-    pub contours: *mut ::std::os::raw::c_short,
+    pub tags: *mut ::std::os::raw::c_uchar,
+    pub contours: *mut ::std::os::raw::c_ushort,
     pub flags: ::std::os::raw::c_int,
 }
 #[test]
@@ -5592,12 +5594,12 @@ fn bindgen_test_layout_FT_Outline_Funcs_() {
     );
 }
 pub type FT_Outline_Funcs = FT_Outline_Funcs_;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_NONE: FT_Glyph_Format_ = 0;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_COMPOSITE: FT_Glyph_Format_ = 1668246896;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_BITMAP: FT_Glyph_Format_ = 1651078259;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_OUTLINE: FT_Glyph_Format_ = 1869968492;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_PLOTTER: FT_Glyph_Format_ = 1886154612;
-pub const FT_Glyph_Format__FT_GLYPH_FORMAT_SVG: FT_Glyph_Format_ = 1398163232;
+pub const FT_GLYPH_FORMAT_NONE: FT_Glyph_Format_ = 0;
+pub const FT_GLYPH_FORMAT_COMPOSITE: FT_Glyph_Format_ = 1668246896;
+pub const FT_GLYPH_FORMAT_BITMAP: FT_Glyph_Format_ = 1651078259;
+pub const FT_GLYPH_FORMAT_OUTLINE: FT_Glyph_Format_ = 1869968492;
+pub const FT_GLYPH_FORMAT_PLOTTER: FT_Glyph_Format_ = 1886154612;
+pub const FT_GLYPH_FORMAT_SVG: FT_Glyph_Format_ = 1398163232;
 pub type FT_Glyph_Format_ = ::std::os::raw::c_uint;
 pub use self::FT_Glyph_Format_ as FT_Glyph_Format;
 #[repr(C)]
@@ -6560,26 +6562,26 @@ pub type FT_Face = *mut FT_FaceRec_;
 pub type FT_Size = *mut FT_SizeRec_;
 pub type FT_GlyphSlot = *mut FT_GlyphSlotRec_;
 pub type FT_CharMap = *mut FT_CharMapRec_;
-pub const FT_Encoding__FT_ENCODING_NONE: FT_Encoding_ = 0;
-pub const FT_Encoding__FT_ENCODING_MS_SYMBOL: FT_Encoding_ = 1937337698;
-pub const FT_Encoding__FT_ENCODING_UNICODE: FT_Encoding_ = 1970170211;
-pub const FT_Encoding__FT_ENCODING_SJIS: FT_Encoding_ = 1936353651;
-pub const FT_Encoding__FT_ENCODING_PRC: FT_Encoding_ = 1734484000;
-pub const FT_Encoding__FT_ENCODING_BIG5: FT_Encoding_ = 1651074869;
-pub const FT_Encoding__FT_ENCODING_WANSUNG: FT_Encoding_ = 2002873971;
-pub const FT_Encoding__FT_ENCODING_JOHAB: FT_Encoding_ = 1785686113;
-pub const FT_Encoding__FT_ENCODING_GB2312: FT_Encoding_ = 1734484000;
-pub const FT_Encoding__FT_ENCODING_MS_SJIS: FT_Encoding_ = 1936353651;
-pub const FT_Encoding__FT_ENCODING_MS_GB2312: FT_Encoding_ = 1734484000;
-pub const FT_Encoding__FT_ENCODING_MS_BIG5: FT_Encoding_ = 1651074869;
-pub const FT_Encoding__FT_ENCODING_MS_WANSUNG: FT_Encoding_ = 2002873971;
-pub const FT_Encoding__FT_ENCODING_MS_JOHAB: FT_Encoding_ = 1785686113;
-pub const FT_Encoding__FT_ENCODING_ADOBE_STANDARD: FT_Encoding_ = 1094995778;
-pub const FT_Encoding__FT_ENCODING_ADOBE_EXPERT: FT_Encoding_ = 1094992453;
-pub const FT_Encoding__FT_ENCODING_ADOBE_CUSTOM: FT_Encoding_ = 1094992451;
-pub const FT_Encoding__FT_ENCODING_ADOBE_LATIN_1: FT_Encoding_ = 1818326065;
-pub const FT_Encoding__FT_ENCODING_OLD_LATIN_2: FT_Encoding_ = 1818326066;
-pub const FT_Encoding__FT_ENCODING_APPLE_ROMAN: FT_Encoding_ = 1634889070;
+pub const FT_ENCODING_NONE: FT_Encoding_ = 0;
+pub const FT_ENCODING_MS_SYMBOL: FT_Encoding_ = 1937337698;
+pub const FT_ENCODING_UNICODE: FT_Encoding_ = 1970170211;
+pub const FT_ENCODING_SJIS: FT_Encoding_ = 1936353651;
+pub const FT_ENCODING_PRC: FT_Encoding_ = 1734484000;
+pub const FT_ENCODING_BIG5: FT_Encoding_ = 1651074869;
+pub const FT_ENCODING_WANSUNG: FT_Encoding_ = 2002873971;
+pub const FT_ENCODING_JOHAB: FT_Encoding_ = 1785686113;
+pub const FT_ENCODING_GB2312: FT_Encoding_ = 1734484000;
+pub const FT_ENCODING_MS_SJIS: FT_Encoding_ = 1936353651;
+pub const FT_ENCODING_MS_GB2312: FT_Encoding_ = 1734484000;
+pub const FT_ENCODING_MS_BIG5: FT_Encoding_ = 1651074869;
+pub const FT_ENCODING_MS_WANSUNG: FT_Encoding_ = 2002873971;
+pub const FT_ENCODING_MS_JOHAB: FT_Encoding_ = 1785686113;
+pub const FT_ENCODING_ADOBE_STANDARD: FT_Encoding_ = 1094995778;
+pub const FT_ENCODING_ADOBE_EXPERT: FT_Encoding_ = 1094992453;
+pub const FT_ENCODING_ADOBE_CUSTOM: FT_Encoding_ = 1094992451;
+pub const FT_ENCODING_ADOBE_LATIN_1: FT_Encoding_ = 1818326065;
+pub const FT_ENCODING_OLD_LATIN_2: FT_Encoding_ = 1818326066;
+pub const FT_ENCODING_APPLE_ROMAN: FT_Encoding_ = 1634889070;
 pub type FT_Encoding_ = ::std::os::raw::c_uint;
 pub use self::FT_Encoding_ as FT_Encoding;
 #[repr(C)]
@@ -7661,12 +7663,12 @@ extern "C" {
 extern "C" {
     pub fn FT_Select_Size(face: FT_Face, strike_index: FT_Int) -> FT_Error;
 }
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_NOMINAL: FT_Size_Request_Type_ = 0;
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_REAL_DIM: FT_Size_Request_Type_ = 1;
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_BBOX: FT_Size_Request_Type_ = 2;
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_CELL: FT_Size_Request_Type_ = 3;
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_SCALES: FT_Size_Request_Type_ = 4;
-pub const FT_Size_Request_Type__FT_SIZE_REQUEST_TYPE_MAX: FT_Size_Request_Type_ = 5;
+pub const FT_SIZE_REQUEST_TYPE_NOMINAL: FT_Size_Request_Type_ = 0;
+pub const FT_SIZE_REQUEST_TYPE_REAL_DIM: FT_Size_Request_Type_ = 1;
+pub const FT_SIZE_REQUEST_TYPE_BBOX: FT_Size_Request_Type_ = 2;
+pub const FT_SIZE_REQUEST_TYPE_CELL: FT_Size_Request_Type_ = 3;
+pub const FT_SIZE_REQUEST_TYPE_SCALES: FT_Size_Request_Type_ = 4;
+pub const FT_SIZE_REQUEST_TYPE_MAX: FT_Size_Request_Type_ = 5;
 pub type FT_Size_Request_Type_ = ::std::os::raw::c_uint;
 pub use self::FT_Size_Request_Type_ as FT_Size_Request_Type;
 #[repr(C)]
@@ -7776,21 +7778,21 @@ extern "C" {
 extern "C" {
     pub fn FT_Get_Transform(face: FT_Face, matrix: *mut FT_Matrix, delta: *mut FT_Vector);
 }
-pub const FT_Render_Mode__FT_RENDER_MODE_NORMAL: FT_Render_Mode_ = 0;
-pub const FT_Render_Mode__FT_RENDER_MODE_LIGHT: FT_Render_Mode_ = 1;
-pub const FT_Render_Mode__FT_RENDER_MODE_MONO: FT_Render_Mode_ = 2;
-pub const FT_Render_Mode__FT_RENDER_MODE_LCD: FT_Render_Mode_ = 3;
-pub const FT_Render_Mode__FT_RENDER_MODE_LCD_V: FT_Render_Mode_ = 4;
-pub const FT_Render_Mode__FT_RENDER_MODE_SDF: FT_Render_Mode_ = 5;
-pub const FT_Render_Mode__FT_RENDER_MODE_MAX: FT_Render_Mode_ = 6;
+pub const FT_RENDER_MODE_NORMAL: FT_Render_Mode_ = 0;
+pub const FT_RENDER_MODE_LIGHT: FT_Render_Mode_ = 1;
+pub const FT_RENDER_MODE_MONO: FT_Render_Mode_ = 2;
+pub const FT_RENDER_MODE_LCD: FT_Render_Mode_ = 3;
+pub const FT_RENDER_MODE_LCD_V: FT_Render_Mode_ = 4;
+pub const FT_RENDER_MODE_SDF: FT_Render_Mode_ = 5;
+pub const FT_RENDER_MODE_MAX: FT_Render_Mode_ = 6;
 pub type FT_Render_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Render_Mode_ as FT_Render_Mode;
 extern "C" {
     pub fn FT_Render_Glyph(slot: FT_GlyphSlot, render_mode: FT_Render_Mode) -> FT_Error;
 }
-pub const FT_Kerning_Mode__FT_KERNING_DEFAULT: FT_Kerning_Mode_ = 0;
-pub const FT_Kerning_Mode__FT_KERNING_UNFITTED: FT_Kerning_Mode_ = 1;
-pub const FT_Kerning_Mode__FT_KERNING_UNSCALED: FT_Kerning_Mode_ = 2;
+pub const FT_KERNING_DEFAULT: FT_Kerning_Mode_ = 0;
+pub const FT_KERNING_UNFITTED: FT_Kerning_Mode_ = 1;
+pub const FT_KERNING_UNSCALED: FT_Kerning_Mode_ = 2;
 pub type FT_Kerning_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Kerning_Mode_ as FT_Kerning_Mode;
 extern "C" {
@@ -7923,1106 +7925,360 @@ extern "C" {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct PS_FontInfoRec_ {
-    pub version: *mut FT_String,
-    pub notice: *mut FT_String,
-    pub full_name: *mut FT_String,
-    pub family_name: *mut FT_String,
-    pub weight: *mut FT_String,
-    pub italic_angle: FT_Long,
-    pub is_fixed_pitch: FT_Bool,
-    pub underline_position: FT_Short,
-    pub underline_thickness: FT_UShort,
+pub struct FT_Glyph_Class_ {
+    _unused: [u8; 0],
+}
+pub type FT_Glyph_Class = FT_Glyph_Class_;
+pub type FT_Glyph = *mut FT_GlyphRec_;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct FT_GlyphRec_ {
+    pub library: FT_Library,
+    pub clazz: *const FT_Glyph_Class,
+    pub format: FT_Glyph_Format,
+    pub advance: FT_Vector,
 }
 #[test]
-fn bindgen_test_layout_PS_FontInfoRec_() {
-    const UNINIT: ::std::mem::MaybeUninit<PS_FontInfoRec_> = ::std::mem::MaybeUninit::uninit();
+fn bindgen_test_layout_FT_GlyphRec_() {
+    const UNINIT: ::std::mem::MaybeUninit<FT_GlyphRec_> = ::std::mem::MaybeUninit::uninit();
     let ptr = UNINIT.as_ptr();
     assert_eq!(
-        ::std::mem::size_of::<PS_FontInfoRec_>(),
-        56usize,
-        concat!("Size of: ", stringify!(PS_FontInfoRec_))
+        ::std::mem::size_of::<FT_GlyphRec_>(),
+        40usize,
+        concat!("Size of: ", stringify!(FT_GlyphRec_))
     );
     assert_eq!(
-        ::std::mem::align_of::<PS_FontInfoRec_>(),
+        ::std::mem::align_of::<FT_GlyphRec_>(),
         8usize,
-        concat!("Alignment of ", stringify!(PS_FontInfoRec_))
+        concat!("Alignment of ", stringify!(FT_GlyphRec_))
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).version) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).library) as usize - ptr as usize },
         0usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
+            stringify!(FT_GlyphRec_),
             "::",
-            stringify!(version)
+            stringify!(library)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).notice) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).clazz) as usize - ptr as usize },
         8usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
+            stringify!(FT_GlyphRec_),
             "::",
-            stringify!(notice)
+            stringify!(clazz)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).full_name) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).format) as usize - ptr as usize },
         16usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
+            stringify!(FT_GlyphRec_),
             "::",
-            stringify!(full_name)
+            stringify!(format)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).family_name) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).advance) as usize - ptr as usize },
         24usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
+            stringify!(FT_GlyphRec_),
             "::",
-            stringify!(family_name)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).weight) as usize - ptr as usize },
-        32usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
-            "::",
-            stringify!(weight)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).italic_angle) as usize - ptr as usize },
-        40usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
-            "::",
-            stringify!(italic_angle)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).is_fixed_pitch) as usize - ptr as usize },
-        48usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
-            "::",
-            stringify!(is_fixed_pitch)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).underline_position) as usize - ptr as usize },
-        50usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
-            "::",
-            stringify!(underline_position)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).underline_thickness) as usize - ptr as usize },
-        52usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_FontInfoRec_),
-            "::",
-            stringify!(underline_thickness)
+            stringify!(advance)
         )
     );
 }
-pub type PS_FontInfoRec = PS_FontInfoRec_;
-pub type PS_FontInfo = *mut PS_FontInfoRec_;
-pub type T1_FontInfo = PS_FontInfoRec;
+pub type FT_GlyphRec = FT_GlyphRec_;
+pub type FT_BitmapGlyph = *mut FT_BitmapGlyphRec_;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct PS_PrivateRec_ {
-    pub unique_id: FT_Int,
-    pub lenIV: FT_Int,
-    pub num_blue_values: FT_Byte,
-    pub num_other_blues: FT_Byte,
-    pub num_family_blues: FT_Byte,
-    pub num_family_other_blues: FT_Byte,
-    pub blue_values: [FT_Short; 14usize],
-    pub other_blues: [FT_Short; 10usize],
-    pub family_blues: [FT_Short; 14usize],
-    pub family_other_blues: [FT_Short; 10usize],
-    pub blue_scale: FT_Fixed,
-    pub blue_shift: FT_Int,
-    pub blue_fuzz: FT_Int,
-    pub standard_width: [FT_UShort; 1usize],
-    pub standard_height: [FT_UShort; 1usize],
-    pub num_snap_widths: FT_Byte,
-    pub num_snap_heights: FT_Byte,
-    pub force_bold: FT_Bool,
-    pub round_stem_up: FT_Bool,
-    pub snap_widths: [FT_Short; 13usize],
-    pub snap_heights: [FT_Short; 13usize],
-    pub expansion_factor: FT_Fixed,
-    pub language_group: FT_Long,
-    pub password: FT_Long,
-    pub min_feature: [FT_Short; 2usize],
+pub struct FT_BitmapGlyphRec_ {
+    pub root: FT_GlyphRec,
+    pub left: FT_Int,
+    pub top: FT_Int,
+    pub bitmap: FT_Bitmap,
 }
 #[test]
-fn bindgen_test_layout_PS_PrivateRec_() {
-    const UNINIT: ::std::mem::MaybeUninit<PS_PrivateRec_> = ::std::mem::MaybeUninit::uninit();
+fn bindgen_test_layout_FT_BitmapGlyphRec_() {
+    const UNINIT: ::std::mem::MaybeUninit<FT_BitmapGlyphRec_> = ::std::mem::MaybeUninit::uninit();
     let ptr = UNINIT.as_ptr();
     assert_eq!(
-        ::std::mem::size_of::<PS_PrivateRec_>(),
-        224usize,
-        concat!("Size of: ", stringify!(PS_PrivateRec_))
+        ::std::mem::size_of::<FT_BitmapGlyphRec_>(),
+        88usize,
+        concat!("Size of: ", stringify!(FT_BitmapGlyphRec_))
     );
     assert_eq!(
-        ::std::mem::align_of::<PS_PrivateRec_>(),
+        ::std::mem::align_of::<FT_BitmapGlyphRec_>(),
         8usize,
-        concat!("Alignment of ", stringify!(PS_PrivateRec_))
+        concat!("Alignment of ", stringify!(FT_BitmapGlyphRec_))
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).unique_id) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).root) as usize - ptr as usize },
         0usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_BitmapGlyphRec_),
             "::",
-            stringify!(unique_id)
+            stringify!(root)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).lenIV) as usize - ptr as usize },
-        4usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(lenIV)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_blue_values) as usize - ptr as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_blue_values)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_other_blues) as usize - ptr as usize },
-        9usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_other_blues)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_family_blues) as usize - ptr as usize },
-        10usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_family_blues)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_family_other_blues) as usize - ptr as usize },
-        11usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_family_other_blues)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blue_values) as usize - ptr as usize },
-        12usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(blue_values)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).other_blues) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).left) as usize - ptr as usize },
         40usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_BitmapGlyphRec_),
             "::",
-            stringify!(other_blues)
+            stringify!(left)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).family_blues) as usize - ptr as usize },
-        60usize,
+        unsafe { ::std::ptr::addr_of!((*ptr).top) as usize - ptr as usize },
+        44usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_BitmapGlyphRec_),
             "::",
-            stringify!(family_blues)
+            stringify!(top)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).family_other_blues) as usize - ptr as usize },
-        88usize,
+        unsafe { ::std::ptr::addr_of!((*ptr).bitmap) as usize - ptr as usize },
+        48usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_BitmapGlyphRec_),
             "::",
-            stringify!(family_other_blues)
+            stringify!(bitmap)
         )
     );
+}
+pub type FT_BitmapGlyphRec = FT_BitmapGlyphRec_;
+pub type FT_OutlineGlyph = *mut FT_OutlineGlyphRec_;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct FT_OutlineGlyphRec_ {
+    pub root: FT_GlyphRec,
+    pub outline: FT_Outline,
+}
+#[test]
+fn bindgen_test_layout_FT_OutlineGlyphRec_() {
+    const UNINIT: ::std::mem::MaybeUninit<FT_OutlineGlyphRec_> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blue_scale) as usize - ptr as usize },
-        112usize,
+        ::std::mem::size_of::<FT_OutlineGlyphRec_>(),
+        80usize,
+        concat!("Size of: ", stringify!(FT_OutlineGlyphRec_))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<FT_OutlineGlyphRec_>(),
+        8usize,
+        concat!("Alignment of ", stringify!(FT_OutlineGlyphRec_))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).root) as usize - ptr as usize },
+        0usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_OutlineGlyphRec_),
             "::",
-            stringify!(blue_scale)
+            stringify!(root)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blue_shift) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).outline) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_OutlineGlyphRec_),
+            "::",
+            stringify!(outline)
+        )
+    );
+}
+pub type FT_OutlineGlyphRec = FT_OutlineGlyphRec_;
+pub type FT_SvgGlyph = *mut FT_SvgGlyphRec_;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct FT_SvgGlyphRec_ {
+    pub root: FT_GlyphRec,
+    pub svg_document: *mut FT_Byte,
+    pub svg_document_length: FT_ULong,
+    pub glyph_index: FT_UInt,
+    pub metrics: FT_Size_Metrics,
+    pub units_per_EM: FT_UShort,
+    pub start_glyph_id: FT_UShort,
+    pub end_glyph_id: FT_UShort,
+    pub transform: FT_Matrix,
+    pub delta: FT_Vector,
+}
+#[test]
+fn bindgen_test_layout_FT_SvgGlyphRec_() {
+    const UNINIT: ::std::mem::MaybeUninit<FT_SvgGlyphRec_> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<FT_SvgGlyphRec_>(),
+        176usize,
+        concat!("Size of: ", stringify!(FT_SvgGlyphRec_))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<FT_SvgGlyphRec_>(),
+        8usize,
+        concat!("Alignment of ", stringify!(FT_SvgGlyphRec_))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).root) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(root)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).svg_document) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(svg_document)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).svg_document_length) as usize - ptr as usize },
+        48usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(svg_document_length)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).glyph_index) as usize - ptr as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(glyph_index)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).metrics) as usize - ptr as usize },
+        64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(metrics)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).units_per_EM) as usize - ptr as usize },
         120usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_SvgGlyphRec_),
             "::",
-            stringify!(blue_shift)
+            stringify!(units_per_EM)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blue_fuzz) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).start_glyph_id) as usize - ptr as usize },
+        122usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(FT_SvgGlyphRec_),
+            "::",
+            stringify!(start_glyph_id)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).end_glyph_id) as usize - ptr as usize },
         124usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_SvgGlyphRec_),
             "::",
-            stringify!(blue_fuzz)
+            stringify!(end_glyph_id)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).standard_width) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).transform) as usize - ptr as usize },
         128usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_SvgGlyphRec_),
             "::",
-            stringify!(standard_width)
+            stringify!(transform)
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).standard_height) as usize - ptr as usize },
-        130usize,
+        unsafe { ::std::ptr::addr_of!((*ptr).delta) as usize - ptr as usize },
+        160usize,
         concat!(
             "Offset of field: ",
-            stringify!(PS_PrivateRec_),
+            stringify!(FT_SvgGlyphRec_),
             "::",
-            stringify!(standard_height)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_snap_widths) as usize - ptr as usize },
-        132usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_snap_widths)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_snap_heights) as usize - ptr as usize },
-        133usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(num_snap_heights)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).force_bold) as usize - ptr as usize },
-        134usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(force_bold)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).round_stem_up) as usize - ptr as usize },
-        135usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(round_stem_up)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).snap_widths) as usize - ptr as usize },
-        136usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(snap_widths)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).snap_heights) as usize - ptr as usize },
-        162usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(snap_heights)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).expansion_factor) as usize - ptr as usize },
-        192usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(expansion_factor)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).language_group) as usize - ptr as usize },
-        200usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(language_group)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).password) as usize - ptr as usize },
-        208usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(password)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).min_feature) as usize - ptr as usize },
-        216usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_PrivateRec_),
-            "::",
-            stringify!(min_feature)
+            stringify!(delta)
         )
     );
 }
-pub type PS_PrivateRec = PS_PrivateRec_;
-pub type PS_Private = *mut PS_PrivateRec_;
-pub type T1_Private = PS_PrivateRec;
-pub const T1_Blend_Flags__T1_BLEND_UNDERLINE_POSITION: T1_Blend_Flags_ = 0;
-pub const T1_Blend_Flags__T1_BLEND_UNDERLINE_THICKNESS: T1_Blend_Flags_ = 1;
-pub const T1_Blend_Flags__T1_BLEND_ITALIC_ANGLE: T1_Blend_Flags_ = 2;
-pub const T1_Blend_Flags__T1_BLEND_BLUE_VALUES: T1_Blend_Flags_ = 3;
-pub const T1_Blend_Flags__T1_BLEND_OTHER_BLUES: T1_Blend_Flags_ = 4;
-pub const T1_Blend_Flags__T1_BLEND_STANDARD_WIDTH: T1_Blend_Flags_ = 5;
-pub const T1_Blend_Flags__T1_BLEND_STANDARD_HEIGHT: T1_Blend_Flags_ = 6;
-pub const T1_Blend_Flags__T1_BLEND_STEM_SNAP_WIDTHS: T1_Blend_Flags_ = 7;
-pub const T1_Blend_Flags__T1_BLEND_STEM_SNAP_HEIGHTS: T1_Blend_Flags_ = 8;
-pub const T1_Blend_Flags__T1_BLEND_BLUE_SCALE: T1_Blend_Flags_ = 9;
-pub const T1_Blend_Flags__T1_BLEND_BLUE_SHIFT: T1_Blend_Flags_ = 10;
-pub const T1_Blend_Flags__T1_BLEND_FAMILY_BLUES: T1_Blend_Flags_ = 11;
-pub const T1_Blend_Flags__T1_BLEND_FAMILY_OTHER_BLUES: T1_Blend_Flags_ = 12;
-pub const T1_Blend_Flags__T1_BLEND_FORCE_BOLD: T1_Blend_Flags_ = 13;
-pub const T1_Blend_Flags__T1_BLEND_MAX: T1_Blend_Flags_ = 14;
-pub type T1_Blend_Flags_ = ::std::os::raw::c_uint;
-pub use self::T1_Blend_Flags_ as T1_Blend_Flags;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct PS_DesignMap_ {
-    pub num_points: FT_Byte,
-    pub design_points: *mut FT_Long,
-    pub blend_points: *mut FT_Fixed,
-}
-#[test]
-fn bindgen_test_layout_PS_DesignMap_() {
-    const UNINIT: ::std::mem::MaybeUninit<PS_DesignMap_> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<PS_DesignMap_>(),
-        24usize,
-        concat!("Size of: ", stringify!(PS_DesignMap_))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<PS_DesignMap_>(),
-        8usize,
-        concat!("Alignment of ", stringify!(PS_DesignMap_))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_points) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_DesignMap_),
-            "::",
-            stringify!(num_points)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).design_points) as usize - ptr as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_DesignMap_),
-            "::",
-            stringify!(design_points)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blend_points) as usize - ptr as usize },
-        16usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_DesignMap_),
-            "::",
-            stringify!(blend_points)
-        )
-    );
-}
-pub type PS_DesignMapRec = PS_DesignMap_;
-pub type PS_DesignMap = *mut PS_DesignMap_;
-pub type T1_DesignMap = PS_DesignMapRec;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct PS_BlendRec_ {
-    pub num_designs: FT_UInt,
-    pub num_axis: FT_UInt,
-    pub axis_names: [*mut FT_String; 4usize],
-    pub design_pos: [*mut FT_Fixed; 16usize],
-    pub design_map: [PS_DesignMapRec; 4usize],
-    pub weight_vector: *mut FT_Fixed,
-    pub default_weight_vector: *mut FT_Fixed,
-    pub font_infos: [PS_FontInfo; 17usize],
-    pub privates: [PS_Private; 17usize],
-    pub blend_bitflags: FT_ULong,
-    pub bboxes: [*mut FT_BBox; 17usize],
-    pub default_design_vector: [FT_UInt; 16usize],
-    pub num_default_design_vector: FT_UInt,
-}
-#[test]
-fn bindgen_test_layout_PS_BlendRec_() {
-    const UNINIT: ::std::mem::MaybeUninit<PS_BlendRec_> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<PS_BlendRec_>(),
-        768usize,
-        concat!("Size of: ", stringify!(PS_BlendRec_))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<PS_BlendRec_>(),
-        8usize,
-        concat!("Alignment of ", stringify!(PS_BlendRec_))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_designs) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(num_designs)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_axis) as usize - ptr as usize },
-        4usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(num_axis)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).axis_names) as usize - ptr as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(axis_names)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).design_pos) as usize - ptr as usize },
-        40usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(design_pos)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).design_map) as usize - ptr as usize },
-        168usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(design_map)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).weight_vector) as usize - ptr as usize },
-        264usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(weight_vector)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).default_weight_vector) as usize - ptr as usize },
-        272usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(default_weight_vector)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_infos) as usize - ptr as usize },
-        280usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(font_infos)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).privates) as usize - ptr as usize },
-        416usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(privates)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).blend_bitflags) as usize - ptr as usize },
-        552usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(blend_bitflags)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).bboxes) as usize - ptr as usize },
-        560usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(bboxes)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).default_design_vector) as usize - ptr as usize },
-        696usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(default_design_vector)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_default_design_vector) as usize - ptr as usize },
-        760usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(PS_BlendRec_),
-            "::",
-            stringify!(num_default_design_vector)
-        )
-    );
-}
-pub type PS_BlendRec = PS_BlendRec_;
-pub type PS_Blend = *mut PS_BlendRec_;
-pub type T1_Blend = PS_BlendRec;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CID_FaceDictRec_ {
-    pub private_dict: PS_PrivateRec,
-    pub len_buildchar: FT_UInt,
-    pub forcebold_threshold: FT_Fixed,
-    pub stroke_width: FT_Pos,
-    pub expansion_factor: FT_Fixed,
-    pub paint_type: FT_Byte,
-    pub font_type: FT_Byte,
-    pub font_matrix: FT_Matrix,
-    pub font_offset: FT_Vector,
-    pub num_subrs: FT_UInt,
-    pub subrmap_offset: FT_ULong,
-    pub sd_bytes: FT_UInt,
-}
-#[test]
-fn bindgen_test_layout_CID_FaceDictRec_() {
-    const UNINIT: ::std::mem::MaybeUninit<CID_FaceDictRec_> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<CID_FaceDictRec_>(),
-        336usize,
-        concat!("Size of: ", stringify!(CID_FaceDictRec_))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<CID_FaceDictRec_>(),
-        8usize,
-        concat!("Alignment of ", stringify!(CID_FaceDictRec_))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).private_dict) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(private_dict)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).len_buildchar) as usize - ptr as usize },
-        224usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(len_buildchar)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).forcebold_threshold) as usize - ptr as usize },
-        232usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(forcebold_threshold)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).stroke_width) as usize - ptr as usize },
-        240usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(stroke_width)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).expansion_factor) as usize - ptr as usize },
-        248usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(expansion_factor)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).paint_type) as usize - ptr as usize },
-        256usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(paint_type)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_type) as usize - ptr as usize },
-        257usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(font_type)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_matrix) as usize - ptr as usize },
-        264usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(font_matrix)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_offset) as usize - ptr as usize },
-        296usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(font_offset)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_subrs) as usize - ptr as usize },
-        312usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(num_subrs)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).subrmap_offset) as usize - ptr as usize },
-        320usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(subrmap_offset)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).sd_bytes) as usize - ptr as usize },
-        328usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceDictRec_),
-            "::",
-            stringify!(sd_bytes)
-        )
-    );
-}
-pub type CID_FaceDictRec = CID_FaceDictRec_;
-pub type CID_FaceDict = *mut CID_FaceDictRec_;
-pub type CID_FontDict = CID_FaceDictRec;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CID_FaceInfoRec_ {
-    pub cid_font_name: *mut FT_String,
-    pub cid_version: FT_Fixed,
-    pub cid_font_type: FT_Int,
-    pub registry: *mut FT_String,
-    pub ordering: *mut FT_String,
-    pub supplement: FT_Int,
-    pub font_info: PS_FontInfoRec,
-    pub font_bbox: FT_BBox,
-    pub uid_base: FT_ULong,
-    pub num_xuid: FT_Int,
-    pub xuid: [FT_ULong; 16usize],
-    pub cidmap_offset: FT_ULong,
-    pub fd_bytes: FT_UInt,
-    pub gd_bytes: FT_UInt,
-    pub cid_count: FT_ULong,
-    pub num_dicts: FT_UInt,
-    pub font_dicts: CID_FaceDict,
-    pub data_offset: FT_ULong,
-}
-#[test]
-fn bindgen_test_layout_CID_FaceInfoRec_() {
-    const UNINIT: ::std::mem::MaybeUninit<CID_FaceInfoRec_> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<CID_FaceInfoRec_>(),
-        328usize,
-        concat!("Size of: ", stringify!(CID_FaceInfoRec_))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<CID_FaceInfoRec_>(),
-        8usize,
-        concat!("Alignment of ", stringify!(CID_FaceInfoRec_))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cid_font_name) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(cid_font_name)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cid_version) as usize - ptr as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(cid_version)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cid_font_type) as usize - ptr as usize },
-        16usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(cid_font_type)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).registry) as usize - ptr as usize },
-        24usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(registry)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).ordering) as usize - ptr as usize },
-        32usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(ordering)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).supplement) as usize - ptr as usize },
-        40usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(supplement)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_info) as usize - ptr as usize },
-        48usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(font_info)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_bbox) as usize - ptr as usize },
-        104usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(font_bbox)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).uid_base) as usize - ptr as usize },
-        136usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(uid_base)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_xuid) as usize - ptr as usize },
-        144usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(num_xuid)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).xuid) as usize - ptr as usize },
-        152usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(xuid)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cidmap_offset) as usize - ptr as usize },
-        280usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(cidmap_offset)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).fd_bytes) as usize - ptr as usize },
-        288usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(fd_bytes)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).gd_bytes) as usize - ptr as usize },
-        292usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(gd_bytes)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cid_count) as usize - ptr as usize },
-        296usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(cid_count)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).num_dicts) as usize - ptr as usize },
-        304usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(num_dicts)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).font_dicts) as usize - ptr as usize },
-        312usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(font_dicts)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).data_offset) as usize - ptr as usize },
-        320usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(CID_FaceInfoRec_),
-            "::",
-            stringify!(data_offset)
-        )
-    );
-}
-pub type CID_FaceInfoRec = CID_FaceInfoRec_;
-pub type CID_FaceInfo = *mut CID_FaceInfoRec_;
-pub type CID_Info = CID_FaceInfoRec;
+pub type FT_SvgGlyphRec = FT_SvgGlyphRec_;
 extern "C" {
-    pub fn FT_Has_PS_Glyph_Names(face: FT_Face) -> FT_Int;
+    pub fn FT_New_Glyph(
+        library: FT_Library,
+        format: FT_Glyph_Format,
+        aglyph: *mut FT_Glyph,
+    ) -> FT_Error;
 }
 extern "C" {
-    pub fn FT_Get_PS_Font_Info(face: FT_Face, afont_info: PS_FontInfo) -> FT_Error;
+    pub fn FT_Get_Glyph(slot: FT_GlyphSlot, aglyph: *mut FT_Glyph) -> FT_Error;
 }
 extern "C" {
-    pub fn FT_Get_PS_Font_Private(face: FT_Face, afont_private: PS_Private) -> FT_Error;
+    pub fn FT_Glyph_Copy(source: FT_Glyph, target: *mut FT_Glyph) -> FT_Error;
 }
-pub const T1_EncodingType__T1_ENCODING_TYPE_NONE: T1_EncodingType_ = 0;
-pub const T1_EncodingType__T1_ENCODING_TYPE_ARRAY: T1_EncodingType_ = 1;
-pub const T1_EncodingType__T1_ENCODING_TYPE_STANDARD: T1_EncodingType_ = 2;
-pub const T1_EncodingType__T1_ENCODING_TYPE_ISOLATIN1: T1_EncodingType_ = 3;
-pub const T1_EncodingType__T1_ENCODING_TYPE_EXPERT: T1_EncodingType_ = 4;
-pub type T1_EncodingType_ = ::std::os::raw::c_uint;
-pub use self::T1_EncodingType_ as T1_EncodingType;
-pub const PS_Dict_Keys__PS_DICT_FONT_TYPE: PS_Dict_Keys_ = 0;
-pub const PS_Dict_Keys__PS_DICT_FONT_MATRIX: PS_Dict_Keys_ = 1;
-pub const PS_Dict_Keys__PS_DICT_FONT_BBOX: PS_Dict_Keys_ = 2;
-pub const PS_Dict_Keys__PS_DICT_PAINT_TYPE: PS_Dict_Keys_ = 3;
-pub const PS_Dict_Keys__PS_DICT_FONT_NAME: PS_Dict_Keys_ = 4;
-pub const PS_Dict_Keys__PS_DICT_UNIQUE_ID: PS_Dict_Keys_ = 5;
-pub const PS_Dict_Keys__PS_DICT_NUM_CHAR_STRINGS: PS_Dict_Keys_ = 6;
-pub const PS_Dict_Keys__PS_DICT_CHAR_STRING_KEY: PS_Dict_Keys_ = 7;
-pub const PS_Dict_Keys__PS_DICT_CHAR_STRING: PS_Dict_Keys_ = 8;
-pub const PS_Dict_Keys__PS_DICT_ENCODING_TYPE: PS_Dict_Keys_ = 9;
-pub const PS_Dict_Keys__PS_DICT_ENCODING_ENTRY: PS_Dict_Keys_ = 10;
-pub const PS_Dict_Keys__PS_DICT_NUM_SUBRS: PS_Dict_Keys_ = 11;
-pub const PS_Dict_Keys__PS_DICT_SUBR: PS_Dict_Keys_ = 12;
-pub const PS_Dict_Keys__PS_DICT_STD_HW: PS_Dict_Keys_ = 13;
-pub const PS_Dict_Keys__PS_DICT_STD_VW: PS_Dict_Keys_ = 14;
-pub const PS_Dict_Keys__PS_DICT_NUM_BLUE_VALUES: PS_Dict_Keys_ = 15;
-pub const PS_Dict_Keys__PS_DICT_BLUE_VALUE: PS_Dict_Keys_ = 16;
-pub const PS_Dict_Keys__PS_DICT_BLUE_FUZZ: PS_Dict_Keys_ = 17;
-pub const PS_Dict_Keys__PS_DICT_NUM_OTHER_BLUES: PS_Dict_Keys_ = 18;
-pub const PS_Dict_Keys__PS_DICT_OTHER_BLUE: PS_Dict_Keys_ = 19;
-pub const PS_Dict_Keys__PS_DICT_NUM_FAMILY_BLUES: PS_Dict_Keys_ = 20;
-pub const PS_Dict_Keys__PS_DICT_FAMILY_BLUE: PS_Dict_Keys_ = 21;
-pub const PS_Dict_Keys__PS_DICT_NUM_FAMILY_OTHER_BLUES: PS_Dict_Keys_ = 22;
-pub const PS_Dict_Keys__PS_DICT_FAMILY_OTHER_BLUE: PS_Dict_Keys_ = 23;
-pub const PS_Dict_Keys__PS_DICT_BLUE_SCALE: PS_Dict_Keys_ = 24;
-pub const PS_Dict_Keys__PS_DICT_BLUE_SHIFT: PS_Dict_Keys_ = 25;
-pub const PS_Dict_Keys__PS_DICT_NUM_STEM_SNAP_H: PS_Dict_Keys_ = 26;
-pub const PS_Dict_Keys__PS_DICT_STEM_SNAP_H: PS_Dict_Keys_ = 27;
-pub const PS_Dict_Keys__PS_DICT_NUM_STEM_SNAP_V: PS_Dict_Keys_ = 28;
-pub const PS_Dict_Keys__PS_DICT_STEM_SNAP_V: PS_Dict_Keys_ = 29;
-pub const PS_Dict_Keys__PS_DICT_FORCE_BOLD: PS_Dict_Keys_ = 30;
-pub const PS_Dict_Keys__PS_DICT_RND_STEM_UP: PS_Dict_Keys_ = 31;
-pub const PS_Dict_Keys__PS_DICT_MIN_FEATURE: PS_Dict_Keys_ = 32;
-pub const PS_Dict_Keys__PS_DICT_LEN_IV: PS_Dict_Keys_ = 33;
-pub const PS_Dict_Keys__PS_DICT_PASSWORD: PS_Dict_Keys_ = 34;
-pub const PS_Dict_Keys__PS_DICT_LANGUAGE_GROUP: PS_Dict_Keys_ = 35;
-pub const PS_Dict_Keys__PS_DICT_VERSION: PS_Dict_Keys_ = 36;
-pub const PS_Dict_Keys__PS_DICT_NOTICE: PS_Dict_Keys_ = 37;
-pub const PS_Dict_Keys__PS_DICT_FULL_NAME: PS_Dict_Keys_ = 38;
-pub const PS_Dict_Keys__PS_DICT_FAMILY_NAME: PS_Dict_Keys_ = 39;
-pub const PS_Dict_Keys__PS_DICT_WEIGHT: PS_Dict_Keys_ = 40;
-pub const PS_Dict_Keys__PS_DICT_IS_FIXED_PITCH: PS_Dict_Keys_ = 41;
-pub const PS_Dict_Keys__PS_DICT_UNDERLINE_POSITION: PS_Dict_Keys_ = 42;
-pub const PS_Dict_Keys__PS_DICT_UNDERLINE_THICKNESS: PS_Dict_Keys_ = 43;
-pub const PS_Dict_Keys__PS_DICT_FS_TYPE: PS_Dict_Keys_ = 44;
-pub const PS_Dict_Keys__PS_DICT_ITALIC_ANGLE: PS_Dict_Keys_ = 45;
-pub const PS_Dict_Keys__PS_DICT_MAX: PS_Dict_Keys_ = 45;
-pub type PS_Dict_Keys_ = ::std::os::raw::c_uint;
-pub use self::PS_Dict_Keys_ as PS_Dict_Keys;
 extern "C" {
-    pub fn FT_Get_PS_Font_Value(
-        face: FT_Face,
-        key: PS_Dict_Keys,
-        idx: FT_UInt,
-        value: *mut ::std::os::raw::c_void,
-        value_len: FT_Long,
-    ) -> FT_Long;
+    pub fn FT_Glyph_Transform(
+        glyph: FT_Glyph,
+        matrix: *const FT_Matrix,
+        delta: *const FT_Vector,
+    ) -> FT_Error;
+}
+pub const FT_GLYPH_BBOX_UNSCALED: FT_Glyph_BBox_Mode_ = 0;
+pub const FT_GLYPH_BBOX_SUBPIXELS: FT_Glyph_BBox_Mode_ = 0;
+pub const FT_GLYPH_BBOX_GRIDFIT: FT_Glyph_BBox_Mode_ = 1;
+pub const FT_GLYPH_BBOX_TRUNCATE: FT_Glyph_BBox_Mode_ = 2;
+pub const FT_GLYPH_BBOX_PIXELS: FT_Glyph_BBox_Mode_ = 3;
+pub type FT_Glyph_BBox_Mode_ = ::std::os::raw::c_uint;
+pub use self::FT_Glyph_BBox_Mode_ as FT_Glyph_BBox_Mode;
+extern "C" {
+    pub fn FT_Glyph_Get_CBox(glyph: FT_Glyph, bbox_mode: FT_UInt, acbox: *mut FT_BBox);
+}
+extern "C" {
+    pub fn FT_Glyph_To_Bitmap(
+        the_glyph: *mut FT_Glyph,
+        render_mode: FT_Render_Mode,
+        origin: *const FT_Vector,
+        destroy: FT_Bool,
+    ) -> FT_Error;
+}
+extern "C" {
+    pub fn FT_Done_Glyph(glyph: FT_Glyph);
+}
+extern "C" {
+    pub fn FT_Matrix_Multiply(a: *const FT_Matrix, b: *mut FT_Matrix);
+}
+extern "C" {
+    pub fn FT_Matrix_Invert(matrix: *mut FT_Matrix) -> FT_Error;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -9861,11 +9117,11 @@ extern "C" {
 extern "C" {
     pub fn hb_tag_to_string(tag: hb_tag_t, buf: *mut ::std::os::raw::c_char);
 }
-pub const hb_direction_t_HB_DIRECTION_INVALID: hb_direction_t = 0;
-pub const hb_direction_t_HB_DIRECTION_LTR: hb_direction_t = 4;
-pub const hb_direction_t_HB_DIRECTION_RTL: hb_direction_t = 5;
-pub const hb_direction_t_HB_DIRECTION_TTB: hb_direction_t = 6;
-pub const hb_direction_t_HB_DIRECTION_BTT: hb_direction_t = 7;
+pub const HB_DIRECTION_INVALID: hb_direction_t = 0;
+pub const HB_DIRECTION_LTR: hb_direction_t = 4;
+pub const HB_DIRECTION_RTL: hb_direction_t = 5;
+pub const HB_DIRECTION_TTB: hb_direction_t = 6;
+pub const HB_DIRECTION_BTT: hb_direction_t = 7;
 pub type hb_direction_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_direction_from_string(
@@ -9897,174 +9153,174 @@ extern "C" {
 extern "C" {
     pub fn hb_language_matches(language: hb_language_t, specific: hb_language_t) -> hb_bool_t;
 }
-pub const hb_script_t_HB_SCRIPT_COMMON: hb_script_t = 1517910393;
-pub const hb_script_t_HB_SCRIPT_INHERITED: hb_script_t = 1516858984;
-pub const hb_script_t_HB_SCRIPT_UNKNOWN: hb_script_t = 1517976186;
-pub const hb_script_t_HB_SCRIPT_ARABIC: hb_script_t = 1098015074;
-pub const hb_script_t_HB_SCRIPT_ARMENIAN: hb_script_t = 1098018158;
-pub const hb_script_t_HB_SCRIPT_BENGALI: hb_script_t = 1113943655;
-pub const hb_script_t_HB_SCRIPT_CYRILLIC: hb_script_t = 1132032620;
-pub const hb_script_t_HB_SCRIPT_DEVANAGARI: hb_script_t = 1147500129;
-pub const hb_script_t_HB_SCRIPT_GEORGIAN: hb_script_t = 1197830002;
-pub const hb_script_t_HB_SCRIPT_GREEK: hb_script_t = 1198679403;
-pub const hb_script_t_HB_SCRIPT_GUJARATI: hb_script_t = 1198877298;
-pub const hb_script_t_HB_SCRIPT_GURMUKHI: hb_script_t = 1198879349;
-pub const hb_script_t_HB_SCRIPT_HANGUL: hb_script_t = 1214344807;
-pub const hb_script_t_HB_SCRIPT_HAN: hb_script_t = 1214344809;
-pub const hb_script_t_HB_SCRIPT_HEBREW: hb_script_t = 1214603890;
-pub const hb_script_t_HB_SCRIPT_HIRAGANA: hb_script_t = 1214870113;
-pub const hb_script_t_HB_SCRIPT_KANNADA: hb_script_t = 1265525857;
-pub const hb_script_t_HB_SCRIPT_KATAKANA: hb_script_t = 1264676449;
-pub const hb_script_t_HB_SCRIPT_LAO: hb_script_t = 1281453935;
-pub const hb_script_t_HB_SCRIPT_LATIN: hb_script_t = 1281455214;
-pub const hb_script_t_HB_SCRIPT_MALAYALAM: hb_script_t = 1298954605;
-pub const hb_script_t_HB_SCRIPT_ORIYA: hb_script_t = 1332902241;
-pub const hb_script_t_HB_SCRIPT_TAMIL: hb_script_t = 1415671148;
-pub const hb_script_t_HB_SCRIPT_TELUGU: hb_script_t = 1415933045;
-pub const hb_script_t_HB_SCRIPT_THAI: hb_script_t = 1416126825;
-pub const hb_script_t_HB_SCRIPT_TIBETAN: hb_script_t = 1416192628;
-pub const hb_script_t_HB_SCRIPT_BOPOMOFO: hb_script_t = 1114599535;
-pub const hb_script_t_HB_SCRIPT_BRAILLE: hb_script_t = 1114792297;
-pub const hb_script_t_HB_SCRIPT_CANADIAN_SYLLABICS: hb_script_t = 1130458739;
-pub const hb_script_t_HB_SCRIPT_CHEROKEE: hb_script_t = 1130915186;
-pub const hb_script_t_HB_SCRIPT_ETHIOPIC: hb_script_t = 1165256809;
-pub const hb_script_t_HB_SCRIPT_KHMER: hb_script_t = 1265134962;
-pub const hb_script_t_HB_SCRIPT_MONGOLIAN: hb_script_t = 1299148391;
-pub const hb_script_t_HB_SCRIPT_MYANMAR: hb_script_t = 1299803506;
-pub const hb_script_t_HB_SCRIPT_OGHAM: hb_script_t = 1332175213;
-pub const hb_script_t_HB_SCRIPT_RUNIC: hb_script_t = 1383427698;
-pub const hb_script_t_HB_SCRIPT_SINHALA: hb_script_t = 1399418472;
-pub const hb_script_t_HB_SCRIPT_SYRIAC: hb_script_t = 1400468067;
-pub const hb_script_t_HB_SCRIPT_THAANA: hb_script_t = 1416126817;
-pub const hb_script_t_HB_SCRIPT_YI: hb_script_t = 1500080489;
-pub const hb_script_t_HB_SCRIPT_DESERET: hb_script_t = 1148416628;
-pub const hb_script_t_HB_SCRIPT_GOTHIC: hb_script_t = 1198486632;
-pub const hb_script_t_HB_SCRIPT_OLD_ITALIC: hb_script_t = 1232363884;
-pub const hb_script_t_HB_SCRIPT_BUHID: hb_script_t = 1114990692;
-pub const hb_script_t_HB_SCRIPT_HANUNOO: hb_script_t = 1214344815;
-pub const hb_script_t_HB_SCRIPT_TAGALOG: hb_script_t = 1416064103;
-pub const hb_script_t_HB_SCRIPT_TAGBANWA: hb_script_t = 1415669602;
-pub const hb_script_t_HB_SCRIPT_CYPRIOT: hb_script_t = 1131442804;
-pub const hb_script_t_HB_SCRIPT_LIMBU: hb_script_t = 1281977698;
-pub const hb_script_t_HB_SCRIPT_LINEAR_B: hb_script_t = 1281977954;
-pub const hb_script_t_HB_SCRIPT_OSMANYA: hb_script_t = 1332964705;
-pub const hb_script_t_HB_SCRIPT_SHAVIAN: hb_script_t = 1399349623;
-pub const hb_script_t_HB_SCRIPT_TAI_LE: hb_script_t = 1415670885;
-pub const hb_script_t_HB_SCRIPT_UGARITIC: hb_script_t = 1432838514;
-pub const hb_script_t_HB_SCRIPT_BUGINESE: hb_script_t = 1114990441;
-pub const hb_script_t_HB_SCRIPT_COPTIC: hb_script_t = 1131376756;
-pub const hb_script_t_HB_SCRIPT_GLAGOLITIC: hb_script_t = 1198285159;
-pub const hb_script_t_HB_SCRIPT_KHAROSHTHI: hb_script_t = 1265131890;
-pub const hb_script_t_HB_SCRIPT_NEW_TAI_LUE: hb_script_t = 1415670901;
-pub const hb_script_t_HB_SCRIPT_OLD_PERSIAN: hb_script_t = 1483761007;
-pub const hb_script_t_HB_SCRIPT_SYLOTI_NAGRI: hb_script_t = 1400466543;
-pub const hb_script_t_HB_SCRIPT_TIFINAGH: hb_script_t = 1415999079;
-pub const hb_script_t_HB_SCRIPT_BALINESE: hb_script_t = 1113681001;
-pub const hb_script_t_HB_SCRIPT_CUNEIFORM: hb_script_t = 1483961720;
-pub const hb_script_t_HB_SCRIPT_NKO: hb_script_t = 1315663727;
-pub const hb_script_t_HB_SCRIPT_PHAGS_PA: hb_script_t = 1349017959;
-pub const hb_script_t_HB_SCRIPT_PHOENICIAN: hb_script_t = 1349021304;
-pub const hb_script_t_HB_SCRIPT_CARIAN: hb_script_t = 1130459753;
-pub const hb_script_t_HB_SCRIPT_CHAM: hb_script_t = 1130914157;
-pub const hb_script_t_HB_SCRIPT_KAYAH_LI: hb_script_t = 1264675945;
-pub const hb_script_t_HB_SCRIPT_LEPCHA: hb_script_t = 1281716323;
-pub const hb_script_t_HB_SCRIPT_LYCIAN: hb_script_t = 1283023721;
-pub const hb_script_t_HB_SCRIPT_LYDIAN: hb_script_t = 1283023977;
-pub const hb_script_t_HB_SCRIPT_OL_CHIKI: hb_script_t = 1332503403;
-pub const hb_script_t_HB_SCRIPT_REJANG: hb_script_t = 1382706791;
-pub const hb_script_t_HB_SCRIPT_SAURASHTRA: hb_script_t = 1398895986;
-pub const hb_script_t_HB_SCRIPT_SUNDANESE: hb_script_t = 1400204900;
-pub const hb_script_t_HB_SCRIPT_VAI: hb_script_t = 1449224553;
-pub const hb_script_t_HB_SCRIPT_AVESTAN: hb_script_t = 1098281844;
-pub const hb_script_t_HB_SCRIPT_BAMUM: hb_script_t = 1113681269;
-pub const hb_script_t_HB_SCRIPT_EGYPTIAN_HIEROGLYPHS: hb_script_t = 1164409200;
-pub const hb_script_t_HB_SCRIPT_IMPERIAL_ARAMAIC: hb_script_t = 1098018153;
-pub const hb_script_t_HB_SCRIPT_INSCRIPTIONAL_PAHLAVI: hb_script_t = 1349020777;
-pub const hb_script_t_HB_SCRIPT_INSCRIPTIONAL_PARTHIAN: hb_script_t = 1349678185;
-pub const hb_script_t_HB_SCRIPT_JAVANESE: hb_script_t = 1247901281;
-pub const hb_script_t_HB_SCRIPT_KAITHI: hb_script_t = 1265920105;
-pub const hb_script_t_HB_SCRIPT_LISU: hb_script_t = 1281979253;
-pub const hb_script_t_HB_SCRIPT_MEETEI_MAYEK: hb_script_t = 1299473769;
-pub const hb_script_t_HB_SCRIPT_OLD_SOUTH_ARABIAN: hb_script_t = 1398895202;
-pub const hb_script_t_HB_SCRIPT_OLD_TURKIC: hb_script_t = 1332898664;
-pub const hb_script_t_HB_SCRIPT_SAMARITAN: hb_script_t = 1398893938;
-pub const hb_script_t_HB_SCRIPT_TAI_THAM: hb_script_t = 1281453665;
-pub const hb_script_t_HB_SCRIPT_TAI_VIET: hb_script_t = 1415673460;
-pub const hb_script_t_HB_SCRIPT_BATAK: hb_script_t = 1113683051;
-pub const hb_script_t_HB_SCRIPT_BRAHMI: hb_script_t = 1114792296;
-pub const hb_script_t_HB_SCRIPT_MANDAIC: hb_script_t = 1298230884;
-pub const hb_script_t_HB_SCRIPT_CHAKMA: hb_script_t = 1130457965;
-pub const hb_script_t_HB_SCRIPT_MEROITIC_CURSIVE: hb_script_t = 1298494051;
-pub const hb_script_t_HB_SCRIPT_MEROITIC_HIEROGLYPHS: hb_script_t = 1298494063;
-pub const hb_script_t_HB_SCRIPT_MIAO: hb_script_t = 1349284452;
-pub const hb_script_t_HB_SCRIPT_SHARADA: hb_script_t = 1399353956;
-pub const hb_script_t_HB_SCRIPT_SORA_SOMPENG: hb_script_t = 1399812705;
-pub const hb_script_t_HB_SCRIPT_TAKRI: hb_script_t = 1415670642;
-pub const hb_script_t_HB_SCRIPT_BASSA_VAH: hb_script_t = 1113682803;
-pub const hb_script_t_HB_SCRIPT_CAUCASIAN_ALBANIAN: hb_script_t = 1097295970;
-pub const hb_script_t_HB_SCRIPT_DUPLOYAN: hb_script_t = 1148547180;
-pub const hb_script_t_HB_SCRIPT_ELBASAN: hb_script_t = 1164730977;
-pub const hb_script_t_HB_SCRIPT_GRANTHA: hb_script_t = 1198678382;
-pub const hb_script_t_HB_SCRIPT_KHOJKI: hb_script_t = 1265135466;
-pub const hb_script_t_HB_SCRIPT_KHUDAWADI: hb_script_t = 1399418468;
-pub const hb_script_t_HB_SCRIPT_LINEAR_A: hb_script_t = 1281977953;
-pub const hb_script_t_HB_SCRIPT_MAHAJANI: hb_script_t = 1298229354;
-pub const hb_script_t_HB_SCRIPT_MANICHAEAN: hb_script_t = 1298230889;
-pub const hb_script_t_HB_SCRIPT_MENDE_KIKAKUI: hb_script_t = 1298493028;
-pub const hb_script_t_HB_SCRIPT_MODI: hb_script_t = 1299145833;
-pub const hb_script_t_HB_SCRIPT_MRO: hb_script_t = 1299345263;
-pub const hb_script_t_HB_SCRIPT_NABATAEAN: hb_script_t = 1315070324;
-pub const hb_script_t_HB_SCRIPT_OLD_NORTH_ARABIAN: hb_script_t = 1315009122;
-pub const hb_script_t_HB_SCRIPT_OLD_PERMIC: hb_script_t = 1348825709;
-pub const hb_script_t_HB_SCRIPT_PAHAWH_HMONG: hb_script_t = 1215131239;
-pub const hb_script_t_HB_SCRIPT_PALMYRENE: hb_script_t = 1348562029;
-pub const hb_script_t_HB_SCRIPT_PAU_CIN_HAU: hb_script_t = 1348564323;
-pub const hb_script_t_HB_SCRIPT_PSALTER_PAHLAVI: hb_script_t = 1349020784;
-pub const hb_script_t_HB_SCRIPT_SIDDHAM: hb_script_t = 1399415908;
-pub const hb_script_t_HB_SCRIPT_TIRHUTA: hb_script_t = 1416196712;
-pub const hb_script_t_HB_SCRIPT_WARANG_CITI: hb_script_t = 1466004065;
-pub const hb_script_t_HB_SCRIPT_AHOM: hb_script_t = 1097363309;
-pub const hb_script_t_HB_SCRIPT_ANATOLIAN_HIEROGLYPHS: hb_script_t = 1215067511;
-pub const hb_script_t_HB_SCRIPT_HATRAN: hb_script_t = 1214346354;
-pub const hb_script_t_HB_SCRIPT_MULTANI: hb_script_t = 1299541108;
-pub const hb_script_t_HB_SCRIPT_OLD_HUNGARIAN: hb_script_t = 1215655527;
-pub const hb_script_t_HB_SCRIPT_SIGNWRITING: hb_script_t = 1399287415;
-pub const hb_script_t_HB_SCRIPT_ADLAM: hb_script_t = 1097100397;
-pub const hb_script_t_HB_SCRIPT_BHAIKSUKI: hb_script_t = 1114139507;
-pub const hb_script_t_HB_SCRIPT_MARCHEN: hb_script_t = 1298231907;
-pub const hb_script_t_HB_SCRIPT_OSAGE: hb_script_t = 1332963173;
-pub const hb_script_t_HB_SCRIPT_TANGUT: hb_script_t = 1415671399;
-pub const hb_script_t_HB_SCRIPT_NEWA: hb_script_t = 1315272545;
-pub const hb_script_t_HB_SCRIPT_MASARAM_GONDI: hb_script_t = 1198485101;
-pub const hb_script_t_HB_SCRIPT_NUSHU: hb_script_t = 1316186229;
-pub const hb_script_t_HB_SCRIPT_SOYOMBO: hb_script_t = 1399814511;
-pub const hb_script_t_HB_SCRIPT_ZANABAZAR_SQUARE: hb_script_t = 1516334690;
-pub const hb_script_t_HB_SCRIPT_DOGRA: hb_script_t = 1148151666;
-pub const hb_script_t_HB_SCRIPT_GUNJALA_GONDI: hb_script_t = 1198485095;
-pub const hb_script_t_HB_SCRIPT_HANIFI_ROHINGYA: hb_script_t = 1383032935;
-pub const hb_script_t_HB_SCRIPT_MAKASAR: hb_script_t = 1298230113;
-pub const hb_script_t_HB_SCRIPT_MEDEFAIDRIN: hb_script_t = 1298490470;
-pub const hb_script_t_HB_SCRIPT_OLD_SOGDIAN: hb_script_t = 1399809903;
-pub const hb_script_t_HB_SCRIPT_SOGDIAN: hb_script_t = 1399809892;
-pub const hb_script_t_HB_SCRIPT_ELYMAIC: hb_script_t = 1164736877;
-pub const hb_script_t_HB_SCRIPT_NANDINAGARI: hb_script_t = 1315008100;
-pub const hb_script_t_HB_SCRIPT_NYIAKENG_PUACHUE_HMONG: hb_script_t = 1215131248;
-pub const hb_script_t_HB_SCRIPT_WANCHO: hb_script_t = 1466132591;
-pub const hb_script_t_HB_SCRIPT_CHORASMIAN: hb_script_t = 1130918515;
-pub const hb_script_t_HB_SCRIPT_DIVES_AKURU: hb_script_t = 1147756907;
-pub const hb_script_t_HB_SCRIPT_KHITAN_SMALL_SCRIPT: hb_script_t = 1265202291;
-pub const hb_script_t_HB_SCRIPT_YEZIDI: hb_script_t = 1499822697;
-pub const hb_script_t_HB_SCRIPT_CYPRO_MINOAN: hb_script_t = 1131441518;
-pub const hb_script_t_HB_SCRIPT_OLD_UYGHUR: hb_script_t = 1333094258;
-pub const hb_script_t_HB_SCRIPT_TANGSA: hb_script_t = 1416524641;
-pub const hb_script_t_HB_SCRIPT_TOTO: hb_script_t = 1416590447;
-pub const hb_script_t_HB_SCRIPT_VITHKUQI: hb_script_t = 1449751656;
-pub const hb_script_t_HB_SCRIPT_MATH: hb_script_t = 1517122664;
-pub const hb_script_t_HB_SCRIPT_KAWI: hb_script_t = 1264678761;
-pub const hb_script_t_HB_SCRIPT_NAG_MUNDARI: hb_script_t = 1315006317;
-pub const hb_script_t_HB_SCRIPT_INVALID: hb_script_t = 0;
-pub const hb_script_t__HB_SCRIPT_MAX_VALUE: hb_script_t = 2147483647;
-pub const hb_script_t__HB_SCRIPT_MAX_VALUE_SIGNED: hb_script_t = 2147483647;
+pub const HB_SCRIPT_COMMON: hb_script_t = 1517910393;
+pub const HB_SCRIPT_INHERITED: hb_script_t = 1516858984;
+pub const HB_SCRIPT_UNKNOWN: hb_script_t = 1517976186;
+pub const HB_SCRIPT_ARABIC: hb_script_t = 1098015074;
+pub const HB_SCRIPT_ARMENIAN: hb_script_t = 1098018158;
+pub const HB_SCRIPT_BENGALI: hb_script_t = 1113943655;
+pub const HB_SCRIPT_CYRILLIC: hb_script_t = 1132032620;
+pub const HB_SCRIPT_DEVANAGARI: hb_script_t = 1147500129;
+pub const HB_SCRIPT_GEORGIAN: hb_script_t = 1197830002;
+pub const HB_SCRIPT_GREEK: hb_script_t = 1198679403;
+pub const HB_SCRIPT_GUJARATI: hb_script_t = 1198877298;
+pub const HB_SCRIPT_GURMUKHI: hb_script_t = 1198879349;
+pub const HB_SCRIPT_HANGUL: hb_script_t = 1214344807;
+pub const HB_SCRIPT_HAN: hb_script_t = 1214344809;
+pub const HB_SCRIPT_HEBREW: hb_script_t = 1214603890;
+pub const HB_SCRIPT_HIRAGANA: hb_script_t = 1214870113;
+pub const HB_SCRIPT_KANNADA: hb_script_t = 1265525857;
+pub const HB_SCRIPT_KATAKANA: hb_script_t = 1264676449;
+pub const HB_SCRIPT_LAO: hb_script_t = 1281453935;
+pub const HB_SCRIPT_LATIN: hb_script_t = 1281455214;
+pub const HB_SCRIPT_MALAYALAM: hb_script_t = 1298954605;
+pub const HB_SCRIPT_ORIYA: hb_script_t = 1332902241;
+pub const HB_SCRIPT_TAMIL: hb_script_t = 1415671148;
+pub const HB_SCRIPT_TELUGU: hb_script_t = 1415933045;
+pub const HB_SCRIPT_THAI: hb_script_t = 1416126825;
+pub const HB_SCRIPT_TIBETAN: hb_script_t = 1416192628;
+pub const HB_SCRIPT_BOPOMOFO: hb_script_t = 1114599535;
+pub const HB_SCRIPT_BRAILLE: hb_script_t = 1114792297;
+pub const HB_SCRIPT_CANADIAN_SYLLABICS: hb_script_t = 1130458739;
+pub const HB_SCRIPT_CHEROKEE: hb_script_t = 1130915186;
+pub const HB_SCRIPT_ETHIOPIC: hb_script_t = 1165256809;
+pub const HB_SCRIPT_KHMER: hb_script_t = 1265134962;
+pub const HB_SCRIPT_MONGOLIAN: hb_script_t = 1299148391;
+pub const HB_SCRIPT_MYANMAR: hb_script_t = 1299803506;
+pub const HB_SCRIPT_OGHAM: hb_script_t = 1332175213;
+pub const HB_SCRIPT_RUNIC: hb_script_t = 1383427698;
+pub const HB_SCRIPT_SINHALA: hb_script_t = 1399418472;
+pub const HB_SCRIPT_SYRIAC: hb_script_t = 1400468067;
+pub const HB_SCRIPT_THAANA: hb_script_t = 1416126817;
+pub const HB_SCRIPT_YI: hb_script_t = 1500080489;
+pub const HB_SCRIPT_DESERET: hb_script_t = 1148416628;
+pub const HB_SCRIPT_GOTHIC: hb_script_t = 1198486632;
+pub const HB_SCRIPT_OLD_ITALIC: hb_script_t = 1232363884;
+pub const HB_SCRIPT_BUHID: hb_script_t = 1114990692;
+pub const HB_SCRIPT_HANUNOO: hb_script_t = 1214344815;
+pub const HB_SCRIPT_TAGALOG: hb_script_t = 1416064103;
+pub const HB_SCRIPT_TAGBANWA: hb_script_t = 1415669602;
+pub const HB_SCRIPT_CYPRIOT: hb_script_t = 1131442804;
+pub const HB_SCRIPT_LIMBU: hb_script_t = 1281977698;
+pub const HB_SCRIPT_LINEAR_B: hb_script_t = 1281977954;
+pub const HB_SCRIPT_OSMANYA: hb_script_t = 1332964705;
+pub const HB_SCRIPT_SHAVIAN: hb_script_t = 1399349623;
+pub const HB_SCRIPT_TAI_LE: hb_script_t = 1415670885;
+pub const HB_SCRIPT_UGARITIC: hb_script_t = 1432838514;
+pub const HB_SCRIPT_BUGINESE: hb_script_t = 1114990441;
+pub const HB_SCRIPT_COPTIC: hb_script_t = 1131376756;
+pub const HB_SCRIPT_GLAGOLITIC: hb_script_t = 1198285159;
+pub const HB_SCRIPT_KHAROSHTHI: hb_script_t = 1265131890;
+pub const HB_SCRIPT_NEW_TAI_LUE: hb_script_t = 1415670901;
+pub const HB_SCRIPT_OLD_PERSIAN: hb_script_t = 1483761007;
+pub const HB_SCRIPT_SYLOTI_NAGRI: hb_script_t = 1400466543;
+pub const HB_SCRIPT_TIFINAGH: hb_script_t = 1415999079;
+pub const HB_SCRIPT_BALINESE: hb_script_t = 1113681001;
+pub const HB_SCRIPT_CUNEIFORM: hb_script_t = 1483961720;
+pub const HB_SCRIPT_NKO: hb_script_t = 1315663727;
+pub const HB_SCRIPT_PHAGS_PA: hb_script_t = 1349017959;
+pub const HB_SCRIPT_PHOENICIAN: hb_script_t = 1349021304;
+pub const HB_SCRIPT_CARIAN: hb_script_t = 1130459753;
+pub const HB_SCRIPT_CHAM: hb_script_t = 1130914157;
+pub const HB_SCRIPT_KAYAH_LI: hb_script_t = 1264675945;
+pub const HB_SCRIPT_LEPCHA: hb_script_t = 1281716323;
+pub const HB_SCRIPT_LYCIAN: hb_script_t = 1283023721;
+pub const HB_SCRIPT_LYDIAN: hb_script_t = 1283023977;
+pub const HB_SCRIPT_OL_CHIKI: hb_script_t = 1332503403;
+pub const HB_SCRIPT_REJANG: hb_script_t = 1382706791;
+pub const HB_SCRIPT_SAURASHTRA: hb_script_t = 1398895986;
+pub const HB_SCRIPT_SUNDANESE: hb_script_t = 1400204900;
+pub const HB_SCRIPT_VAI: hb_script_t = 1449224553;
+pub const HB_SCRIPT_AVESTAN: hb_script_t = 1098281844;
+pub const HB_SCRIPT_BAMUM: hb_script_t = 1113681269;
+pub const HB_SCRIPT_EGYPTIAN_HIEROGLYPHS: hb_script_t = 1164409200;
+pub const HB_SCRIPT_IMPERIAL_ARAMAIC: hb_script_t = 1098018153;
+pub const HB_SCRIPT_INSCRIPTIONAL_PAHLAVI: hb_script_t = 1349020777;
+pub const HB_SCRIPT_INSCRIPTIONAL_PARTHIAN: hb_script_t = 1349678185;
+pub const HB_SCRIPT_JAVANESE: hb_script_t = 1247901281;
+pub const HB_SCRIPT_KAITHI: hb_script_t = 1265920105;
+pub const HB_SCRIPT_LISU: hb_script_t = 1281979253;
+pub const HB_SCRIPT_MEETEI_MAYEK: hb_script_t = 1299473769;
+pub const HB_SCRIPT_OLD_SOUTH_ARABIAN: hb_script_t = 1398895202;
+pub const HB_SCRIPT_OLD_TURKIC: hb_script_t = 1332898664;
+pub const HB_SCRIPT_SAMARITAN: hb_script_t = 1398893938;
+pub const HB_SCRIPT_TAI_THAM: hb_script_t = 1281453665;
+pub const HB_SCRIPT_TAI_VIET: hb_script_t = 1415673460;
+pub const HB_SCRIPT_BATAK: hb_script_t = 1113683051;
+pub const HB_SCRIPT_BRAHMI: hb_script_t = 1114792296;
+pub const HB_SCRIPT_MANDAIC: hb_script_t = 1298230884;
+pub const HB_SCRIPT_CHAKMA: hb_script_t = 1130457965;
+pub const HB_SCRIPT_MEROITIC_CURSIVE: hb_script_t = 1298494051;
+pub const HB_SCRIPT_MEROITIC_HIEROGLYPHS: hb_script_t = 1298494063;
+pub const HB_SCRIPT_MIAO: hb_script_t = 1349284452;
+pub const HB_SCRIPT_SHARADA: hb_script_t = 1399353956;
+pub const HB_SCRIPT_SORA_SOMPENG: hb_script_t = 1399812705;
+pub const HB_SCRIPT_TAKRI: hb_script_t = 1415670642;
+pub const HB_SCRIPT_BASSA_VAH: hb_script_t = 1113682803;
+pub const HB_SCRIPT_CAUCASIAN_ALBANIAN: hb_script_t = 1097295970;
+pub const HB_SCRIPT_DUPLOYAN: hb_script_t = 1148547180;
+pub const HB_SCRIPT_ELBASAN: hb_script_t = 1164730977;
+pub const HB_SCRIPT_GRANTHA: hb_script_t = 1198678382;
+pub const HB_SCRIPT_KHOJKI: hb_script_t = 1265135466;
+pub const HB_SCRIPT_KHUDAWADI: hb_script_t = 1399418468;
+pub const HB_SCRIPT_LINEAR_A: hb_script_t = 1281977953;
+pub const HB_SCRIPT_MAHAJANI: hb_script_t = 1298229354;
+pub const HB_SCRIPT_MANICHAEAN: hb_script_t = 1298230889;
+pub const HB_SCRIPT_MENDE_KIKAKUI: hb_script_t = 1298493028;
+pub const HB_SCRIPT_MODI: hb_script_t = 1299145833;
+pub const HB_SCRIPT_MRO: hb_script_t = 1299345263;
+pub const HB_SCRIPT_NABATAEAN: hb_script_t = 1315070324;
+pub const HB_SCRIPT_OLD_NORTH_ARABIAN: hb_script_t = 1315009122;
+pub const HB_SCRIPT_OLD_PERMIC: hb_script_t = 1348825709;
+pub const HB_SCRIPT_PAHAWH_HMONG: hb_script_t = 1215131239;
+pub const HB_SCRIPT_PALMYRENE: hb_script_t = 1348562029;
+pub const HB_SCRIPT_PAU_CIN_HAU: hb_script_t = 1348564323;
+pub const HB_SCRIPT_PSALTER_PAHLAVI: hb_script_t = 1349020784;
+pub const HB_SCRIPT_SIDDHAM: hb_script_t = 1399415908;
+pub const HB_SCRIPT_TIRHUTA: hb_script_t = 1416196712;
+pub const HB_SCRIPT_WARANG_CITI: hb_script_t = 1466004065;
+pub const HB_SCRIPT_AHOM: hb_script_t = 1097363309;
+pub const HB_SCRIPT_ANATOLIAN_HIEROGLYPHS: hb_script_t = 1215067511;
+pub const HB_SCRIPT_HATRAN: hb_script_t = 1214346354;
+pub const HB_SCRIPT_MULTANI: hb_script_t = 1299541108;
+pub const HB_SCRIPT_OLD_HUNGARIAN: hb_script_t = 1215655527;
+pub const HB_SCRIPT_SIGNWRITING: hb_script_t = 1399287415;
+pub const HB_SCRIPT_ADLAM: hb_script_t = 1097100397;
+pub const HB_SCRIPT_BHAIKSUKI: hb_script_t = 1114139507;
+pub const HB_SCRIPT_MARCHEN: hb_script_t = 1298231907;
+pub const HB_SCRIPT_OSAGE: hb_script_t = 1332963173;
+pub const HB_SCRIPT_TANGUT: hb_script_t = 1415671399;
+pub const HB_SCRIPT_NEWA: hb_script_t = 1315272545;
+pub const HB_SCRIPT_MASARAM_GONDI: hb_script_t = 1198485101;
+pub const HB_SCRIPT_NUSHU: hb_script_t = 1316186229;
+pub const HB_SCRIPT_SOYOMBO: hb_script_t = 1399814511;
+pub const HB_SCRIPT_ZANABAZAR_SQUARE: hb_script_t = 1516334690;
+pub const HB_SCRIPT_DOGRA: hb_script_t = 1148151666;
+pub const HB_SCRIPT_GUNJALA_GONDI: hb_script_t = 1198485095;
+pub const HB_SCRIPT_HANIFI_ROHINGYA: hb_script_t = 1383032935;
+pub const HB_SCRIPT_MAKASAR: hb_script_t = 1298230113;
+pub const HB_SCRIPT_MEDEFAIDRIN: hb_script_t = 1298490470;
+pub const HB_SCRIPT_OLD_SOGDIAN: hb_script_t = 1399809903;
+pub const HB_SCRIPT_SOGDIAN: hb_script_t = 1399809892;
+pub const HB_SCRIPT_ELYMAIC: hb_script_t = 1164736877;
+pub const HB_SCRIPT_NANDINAGARI: hb_script_t = 1315008100;
+pub const HB_SCRIPT_NYIAKENG_PUACHUE_HMONG: hb_script_t = 1215131248;
+pub const HB_SCRIPT_WANCHO: hb_script_t = 1466132591;
+pub const HB_SCRIPT_CHORASMIAN: hb_script_t = 1130918515;
+pub const HB_SCRIPT_DIVES_AKURU: hb_script_t = 1147756907;
+pub const HB_SCRIPT_KHITAN_SMALL_SCRIPT: hb_script_t = 1265202291;
+pub const HB_SCRIPT_YEZIDI: hb_script_t = 1499822697;
+pub const HB_SCRIPT_CYPRO_MINOAN: hb_script_t = 1131441518;
+pub const HB_SCRIPT_OLD_UYGHUR: hb_script_t = 1333094258;
+pub const HB_SCRIPT_TANGSA: hb_script_t = 1416524641;
+pub const HB_SCRIPT_TOTO: hb_script_t = 1416590447;
+pub const HB_SCRIPT_VITHKUQI: hb_script_t = 1449751656;
+pub const HB_SCRIPT_MATH: hb_script_t = 1517122664;
+pub const HB_SCRIPT_KAWI: hb_script_t = 1264678761;
+pub const HB_SCRIPT_NAG_MUNDARI: hb_script_t = 1315006317;
+pub const HB_SCRIPT_INVALID: hb_script_t = 0;
+pub const _HB_SCRIPT_MAX_VALUE: hb_script_t = 2147483647;
+pub const _HB_SCRIPT_MAX_VALUE_SIGNED: hb_script_t = 2147483647;
 pub type hb_script_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_script_from_iso15924_tag(tag: hb_tag_t) -> hb_script_t;
@@ -10326,10 +9582,10 @@ fn bindgen_test_layout_hb_glyph_extents_t() {
 pub struct hb_font_t {
     _unused: [u8; 0],
 }
-pub const hb_memory_mode_t_HB_MEMORY_MODE_DUPLICATE: hb_memory_mode_t = 0;
-pub const hb_memory_mode_t_HB_MEMORY_MODE_READONLY: hb_memory_mode_t = 1;
-pub const hb_memory_mode_t_HB_MEMORY_MODE_WRITABLE: hb_memory_mode_t = 2;
-pub const hb_memory_mode_t_HB_MEMORY_MODE_READONLY_MAY_MAKE_WRITABLE: hb_memory_mode_t = 3;
+pub const HB_MEMORY_MODE_DUPLICATE: hb_memory_mode_t = 0;
+pub const HB_MEMORY_MODE_READONLY: hb_memory_mode_t = 1;
+pub const HB_MEMORY_MODE_WRITABLE: hb_memory_mode_t = 2;
+pub const HB_MEMORY_MODE_READONLY_MAY_MAKE_WRITABLE: hb_memory_mode_t = 3;
 pub type hb_memory_mode_t = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -10417,181 +9673,94 @@ extern "C" {
         length: *mut ::std::os::raw::c_uint,
     ) -> *mut ::std::os::raw::c_char;
 }
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_CONTROL:
-    hb_unicode_general_category_t = 0;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_FORMAT:
-    hb_unicode_general_category_t = 1;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED:
-    hb_unicode_general_category_t = 2;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_PRIVATE_USE:
-    hb_unicode_general_category_t = 3;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_SURROGATE:
-    hb_unicode_general_category_t = 4;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_LOWERCASE_LETTER:
-    hb_unicode_general_category_t = 5;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_MODIFIER_LETTER:
-    hb_unicode_general_category_t = 6;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_OTHER_LETTER:
-    hb_unicode_general_category_t = 7;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_TITLECASE_LETTER:
-    hb_unicode_general_category_t = 8;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_UPPERCASE_LETTER:
-    hb_unicode_general_category_t = 9;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK:
-    hb_unicode_general_category_t = 10;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK:
-    hb_unicode_general_category_t = 11;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK:
-    hb_unicode_general_category_t = 12;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_DECIMAL_NUMBER:
-    hb_unicode_general_category_t = 13;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_LETTER_NUMBER:
-    hb_unicode_general_category_t = 14;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_OTHER_NUMBER:
-    hb_unicode_general_category_t = 15;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_CONNECT_PUNCTUATION:
-    hb_unicode_general_category_t = 16;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_DASH_PUNCTUATION:
-    hb_unicode_general_category_t = 17;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION:
-    hb_unicode_general_category_t = 18;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION:
-    hb_unicode_general_category_t = 19;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_INITIAL_PUNCTUATION:
-    hb_unicode_general_category_t = 20;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_OTHER_PUNCTUATION:
-    hb_unicode_general_category_t = 21;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_OPEN_PUNCTUATION:
-    hb_unicode_general_category_t = 22;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_CURRENCY_SYMBOL:
-    hb_unicode_general_category_t = 23;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_MODIFIER_SYMBOL:
-    hb_unicode_general_category_t = 24;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_MATH_SYMBOL:
-    hb_unicode_general_category_t = 25;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_OTHER_SYMBOL:
-    hb_unicode_general_category_t = 26;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_LINE_SEPARATOR:
-    hb_unicode_general_category_t = 27;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_PARAGRAPH_SEPARATOR:
-    hb_unicode_general_category_t = 28;
-pub const hb_unicode_general_category_t_HB_UNICODE_GENERAL_CATEGORY_SPACE_SEPARATOR:
-    hb_unicode_general_category_t = 29;
+pub const HB_UNICODE_GENERAL_CATEGORY_CONTROL: hb_unicode_general_category_t = 0;
+pub const HB_UNICODE_GENERAL_CATEGORY_FORMAT: hb_unicode_general_category_t = 1;
+pub const HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED: hb_unicode_general_category_t = 2;
+pub const HB_UNICODE_GENERAL_CATEGORY_PRIVATE_USE: hb_unicode_general_category_t = 3;
+pub const HB_UNICODE_GENERAL_CATEGORY_SURROGATE: hb_unicode_general_category_t = 4;
+pub const HB_UNICODE_GENERAL_CATEGORY_LOWERCASE_LETTER: hb_unicode_general_category_t = 5;
+pub const HB_UNICODE_GENERAL_CATEGORY_MODIFIER_LETTER: hb_unicode_general_category_t = 6;
+pub const HB_UNICODE_GENERAL_CATEGORY_OTHER_LETTER: hb_unicode_general_category_t = 7;
+pub const HB_UNICODE_GENERAL_CATEGORY_TITLECASE_LETTER: hb_unicode_general_category_t = 8;
+pub const HB_UNICODE_GENERAL_CATEGORY_UPPERCASE_LETTER: hb_unicode_general_category_t = 9;
+pub const HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK: hb_unicode_general_category_t = 10;
+pub const HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK: hb_unicode_general_category_t = 11;
+pub const HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK: hb_unicode_general_category_t = 12;
+pub const HB_UNICODE_GENERAL_CATEGORY_DECIMAL_NUMBER: hb_unicode_general_category_t = 13;
+pub const HB_UNICODE_GENERAL_CATEGORY_LETTER_NUMBER: hb_unicode_general_category_t = 14;
+pub const HB_UNICODE_GENERAL_CATEGORY_OTHER_NUMBER: hb_unicode_general_category_t = 15;
+pub const HB_UNICODE_GENERAL_CATEGORY_CONNECT_PUNCTUATION: hb_unicode_general_category_t = 16;
+pub const HB_UNICODE_GENERAL_CATEGORY_DASH_PUNCTUATION: hb_unicode_general_category_t = 17;
+pub const HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION: hb_unicode_general_category_t = 18;
+pub const HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION: hb_unicode_general_category_t = 19;
+pub const HB_UNICODE_GENERAL_CATEGORY_INITIAL_PUNCTUATION: hb_unicode_general_category_t = 20;
+pub const HB_UNICODE_GENERAL_CATEGORY_OTHER_PUNCTUATION: hb_unicode_general_category_t = 21;
+pub const HB_UNICODE_GENERAL_CATEGORY_OPEN_PUNCTUATION: hb_unicode_general_category_t = 22;
+pub const HB_UNICODE_GENERAL_CATEGORY_CURRENCY_SYMBOL: hb_unicode_general_category_t = 23;
+pub const HB_UNICODE_GENERAL_CATEGORY_MODIFIER_SYMBOL: hb_unicode_general_category_t = 24;
+pub const HB_UNICODE_GENERAL_CATEGORY_MATH_SYMBOL: hb_unicode_general_category_t = 25;
+pub const HB_UNICODE_GENERAL_CATEGORY_OTHER_SYMBOL: hb_unicode_general_category_t = 26;
+pub const HB_UNICODE_GENERAL_CATEGORY_LINE_SEPARATOR: hb_unicode_general_category_t = 27;
+pub const HB_UNICODE_GENERAL_CATEGORY_PARAGRAPH_SEPARATOR: hb_unicode_general_category_t = 28;
+pub const HB_UNICODE_GENERAL_CATEGORY_SPACE_SEPARATOR: hb_unicode_general_category_t = 29;
 pub type hb_unicode_general_category_t = ::std::os::raw::c_uint;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_NOT_REORDERED:
-    hb_unicode_combining_class_t = 0;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_OVERLAY:
-    hb_unicode_combining_class_t = 1;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_NUKTA:
-    hb_unicode_combining_class_t = 7;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_KANA_VOICING:
-    hb_unicode_combining_class_t = 8;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_VIRAMA:
-    hb_unicode_combining_class_t = 9;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC10:
-    hb_unicode_combining_class_t = 10;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC11:
-    hb_unicode_combining_class_t = 11;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC12:
-    hb_unicode_combining_class_t = 12;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC13:
-    hb_unicode_combining_class_t = 13;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC14:
-    hb_unicode_combining_class_t = 14;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC15:
-    hb_unicode_combining_class_t = 15;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC16:
-    hb_unicode_combining_class_t = 16;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC17:
-    hb_unicode_combining_class_t = 17;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC18:
-    hb_unicode_combining_class_t = 18;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC19:
-    hb_unicode_combining_class_t = 19;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC20:
-    hb_unicode_combining_class_t = 20;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC21:
-    hb_unicode_combining_class_t = 21;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC22:
-    hb_unicode_combining_class_t = 22;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC23:
-    hb_unicode_combining_class_t = 23;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC24:
-    hb_unicode_combining_class_t = 24;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC25:
-    hb_unicode_combining_class_t = 25;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC26:
-    hb_unicode_combining_class_t = 26;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC27:
-    hb_unicode_combining_class_t = 27;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC28:
-    hb_unicode_combining_class_t = 28;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC29:
-    hb_unicode_combining_class_t = 29;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC30:
-    hb_unicode_combining_class_t = 30;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC31:
-    hb_unicode_combining_class_t = 31;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC32:
-    hb_unicode_combining_class_t = 32;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC33:
-    hb_unicode_combining_class_t = 33;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC34:
-    hb_unicode_combining_class_t = 34;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC35:
-    hb_unicode_combining_class_t = 35;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC36:
-    hb_unicode_combining_class_t = 36;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC84:
-    hb_unicode_combining_class_t = 84;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC91:
-    hb_unicode_combining_class_t = 91;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC103:
-    hb_unicode_combining_class_t = 103;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC107:
-    hb_unicode_combining_class_t = 107;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC118:
-    hb_unicode_combining_class_t = 118;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC122:
-    hb_unicode_combining_class_t = 122;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC129:
-    hb_unicode_combining_class_t = 129;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC130:
-    hb_unicode_combining_class_t = 130;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_CCC132:
-    hb_unicode_combining_class_t = 132;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ATTACHED_BELOW_LEFT:
-    hb_unicode_combining_class_t = 200;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ATTACHED_BELOW:
-    hb_unicode_combining_class_t = 202;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ATTACHED_ABOVE:
-    hb_unicode_combining_class_t = 214;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ATTACHED_ABOVE_RIGHT:
-    hb_unicode_combining_class_t = 216;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_BELOW_LEFT:
-    hb_unicode_combining_class_t = 218;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_BELOW:
-    hb_unicode_combining_class_t = 220;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_BELOW_RIGHT:
-    hb_unicode_combining_class_t = 222;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_LEFT:
-    hb_unicode_combining_class_t = 224;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_RIGHT:
-    hb_unicode_combining_class_t = 226;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ABOVE_LEFT:
-    hb_unicode_combining_class_t = 228;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ABOVE:
-    hb_unicode_combining_class_t = 230;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_ABOVE_RIGHT:
-    hb_unicode_combining_class_t = 232;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_DOUBLE_BELOW:
-    hb_unicode_combining_class_t = 233;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_DOUBLE_ABOVE:
-    hb_unicode_combining_class_t = 234;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_IOTA_SUBSCRIPT:
-    hb_unicode_combining_class_t = 240;
-pub const hb_unicode_combining_class_t_HB_UNICODE_COMBINING_CLASS_INVALID:
-    hb_unicode_combining_class_t = 255;
+pub const HB_UNICODE_COMBINING_CLASS_NOT_REORDERED: hb_unicode_combining_class_t = 0;
+pub const HB_UNICODE_COMBINING_CLASS_OVERLAY: hb_unicode_combining_class_t = 1;
+pub const HB_UNICODE_COMBINING_CLASS_NUKTA: hb_unicode_combining_class_t = 7;
+pub const HB_UNICODE_COMBINING_CLASS_KANA_VOICING: hb_unicode_combining_class_t = 8;
+pub const HB_UNICODE_COMBINING_CLASS_VIRAMA: hb_unicode_combining_class_t = 9;
+pub const HB_UNICODE_COMBINING_CLASS_CCC10: hb_unicode_combining_class_t = 10;
+pub const HB_UNICODE_COMBINING_CLASS_CCC11: hb_unicode_combining_class_t = 11;
+pub const HB_UNICODE_COMBINING_CLASS_CCC12: hb_unicode_combining_class_t = 12;
+pub const HB_UNICODE_COMBINING_CLASS_CCC13: hb_unicode_combining_class_t = 13;
+pub const HB_UNICODE_COMBINING_CLASS_CCC14: hb_unicode_combining_class_t = 14;
+pub const HB_UNICODE_COMBINING_CLASS_CCC15: hb_unicode_combining_class_t = 15;
+pub const HB_UNICODE_COMBINING_CLASS_CCC16: hb_unicode_combining_class_t = 16;
+pub const HB_UNICODE_COMBINING_CLASS_CCC17: hb_unicode_combining_class_t = 17;
+pub const HB_UNICODE_COMBINING_CLASS_CCC18: hb_unicode_combining_class_t = 18;
+pub const HB_UNICODE_COMBINING_CLASS_CCC19: hb_unicode_combining_class_t = 19;
+pub const HB_UNICODE_COMBINING_CLASS_CCC20: hb_unicode_combining_class_t = 20;
+pub const HB_UNICODE_COMBINING_CLASS_CCC21: hb_unicode_combining_class_t = 21;
+pub const HB_UNICODE_COMBINING_CLASS_CCC22: hb_unicode_combining_class_t = 22;
+pub const HB_UNICODE_COMBINING_CLASS_CCC23: hb_unicode_combining_class_t = 23;
+pub const HB_UNICODE_COMBINING_CLASS_CCC24: hb_unicode_combining_class_t = 24;
+pub const HB_UNICODE_COMBINING_CLASS_CCC25: hb_unicode_combining_class_t = 25;
+pub const HB_UNICODE_COMBINING_CLASS_CCC26: hb_unicode_combining_class_t = 26;
+pub const HB_UNICODE_COMBINING_CLASS_CCC27: hb_unicode_combining_class_t = 27;
+pub const HB_UNICODE_COMBINING_CLASS_CCC28: hb_unicode_combining_class_t = 28;
+pub const HB_UNICODE_COMBINING_CLASS_CCC29: hb_unicode_combining_class_t = 29;
+pub const HB_UNICODE_COMBINING_CLASS_CCC30: hb_unicode_combining_class_t = 30;
+pub const HB_UNICODE_COMBINING_CLASS_CCC31: hb_unicode_combining_class_t = 31;
+pub const HB_UNICODE_COMBINING_CLASS_CCC32: hb_unicode_combining_class_t = 32;
+pub const HB_UNICODE_COMBINING_CLASS_CCC33: hb_unicode_combining_class_t = 33;
+pub const HB_UNICODE_COMBINING_CLASS_CCC34: hb_unicode_combining_class_t = 34;
+pub const HB_UNICODE_COMBINING_CLASS_CCC35: hb_unicode_combining_class_t = 35;
+pub const HB_UNICODE_COMBINING_CLASS_CCC36: hb_unicode_combining_class_t = 36;
+pub const HB_UNICODE_COMBINING_CLASS_CCC84: hb_unicode_combining_class_t = 84;
+pub const HB_UNICODE_COMBINING_CLASS_CCC91: hb_unicode_combining_class_t = 91;
+pub const HB_UNICODE_COMBINING_CLASS_CCC103: hb_unicode_combining_class_t = 103;
+pub const HB_UNICODE_COMBINING_CLASS_CCC107: hb_unicode_combining_class_t = 107;
+pub const HB_UNICODE_COMBINING_CLASS_CCC118: hb_unicode_combining_class_t = 118;
+pub const HB_UNICODE_COMBINING_CLASS_CCC122: hb_unicode_combining_class_t = 122;
+pub const HB_UNICODE_COMBINING_CLASS_CCC129: hb_unicode_combining_class_t = 129;
+pub const HB_UNICODE_COMBINING_CLASS_CCC130: hb_unicode_combining_class_t = 130;
+pub const HB_UNICODE_COMBINING_CLASS_CCC132: hb_unicode_combining_class_t = 132;
+pub const HB_UNICODE_COMBINING_CLASS_ATTACHED_BELOW_LEFT: hb_unicode_combining_class_t = 200;
+pub const HB_UNICODE_COMBINING_CLASS_ATTACHED_BELOW: hb_unicode_combining_class_t = 202;
+pub const HB_UNICODE_COMBINING_CLASS_ATTACHED_ABOVE: hb_unicode_combining_class_t = 214;
+pub const HB_UNICODE_COMBINING_CLASS_ATTACHED_ABOVE_RIGHT: hb_unicode_combining_class_t = 216;
+pub const HB_UNICODE_COMBINING_CLASS_BELOW_LEFT: hb_unicode_combining_class_t = 218;
+pub const HB_UNICODE_COMBINING_CLASS_BELOW: hb_unicode_combining_class_t = 220;
+pub const HB_UNICODE_COMBINING_CLASS_BELOW_RIGHT: hb_unicode_combining_class_t = 222;
+pub const HB_UNICODE_COMBINING_CLASS_LEFT: hb_unicode_combining_class_t = 224;
+pub const HB_UNICODE_COMBINING_CLASS_RIGHT: hb_unicode_combining_class_t = 226;
+pub const HB_UNICODE_COMBINING_CLASS_ABOVE_LEFT: hb_unicode_combining_class_t = 228;
+pub const HB_UNICODE_COMBINING_CLASS_ABOVE: hb_unicode_combining_class_t = 230;
+pub const HB_UNICODE_COMBINING_CLASS_ABOVE_RIGHT: hb_unicode_combining_class_t = 232;
+pub const HB_UNICODE_COMBINING_CLASS_DOUBLE_BELOW: hb_unicode_combining_class_t = 233;
+pub const HB_UNICODE_COMBINING_CLASS_DOUBLE_ABOVE: hb_unicode_combining_class_t = 234;
+pub const HB_UNICODE_COMBINING_CLASS_IOTA_SUBSCRIPT: hb_unicode_combining_class_t = 240;
+pub const HB_UNICODE_COMBINING_CLASS_INVALID: hb_unicode_combining_class_t = 255;
 pub type hb_unicode_combining_class_t = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -11606,9 +10775,9 @@ fn bindgen_test_layout_hb_color_stop_t() {
         )
     );
 }
-pub const hb_paint_extend_t_HB_PAINT_EXTEND_PAD: hb_paint_extend_t = 0;
-pub const hb_paint_extend_t_HB_PAINT_EXTEND_REPEAT: hb_paint_extend_t = 1;
-pub const hb_paint_extend_t_HB_PAINT_EXTEND_REFLECT: hb_paint_extend_t = 2;
+pub const HB_PAINT_EXTEND_PAD: hb_paint_extend_t = 0;
+pub const HB_PAINT_EXTEND_REPEAT: hb_paint_extend_t = 1;
+pub const HB_PAINT_EXTEND_REFLECT: hb_paint_extend_t = 2;
 pub type hb_paint_extend_t = ::std::os::raw::c_uint;
 pub type hb_color_line_get_color_stops_func_t = ::std::option::Option<
     unsafe extern "C" fn(
@@ -11840,46 +11009,34 @@ pub type hb_paint_sweep_gradient_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ),
 >;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_CLEAR: hb_paint_composite_mode_t = 0;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SRC: hb_paint_composite_mode_t = 1;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DEST: hb_paint_composite_mode_t = 2;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SRC_OVER: hb_paint_composite_mode_t = 3;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DEST_OVER: hb_paint_composite_mode_t =
-    4;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SRC_IN: hb_paint_composite_mode_t = 5;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DEST_IN: hb_paint_composite_mode_t = 6;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SRC_OUT: hb_paint_composite_mode_t = 7;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DEST_OUT: hb_paint_composite_mode_t = 8;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SRC_ATOP: hb_paint_composite_mode_t = 9;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DEST_ATOP: hb_paint_composite_mode_t =
-    10;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_XOR: hb_paint_composite_mode_t = 11;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_PLUS: hb_paint_composite_mode_t = 12;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SCREEN: hb_paint_composite_mode_t = 13;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_OVERLAY: hb_paint_composite_mode_t = 14;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DARKEN: hb_paint_composite_mode_t = 15;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_LIGHTEN: hb_paint_composite_mode_t = 16;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_COLOR_DODGE: hb_paint_composite_mode_t =
-    17;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_COLOR_BURN: hb_paint_composite_mode_t =
-    18;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_HARD_LIGHT: hb_paint_composite_mode_t =
-    19;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_SOFT_LIGHT: hb_paint_composite_mode_t =
-    20;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_DIFFERENCE: hb_paint_composite_mode_t =
-    21;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_EXCLUSION: hb_paint_composite_mode_t =
-    22;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_MULTIPLY: hb_paint_composite_mode_t =
-    23;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_HSL_HUE: hb_paint_composite_mode_t = 24;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_HSL_SATURATION:
-    hb_paint_composite_mode_t = 25;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_HSL_COLOR: hb_paint_composite_mode_t =
-    26;
-pub const hb_paint_composite_mode_t_HB_PAINT_COMPOSITE_MODE_HSL_LUMINOSITY:
-    hb_paint_composite_mode_t = 27;
+pub const HB_PAINT_COMPOSITE_MODE_CLEAR: hb_paint_composite_mode_t = 0;
+pub const HB_PAINT_COMPOSITE_MODE_SRC: hb_paint_composite_mode_t = 1;
+pub const HB_PAINT_COMPOSITE_MODE_DEST: hb_paint_composite_mode_t = 2;
+pub const HB_PAINT_COMPOSITE_MODE_SRC_OVER: hb_paint_composite_mode_t = 3;
+pub const HB_PAINT_COMPOSITE_MODE_DEST_OVER: hb_paint_composite_mode_t = 4;
+pub const HB_PAINT_COMPOSITE_MODE_SRC_IN: hb_paint_composite_mode_t = 5;
+pub const HB_PAINT_COMPOSITE_MODE_DEST_IN: hb_paint_composite_mode_t = 6;
+pub const HB_PAINT_COMPOSITE_MODE_SRC_OUT: hb_paint_composite_mode_t = 7;
+pub const HB_PAINT_COMPOSITE_MODE_DEST_OUT: hb_paint_composite_mode_t = 8;
+pub const HB_PAINT_COMPOSITE_MODE_SRC_ATOP: hb_paint_composite_mode_t = 9;
+pub const HB_PAINT_COMPOSITE_MODE_DEST_ATOP: hb_paint_composite_mode_t = 10;
+pub const HB_PAINT_COMPOSITE_MODE_XOR: hb_paint_composite_mode_t = 11;
+pub const HB_PAINT_COMPOSITE_MODE_PLUS: hb_paint_composite_mode_t = 12;
+pub const HB_PAINT_COMPOSITE_MODE_SCREEN: hb_paint_composite_mode_t = 13;
+pub const HB_PAINT_COMPOSITE_MODE_OVERLAY: hb_paint_composite_mode_t = 14;
+pub const HB_PAINT_COMPOSITE_MODE_DARKEN: hb_paint_composite_mode_t = 15;
+pub const HB_PAINT_COMPOSITE_MODE_LIGHTEN: hb_paint_composite_mode_t = 16;
+pub const HB_PAINT_COMPOSITE_MODE_COLOR_DODGE: hb_paint_composite_mode_t = 17;
+pub const HB_PAINT_COMPOSITE_MODE_COLOR_BURN: hb_paint_composite_mode_t = 18;
+pub const HB_PAINT_COMPOSITE_MODE_HARD_LIGHT: hb_paint_composite_mode_t = 19;
+pub const HB_PAINT_COMPOSITE_MODE_SOFT_LIGHT: hb_paint_composite_mode_t = 20;
+pub const HB_PAINT_COMPOSITE_MODE_DIFFERENCE: hb_paint_composite_mode_t = 21;
+pub const HB_PAINT_COMPOSITE_MODE_EXCLUSION: hb_paint_composite_mode_t = 22;
+pub const HB_PAINT_COMPOSITE_MODE_MULTIPLY: hb_paint_composite_mode_t = 23;
+pub const HB_PAINT_COMPOSITE_MODE_HSL_HUE: hb_paint_composite_mode_t = 24;
+pub const HB_PAINT_COMPOSITE_MODE_HSL_SATURATION: hb_paint_composite_mode_t = 25;
+pub const HB_PAINT_COMPOSITE_MODE_HSL_COLOR: hb_paint_composite_mode_t = 26;
+pub const HB_PAINT_COMPOSITE_MODE_HSL_LUMINOSITY: hb_paint_composite_mode_t = 27;
 pub type hb_paint_composite_mode_t = ::std::os::raw::c_uint;
 pub type hb_paint_push_group_func_t = ::std::option::Option<
     unsafe extern "C" fn(
@@ -13116,10 +12273,10 @@ fn bindgen_test_layout_hb_glyph_info_t() {
         )
     );
 }
-pub const hb_glyph_flags_t_HB_GLYPH_FLAG_UNSAFE_TO_BREAK: hb_glyph_flags_t = 1;
-pub const hb_glyph_flags_t_HB_GLYPH_FLAG_UNSAFE_TO_CONCAT: hb_glyph_flags_t = 2;
-pub const hb_glyph_flags_t_HB_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL: hb_glyph_flags_t = 4;
-pub const hb_glyph_flags_t_HB_GLYPH_FLAG_DEFINED: hb_glyph_flags_t = 7;
+pub const HB_GLYPH_FLAG_UNSAFE_TO_BREAK: hb_glyph_flags_t = 1;
+pub const HB_GLYPH_FLAG_UNSAFE_TO_CONCAT: hb_glyph_flags_t = 2;
+pub const HB_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL: hb_glyph_flags_t = 4;
+pub const HB_GLYPH_FLAG_DEFINED: hb_glyph_flags_t = 7;
 pub type hb_glyph_flags_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_glyph_info_get_glyph_flags(info: *const hb_glyph_info_t) -> hb_glyph_flags_t;
@@ -13326,9 +12483,9 @@ extern "C" {
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-pub const hb_buffer_content_type_t_HB_BUFFER_CONTENT_TYPE_INVALID: hb_buffer_content_type_t = 0;
-pub const hb_buffer_content_type_t_HB_BUFFER_CONTENT_TYPE_UNICODE: hb_buffer_content_type_t = 1;
-pub const hb_buffer_content_type_t_HB_BUFFER_CONTENT_TYPE_GLYPHS: hb_buffer_content_type_t = 2;
+pub const HB_BUFFER_CONTENT_TYPE_INVALID: hb_buffer_content_type_t = 0;
+pub const HB_BUFFER_CONTENT_TYPE_UNICODE: hb_buffer_content_type_t = 1;
+pub const HB_BUFFER_CONTENT_TYPE_GLYPHS: hb_buffer_content_type_t = 2;
 pub type hb_buffer_content_type_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_buffer_set_content_type(
@@ -13381,16 +12538,16 @@ extern "C" {
 extern "C" {
     pub fn hb_buffer_guess_segment_properties(buffer: *mut hb_buffer_t);
 }
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_DEFAULT: hb_buffer_flags_t = 0;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_BOT: hb_buffer_flags_t = 1;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_EOT: hb_buffer_flags_t = 2;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_PRESERVE_DEFAULT_IGNORABLES: hb_buffer_flags_t = 4;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_REMOVE_DEFAULT_IGNORABLES: hb_buffer_flags_t = 8;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_DO_NOT_INSERT_DOTTED_CIRCLE: hb_buffer_flags_t = 16;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_VERIFY: hb_buffer_flags_t = 32;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT: hb_buffer_flags_t = 64;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL: hb_buffer_flags_t = 128;
-pub const hb_buffer_flags_t_HB_BUFFER_FLAG_DEFINED: hb_buffer_flags_t = 255;
+pub const HB_BUFFER_FLAG_DEFAULT: hb_buffer_flags_t = 0;
+pub const HB_BUFFER_FLAG_BOT: hb_buffer_flags_t = 1;
+pub const HB_BUFFER_FLAG_EOT: hb_buffer_flags_t = 2;
+pub const HB_BUFFER_FLAG_PRESERVE_DEFAULT_IGNORABLES: hb_buffer_flags_t = 4;
+pub const HB_BUFFER_FLAG_REMOVE_DEFAULT_IGNORABLES: hb_buffer_flags_t = 8;
+pub const HB_BUFFER_FLAG_DO_NOT_INSERT_DOTTED_CIRCLE: hb_buffer_flags_t = 16;
+pub const HB_BUFFER_FLAG_VERIFY: hb_buffer_flags_t = 32;
+pub const HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT: hb_buffer_flags_t = 64;
+pub const HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL: hb_buffer_flags_t = 128;
+pub const HB_BUFFER_FLAG_DEFINED: hb_buffer_flags_t = 255;
 pub type hb_buffer_flags_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_buffer_set_flags(buffer: *mut hb_buffer_t, flags: hb_buffer_flags_t);
@@ -13398,13 +12555,10 @@ extern "C" {
 extern "C" {
     pub fn hb_buffer_get_flags(buffer: *const hb_buffer_t) -> hb_buffer_flags_t;
 }
-pub const hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES:
-    hb_buffer_cluster_level_t = 0;
-pub const hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS:
-    hb_buffer_cluster_level_t = 1;
-pub const hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_CHARACTERS: hb_buffer_cluster_level_t =
-    2;
-pub const hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_DEFAULT: hb_buffer_cluster_level_t = 0;
+pub const HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES: hb_buffer_cluster_level_t = 0;
+pub const HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS: hb_buffer_cluster_level_t = 1;
+pub const HB_BUFFER_CLUSTER_LEVEL_CHARACTERS: hb_buffer_cluster_level_t = 2;
+pub const HB_BUFFER_CLUSTER_LEVEL_DEFAULT: hb_buffer_cluster_level_t = 0;
 pub type hb_buffer_cluster_level_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_buffer_set_cluster_level(
@@ -13554,29 +12708,18 @@ extern "C" {
 extern "C" {
     pub fn hb_buffer_normalize_glyphs(buffer: *mut hb_buffer_t);
 }
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_DEFAULT:
-    hb_buffer_serialize_flags_t = 0;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_NO_CLUSTERS:
-    hb_buffer_serialize_flags_t = 1;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_NO_POSITIONS:
-    hb_buffer_serialize_flags_t = 2;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_NO_GLYPH_NAMES:
-    hb_buffer_serialize_flags_t = 4;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_GLYPH_EXTENTS:
-    hb_buffer_serialize_flags_t = 8;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_GLYPH_FLAGS:
-    hb_buffer_serialize_flags_t = 16;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES:
-    hb_buffer_serialize_flags_t = 32;
-pub const hb_buffer_serialize_flags_t_HB_BUFFER_SERIALIZE_FLAG_DEFINED:
-    hb_buffer_serialize_flags_t = 63;
+pub const HB_BUFFER_SERIALIZE_FLAG_DEFAULT: hb_buffer_serialize_flags_t = 0;
+pub const HB_BUFFER_SERIALIZE_FLAG_NO_CLUSTERS: hb_buffer_serialize_flags_t = 1;
+pub const HB_BUFFER_SERIALIZE_FLAG_NO_POSITIONS: hb_buffer_serialize_flags_t = 2;
+pub const HB_BUFFER_SERIALIZE_FLAG_NO_GLYPH_NAMES: hb_buffer_serialize_flags_t = 4;
+pub const HB_BUFFER_SERIALIZE_FLAG_GLYPH_EXTENTS: hb_buffer_serialize_flags_t = 8;
+pub const HB_BUFFER_SERIALIZE_FLAG_GLYPH_FLAGS: hb_buffer_serialize_flags_t = 16;
+pub const HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES: hb_buffer_serialize_flags_t = 32;
+pub const HB_BUFFER_SERIALIZE_FLAG_DEFINED: hb_buffer_serialize_flags_t = 63;
 pub type hb_buffer_serialize_flags_t = ::std::os::raw::c_uint;
-pub const hb_buffer_serialize_format_t_HB_BUFFER_SERIALIZE_FORMAT_TEXT:
-    hb_buffer_serialize_format_t = 1413830740;
-pub const hb_buffer_serialize_format_t_HB_BUFFER_SERIALIZE_FORMAT_JSON:
-    hb_buffer_serialize_format_t = 1246973774;
-pub const hb_buffer_serialize_format_t_HB_BUFFER_SERIALIZE_FORMAT_INVALID:
-    hb_buffer_serialize_format_t = 0;
+pub const HB_BUFFER_SERIALIZE_FORMAT_TEXT: hb_buffer_serialize_format_t = 1413830740;
+pub const HB_BUFFER_SERIALIZE_FORMAT_JSON: hb_buffer_serialize_format_t = 1246973774;
+pub const HB_BUFFER_SERIALIZE_FORMAT_INVALID: hb_buffer_serialize_format_t = 0;
 pub type hb_buffer_serialize_format_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_buffer_serialize_format_from_string(
@@ -13649,20 +12792,15 @@ extern "C" {
         format: hb_buffer_serialize_format_t,
     ) -> hb_bool_t;
 }
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_EQUAL: hb_buffer_diff_flags_t = 0;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_CONTENT_TYPE_MISMATCH: hb_buffer_diff_flags_t =
-    1;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_LENGTH_MISMATCH: hb_buffer_diff_flags_t = 2;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_NOTDEF_PRESENT: hb_buffer_diff_flags_t = 4;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_DOTTED_CIRCLE_PRESENT: hb_buffer_diff_flags_t =
-    8;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_CODEPOINT_MISMATCH: hb_buffer_diff_flags_t =
-    16;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_CLUSTER_MISMATCH: hb_buffer_diff_flags_t = 32;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_GLYPH_FLAGS_MISMATCH: hb_buffer_diff_flags_t =
-    64;
-pub const hb_buffer_diff_flags_t_HB_BUFFER_DIFF_FLAG_POSITION_MISMATCH: hb_buffer_diff_flags_t =
-    128;
+pub const HB_BUFFER_DIFF_FLAG_EQUAL: hb_buffer_diff_flags_t = 0;
+pub const HB_BUFFER_DIFF_FLAG_CONTENT_TYPE_MISMATCH: hb_buffer_diff_flags_t = 1;
+pub const HB_BUFFER_DIFF_FLAG_LENGTH_MISMATCH: hb_buffer_diff_flags_t = 2;
+pub const HB_BUFFER_DIFF_FLAG_NOTDEF_PRESENT: hb_buffer_diff_flags_t = 4;
+pub const HB_BUFFER_DIFF_FLAG_DOTTED_CIRCLE_PRESENT: hb_buffer_diff_flags_t = 8;
+pub const HB_BUFFER_DIFF_FLAG_CODEPOINT_MISMATCH: hb_buffer_diff_flags_t = 16;
+pub const HB_BUFFER_DIFF_FLAG_CLUSTER_MISMATCH: hb_buffer_diff_flags_t = 32;
+pub const HB_BUFFER_DIFF_FLAG_GLYPH_FLAGS_MISMATCH: hb_buffer_diff_flags_t = 64;
+pub const HB_BUFFER_DIFF_FLAG_POSITION_MISMATCH: hb_buffer_diff_flags_t = 128;
 pub type hb_buffer_diff_flags_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_buffer_diff(
@@ -13909,13 +13047,13 @@ extern "C" {
         shape_plan: *mut hb_shape_plan_t,
     ) -> *const ::std::os::raw::c_char;
 }
-pub const hb_style_tag_t_HB_STYLE_TAG_ITALIC: hb_style_tag_t = 1769234796;
-pub const hb_style_tag_t_HB_STYLE_TAG_OPTICAL_SIZE: hb_style_tag_t = 1869640570;
-pub const hb_style_tag_t_HB_STYLE_TAG_SLANT_ANGLE: hb_style_tag_t = 1936486004;
-pub const hb_style_tag_t_HB_STYLE_TAG_SLANT_RATIO: hb_style_tag_t = 1399615092;
-pub const hb_style_tag_t_HB_STYLE_TAG_WIDTH: hb_style_tag_t = 2003072104;
-pub const hb_style_tag_t_HB_STYLE_TAG_WEIGHT: hb_style_tag_t = 2003265652;
-pub const hb_style_tag_t__HB_STYLE_TAG_MAX_VALUE: hb_style_tag_t = 2147483647;
+pub const HB_STYLE_TAG_ITALIC: hb_style_tag_t = 1769234796;
+pub const HB_STYLE_TAG_OPTICAL_SIZE: hb_style_tag_t = 1869640570;
+pub const HB_STYLE_TAG_SLANT_ANGLE: hb_style_tag_t = 1936486004;
+pub const HB_STYLE_TAG_SLANT_RATIO: hb_style_tag_t = 1399615092;
+pub const HB_STYLE_TAG_WIDTH: hb_style_tag_t = 2003072104;
+pub const HB_STYLE_TAG_WEIGHT: hb_style_tag_t = 2003265652;
+pub const _HB_STYLE_TAG_MAX_VALUE: hb_style_tag_t = 2147483647;
 pub type hb_style_tag_t = ::std::os::raw::c_uint;
 extern "C" {
     pub fn hb_style_get_value(font: *mut hb_font_t, style_tag: hb_style_tag_t) -> f32;
@@ -13975,6 +13113,50 @@ extern "C" {
 }
 extern "C" {
     pub fn hb_ft_font_set_funcs(font: *mut hb_font_t);
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct _bindgen_ty_3 {
+    pub err_code: ::std::os::raw::c_int,
+    pub err_msg: *const ::std::os::raw::c_char,
+}
+#[test]
+fn bindgen_test_layout__bindgen_ty_3() {
+    const UNINIT: ::std::mem::MaybeUninit<_bindgen_ty_3> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<_bindgen_ty_3>(),
+        16usize,
+        concat!("Size of: ", stringify!(_bindgen_ty_3))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<_bindgen_ty_3>(),
+        8usize,
+        concat!("Alignment of ", stringify!(_bindgen_ty_3))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).err_code) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(_bindgen_ty_3),
+            "::",
+            stringify!(err_code)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).err_msg) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(_bindgen_ty_3),
+            "::",
+            stringify!(err_msg)
+        )
+    );
+}
+extern "C" {
+    pub static ft_errors: [_bindgen_ty_3; 96usize];
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

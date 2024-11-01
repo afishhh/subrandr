@@ -167,3 +167,9 @@ impl BoundingBox {
         }
     }
 }
+
+impl Default for BoundingBox {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     ffi::{CStr, CString},
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,
@@ -60,12 +59,16 @@ type MmCoords = [FT_Fixed; T1_MAX_MM_AXIS as usize];
 
 struct SharedFaceData {
     axes: Vec<Axis>,
-    default_coords: MmCoords,
 }
 
 impl SharedFaceData {
     fn get_ref(face: FT_Face) -> &'static SharedFaceData {
         unsafe { &*((*face).generic.data as *const SharedFaceData) }
+    }
+
+    unsafe extern "C" fn finalize(face: *mut std::ffi::c_void) {
+        let face = face as FT_Face;
+        drop(unsafe { Box::from_raw((*face).generic.data) });
     }
 }
 
@@ -115,10 +118,9 @@ impl Face {
 
         unsafe {
             // TODO: finalizer
-            (*face).generic.data = Box::into_raw(Box::new(SharedFaceData {
-                axes,
-                default_coords,
-            })) as *mut std::ffi::c_void;
+            (*face).generic.data =
+                Box::into_raw(Box::new(SharedFaceData { axes })) as *mut std::ffi::c_void;
+            (*face).generic.finalizer = Some(SharedFaceData::finalize);
         }
 
         Self {
@@ -128,7 +130,6 @@ impl Face {
     }
 
     #[inline(always)]
-    #[expect(dead_code)]
     pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
         Font {
             ft_face: self.face,
@@ -205,12 +206,7 @@ impl Face {
 
 impl std::fmt::Debug for Face {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Face({:?}@{:?}, ",
-            unsafe { CStr::from_ptr((*self.face).family_name) },
-            self.face,
-        )?;
+        write!(f, "Face({:?}@{:?}, ", self.family_name(), self.face,)?;
 
         let s = unsafe { (*self.face).style_flags };
         if (s & FT_STYLE_FLAG_ITALIC as FT_Long) != 0 {

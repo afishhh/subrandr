@@ -1,12 +1,12 @@
 use std::{
     fmt::Debug,
-    ops::{Deref, Index},
-    slice::SliceIndex,
+    ops::{Deref, Range, RangeBounds},
 };
 
 pub struct RcArray<T> {
     refcount: *mut u32,
     elements: *const [T],
+    range: Range<usize>,
 }
 
 impl<T> RcArray<T> {
@@ -14,6 +14,7 @@ impl<T> RcArray<T> {
         Self {
             refcount: Box::into_raw(Box::new(1)),
             elements,
+            range: 0..elements.len(),
         }
     }
 
@@ -22,10 +23,21 @@ impl<T> RcArray<T> {
         unsafe { Self::from_raw(Box::into_raw(slice)) }
     }
 
-    pub fn slice(array: RcArray<T>, range: impl SliceIndex<[T], Output = [T]>) -> Self {
+    pub fn slice(array: RcArray<T>, range: impl RangeBounds<usize>) -> Self {
+        // TODO: std::slice::range here
+        let array = std::mem::ManuallyDrop::new(array);
         Self {
             refcount: array.refcount,
-            elements: unsafe { (*array.elements).index(range) },
+            elements: array.elements,
+            range: match range.start_bound() {
+                std::ops::Bound::Included(i) => array.range.start + *i,
+                std::ops::Bound::Excluded(i) => array.range.start + *i + 1,
+                std::ops::Bound::Unbounded => array.range.start,
+            }..match range.end_bound() {
+                std::ops::Bound::Included(i) => array.range.start + *i + 1,
+                std::ops::Bound::Excluded(i) => array.range.start + *i,
+                std::ops::Bound::Unbounded => array.range.end,
+            },
         }
     }
 }
@@ -34,7 +46,7 @@ impl<T> Deref for RcArray<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.elements }
+        unsafe { &(*self.elements)[self.range.clone()] }
     }
 }
 
@@ -46,6 +58,7 @@ impl<T> Clone for RcArray<T> {
                 self.refcount
             },
             elements: self.elements,
+            range: self.range.clone(),
         }
     }
 }

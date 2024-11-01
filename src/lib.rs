@@ -7,6 +7,7 @@ use util::{BoundingBox, Point2, RcArray};
 
 pub mod ass;
 mod outline;
+mod rasterize;
 pub mod srv3;
 mod text;
 mod util;
@@ -765,22 +766,15 @@ impl<'a> Renderer<'a> {
     }
 
     fn horizontal_line(&mut self, x: i32, y: i32, w: u32, color: u32) {
-        let rgba = [
-            ((color & 0xFF000000) >> 24) as u8,
-            ((color & 0x00FF0000) >> 16) as u8,
-            ((color & 0x0000FF00) >> 8) as u8,
-            (color & 0x000000FF) as u8,
-        ];
-
-        let x = if x < 0 { 0u32 } else { x as u32 };
-        let y = if y < 0 { return } else { y as u32 };
-        if y >= self.height {
-            return;
-        }
-
-        for x in x..(x + w).min(self.width) {
-            *self.pixel(x, y) = rgba;
-        }
+        rasterize::horizontal_line(
+            y,
+            x,
+            x.saturating_add_unsigned(w),
+            &mut self.buffer,
+            self.width,
+            self.height,
+            color,
+        )
     }
 
     fn rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32) {
@@ -894,6 +888,10 @@ impl<'a> Renderer<'a> {
     }
 
     fn draw_outline(&mut self, x: i32, y: i32, outline: &outline::Outline, color: u32) {
+        if !outline.has_segments() {
+            return;
+        }
+
         for point in outline.points.iter() {
             let (x, y) = (point.x as i32 + x, point.y as i32 + y);
             if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
@@ -912,20 +910,7 @@ impl<'a> Renderer<'a> {
 
         const SAMPLES: i32 = 20000;
         for i in 0..SAMPLES {
-            let t = (outline.segments() as f32 / SAMPLES as f32) * i as f32;
-            let p = outline.evaluate(t);
-            let (x, y) = (p.x as i32 + x, p.y as i32 + y);
-            if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
-                continue;
-            }
-            *self.pixel(x as u32, y as u32) = color.to_be_bytes();
-        }
-    }
-
-    fn draw_curve(&mut self, x: i32, y: i32, outline: &outline::Curve, color: u32) {
-        const SAMPLES: i32 = 20000;
-        for i in 0..SAMPLES {
-            let t = (1.0 as f32 / SAMPLES as f32) * i as f32;
+            let t = (outline.nsegments() as f32 / SAMPLES as f32) * i as f32;
             let p = outline.evaluate(t);
             let (x, y) = (p.x as i32 + x, p.y as i32 + y);
             if x < 0 || x >= self.width as i32 || y < 0 || y >= self.height as i32 {
@@ -941,23 +926,6 @@ impl<'a> Renderer<'a> {
         }
 
         self.buffer.fill(0);
-
-        use util::math::Point2;
-        // let mut curve = spline::Curve {
-        //     kind: spline::CurveKind::CubicBezier,
-        //     control_points: [
-        //         Point2::new(200.0, 200.0),
-        //         Point2::new(300.0, 800.0),
-        //         Point2::new(800.0, 800.0),
-        //         Point2::new(1000.0, 700.0),
-        //     ],
-        // };
-
-        // self.draw_curve(0, 0, &curve, 0xFF0000FF);
-
-        // curve.kind = spline::CurveKind::BSpline;
-
-        // self.draw_curve(0, 0, &curve, 0x0000FFFF);
 
         self.debug_text(
             self.width as i32,
@@ -1055,7 +1023,6 @@ impl<'a> Renderer<'a> {
                     0xFF00FFFF,
                 );
 
-                let mut last = 0;
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
 
@@ -1142,15 +1109,6 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
-
-        // let shaped = self
-        //     .text
-        //     .shape_text(&font, "あああああLLlloああああああああ");
-        // self.paint_text(50, 750, &font, &shaped, 0.85);
-        //
-        // let font = self.face.with_size(32.0);
-        // let shaped = self.text.shape_text(&font, "全角文字");
-        // self.paint_text(200, 300, &font, &shaped, 1.0);
     }
 
     pub fn bitmap(&self) -> &[u8] {

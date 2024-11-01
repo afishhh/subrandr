@@ -617,6 +617,10 @@ pub fn parse(text: &str) -> Result<Script, Error> {
 
             let mut events = vec![];
             for line in section.lines().skip(1) {
+                if line.starts_with("Comment:") {
+                    continue;
+                }
+
                 events.push(parse_event_line(version, line));
             }
 

@@ -72,11 +72,36 @@ impl Outline {
         }
     }
 
-    pub fn push_line_point(&mut self, next: Point2) {
-        self.push_spline(SplineDegree::Linear)
-            .add_point(next)
-            .finish()
-            .unwrap()
+    pub fn push_cubic_bspline(&mut self, p1: Point2, p2: Point2, p3: Point2) {
+        self.points.extend_from_slice(&[p1, p2, p3]);
+        self.segments.push((SplineDegree::Cubic, self.points.len()))
+    }
+
+    pub fn push_cubic_bezier(&mut self, p1: Point2, p2: Point2, p3: Point2) {
+        self.points
+            .extend_from_slice(&cubic_bezier_p123_to_bspline_b123(p1, p2, p3));
+        self.segments.push((SplineDegree::Cubic, self.points.len()))
+    }
+
+    pub fn append_point(&mut self, point: Point2) {
+        assert!(!self.segments.is_empty());
+
+        self.points.push(point);
+        let segment = self
+            .segments
+            .last_mut()
+            .expect("Outline::segments should not be empty");
+        segment.1 += 1;
+    }
+
+    pub fn push_line_point(&mut self, point: Point2) {
+        self.points.push(point);
+        if let Some((SplineDegree::Linear, last)) = self.segments.last_mut() {
+            *last += 1;
+        } else {
+            self.segments
+                .push((SplineDegree::Linear, self.points.len()));
+        }
     }
 }
 
@@ -133,13 +158,28 @@ impl Drop for SplineBuilder<'_> {
     }
 }
 
-#[inline]
-fn cubic_bezier_to_bspline(p0: Point2, p1: Point2, p2: Point2, p3: Point2) -> [Point2; 4] {
+#[inline(always)]
+fn cubic_bezier_p012_to_bspline_b0(p0: Point2, p1: Point2, p2: Point2) -> Point2 {
+    (p0.to_vec() * 6.0 - p1.to_vec() * 7.0 + p2.to_vec() * 2.0).to_point()
+}
+
+#[inline(always)]
+fn cubic_bezier_p123_to_bspline_b123(p1: Point2, p2: Point2, p3: Point2) -> [Point2; 3] {
     [
-        (p0.to_vec() * 6.0 - p1.to_vec() * 7.0 + p2.to_vec() * 2.0).to_point(),
         (p1.to_vec() * 2.0 - p2.to_vec()).to_point(),
         (p2.to_vec() * 2.0 - p1.to_vec()).to_point(),
         (p3.to_vec() * 6.0 - p2.to_vec() * 7.0 + p1.to_vec() * 2.0).to_point(),
+    ]
+}
+
+#[inline(always)]
+fn cubic_bezier_to_bspline(p0: Point2, p1: Point2, p2: Point2, p3: Point2) -> [Point2; 4] {
+    let b123 = cubic_bezier_p123_to_bspline_b123(p0, p1, p2);
+    [
+        cubic_bezier_p012_to_bspline_b0(p0, p1, p2),
+        b123[0],
+        b123[1],
+        b123[2],
     ]
 }
 

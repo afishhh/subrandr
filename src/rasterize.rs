@@ -57,8 +57,6 @@ impl Bresenham {
     }
 
     pub fn advance_low(&mut self) -> bool {
-        debug_assert!(self.x <= self.x1);
-
         if self.d > 0 {
             self.y += self.i;
             self.d -= 2 * self.dx;
@@ -99,8 +97,6 @@ impl Bresenham {
     }
 
     pub fn advance_high(&mut self) -> bool {
-        debug_assert!(self.y <= self.y1);
-
         if self.d > 0 {
             self.x += self.i;
             self.d -= 2 * self.dy;

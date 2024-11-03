@@ -1,5 +1,3 @@
-use text_sys::hb_draw_funcs_set_quadratic_to_func;
-
 #[derive(Debug, Clone)]
 struct Bresenham {
     dx: i32,
@@ -252,6 +250,55 @@ pub fn horizontal_line(
             width as i32,
             color,
         )
+    }
+}
+
+pub fn stroke_polygon(
+    points: impl IntoIterator<Item = (i32, i32)>,
+    buffer: &mut [u8],
+    width: u32,
+    height: u32,
+    color: u32,
+) {
+    check_buffer!("stroke_rectangle", buffer, width, height);
+
+    let stride = 4 * width as usize;
+    let mut it = points.into_iter();
+    let Some(first) = it.next() else {
+        return;
+    };
+
+    let mut last = first;
+    for next in it {
+        unsafe {
+            line_unchecked(
+                last.0,
+                last.1,
+                next.0,
+                next.1,
+                buffer,
+                stride,
+                width as i32,
+                height as i32,
+                color,
+            );
+        }
+
+        last = next;
+    }
+
+    unsafe {
+        line_unchecked(
+            last.0,
+            last.1,
+            first.0,
+            first.1,
+            buffer,
+            stride,
+            width as i32,
+            height as i32,
+            color,
+        );
     }
 }
 

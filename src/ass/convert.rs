@@ -1,4 +1,10 @@
-use crate::{Segment, TextSegment, TextWrappingMode};
+use std::num::IntErrorKind;
+
+use crate::{
+    outline::{Outline, OutlineBuilder},
+    util::{BoundingBox, Point2},
+    Rect, Segment, TextSegment, TextWrappingMode,
+};
 
 use super::*;
 

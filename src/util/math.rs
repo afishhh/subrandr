@@ -1,7 +1,8 @@
 use std::{
+    arch::asm,
     fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
 };
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -36,8 +37,8 @@ impl Debug for Point2 {
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
 pub struct Vec2 {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Vec2 {
@@ -51,6 +52,58 @@ impl Vec2 {
 
     pub const fn to_point(self) -> Point2 {
         Point2::new(self.x, self.y)
+    }
+
+    pub fn length(self) -> f32 {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    /// Calculates the dot product of two vectors.
+    ///
+    /// The dot product of two (2d) vectors is defined for vector u and v as:
+    /// u⋅v = u.x * v.x + u.y * v.y
+    ///
+    /// However there is also a useful geometric definition:
+    /// u⋅v = ||u|| * ||v|| * cos(θ)
+    /// where θ is the anglge between u and v.
+    pub fn dot(self, other: Vec2) -> f32 {
+        self.x * other.x + self.y * other.y
+    }
+
+    /// Calculates the cross product of two vectors.
+    ///
+    /// # Note
+    ///
+    /// The cross product of two (2d) vectors is defined for vector u and v as:
+    /// u⨯v = u.x * v.y - u.y * v.x
+    ///
+    /// However there is also a useful geometric definition:
+    /// u⨯v = ||u|| * ||v|| * sin(θ)
+    ///
+    /// If this value is negative that means that the second vector is
+    /// in the "clockwise direction" while if it positive then
+    /// it is in the "counter-clockwise direction".
+    ///
+    /// another NOTE: This terminology is made up and probably not very formal.
+    pub fn cross(self, other: Vec2) -> f32 {
+        self.x * other.y - self.y * other.x
+    }
+
+    pub fn normalize(self) -> Vec2 {
+        #[cfg(target_feature = "sse")]
+        unsafe {
+            let length_sq = self.x * self.x + self.y * self.y;
+            let mut invlength: f32;
+            asm!("rsqrtss {}, {}", out(xmm_reg) invlength, in(xmm_reg) length_sq);
+            // rsqrtss + one newton-raphson step = 22-bits of accuracy
+            // still faster than sqrt
+            invlength *= 1.5 - (length_sq * 0.5 * invlength * invlength);
+            self * invlength
+        }
+        #[cfg(not(target_feature = "sse"))]
+        {
+            self / self.length()
+        }
     }
 
     pub const ZERO: Self = Self::new(0., 0.);
@@ -73,46 +126,66 @@ impl Mul<f32> for Vec2 {
     }
 }
 
+impl Div<f32> for Vec2 {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        Self {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
+    }
+}
+
 macro_rules! impl_binop {
-    ($trait: ident, $trait_assign: ident, $fn: ident, $fn_assign: ident, $dst: ident, $operator: tt, $operator_assign: tt, $src: ident) => {
+    (@arg_or_self $arg: ident) => { $arg };
+    (@arg_or_self) => { Self };
+    ($trait: ident, $fn: ident$(, $trait_assign: ident, $fn_assign: ident)?; $dst: ident, $operator: tt, $operator_assign: tt, $src: ident$(, $output: ident)?) => {
         impl $trait<$src> for $dst {
-            type Output = Self;
+            type Output = impl_binop!(@arg_or_self $($output)?);
 
             fn $fn(self, rhs: $src)-> Self::Output {
-                Self {
-                    x: self.x $operator rhs.x,
-                    y: self.y $operator rhs.y,
-                }
+                <impl_binop!(@arg_or_self $($output)?)>::new(
+                    self.x $operator rhs.x,
+                    self.y $operator rhs.y,
+                )
             }
         }
 
-        impl $trait_assign<$src> for $dst {
-            fn $fn_assign(&mut self, rhs: $src) {
-                self.x $operator_assign rhs.x;
-                self.y $operator_assign rhs.y;
+        $(
+            impl $trait_assign<$src> for $dst {
+                fn $fn_assign(&mut self, rhs: $src) {
+                    self.x $operator_assign rhs.x;
+                    self.y $operator_assign rhs.y;
+                }
             }
-        }
+        )?
     };
 }
 
 impl_binop!(
-    Add, AddAssign, add, add_assign,
+    Add, add, AddAssign, add_assign;
     Vec2, +, +=, Vec2
 );
 
 impl_binop!(
-    Sub, SubAssign, sub, sub_assign,
+    Sub, sub, SubAssign, sub_assign;
     Vec2, -, -=, Vec2
 );
 
 impl_binop!(
-    Add, AddAssign, add, add_assign,
+    Add, add, AddAssign, add_assign;
     Point2, +, +=, Vec2
 );
 
 impl_binop!(
-    Sub, SubAssign, sub, sub_assign,
+    Sub, sub, SubAssign, sub_assign;
     Point2, -, -=, Vec2
+);
+
+impl_binop!(
+    Sub, sub;
+    Point2, -, -=, Point2, Vec2
 );
 
 impl Sum for Vec2 {

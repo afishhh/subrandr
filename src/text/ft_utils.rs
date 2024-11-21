@@ -39,7 +39,7 @@ unsafe impl Send for Library {}
 unsafe impl Sync for Library {}
 
 pub fn f32_to_fractional_points(value: f32) -> FT_F26Dot6 {
-    (value * 26.6).round() as i64
+    (value * 26.6).round() as FT_F26Dot6
 }
 
 pub fn fractional_points_to_f32(value: FT_F26Dot6) -> f32 {
@@ -47,7 +47,7 @@ pub fn fractional_points_to_f32(value: FT_F26Dot6) -> f32 {
 }
 
 pub fn f32_to_fixed_point(value: f32) -> FT_Fixed {
-    (value * 65536.0).round() as i64
+    (value * 65536.0).round() as FT_Fixed
 }
 
 pub fn fixed_point_to_f32(value: FT_Fixed) -> f32 {

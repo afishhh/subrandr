@@ -10,15 +10,23 @@ pub enum SplineDegree {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Segment {
+pub struct Segment {
     degree: SplineDegree,
     end_of_contour: bool,
     // Not usize so that `Segment` fits in 8 bytes
     end: u32,
 }
 
-// TODO: I GOT TROLLED SO HARD
-//       These are supposed to be beziers, not B-splines.
+impl Segment {
+    pub fn degree(&self) -> SplineDegree {
+        self.degree
+    }
+
+    pub fn end_of_contour(&self) -> bool {
+        self.end_of_contour
+    }
+}
+
 #[derive(Clone)]
 pub struct Outline {
     points: Vec<Point2>,
@@ -107,16 +115,16 @@ impl Outline {
     }
 
     #[inline(always)]
-    pub fn nsegments(&self) -> usize {
-        self.segments.len()
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
     }
 
     #[inline(always)]
-    pub fn has_segments(&self) -> bool {
-        !self.segments.is_empty()
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
     }
 
-    fn points_for_segment(&self, segment @ Segment { end, degree, .. }: Segment) -> &[Point2] {
+    pub fn points_for_segment(&self, Segment { end, degree, .. }: Segment) -> &[Point2] {
         let start;
         let nend;
 
@@ -136,7 +144,25 @@ impl Outline {
     }
 
     fn evaluate_segment_normalized(&self, i: usize, t: f32) -> Point2 {
-        evaluate_bezier(self.points_for_segment(self.segments[i]), t)
+        assert!(0.0 <= t && t <= 1.0);
+
+        let value = evaluate_bezier(self.points_for_segment(self.segments[i]), t);
+        eprintln!(
+            "evaluate_segment_normalized({i}, {t}), {:?} = {value:?}",
+            self.points_for_segment(self.segments[i])
+        );
+        value
+    }
+
+    pub fn evaluate_segment(&self, segment: Segment, t: f32) -> Point2 {
+        assert!(0.0 <= t && t <= 1.0);
+
+        let value = evaluate_bezier(self.points_for_segment(segment), t);
+        // eprintln!(
+        //     "evaluate_segment({segment:?}, {t}), {:?} = {value:?}",
+        //     self.points_for_segment(segment)
+        // );
+        value
     }
 
     pub fn evaluate(&self, t: f32) -> Point2 {
@@ -160,14 +186,28 @@ impl Debug for Outline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Outline ")?;
         let mut list = f.debug_list();
-        for segment in self.segments.iter().copied() {
-            let points = self.points_for_segment(segment);
+        let mut it = self.segments.iter().copied().enumerate();
+        let mut last = 0;
+        while let Some(end_of_contour) =
+            it.find_map(|(i, s)| if s.end_of_contour { Some(i) } else { None })
+        {
+            let segments = &self.segments[last..end_of_contour];
             list.entry(&fmt_from_fn(|f| {
-                f.debug_struct("Spline")
-                    .field("degree", &segment.degree)
-                    .field("points", &points)
-                    .finish()
+                write!(f, "Contour ")?;
+
+                let mut list = f.debug_list();
+                for segment in segments.iter().copied() {
+                    let points = self.points_for_segment(segment);
+                    list.entry(&fmt_from_fn(|f| {
+                        f.debug_struct("Curve")
+                            .field("degree", &segment.degree)
+                            .field("points", &points)
+                            .finish()
+                    }));
+                }
+                list.finish()
             }));
+            last = end_of_contour;
         }
         list.finish()
     }
@@ -194,7 +234,7 @@ fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
 
     let one_minus_t = 1.0 - t;
 
-    while midpoints.len() > 2 {
+    while midpoints.len() > 1 {
         let new_len = midpoints.len() - 1;
         for i in 0..new_len {
             midpoints[i] = midpoints[i] * one_minus_t + midpoints[i + 1] * t
@@ -202,7 +242,7 @@ fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
         midpoints = &mut midpoints[..new_len];
     }
 
-    return (midpoints[0] * one_minus_t + midpoints[1] * t).to_point();
+    midpoints[0].to_point()
 }
 
 // libass/ass_outline.c
@@ -328,7 +368,7 @@ impl Stroker {
                 dirstr.push('-')
             };
             eprintln!(
-                "stroker: emitting point {point:?}{dirstr}{offset:?}{}",
+                "stroker: emitting point (normal={normalized_offset:?}) {point:?}{dirstr}{offset:?}{}",
                 if let Some(segment) = segment {
                     format!(" and segment {segment:?}")
                 } else {
@@ -368,18 +408,21 @@ impl Stroker {
         dir: StrokerDir,
     ) {
         // TODO: replace with take_last once stable
-        let Some(coeff) = coeffs.last().copied() else {
-            return;
-        };
+        let coeff = coeffs.last().copied().unwrap();
 
         let center = (normal0 + normal1) * coeff;
 
-        self.process_arc(point, normal0, center, &coeffs[..coeffs.len() - 1], dir);
-        self.process_arc(point, center, normal1, &coeffs[..coeffs.len() - 1], dir);
+        dbg!(center);
 
         // WHAT: Hopefully this is correct
-        self.emit_point(point, normal0, None, dir);
-        self.emit_point(point, center, Some(SplineDegree::Quadratic), dir);
+
+        if coeffs.len() > 1 {
+            self.process_arc(point, normal0, center, &coeffs[..coeffs.len() - 1], dir);
+            self.process_arc(point, center, normal1, &coeffs[..coeffs.len() - 1], dir);
+        } else {
+            self.emit_point(point, normal0, Some(SplineDegree::Quadratic), dir);
+            self.emit_point(point, center, None, dir);
+        }
     }
 
     /// Constructs a circular arc between `normal0` and `normal1` anchored at `point`.
@@ -402,7 +445,6 @@ impl Stroker {
 
         let center: Vec2;
         let mut small_angle = true;
-        // WHAT: What is going on?
         // If the angle is greater than 90° (i.e. the cosine is smaller than zero)
         // split the arc into two separate arcs between a center normal vector.
         if cos < 0.0 {
@@ -445,9 +487,13 @@ impl Stroker {
             mul[subdivisions_left].write(cmul);
             // cos(θ/2)**2 * (1 / cos(0/2)) = cos(θ/2)
             cos = (1.0 + cos) * cmul;
+            eprintln!("cmul={cmul} new cos={cos}");
             subdivisions_left -= 1;
         }
 
+        eprintln!("{center:?}");
+
+        // cos²(θ/2)
         mul[subdivisions_left].write((1.0 + cos).recip());
         let mul = unsafe { &*(&mul[subdivisions_left..] as *const [_] as *const [f32]) };
 

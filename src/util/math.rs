@@ -185,7 +185,7 @@ impl_binop!(
 
 impl_binop!(
     Sub, sub;
-    Point2, -, -=, Point2, Vec2
+    Point2, -, _, Point2, Vec2
 );
 
 impl Sum for Vec2 {

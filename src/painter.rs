@@ -1,29 +1,9 @@
-use crate::{outline, rasterize, text};
+use std::ops::Rem;
 
-// enum PainterBuffer<'a> {
-//     Borrowed(&'a mut [u8]),
-//     Owned(Vec<u8>),
-// }
-
-// impl Deref for PainterBuffer<'_> {
-//     type Target = [u8];
-
-//     fn deref(&self) -> &Self::Target {
-//         match self {
-//             PainterBuffer::Borrowed(b) => b,
-//             PainterBuffer::Owned(v) => v,
-//         }
-//     }
-// }
-
-// impl DerefMut for PainterBuffer<'_> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         match self {
-//             PainterBuffer::Borrowed(b) => b,
-//             PainterBuffer::Owned(v) => v,
-//         }
-//     }
-// }
+use crate::{
+    outline, rasterize, text,
+    util::{hsl_to_rgb, rgb_to_hsl},
+};
 
 pub trait PainterBuffer: AsRef<[u8]> + AsMut<[u8]> {}
 
@@ -203,19 +183,48 @@ impl<B: PainterBuffer> Painter<B> {
         )
     }
 
-    pub fn stroke_outline(&mut self, x: i32, y: i32, outline: &outline::Outline, color: u32) {
-        if !outline.has_segments() {
+    pub fn stroke_outline(&mut self, x: i32, y: i32, outline: &outline::Outline, mut color: u32) {
+        if outline.is_empty() {
             return;
         }
 
-        const SAMPLES: i32 = 20000;
-        for i in 0..SAMPLES {
-            let t = (outline.nsegments() as f32 / SAMPLES as f32) * i as f32;
-            let p = outline.evaluate(t);
-            let (x, y) = (p.x as i32 + x, p.y as i32 + y);
-            if self.in_bounds(x, y) {
-                self.dot(x, y, color);
+        // NOTE: For testing, make each outline segment have a rotated hue
+        let [mut h, s, l] = rgb_to_hsl(
+            (color >> 24) as u8,
+            ((color >> 16) & 0xFF) as u8,
+            ((color >> 8) & 0xFF) as u8,
+        );
+
+        let first_point = outline.points()[0];
+        let mut last_point = (x + first_point.x as i32, y + first_point.y as i32);
+
+        for segment in outline.segments().iter().copied() {
+            let [r, g, b] = hsl_to_rgb(h, s, l);
+            color = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | (color & 0xFF);
+
+            if segment.degree() == outline::SplineDegree::Linear {
+                let points = outline.points_for_segment(segment);
+                let (x, y) = (x + points[1].x as i32, y + points[1].y as i32);
+                self.line(last_point.0, last_point.1, x, y, color);
+                last_point = (x, y)
+            } else {
+                dbg!(outline
+                    .points_for_segment(segment)
+                    .iter()
+                    .map(|p| *p + crate::util::math::Vec2::new(x as f32, y as f32))
+                    .collect::<Vec<_>>());
+                const SAMPLES: i32 = 20;
+                for i in 1..=SAMPLES {
+                    let t = i as f32 / SAMPLES as f32;
+                    let p = outline.evaluate_segment(segment, t);
+                    let (x, y) = (p.x as i32 + x, p.y as i32 + y);
+
+                    self.line(last_point.0, last_point.1, x, y, color);
+                    last_point = (x, y);
+                }
             }
+
+            h = (h + 0.05).fract();
         }
     }
 

@@ -847,7 +847,59 @@ impl<'a> Renderer<'a> {
             0xFFFFFFFF,
         );
 
-        let shape_scale = self.dpi as f32 / 72.0;
+        self.draw_outline(
+            0,
+            0,
+            &{
+                let mut builder = OutlineBuilder::new();
+                builder.add_point(Point2::new(0., 0.));
+                builder.add_point(Point2::new(100., 200.));
+                builder.add_point(Point2::new(350., 300.));
+                builder.add_point(Point2::new(400., 300.));
+                builder.add_segment(SplineDegree::Cubic);
+                builder.add_point(Point2::new(300., 200.));
+                builder.add_point(Point2::new(550., 100.));
+                builder.add_point(Point2::new(500., 0.));
+                builder.add_segment(SplineDegree::Cubic);
+                builder.add_point(Point2::new(100., 100.));
+                builder.add_segment(SplineDegree::Quadratic);
+                builder.close_contour();
+                builder.build()
+            },
+            0xFFFFFFFF,
+        );
+
+        let shape_scale = self.dpi as f32 * 7.0 / 72.0;
+
+        {
+            let mut c = {
+                let mut b = OutlineBuilder::new();
+                b.add_point(Point2::ZERO);
+                b.add_segment(SplineDegree::Linear);
+                b.add_point(Point2::new(0.0, 100.0));
+                b.add_segment(SplineDegree::Linear);
+                b.add_point(Point2::new(100.0, 100.0));
+                // c.add_segment(SplineDegree::Linear);
+                // c.add_point(Point2::new(100.0, 0.0));
+                b.add_segment(SplineDegree::Linear);
+                b.close_contour();
+                b.build()
+            };
+            let x = 150;
+            let y = 150;
+            println!("{c:?}");
+            c.scale(shape_scale);
+            let outer = outline::stroke(&c, 10.0 * shape_scale, 10.0 * shape_scale, 0.01);
+            self.painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
+
+            dbg!(&c);
+            // dbg!(&outer);
+
+            dbg!(&outer.0);
+            self.draw_outline(x, y, &outer.0, 0xFF0000FF);
+            dbg!(&outer.1);
+            self.draw_outline(x, y, &outer.1, 0x0000FFFF);
+        }
 
         {
             for event in self
@@ -1022,19 +1074,6 @@ impl<'a> Renderer<'a> {
                             for c in s.outlines.iter() {
                                 let mut c = c.clone();
                                 let shape_scale = shape_scale * 5.;
-                                c = {
-                                    let mut c = OutlineBuilder::new();
-                                    c.add_point(Point2::ZERO);
-                                    c.add_segment(SplineDegree::Linear);
-                                    c.add_point(Point2::new(0.0, 100.0));
-                                    c.add_segment(SplineDegree::Linear);
-                                    c.add_point(Point2::new(100.0, 100.0));
-                                    // c.add_segment(SplineDegree::Linear);
-                                    // c.add_point(Point2::new(100.0, 0.0));
-                                    c.add_segment(SplineDegree::Linear);
-                                    c.close_contour();
-                                    c.build()
-                                };
                                 let x = 150;
                                 let y = 150;
                                 println!("{c:?}");
@@ -1050,8 +1089,10 @@ impl<'a> Renderer<'a> {
                                 dbg!(&c);
                                 // dbg!(&outer);
 
-                                self.painter.stroke_outline(x, y, &outer.0, 0xFF0000FF);
-                                self.painter.stroke_outline(x, y, &outer.1, 0x0000FFFF);
+                                dbg!(&outer.0);
+                                self.draw_outline(x, y, &outer.0, 0xFF0000FF);
+                                dbg!(&outer.1);
+                                self.draw_outline(x, y, &outer.1, 0x0000FFFF);
                             }
                         }
                     }

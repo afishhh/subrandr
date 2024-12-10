@@ -4,9 +4,19 @@ pub trait Sealed {}
 
 pub mod math;
 
+use std::mem::MaybeUninit;
+
 pub use math::*;
 mod rcarray;
 pub use rcarray::*;
+
+pub unsafe fn array_assume_init_ref<const N: usize, T>(array: &[MaybeUninit<T>; N]) -> &[T; N] {
+    unsafe { &*(array as *const [_] as *const [T; N]) }
+}
+
+pub unsafe fn slice_assume_init_mut<T>(array: &mut [MaybeUninit<T>]) -> &mut [T] {
+    unsafe { &mut *(array as *mut [_] as *mut [T]) }
+}
 
 pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     let r = r as f32 / 255.0;

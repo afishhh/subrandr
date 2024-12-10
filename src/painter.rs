@@ -1,15 +1,15 @@
-use std::ops::Rem;
+use std::ops::DerefMut;
 
 use crate::{
     outline, rasterize, text,
-    util::{hsl_to_rgb, rgb_to_hsl},
+    util::{hsl_to_rgb, math, rgb_to_hsl},
 };
 
 pub trait PainterBuffer: AsRef<[u8]> + AsMut<[u8]> {}
 
 impl PainterBuffer for [u8] {}
 impl PainterBuffer for Vec<u8> {}
-impl<'a, T: PainterBuffer> PainterBuffer for &'a mut T {}
+impl<'a, T: PainterBuffer + ?Sized> PainterBuffer for &'a mut T {}
 
 pub trait ResizablePainterBuffer: PainterBuffer {
     fn resize(&mut self, size: usize);
@@ -21,7 +21,7 @@ impl ResizablePainterBuffer for Vec<u8> {
     }
 }
 
-impl<'a, T: ResizablePainterBuffer> ResizablePainterBuffer for &'a mut T {
+impl<'a, T: ResizablePainterBuffer + ?Sized> ResizablePainterBuffer for &'a mut T {
     fn resize(&mut self, size: usize) {
         T::resize(*self, size)
     }
@@ -202,7 +202,7 @@ impl<B: PainterBuffer> Painter<B> {
             let [r, g, b] = hsl_to_rgb(h, s, l);
             color = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | (color & 0xFF);
 
-            if segment.degree() == outline::SplineDegree::Linear {
+            if segment.degree() == outline::CurveDegree::Linear {
                 let points = outline.points_for_segment(segment);
                 let (x, y) = (x + points[1].x as i32, y + points[1].y as i32);
                 self.line(last_point.0, last_point.1, x, y, color);
@@ -228,7 +228,42 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
-    pub fn paint_text<'g>(
+    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[math::Point2], color: u32) {
+        let mut last = points[0];
+        for point in &points[1..] {
+            self.line(
+                x + last.x as i32,
+                y + last.y as i32,
+                x + point.x as i32,
+                y + point.y as i32,
+                color,
+            );
+            last = *point;
+        }
+    }
+
+    pub fn stroke_outline_polyline(
+        &mut self,
+        x: i32,
+        y: i32,
+        outline: &outline::Outline,
+        color: u32,
+    ) {
+        if outline.is_empty() {
+            return;
+        }
+
+        for segments in outline.iter_contours() {
+            if segments.is_empty() {
+                continue;
+            }
+
+            let polyline = outline.flatten_contour(segments);
+            self.stroke_polyline(x, y, &polyline, color);
+        }
+    }
+
+    pub fn text<'g>(
         &mut self,
         x: i32,
         y: i32,
@@ -260,5 +295,36 @@ impl<B: ResizablePainterBuffer> Painter<B> {
         self.width = width;
         self.height = height;
         self.buffer.resize((width * height * 4) as usize);
+    }
+}
+
+impl<B: PainterBuffer> Painter<B> {
+    pub fn as_ref(&mut self) -> Painter<&mut B> {
+        Painter {
+            buffer: &mut self.buffer,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    pub fn map<Y: PainterBuffer>(self, mapper: impl FnOnce(B) -> Y) -> Painter<Y> {
+        Painter {
+            buffer: mapper(self.buffer),
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+impl<B: PainterBuffer + DerefMut> Painter<B>
+where
+    B::Target: PainterBuffer,
+{
+    pub fn as_deref(&mut self) -> Painter<&mut B::Target> {
+        Painter {
+            buffer: DerefMut::deref_mut(&mut self.buffer),
+            width: self.width,
+            height: self.height,
+        }
     }
 }

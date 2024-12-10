@@ -14,6 +14,8 @@ pub mod srv3;
 mod text;
 mod util;
 
+pub use painter::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
     TopLeft,
@@ -243,7 +245,7 @@ impl Subtitles {
                 //     y: 0.6,
                 //     alignment: Alignment::Bottom,
                 //     text_wrap: TextWrappingMode::None,
-                //     segments: vec![Segment {
+                //     segments: vec![Segment::Text {
                 //         font: "emoji".to_string(),
                 //         font_size: 32.,
                 //         font_weight: 700,
@@ -252,7 +254,7 @@ impl Subtitles {
                 //         strike_out: false,
                 //         color: 0xFFFFFFFF,
                 //         text: "😭".to_string(),
-                //     }],
+                //     })],
                 // },
             ],
         }
@@ -731,7 +733,6 @@ impl MultilineTextShaper {
 }
 
 pub struct Renderer<'a> {
-    painter: Painter<Vec<u8>>,
     fonts: text::FontManager,
     // always should be 72 for ass?
     dpi: u32,
@@ -739,10 +740,8 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(width: u32, height: u32, subs: &'a Subtitles, dpi: u32) -> Self {
+    pub fn new(subs: &'a Subtitles, dpi: u32) -> Self {
         Self {
-            painter: Painter::new_vec(width, height),
-
             fonts: text::FontManager::new(text::font_backend::platform_default().unwrap()),
             dpi,
             subs,
@@ -761,6 +760,7 @@ impl<'a> Renderer<'a> {
         alignment: Alignment,
         size: f32,
         color: u32,
+        painter: &mut Painter<&mut [u8]>,
     ) {
         let font = self
             .fonts
@@ -774,8 +774,7 @@ impl<'a> Renderer<'a> {
             &text::compute_extents(true, &font, &shaped.glyphs),
             alignment,
         );
-        self.painter
-            .paint_text(x + ox, y + oy, &font, &shaped.glyphs, color);
+        painter.text(x + ox, y + oy, &font, &shaped.glyphs, color);
     }
 
     fn translate_for_aligned_text(
@@ -806,45 +805,49 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    fn draw_outline(&mut self, x: i32, y: i32, outline: &outline::Outline, color: u32) {
-        for point in outline.points() {
-            let (x, y) = (point.x as i32 + x, point.y as i32 + y);
-            if !self.painter.in_bounds(x, y) {
-                continue;
-            }
-            self.debug_text(
-                x,
-                y,
-                &format!("{x},{y}"),
-                Alignment::TopLeft,
-                16.0,
-                0xFFFFFFFF,
-            );
-            self.painter.dot(x, y, 0xFFFFFFFF);
-        }
+    fn draw_outline(
+        &mut self,
+        painter: &mut Painter<&mut [u8]>,
+        x: i32,
+        y: i32,
+        outline: &outline::Outline,
+        color: u32,
+    ) {
+        // for point in outline.points() {
+        //     let (x, y) = (point.x as i32 + x, point.y as i32 + y);
+        //     if !self.painter.in_bounds(x, y) {
+        //         continue;
+        //     }
+        //     self.debug_text(
+        //         x,
+        //         y,
+        //         &format!("{x},{y}"),
+        //         Alignment::TopLeft,
+        //         8.0,
+        //         0xFFFFFFFF,
+        //     );
+        //     self.painter.dot(x, y, 0xFFFFFFFF);
+        // }
 
-        self.painter.stroke_outline(x, y, outline, color);
+        // painter.stroke_outline(x, y, outline, color);
+        painter.stroke_outline_polyline(x, y, outline, color);
     }
 
-    pub fn render(&mut self, t: u32) {
-        if self.painter.height() == 0 || self.painter.height() == 0 {
+    pub fn render(&mut self, mut painter: Painter<&mut [u8]>, t: u32) {
+        if painter.height() == 0 || painter.height() == 0 {
             return;
         }
 
-        self.painter.clear(0x00000000);
+        painter.clear(0x00000000);
 
         self.debug_text(
-            self.painter.width() as i32,
+            painter.width() as i32,
             0,
-            &format!(
-                "{}x{} dpi:{}",
-                self.painter.width(),
-                self.painter.height(),
-                self.dpi
-            ),
+            &format!("{}x{} dpi:{}", painter.width(), painter.height(), self.dpi),
             Alignment::TopRight,
             16.0,
             0xFFFFFFFF,
+            &mut painter,
         );
 
         self.draw_outline(
@@ -875,13 +878,14 @@ impl<'a> Renderer<'a> {
             let mut c = {
                 let mut b = OutlineBuilder::new();
                 b.add_point(Point2::ZERO);
-                b.add_segment(SplineDegree::Linear);
+                b.add_segment(CurveDegree::Linear);
                 b.add_point(Point2::new(0.0, 100.0));
-                b.add_segment(SplineDegree::Linear);
+                b.add_segment(CurveDegree::Linear);
                 b.add_point(Point2::new(100.0, 100.0));
                 // c.add_segment(SplineDegree::Linear);
-                // c.add_point(Point2::new(100.0, 0.0));
-                b.add_segment(SplineDegree::Linear);
+                b.add_point(Point2::new(100.0, 0.0));
+                // b.add_point(Point2::new(150.0, 50.0));
+                b.add_segment(CurveDegree::Quadratic);
                 b.close_contour();
                 b.build()
             };
@@ -890,15 +894,31 @@ impl<'a> Renderer<'a> {
             println!("{c:?}");
             c.scale(shape_scale);
             let outer = outline::stroke(&c, 10.0 * shape_scale, 10.0 * shape_scale, 0.01);
-            self.painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
+            painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
 
             dbg!(&c);
             // dbg!(&outer);
 
+            let outer0_flat = outer.0.flatten_contour(outer.0.segments());
+            let outer1_flat = outer.1.flatten_contour(outer.1.segments());
+            let base_flat = c.flatten_contour(c.segments());
+            // let triangles = polyline::tessellate_area_between_polylines(&outer1_flat, &base_flat);
+            // for (a, b, c) in triangles {
+            //     painter.fill_triangle(
+            //         a.x as i32 + 100,
+            //         a.y as i32 + 100,
+            //         b.x as i32 + 100,
+            //         b.y as i32 + 100,
+            //         c.x as i32 + 100,
+            //         c.y as i32 + 100,
+            //         0x00FF00FF,
+            //     );
+            // }
+
             dbg!(&outer.0);
-            self.draw_outline(x, y, &outer.0, 0xFF0000FF);
+            self.draw_outline(&mut painter, x, y, &outer.0, 0xFF0000FF);
             dbg!(&outer.1);
-            self.draw_outline(x, y, &outer.1, 0x0000FFFF);
+            self.draw_outline(&mut painter, x, y, &outer.1, 0x0000FFFF);
         }
 
         {
@@ -909,8 +929,8 @@ impl<'a> Renderer<'a> {
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
                 println!("{event:?}");
-                let x = (self.painter.width() as f32 * event.x) as u32;
-                let y = (self.painter.height() as f32 * event.y) as u32;
+                let x = (painter.width() as f32 * event.x) as u32;
+                let y = (painter.height() as f32 * event.y) as u32;
 
                 let mut shaper = MultilineTextShaper::new();
                 let mut segment_fonts = vec![];
@@ -962,7 +982,7 @@ impl<'a> Renderer<'a> {
                         VerticalAlignment::Bottom => -(total_rect.h as i32),
                     };
 
-                self.painter.stroke_whrect(
+                painter.stroke_whrect(
                     x + total_rect.x - 1,
                     y + total_rect.y - 1,
                     total_rect.w + 2,
@@ -991,6 +1011,7 @@ impl<'a> Renderer<'a> {
                     total_position_debug_pos.1,
                     16.0,
                     0xFF00FFFF,
+                    &mut painter,
                 );
 
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
@@ -1012,6 +1033,7 @@ impl<'a> Renderer<'a> {
                         Alignment::BottomLeft,
                         16.0,
                         0xFF0000FF,
+                        &mut painter,
                     );
 
                     self.debug_text(
@@ -1025,6 +1047,7 @@ impl<'a> Renderer<'a> {
                         Alignment::TopLeft,
                         16.0,
                         0xFF0000FF,
+                        &mut painter,
                     );
 
                     self.debug_text(
@@ -1038,9 +1061,10 @@ impl<'a> Renderer<'a> {
                         Alignment::BottomRight,
                         16.0,
                         0xFFFFFFFF,
+                        &mut painter,
                     );
 
-                    self.painter.stroke_whrect(
+                    painter.stroke_whrect(
                         paint_box.0,
                         paint_box.1,
                         shaped_segment.paint_rect.w as u32,
@@ -1048,7 +1072,7 @@ impl<'a> Renderer<'a> {
                         0x0000FFFF,
                     );
 
-                    self.painter.horizontal_line(
+                    painter.horizontal_line(
                         paint_box.0 as i32,
                         y + shaped_segment.baseline_offset.1,
                         shaped_segment.paint_rect.w as u32,
@@ -1060,7 +1084,7 @@ impl<'a> Renderer<'a> {
 
                     match segment {
                         Segment::Text(t) => {
-                            self.painter.paint_text(
+                            painter.text(
                                 x,
                                 y,
                                 segment_fonts[shaped_segment.corresponding_input_segment]
@@ -1084,24 +1108,20 @@ impl<'a> Renderer<'a> {
                                     10.0 * shape_scale,
                                     0.01,
                                 );
-                                self.painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
+                                painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
 
                                 dbg!(&c);
                                 // dbg!(&outer);
 
                                 dbg!(&outer.0);
-                                self.draw_outline(x, y, &outer.0, 0xFF0000FF);
+                                self.draw_outline(&mut painter, x, y, &outer.0, 0xFF0000FF);
                                 dbg!(&outer.1);
-                                self.draw_outline(x, y, &outer.1, 0x0000FFFF);
+                                self.draw_outline(&mut painter, x, y, &outer.1, 0x0000FFFF);
                             }
                         }
                     }
                 }
             }
         }
-    }
-
-    pub fn bitmap(&self) -> &[u8] {
-        &self.painter.buffer()
     }
 }

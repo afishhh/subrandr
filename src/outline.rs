@@ -1,9 +1,11 @@
-use std::{fmt::Debug, mem::MaybeUninit};
+use std::{fmt::Debug, mem::MaybeUninit, ops::BitAnd};
 
-use crate::util::{fmt_from_fn, math::*};
+use crate::util::{array_assume_init_ref, fmt_from_fn, math::*, slice_assume_init_mut};
+
+mod flatten;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SplineDegree {
+pub enum CurveDegree {
     Linear = 1,
     Quadratic = 2,
     Cubic = 3,
@@ -11,14 +13,14 @@ pub enum SplineDegree {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Segment {
-    degree: SplineDegree,
+    degree: CurveDegree,
     end_of_contour: bool,
     // Not usize so that `Segment` fits in 8 bytes
     end: u32,
 }
 
 impl Segment {
-    pub fn degree(&self) -> SplineDegree {
+    pub fn degree(&self) -> CurveDegree {
         self.degree
     }
 
@@ -54,7 +56,7 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    pub fn add_segment(&mut self, degree: SplineDegree) {
+    pub fn add_segment(&mut self, degree: CurveDegree) {
         self.last_segment_end += degree as u32;
         self.outline.segments.push(Segment {
             degree,
@@ -180,18 +182,41 @@ impl Outline {
             *p = (p.to_vec() * xy).to_point()
         }
     }
+
+    pub fn flatten_segment(&self, segment: Segment, out: &mut Vec<Point2>) {
+        flatten::flatten(self, segment, 0.25, out);
+    }
+
+    pub fn iter_contours(&self) -> impl Iterator<Item = &[Segment]> + use<'_> {
+        let mut it = self.segments.iter().copied().enumerate();
+        let mut last = 0;
+        std::iter::from_fn(move || {
+            if let Some(end_of_contour) =
+                it.find_map(|(i, s)| if s.end_of_contour { Some(i) } else { None })
+            {
+                let segments = &self.segments[last..=end_of_contour];
+                last = end_of_contour;
+                Some(segments)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2> {
+        let mut polyline = vec![self.points_for_segment(segments[0])[0]];
+        for segment in segments {
+            self.flatten_segment(*segment, &mut polyline);
+        }
+        polyline
+    }
 }
 
 impl Debug for Outline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Outline ")?;
         let mut list = f.debug_list();
-        let mut it = self.segments.iter().copied().enumerate();
-        let mut last = 0;
-        while let Some(end_of_contour) =
-            it.find_map(|(i, s)| if s.end_of_contour { Some(i) } else { None })
-        {
-            let segments = &self.segments[last..end_of_contour];
+        for segments in self.iter_contours() {
             list.entry(&fmt_from_fn(|f| {
                 write!(f, "Contour ")?;
 
@@ -207,7 +232,6 @@ impl Debug for Outline {
                 }
                 list.finish()
             }));
-            last = end_of_contour;
         }
         list.finish()
     }
@@ -224,12 +248,14 @@ fn b_spline_to_bezier(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> [Point2
 }
 
 fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
+    assert!(points.len() < 10);
+
     let mut midpoints_buffer = [MaybeUninit::<Vec2>::uninit(); 10];
     let mut midpoints = {
         for (i, point) in points.iter().copied().enumerate() {
             midpoints_buffer[i].write(point.to_vec());
         }
-        unsafe { &mut *(&mut midpoints_buffer[..points.len()] as *mut [_] as *mut [Vec2]) }
+        unsafe { slice_assume_init_mut(&mut midpoints_buffer[..points.len()]) }
     };
 
     let one_minus_t = 1.0 - t;
@@ -334,6 +360,14 @@ impl StrokerDir {
     }
 }
 
+impl BitAnd for StrokerDir {
+    type Output = StrokerDir;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        StrokerDir(self.0 & rhs.0)
+    }
+}
+
 impl Debug for StrokerDir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self.0 {
@@ -346,18 +380,28 @@ impl Debug for StrokerDir {
     }
 }
 
+// Why does this normal store a length?
+#[derive(Debug)]
+struct WeirdNormal {
+    v: Vec2,
+    len: f32,
+}
+
+impl WeirdNormal {
+    fn new(v: Vec2, len: f32) -> Self {
+        Self { v, len }
+    }
+}
+
 impl Stroker {
     fn emit_point(
         &mut self,
         point: Point2,
-        normalized_offset: Vec2,
-        segment: Option<SplineDegree>,
+        normal: Vec2,
+        segment: Option<CurveDegree>,
         dir: StrokerDir,
     ) {
-        let offset = Vec2::new(
-            normalized_offset.x * self.xbord,
-            normalized_offset.y * self.ybord,
-        );
+        let offset = Vec2::new(normal.x * self.xbord, normal.y * self.ybord);
 
         if dir.0 != 0 {
             let mut dirstr = String::with_capacity(2);
@@ -368,7 +412,7 @@ impl Stroker {
                 dirstr.push('-')
             };
             eprintln!(
-                "stroker: emitting point (normal={normalized_offset:?}) {point:?}{dirstr}{offset:?}{}",
+                "stroker: emitting point (normal={normal:?}) {point:?}{dirstr}{offset:?}{}",
                 if let Some(segment) = segment {
                     format!(" and segment {segment:?}")
                 } else {
@@ -392,12 +436,10 @@ impl Stroker {
         }
     }
 
-    fn emit_first_point(&mut self, point: Point2, segment: Option<SplineDegree>, dir: StrokerDir) {
+    fn emit_first_point(&mut self, point: Point2, segment: Option<CurveDegree>, dir: StrokerDir) {
         self.last_skip.0 &= !dir.0;
         self.emit_point(point, self.last_normal, segment, dir);
     }
-
-    // TODO: emit_bezier_segment which transforms bezier points to B-spline points.
 
     fn process_arc(
         &mut self,
@@ -420,7 +462,7 @@ impl Stroker {
             self.process_arc(point, normal0, center, &coeffs[..coeffs.len() - 1], dir);
             self.process_arc(point, center, normal1, &coeffs[..coeffs.len() - 1], dir);
         } else {
-            self.emit_point(point, normal0, Some(SplineDegree::Quadratic), dir);
+            self.emit_point(point, normal0, Some(CurveDegree::Quadratic), dir);
             self.emit_point(point, center, None, dir);
         }
     }
@@ -558,10 +600,10 @@ impl Stroker {
                 self.emit_point(
                     point,
                     previous_normal,
-                    Some(SplineDegree::Linear),
+                    Some(CurveDegree::Linear),
                     StrokerDir(!self.last_skip.0 & skip.0),
                 );
-                self.emit_point(point, Vec2::ZERO, Some(SplineDegree::Linear), skip)
+                self.emit_point(point, Vec2::ZERO, Some(CurveDegree::Linear), skip)
             }
             self.last_skip = skip;
             // WHAT: Hopefully this is correct
@@ -589,17 +631,20 @@ impl Stroker {
         }
     }
 
+    fn is_epsilon_vec(&self, v: Vec2) -> bool {
+        v.x > -self.eps && v.x < self.eps && v.y > -self.eps && v.y < self.eps
+    }
+
     fn add_line(&mut self, p1: Point2, dir: StrokerDir) {
-        let dx = p1.x - self.last_point.x;
-        let dy = p1.y - self.last_point.y;
+        let d = p1 - self.last_point;
 
         // Ignore lines shorter than eps.
-        if dx > -self.eps && dx < self.eps && dy > -self.eps && dy < self.eps {
+        if self.is_epsilon_vec(d) {
             return;
         }
 
-        // WHAT: why multiply by yscale and xscale?
-        let deriv = Vec2::new(dy * self.yscale, -dx * self.xscale);
+        // Scaled perpendicular to current line
+        let deriv = Vec2::new(d.y * self.yscale, -d.x * self.xscale);
         let normal = deriv.normalize();
 
         eprintln!(
@@ -608,9 +653,226 @@ impl Stroker {
         );
 
         self.start_segment(self.last_point, normal, dir);
-        self.emit_first_point(self.last_point, Some(SplineDegree::Linear), dir);
+        self.emit_first_point(self.last_point, Some(CurveDegree::Linear), dir);
         self.last_normal = normal;
         self.last_point = p1;
+    }
+
+    fn prepare_skip(&mut self, point: Point2, dir: StrokerDir, first: bool) {
+        if first {
+            self.first_skip.0 |= dir.0;
+        }
+        self.emit_point(
+            point,
+            self.last_normal,
+            Some(CurveDegree::Linear),
+            StrokerDir(!self.last_skip.0 & dir.0),
+        );
+        self.last_skip.0 |= dir.0;
+    }
+
+    // WHAT: quadratic
+    /// Returns optimal offset for quadratic bezier control point
+    /// or None if the error is too large.
+    fn estimate_quadratic_error(
+        &mut self,
+        cos: f32,
+        sin: f32,
+        // WHAT: these normals have a len??
+        normals: &[WeirdNormal; 2],
+    ) -> Option<Vec2> {
+        // WHAT: quadratic
+        if (3. + cos) * (3. + cos) >= self.err_q * (1. + cos) {
+            return None;
+        }
+
+        // sqrt(2/cos(θ/2))
+        let mul = (1.0 + cos).recip();
+        let l0 = 2.0 * normals[0].len;
+        let l1 = 2.0 * normals[1].len;
+        let dot0 = l0 + normals[1].len * cos;
+        let crs0 = (l0 * mul - normals[1].len) * sin;
+
+        let dot1 = l1 + normals[0].len * cos;
+        let crs1 = (l1 * mul - normals[0].len) * sin;
+
+        if crs0.abs() >= self.err_a * dot0 || crs1.abs() >= self.err_a * dot1 {
+            return None;
+        }
+
+        Some(Vec2::new(
+            (normals[0].v.x + normals[1].v.x) * mul,
+            (normals[0].v.y + normals[1].v.y) * mul,
+        ))
+    }
+
+    // WHAT: quadratic
+    fn process_quadratic(
+        &mut self,
+        points: &[Point2; 3],
+        deriv: &[Vec2; 2],
+        normals: &[WeirdNormal; 2],
+        mut dir: StrokerDir,
+        first: bool,
+    ) {
+        println!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
+        assert!((points[0] - points[1]).length() > 0.01);
+
+        let cos = normals[0].v.dot(normals[1].v);
+        let sin = normals[0].v.cross(normals[1].v);
+
+        let mut check_dir = dir;
+        let skip_dir = if sin < 0.0 {
+            StrokerDir::UP
+        } else {
+            StrokerDir::DOWN
+        };
+
+        if dir.includes(skip_dir) {
+            let abs_sin = sin.abs();
+            let f0 = normals[0].len * cos + normals[1].len;
+            let f1 = normals[1].len * cos + normals[0].len;
+            let g0 = normals[0].len * abs_sin;
+            let g1 = normals[1].len * abs_sin;
+
+            if f0 < abs_sin && f1 < abs_sin {
+                let d2 = (f0 * normals[1].len + f1 * normals[0].len) / 2.0;
+                if d2 < g0 && d2 < g1 {
+                    self.prepare_skip(points[0], skip_dir, first);
+                    if f0 < 0.0 || f1 < 0.0 {
+                        self.emit_point(points[0], Vec2::ZERO, Some(CurveDegree::Linear), skip_dir);
+                        self.emit_point(points[2], Vec2::ZERO, Some(CurveDegree::Linear), skip_dir);
+                    } else {
+                        let mul = f0 / abs_sin;
+                        let offs = normals[0].v * mul;
+                        self.emit_point(points[0], offs, Some(CurveDegree::Linear), skip_dir);
+                    }
+                    dir.0 &= !skip_dir.0;
+                    if dir.0 == 0 {
+                        self.last_normal = normals[1].v;
+                        return;
+                    }
+                }
+                check_dir.0 ^= skip_dir.0;
+            } else if cos + g0 < 1.0 && cos + g1 < 1.0 {
+                check_dir.0 ^= skip_dir.0;
+            }
+        }
+
+        dbg!(check_dir, cos, sin, normals);
+        if let Some(Some(offset)) =
+            (check_dir.0 != 0).then(|| self.estimate_quadratic_error(cos, sin, normals))
+        {
+            self.emit_first_point(points[0], Some(CurveDegree::Quadratic), check_dir);
+            self.emit_point(points[1], offset, None, check_dir);
+            dir.0 &= !check_dir.0;
+            if dir.0 == 0 {
+                self.last_normal = normals[1].v;
+                return;
+            }
+        }
+
+        let mut next = [MaybeUninit::<Point2>::uninit(); 5];
+        next[1].write(points[0] + points[1].to_vec());
+        next[3].write(points[1] + points[2].to_vec());
+        unsafe {
+            next[2].write(
+                (((next[1].assume_init().to_vec() + next[3].assume_init().to_vec())
+                    + Vec2::new(0.0, 0.0))
+                    * 0.25)
+                    .to_point(),
+            );
+            *next[1].assume_init_mut() = (next[1].assume_init().to_vec() * 0.5).to_point();
+            *next[3].assume_init_mut() = (next[3].assume_init().to_vec() * 0.5).to_point();
+        }
+        next[0].write(points[0]);
+        next[4].write(points[2]);
+
+        let mut next_deriv = [MaybeUninit::<Vec2>::uninit(); 3];
+        next_deriv[0].write(deriv[0] * 0.5);
+        next_deriv[2].write(deriv[1] * 0.5);
+        next_deriv[1]
+            .write(unsafe { next_deriv[0].assume_init() + next_deriv[2].assume_init() } * 0.5);
+
+        let next = unsafe { array_assume_init_ref(&next) };
+        let next_deriv = unsafe { array_assume_init_ref(&next_deriv) };
+
+        let len = dbg!(next_deriv[1].length());
+        if len < self.min_len {
+            self.emit_first_point(next[0], Some(CurveDegree::Linear), dir);
+            self.start_segment(next[2], normals[1].v, dir);
+            self.last_skip.0 &= !dir.0;
+            self.emit_point(next[2], normals[1].v, Some(CurveDegree::Linear), dir);
+            return;
+        }
+
+        let scale = 1.0 / len;
+        let next_normal = [
+            WeirdNormal::new(normals[0].v, normals[0].len / 2.0),
+            WeirdNormal::new(next_deriv[1] * scale, len),
+            WeirdNormal::new(normals[1].v, normals[1].len / 2.0),
+        ];
+
+        unsafe {
+            self.process_quadratic(
+                next[..3].try_into().unwrap_unchecked(),
+                next_deriv[..2].try_into().unwrap_unchecked(),
+                next_normal[..2].try_into().unwrap_unchecked(),
+                dir,
+                first,
+            );
+            self.process_quadratic(
+                next[2..].try_into().unwrap_unchecked(),
+                next_deriv[1..].try_into().unwrap_unchecked(),
+                next_normal[1..].try_into().unwrap_unchecked(),
+                dir,
+                false,
+            );
+        }
+    }
+
+    fn add_quadratic(&mut self, p1: Point2, p2: Point2, dir: StrokerDir) {
+        let d0 = p1 - self.last_point;
+
+        if self.is_epsilon_vec(d0) {
+            self.add_line(p2, dir);
+            return;
+        }
+
+        let d1 = p2 - p1;
+
+        if self.is_epsilon_vec(d1) {
+            self.add_line(p2, dir);
+            return;
+        }
+
+        let points = [self.last_point, p1, p2];
+        self.last_point = p2;
+
+        let deriv = [
+            Vec2::new(d0.y * self.yscale, -d0.x * self.xscale),
+            Vec2::new(d1.y * self.yscale, -d1.x * self.xscale),
+        ];
+
+        let len0 = deriv[0].length();
+        let scale0 = len0.recip();
+        let len1 = deriv[1].length();
+        let scale1 = len1.recip();
+        let normals = [
+            WeirdNormal::new(deriv[0] * scale0, len0),
+            WeirdNormal::new(deriv[1] * scale1, len1),
+        ];
+
+        let first = self.contour_start;
+        self.start_segment(points[0], normals[0].v, dir);
+        self.process_quadratic(&points, &deriv, &normals, dir, first);
+    }
+
+    // FIXME: Probably doesn't handle all the self intersection stuff...
+    fn add_cubic(&mut self, p1: Point2, p2: Point2, p3: Point2, dir: StrokerDir) {
+        for quad in flatten::cubic_to_quadratics(&[self.last_point, p1, p2, p3], 0.01) {
+            self.add_quadratic(quad[1], quad[2], dir);
+        }
     }
 
     // WHAT: TODO
@@ -626,7 +888,7 @@ impl Stroker {
             self.emit_point(
                 self.first_point,
                 self.first_normal,
-                Some(SplineDegree::Linear),
+                Some(CurveDegree::Linear),
                 dir,
             );
             if self.first_normal != self.last_normal {
@@ -653,9 +915,11 @@ impl Stroker {
             }
 
             match segment.degree {
-                SplineDegree::Linear => self.add_line(points[1], StrokerDir::ALL),
-                SplineDegree::Quadratic => todo!(),
-                SplineDegree::Cubic => (),
+                CurveDegree::Linear => self.add_line(points[1], StrokerDir::ALL),
+                CurveDegree::Quadratic => self.add_quadratic(points[1], points[2], StrokerDir::ALL),
+                CurveDegree::Cubic => {
+                    self.add_cubic(points[1], points[2], points[3], StrokerDir::ALL)
+                }
             }
 
             if segment.end_of_contour {

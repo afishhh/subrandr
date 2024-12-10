@@ -1,5 +1,6 @@
 use std::{
     arch::asm,
+    cmp::Ordering,
     fmt::Debug,
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
@@ -23,6 +24,10 @@ impl Point2 {
 
     pub const fn to_vec(self) -> Vec2 {
         Vec2::new(self.x, self.y)
+    }
+
+    pub fn distance(self, other: Point2) -> f32 {
+        (self - other).length()
     }
 
     pub const ZERO: Self = Self::new(0., 0.);
@@ -56,6 +61,14 @@ impl Vec2 {
 
     pub fn length(self) -> f32 {
         (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    pub fn length_sq(self) -> f32 {
+        self.x * self.x + self.y * self.y
+    }
+
+    pub fn normal(self) -> Vec2 {
+        Vec2::new(self.y, -self.x)
     }
 
     /// Calculates the dot product of two vectors.
@@ -92,7 +105,7 @@ impl Vec2 {
     pub fn normalize(self) -> Vec2 {
         #[cfg(target_feature = "sse")]
         unsafe {
-            let length_sq = self.x * self.x + self.y * self.y;
+            let length_sq = self.length_sq();
             let mut invlength: f32;
             asm!("rsqrtss {}, {}", out(xmm_reg) invlength, in(xmm_reg) length_sq);
             // rsqrtss + one newton-raphson step = 22-bits of accuracy
@@ -244,5 +257,39 @@ impl BoundingBox {
 impl Default for BoundingBox {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn f32_cmp_total_order(af: f32, bf: f32) -> Ordering {
+    let mut a = af.to_bits();
+    let mut b = bf.to_bits();
+    if af < 0.0 {
+        a ^= 0x7fffffff;
+    }
+    if bf < 0.0 {
+        b ^= 0x7fffffff;
+    }
+    a.cmp(&b)
+}
+
+pub struct OrderedF32(pub f32);
+
+impl PartialEq for OrderedF32 {
+    fn eq(&self, other: &Self) -> bool {
+        f32_cmp_total_order(self.0, other.0) == Ordering::Equal
+    }
+}
+
+impl Eq for OrderedF32 {}
+
+impl PartialOrd for OrderedF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(f32_cmp_total_order(self.0, other.0))
+    }
+}
+
+impl Ord for OrderedF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        f32_cmp_total_order(self.0, other.0)
     }
 }

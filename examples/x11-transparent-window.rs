@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use subrandr::{Renderer, Subtitles};
+use subrandr::{Painter, Renderer, Subtitles};
 use xcb::XidNew;
 
 #[derive(clap::Parser)]
@@ -202,7 +202,9 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     // TODO: get and scale by dpi
 
-    let mut render = Renderer::new(0, 0, &subs, args.dpi);
+    let mut render = Renderer::new(&subs, args.dpi);
+    let mut painter = Painter::new_vec(0, 0);
+
     let start = Instant::now();
     loop {
         let geometry = if let Some(id) = args.overlay_window {
@@ -236,6 +238,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
         let (width, height) = (s_width as u32, s_height as u32);
         render.resize(width, height);
+        painter.resize(width, height);
         let now = Instant::now();
         let t = if let Some(ref mut mpv_socket) = mpv_socket {
             mpv_socket.get_playback_time()
@@ -244,12 +247,12 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         };
 
         println!("render t = {}ms to {}x{}", t, width, height);
-        render.render(t);
+        render.render(painter.as_deref(), t);
         let end = Instant::now();
         println!("took {:.2}ms", (end - now).as_micros() as f64 / 1000.);
 
         // FIXME: X11 expects ARGB, maybe everything should be switched to ARGB?
-        let bitmap = render.bitmap();
+        let bitmap = painter.buffer();
         let mut new_bitmap = vec![0u8; s_width as usize * s_height as usize * 4];
         for i in (0..new_bitmap.len()).step_by(4) {
             new_bitmap[i] = bitmap[i + 2];
@@ -272,6 +275,4 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             (args.target_fps.recip() - (end - now).as_secs_f32()).max(0.0),
         ));
     }
-
-    // Ok(())
 }

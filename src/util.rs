@@ -2,11 +2,8 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
-pub mod math;
+use std::{cmp::Ordering, fmt::Debug, mem::MaybeUninit, ops::Deref};
 
-use std::mem::MaybeUninit;
-
-pub use math::*;
 mod rcarray;
 pub use rcarray::*;
 
@@ -14,8 +11,12 @@ pub unsafe fn array_assume_init_ref<const N: usize, T>(array: &[MaybeUninit<T>; 
     unsafe { &*(array as *const [_] as *const [T; N]) }
 }
 
-pub unsafe fn slice_assume_init_mut<T>(array: &mut [MaybeUninit<T>]) -> &mut [T] {
-    unsafe { &mut *(array as *mut [_] as *mut [T]) }
+pub unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
+    unsafe { &*(slice as *const [_] as *const [T]) }
+}
+
+pub unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
+    unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }
 
 pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
@@ -99,6 +100,74 @@ pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
             (hue_to_rgb(p, q, h) * 255.0) as u8,
             (hue_to_rgb(p, q, h - 1.0 / 3.0) * 255.0) as u8,
         ]
+    }
+}
+
+pub struct ArrayVec<const CAP: usize, T> {
+    data: [MaybeUninit<T>; CAP],
+    length: usize,
+}
+
+impl<const CAP: usize, T> ArrayVec<CAP, T> {
+    pub fn new() -> Self {
+        Self {
+            data: [const { MaybeUninit::uninit() }; CAP],
+            length: 0,
+        }
+    }
+
+    pub fn push(&mut self, value: T) {
+        self.data[self.length].write(value);
+        self.length += 1;
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { slice_assume_init_ref(&self.data[..self.length]) }
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+}
+
+impl<const CAP: usize, T> Deref for ArrayVec<CAP, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<const CAP: usize, T: Debug> Debug for ArrayVec<CAP, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ArrayVec<{CAP}> ")?;
+        let mut list = f.debug_list();
+        for value in self.iter() {
+            list.entry(value);
+        }
+        list.finish()
+    }
+}
+
+pub struct OrderedF32(pub f32);
+
+impl PartialEq for OrderedF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0) == Ordering::Equal
+    }
+}
+
+impl Eq for OrderedF32 {}
+
+impl PartialOrd for OrderedF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.0.total_cmp(&other.0))
+    }
+}
+
+impl Ord for OrderedF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
 

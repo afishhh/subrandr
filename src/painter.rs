@@ -1,8 +1,9 @@
 use std::ops::DerefMut;
 
 use crate::{
+    math::*,
     outline, rasterize, text,
-    util::{hsl_to_rgb, math, rgb_to_hsl},
+    util::{hsl_to_rgb, rgb_to_hsl},
 };
 
 pub trait PainterBuffer: AsRef<[u8]> + AsMut<[u8]> {}
@@ -211,7 +212,7 @@ impl<B: PainterBuffer> Painter<B> {
                 dbg!(outline
                     .points_for_segment(segment)
                     .iter()
-                    .map(|p| *p + crate::util::math::Vec2::new(x as f32, y as f32))
+                    .map(|p| *p + Vec2::new(x as f32, y as f32))
                     .collect::<Vec<_>>());
                 const SAMPLES: i32 = 20;
                 for i in 1..=SAMPLES {
@@ -228,7 +229,7 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
-    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[math::Point2], color: u32) {
+    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[Point2], color: u32) {
         let mut last = points[0];
         for point in &points[1..] {
             self.line(

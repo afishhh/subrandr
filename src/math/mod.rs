@@ -1,10 +1,14 @@
 use std::{
     arch::asm,
-    cmp::Ordering,
     fmt::Debug,
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
 };
+
+use num::complex::Complex64;
+
+mod curve;
+pub use curve::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
@@ -260,36 +264,36 @@ impl Default for BoundingBox {
     }
 }
 
-fn f32_cmp_total_order(af: f32, bf: f32) -> Ordering {
-    let mut a = af.to_bits();
-    let mut b = bf.to_bits();
-    if af < 0.0 {
-        a ^= 0x7fffffff;
-    }
-    if bf < 0.0 {
-        b ^= 0x7fffffff;
-    }
-    a.cmp(&b)
-}
+pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64, mut on_root: impl FnMut(f64)) {
+    let det0 = b * b - 3.0 * a * c;
+    let det1 = 2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d;
+    let c_sqrt_sq = det1 * det1 - 4.0 * det0.powi(3);
+    let c_sqrt = Complex64::new(c_sqrt_sq, 0.0).sqrt();
+    let c_cubed_1 = (det1 + c_sqrt) / 2.0;
+    let c_cubed = if c_cubed_1 == Complex64::ZERO {
+        (det1 - c_sqrt) / 2.0
+    } else {
+        c_cubed_1
+    };
+    let mut c = c_cubed.cbrt();
 
-pub struct OrderedF32(pub f32);
+    let a3_neg_recip = (-3.0 * a).recip();
 
-impl PartialEq for OrderedF32 {
-    fn eq(&self, other: &Self) -> bool {
-        f32_cmp_total_order(self.0, other.0) == Ordering::Equal
-    }
-}
+    println!("det0: {det0} det1: {det1}");
+    println!("{c_sqrt}");
 
-impl Eq for OrderedF32 {}
-
-impl PartialOrd for OrderedF32 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(f32_cmp_total_order(self.0, other.0))
-    }
-}
-
-impl Ord for OrderedF32 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        f32_cmp_total_order(self.0, other.0)
+    let cube_root_of_unity = -0.5 + Complex64::new(-3.0, 0.0).sqrt() / 2.0;
+    for _ in 0..3 {
+        println!("c: {c}");
+        let root = if c.re == 0.0 {
+            Complex64::new(a3_neg_recip * b, 0.0)
+        } else {
+            a3_neg_recip * (b + c + det0 / c)
+        };
+        println!("root?: {root}");
+        if root.im > 10.0 * -f64::EPSILON && root.im < 10.0 * f64::EPSILON {
+            on_root(root.re)
+        }
+        c *= cube_root_of_unity;
     }
 }

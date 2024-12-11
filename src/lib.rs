@@ -1,20 +1,23 @@
 // The library is still under active development
 #![allow(dead_code)]
 
-use outline::{Outline, OutlineBuilder, SplineDegree};
-use painter::Painter;
+use math::{solve_cubic, Bezier as _, BoundingBox, CubicBezier, Point2, QuadraticBezier};
+use outline::{CurveDegree, Outline, OutlineBuilder};
 use text::TextExtents;
-use util::{BoundingBox, Point2, RcArray};
 
 pub mod ass;
+mod capi;
+mod math;
 mod outline;
 mod painter;
+mod polyline;
 mod rasterize;
 pub mod srv3;
 mod text;
 mod util;
 
 pub use painter::*;
+use util::{ArrayVec, RcArray};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
@@ -850,43 +853,190 @@ impl<'a> Renderer<'a> {
             &mut painter,
         );
 
-        self.draw_outline(
-            0,
-            0,
-            &{
-                let mut builder = OutlineBuilder::new();
-                builder.add_point(Point2::new(0., 0.));
-                builder.add_point(Point2::new(100., 200.));
-                builder.add_point(Point2::new(350., 300.));
-                builder.add_point(Point2::new(400., 300.));
-                builder.add_segment(SplineDegree::Cubic);
-                builder.add_point(Point2::new(300., 200.));
-                builder.add_point(Point2::new(550., 100.));
-                builder.add_point(Point2::new(500., 0.));
-                builder.add_segment(SplineDegree::Cubic);
-                builder.add_point(Point2::new(100., 100.));
-                builder.add_segment(SplineDegree::Quadratic);
-                builder.close_contour();
-                builder.build()
-            },
-            0xFFFFFFFF,
-        );
+        // self.draw_outline(
+        //     &mut painter,
+        //     0,
+        //     0,
+        //     &{
+        //         let mut builder = OutlineBuilder::new();
+        //         builder.add_point(Point2::new(0., 0.));
+        //         builder.add_point(Point2::new(100., 200.));
+        //         builder.add_point(Point2::new(350., 300.));
+        //         builder.add_point(Point2::new(400., 300.));
+        //         builder.add_segment(SplineDegree::Cubic);
+        //         builder.add_point(Point2::new(300., 200.));
+        //         builder.add_point(Point2::new(550., 100.));
+        //         builder.add_point(Point2::new(500., 0.));
+        //         builder.add_segment(SplineDegree::Cubic);
+        //         builder.add_point(Point2::new(100., 100.));
+        //         builder.add_segment(SplineDegree::Quadratic);
+        //         builder.close_contour();
+        //         builder.build()
+        //     },
+        //     0xFFFFFFFF,
+        // );
 
         let shape_scale = self.dpi as f32 * 7.0 / 72.0;
+
+        // let polyline_base = vec![
+        //     Point2::ZERO,
+        //     Point2::new(0.0, 100.0),
+        //     // Point2::new(30.0, 100.0),
+        //     Point2::new(100.0, 100.0),
+        //     // Point2::new(120.0, 0.0),
+        //     Point2::ZERO,
+        // ];
+
+        // let polyline_base2 = vec![
+        //     Point2::ZERO,
+        //     // Point2::new(12.0, 50.0),
+        //     Point2::new(0.0, 100.0),
+        //     Point2::new(100.0, 100.0),
+        //     Point2::ZERO,
+        // ];
+
+        // let offset = |base: &[Point2], scale: f32, offset: Vec2| -> Vec<Point2> {
+        //     base.iter()
+        //         .map(|p| (p.to_vec() * scale + offset).to_point())
+        //         .collect()
+        // };
+
+        // let inner = offset(&polyline_base2, 0.6 * shape_scale, Vec2::new(20.0, 50.0));
+        // let outer = offset(&polyline_base, 0.9 * shape_scale, Vec2::ZERO);
+        // let triangles = polyline::tessellate_area_between_polylines(&outer, &inner);
+        // for (a, b, c) in triangles {
+        //     painter.stroke_triangle(
+        //         a.x as i32 + 100,
+        //         a.y as i32 + 100,
+        //         b.x as i32 + 100,
+        //         b.y as i32 + 100,
+        //         c.x as i32 + 100,
+        //         c.y as i32 + 100,
+        //         0x00FF00FF,
+        //     );
+        // }
+        // painter.stroke_polyline(100, 100, &inner, 0xFF0000FF);
+        // painter.stroke_polyline(100, 100, &outer, 0x0000FFFF);
+
+        let mut out = ArrayVec::<3, _>::new();
+        solve_cubic(1.0, -33.0, 216.0, 0.0, |r| out.push(r));
+        println!("roots: {out:?}");
+
+        {
+            let cubic = CubicBezier::new([
+                Point2::new(0.0, 0.0),
+                Point2::new(-200.0, 200.0),
+                Point2::new(500.0, 600.0),
+                Point2::new(500.0, 100.0),
+            ]);
+            let mut cubic_poly = cubic.flatten(0.1);
+            painter.stroke_polyline(100, 100, &cubic_poly, 0xFFFFFFFF);
+            let subcubic = cubic.subcurve(0.2, 0.5);
+            cubic_poly.clear();
+            cubic_poly.push(subcubic[0]);
+            subcubic.flatten_into(0.1, &mut cubic_poly);
+            painter.stroke_polyline(100, 100, &cubic_poly, 0xFF0000FF);
+
+            let mut ts = ArrayVec::new();
+            cubic.solve_for_t(200.0, &mut ts);
+            println!("solutions: {ts:?}");
+            for t in ts.iter().copied() {
+                let p = cubic.sample(t);
+                println!("t: {t} -> {:?}", p);
+                assert!((p.x - 200.0).abs() < 0.1);
+            }
+        }
+
+        {
+            let quadratic = QuadraticBezier::new([
+                Point2::new(0.0, 100.0),
+                Point2::new(200.0, 200.0),
+                Point2::new(500.0, 0.0),
+            ]);
+            let mut quad_poly = Vec::new();
+            quadratic.flatten_into(0.01, &mut quad_poly);
+            painter.stroke_polyline(100, 100, &quad_poly, 0xFFFFFFFF);
+            quad_poly.clear();
+
+            let mut ts = ArrayVec::new();
+            quadratic.solve_for_t(300.0, &mut ts);
+            let &[t] = &ts[..] else {
+                panic!();
+            };
+
+            let p = quadratic.sample(t);
+            assert!((p.x - 300.0).abs() < 0.1);
+
+            let subquad = quadratic.subcurve(0.2, 0.5);
+            quad_poly.push(subquad[0]);
+            subquad.flatten_into(0.01, &mut quad_poly);
+            painter.stroke_polyline(100, 100, &quad_poly, 0x0000FFFF);
+        }
+
+        return;
+
+        let eight = {
+            let mut b = OutlineBuilder::new();
+
+            b.add_point(Point2::new(25.0, 0.0));
+            b.add_point(Point2::new(50.0, 0.0));
+            b.add_point(Point2::new(50.0, 25.0));
+            b.add_segment(CurveDegree::Quadratic);
+            b.add_point(Point2::new(50.0, 50.0));
+            b.add_point(Point2::new(25.0, 50.0));
+            b.add_segment(CurveDegree::Quadratic);
+            b.add_point(Point2::new(0.0, 50.0));
+            b.add_point(Point2::new(0.0, 75.0));
+            b.add_segment(CurveDegree::Quadratic);
+
+            b.add_point(Point2::new(0.0, 100.0));
+            b.add_point(Point2::new(25.0, 100.0));
+            b.add_segment(CurveDegree::Quadratic);
+            b.add_point(Point2::new(50.0, 100.0));
+            b.add_point(Point2::new(50.0, 75.0));
+            b.add_segment(CurveDegree::Quadratic);
+
+            b.add_point(Point2::new(50.0, 50.0));
+            b.add_point(Point2::new(25.0, 50.0));
+            b.add_segment(CurveDegree::Quadratic);
+            b.add_point(Point2::new(0.0, 50.0));
+            b.add_point(Point2::new(0.0, 25.0));
+            b.add_segment(CurveDegree::Quadratic);
+
+            b.add_point(Point2::new(0.0, 0.0));
+            b.add_segment(CurveDegree::Quadratic);
+
+            // c.add_segment(SplineDegree::Linear);
+            // b.add_point(Point2::new(150.0, 50.0));
+            b.close_contour();
+
+            b.build()
+        };
 
         {
             let mut c = {
                 let mut b = OutlineBuilder::new();
+
                 b.add_point(Point2::ZERO);
                 b.add_segment(CurveDegree::Linear);
                 b.add_point(Point2::new(0.0, 100.0));
                 b.add_segment(CurveDegree::Linear);
                 b.add_point(Point2::new(100.0, 100.0));
                 // c.add_segment(SplineDegree::Linear);
-                b.add_point(Point2::new(100.0, 0.0));
-                // b.add_point(Point2::new(150.0, 50.0));
+                b.add_point(Point2::new(150.0, 75.0));
+                b.add_point(Point2::new(150.0, 50.0));
                 b.add_segment(CurveDegree::Quadratic);
+                b.add_point(Point2::new(150.0, 45.0));
+                b.add_point(Point2::new(100.0, 10.0));
+                b.add_segment(CurveDegree::Quadratic);
+                b.add_point(Point2::new(80.0, -10.0));
+                b.add_point(Point2::new(40.0, 30.0));
+                b.add_segment(CurveDegree::Cubic);
                 b.close_contour();
+
+                // c.add_segment(SplineDegree::Linear);
+                // b.add_point(Point2::new(150.0, 50.0));
+
                 b.build()
             };
             let x = 150;
@@ -894,23 +1044,23 @@ impl<'a> Renderer<'a> {
             println!("{c:?}");
             c.scale(shape_scale);
             let outer = outline::stroke(&c, 10.0 * shape_scale, 10.0 * shape_scale, 0.01);
-            painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
+            painter.stroke_outline_polyline(x, y, &c, 0xFFFFFFFF);
 
             dbg!(&c);
             // dbg!(&outer);
 
             let outer0_flat = outer.0.flatten_contour(outer.0.segments());
             let outer1_flat = outer.1.flatten_contour(outer.1.segments());
-            let base_flat = c.flatten_contour(c.segments());
-            // let triangles = polyline::tessellate_area_between_polylines(&outer1_flat, &base_flat);
+            // let base_flat = c.flatten_contour(c.segments());
+            // let triangles = polyline::tessellate_area_between_polylines(&outer0_flat, &outer1_flat);
             // for (a, b, c) in triangles {
-            //     painter.fill_triangle(
-            //         a.x as i32 + 100,
-            //         a.y as i32 + 100,
-            //         b.x as i32 + 100,
-            //         b.y as i32 + 100,
-            //         c.x as i32 + 100,
-            //         c.y as i32 + 100,
+            //     painter.stroke_triangle(
+            //         a.x as i32 + x,
+            //         a.y as i32 + y,
+            //         b.x as i32 + x,
+            //         b.y as i32 + y,
+            //         c.x as i32 + x,
+            //         c.y as i32 + y,
             //         0x00FF00FF,
             //     );
             // }

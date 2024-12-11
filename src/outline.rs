@@ -1,8 +1,9 @@
 use std::{fmt::Debug, mem::MaybeUninit, ops::BitAnd};
 
-use crate::util::{array_assume_init_ref, fmt_from_fn, math::*, slice_assume_init_mut};
-
-mod flatten;
+use crate::{
+    math::*,
+    util::{array_assume_init_ref, fmt_from_fn},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurveDegree {
@@ -183,8 +184,15 @@ impl Outline {
         }
     }
 
-    pub fn flatten_segment(&self, segment: Segment, out: &mut Vec<Point2>) {
-        flatten::flatten(self, segment, 0.25, out);
+    /// Does not include the first point of the segment in the flattened version
+    pub fn flatten_segment(&self, segment: Segment, tolerance: f32, out: &mut Vec<Point2>) {
+        let points = self.points_for_segment(segment);
+        match points.len() {
+            2 => out.extend_from_slice(points),
+            3 => QuadraticBezier::from_ref(points.try_into().unwrap()).flatten_into(tolerance, out),
+            4 => CubicBezier::from_ref(points.try_into().unwrap()).flatten_into(tolerance, out),
+            _ => unreachable!(),
+        }
     }
 
     pub fn iter_contours(&self) -> impl Iterator<Item = &[Segment]> + use<'_> {
@@ -206,7 +214,7 @@ impl Outline {
     pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2> {
         let mut polyline = vec![self.points_for_segment(segments[0])[0]];
         for segment in segments {
-            self.flatten_segment(*segment, &mut polyline);
+            self.flatten_segment(*segment, 0.01, &mut polyline);
         }
         polyline
     }
@@ -245,30 +253,6 @@ fn b_spline_to_bezier(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> [Point2
         ((b2.to_vec() * 2.0 + b1.to_vec()) / 3.0).to_point(),
         ((b1.to_vec() + b2.to_vec() * 4.0 + b3.to_vec()) / 6.0).to_point(),
     ]
-}
-
-fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
-    assert!(points.len() < 10);
-
-    let mut midpoints_buffer = [MaybeUninit::<Vec2>::uninit(); 10];
-    let mut midpoints = {
-        for (i, point) in points.iter().copied().enumerate() {
-            midpoints_buffer[i].write(point.to_vec());
-        }
-        unsafe { slice_assume_init_mut(&mut midpoints_buffer[..points.len()]) }
-    };
-
-    let one_minus_t = 1.0 - t;
-
-    while midpoints.len() > 1 {
-        let new_len = midpoints.len() - 1;
-        for i in 0..new_len {
-            midpoints[i] = midpoints[i] * one_minus_t + midpoints[i + 1] * t
-        }
-        midpoints = &mut midpoints[..new_len];
-    }
-
-    midpoints[0].to_point()
 }
 
 // libass/ass_outline.c
@@ -635,6 +619,7 @@ impl Stroker {
         v.x > -self.eps && v.x < self.eps && v.y > -self.eps && v.y < self.eps
     }
 
+    // FIXME: Lines may result in self-intersections!!
     fn add_line(&mut self, p1: Point2, dir: StrokerDir) {
         let d = p1 - self.last_point;
 
@@ -715,7 +700,7 @@ impl Stroker {
         mut dir: StrokerDir,
         first: bool,
     ) {
-        println!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
+        eprintln!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
         assert!((points[0] - points[1]).length() > 0.01);
 
         let cos = normals[0].v.dot(normals[1].v);
@@ -870,8 +855,9 @@ impl Stroker {
 
     // FIXME: Probably doesn't handle all the self intersection stuff...
     fn add_cubic(&mut self, p1: Point2, p2: Point2, p3: Point2, dir: StrokerDir) {
-        for quad in flatten::cubic_to_quadratics(&[self.last_point, p1, p2, p3], 0.01) {
-            self.add_quadratic(quad[1], quad[2], dir);
+        let curve = CubicBezier::new([self.last_point, p1, p2, p3]);
+        for quadratic in curve.to_quadratics(0.01) {
+            self.add_quadratic(quadratic[1], quadratic[2], dir);
         }
     }
 

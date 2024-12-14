@@ -2,7 +2,12 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
-use std::{cmp::Ordering, fmt::Debug, mem::MaybeUninit, ops::Deref};
+use std::{
+    cmp::Ordering,
+    fmt::Debug,
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut},
+};
 
 mod rcarray;
 pub use rcarray::*;
@@ -116,6 +121,16 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
         }
     }
 
+    pub fn from_array<const N: usize>(array: [T; N]) -> Self {
+        assert!(N <= CAP);
+
+        let mut result = Self::new();
+        for value in array {
+            result.push(value);
+        }
+        result
+    }
+
     pub fn push(&mut self, value: T) {
         self.data[self.length].write(value);
         self.length += 1;
@@ -125,8 +140,39 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
         unsafe { slice_assume_init_ref(&self.data[..self.length]) }
     }
 
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { slice_assume_init_mut(&mut self.data[..self.length]) }
+    }
+
     pub fn len(&self) -> usize {
         self.length
+    }
+}
+
+impl<const CAP: usize, T: Clone> ArrayVec<CAP, T> {
+    pub fn from_slice(slice: &[T]) -> Self {
+        assert!(slice.len() <= CAP, "slice is larger than ArrayVec capacity");
+
+        let mut result = Self::new();
+        for value in slice {
+            result.push(value.clone());
+        }
+        result
+    }
+}
+
+impl<const CAP: usize, T: Clone> Clone for ArrayVec<CAP, T> {
+    fn clone(&self) -> Self {
+        let mut result = Self {
+            data: [const { MaybeUninit::uninit() }; CAP],
+            length: self.length,
+        };
+
+        for (i, value) in self.iter().enumerate() {
+            result.data[i].write(value.clone());
+        }
+
+        result
     }
 }
 
@@ -135,6 +181,12 @@ impl<const CAP: usize, T> Deref for ArrayVec<CAP, T> {
 
     fn deref(&self) -> &Self::Target {
         self.as_slice()
+    }
+}
+
+impl<const CAP: usize, T> DerefMut for ArrayVec<CAP, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
     }
 }
 

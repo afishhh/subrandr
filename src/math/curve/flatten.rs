@@ -10,17 +10,15 @@ struct Basic {
 
 /// Map a quadratic bezier to a scaled, translated and rotated segment of y=x^2
 /// (map_to_basic)[https://github.com/raphlinus/raphlinus.github.io/blob/main/_posts/2019-12-23-flatten-quadbez.md]
-fn map_to_basic(a: Point2, b: Point2, c: Point2) -> Basic {
-    // (b.x - a.x) + (b.x - c.x)
-    let ddx = 2.0 * b.x - a.x - c.x;
-    // (b.y - a.y) + (b.y - c.y)
-    let ddy = 2.0 * b.y - a.y - c.y;
-    let u0 = (b.x - a.x) * ddx + (b.y - a.y) * ddy;
-    let u2 = (c.x - b.x) * ddx + (c.y - b.y) * ddy;
-    let cross = (c.x - a.x) * ddy - (c.y - a.y) * ddx;
+pub fn map_to_basic(a: Point2, b: Point2, c: Point2) -> Basic {
+    // (b - a) + (b - c)
+    let dd = b.to_vec() * 2.0 - a.to_vec() - c.to_vec();
+    let u0 = (b.x - a.x) * dd.x + (b.y - a.y) * dd.y;
+    let u2 = (c.x - b.x) * dd.x + (c.y - b.y) * dd.y;
+    let cross = (c.x - a.x) * dd.y - (c.y - a.y) * dd.x;
     let x0 = u0 / cross;
     let x2 = u2 / cross;
-    let scale = cross.abs() / (ddx.hypot(ddy) * (x2 - x0).abs());
+    let scale = cross.abs() / (dd.x.hypot(dd.y) * (x2 - x0).abs());
     Basic { x0, x2, scale }
 }
 

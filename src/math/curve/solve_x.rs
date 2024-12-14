@@ -3,8 +3,6 @@ use crate::{math::*, util::ArrayVec};
 fn push_root<const N: usize>(out: &mut ArrayVec<N, f32>, t: f32) {
     if t >= 0.0 && t <= 1.0 {
         out.push(t);
-    } else {
-        println!("root: {t:?} out of range");
     }
 }
 
@@ -38,6 +36,7 @@ pub fn cubic_x_to_t(cubic: &CubicBezier, x: f32, roots: &mut ArrayVec<3, f32>) {
     let c = (-3.0 * cubic[0].x + 3.0 * cubic[1].x) as f64;
     let d = (cubic[0].x - x) as f64;
 
-    println!("{a}x**3 + {b}x**2 + {c}x + {d}");
-    solve_cubic(a, b, c, d, |r| push_root(roots, dbg!(r) as f32));
+    for root in solve_cubic(a, b, c, d) {
+        push_root(roots, root as f32);
+    }
 }

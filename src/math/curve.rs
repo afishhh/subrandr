@@ -1,21 +1,35 @@
-use std::{mem::MaybeUninit, ops::Deref};
+use std::{
+    cmp::Ordering,
+    mem::MaybeUninit,
+    ops::{Deref, Mul, MulAssign, Range},
+};
 
-use crate::util::{slice_assume_init_mut, ArrayVec};
+use crate::{
+    util::{slice_assume_init_mut, ArrayVec},
+    Painter, PainterBuffer,
+};
 
-use super::{Point2, Vec2};
+use super::{BoundingBox, Point2, Vec2};
+
+const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
 mod flatten;
+mod intersect;
 mod solve_x;
 
 pub fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
-    assert!(points.len() < 10);
+    assert!(points.len() <= MAX_BEZIER_CONTROL_POINTS);
 
-    let mut midpoints_buffer = [MaybeUninit::<Vec2>::uninit(); 10];
+    let mut midpoints_buffer = [MaybeUninit::<Vec2>::uninit(); MAX_BEZIER_CONTROL_POINTS];
     let mut midpoints = {
-        for (i, point) in points.iter().copied().enumerate() {
-            midpoints_buffer[i].write(point.to_vec());
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                points.as_ptr(),
+                midpoints_buffer.as_mut_ptr() as *mut _,
+                points.len(),
+            );
+            slice_assume_init_mut(&mut midpoints_buffer[..points.len()])
         }
-        unsafe { slice_assume_init_mut(&mut midpoints_buffer[..points.len()]) }
     };
 
     let one_minus_t = 1.0 - t;
@@ -50,11 +64,20 @@ pub trait Bezier {
         output
     }
     fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>);
+
+    fn bounding_box(&self) -> BoundingBox {
+        let mut result = BoundingBox::new();
+        for point in self.points() {
+            result.add(point);
+        }
+        result
+    }
 }
 
 macro_rules! define_curve {
     ($name: ident, $npoints: literal) => {
         #[repr(transparent)]
+        #[derive(Clone)]
         pub struct $name([Point2; $npoints]);
 
         impl $name {
@@ -208,3 +231,5 @@ impl CubicBezier {
         solve_x::cubic_x_to_t(self, x, out);
     }
 }
+
+pub use intersect::intersect_curves;

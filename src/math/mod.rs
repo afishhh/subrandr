@@ -1,8 +1,9 @@
 use std::{
     arch::asm,
+    borrow::Borrow,
     fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign},
 };
 
 use num::complex::Complex64;
@@ -235,6 +236,36 @@ impl BoundingBox {
         }
     }
 
+    pub fn from_points(points: impl IntoIterator<Item: Borrow<Point2>>) -> Self {
+        let mut result = Self::new();
+        for point in points {
+            result.add(point.borrow());
+        }
+        result
+    }
+
+    pub const NOTHING: BoundingBox = BoundingBox {
+        min: Point2::new(f32::MAX, f32::MAX),
+        max: Point2::new(f32::MIN, f32::MIN),
+    };
+
+    pub fn intersects(&self, other: &BoundingBox) -> bool {
+        self.min.x <= other.max.x
+            && self.max.x >= other.min.x
+            && self.min.y <= other.max.y
+            && self.max.y >= other.min.y
+    }
+
+    pub fn size(&self) -> Vec2 {
+        let size = self.max - self.min;
+        size
+    }
+
+    pub fn area(&self) -> f32 {
+        let size = self.size();
+        size.x * size.y
+    }
+
     pub fn add(&mut self, point: &Point2) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
@@ -264,7 +295,7 @@ impl Default for BoundingBox {
     }
 }
 
-pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64, mut on_root: impl FnMut(f64)) {
+pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> impl Iterator<Item = f64> {
     let det0 = b * b - 3.0 * a * c;
     let det1 = 2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d;
     let c_sqrt_sq = det1 * det1 - 4.0 * det0.powi(3);
@@ -279,21 +310,76 @@ pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64, mut on_root: impl FnMut(f64))
 
     let a3_neg_recip = (-3.0 * a).recip();
 
-    println!("det0: {det0} det1: {det1}");
-    println!("{c_sqrt}");
-
     let cube_root_of_unity = -0.5 + Complex64::new(-3.0, 0.0).sqrt() / 2.0;
-    for _ in 0..3 {
-        println!("c: {c}");
+    (0..3).into_iter().filter_map(move |_| {
         let root = if c.re == 0.0 {
             Complex64::new(a3_neg_recip * b, 0.0)
         } else {
             a3_neg_recip * (b + c + det0 / c)
         };
-        println!("root?: {root}");
-        if root.im > 10.0 * -f64::EPSILON && root.im < 10.0 * f64::EPSILON {
-            on_root(root.re)
-        }
+
         c *= cube_root_of_unity;
+        if root.im > 10.0 * -f64::EPSILON && root.im < 10.0 * f64::EPSILON {
+            Some(root.re)
+        } else {
+            None
+        }
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Line {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+}
+
+impl Line {
+    pub const fn new(a: f32, b: f32, c: f32) -> Self {
+        Self { a, b, c }
     }
+
+    pub const fn from_points(start: Point2, end: Point2) -> Self {
+        let a = end.y - start.y;
+        let b = start.x - end.x;
+        let c = -(start.y * b + start.x * a);
+        Self::new(a, b, c)
+    }
+
+    pub fn signed_distance_to_point(self, Point2 { x, y }: Point2) -> f32 {
+        let Self { a, b, c } = self;
+        (a * x + b * y + c) / (a * a + b * b).sqrt()
+    }
+
+    pub fn distance_to_point(self, p: Point2) -> f32 {
+        self.signed_distance_to_point(p).abs()
+    }
+
+    pub fn sample_y(&self, x: f32) -> f32 {
+        (-self.a * x - self.c) / self.b
+    }
+}
+
+impl Mul<f32> for Line {
+    type Output = Line;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Line::new(self.a * rhs, self.b * rhs, self.c * rhs)
+    }
+}
+
+impl MulAssign<f32> for Line {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.a *= rhs;
+        self.b *= rhs;
+        self.c *= rhs;
+    }
+}
+
+fn lerp<S: Mul<f32, Output = S>, T: Clone + Add<S, Output = T> + Sub<T, Output = S>>(
+    a: T,
+    b: T,
+    t: f32,
+) -> T {
+    a.clone() + (b - a) * t
 }

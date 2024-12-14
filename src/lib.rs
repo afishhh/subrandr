@@ -1,7 +1,9 @@
 // The library is still under active development
 #![allow(dead_code)]
 
-use math::{solve_cubic, Bezier as _, BoundingBox, CubicBezier, Point2, QuadraticBezier};
+use math::{
+    intersect_curves, solve_cubic, Bezier, BoundingBox, CubicBezier, Point2, QuadraticBezier,
+};
 use outline::{CurveDegree, Outline, OutlineBuilder};
 use text::TextExtents;
 
@@ -918,59 +920,88 @@ impl<'a> Renderer<'a> {
         // painter.stroke_polyline(100, 100, &inner, 0xFF0000FF);
         // painter.stroke_polyline(100, 100, &outer, 0x0000FFFF);
 
-        let mut out = ArrayVec::<3, _>::new();
-        solve_cubic(1.0, -33.0, 216.0, 0.0, |r| out.push(r));
-        println!("roots: {out:?}");
+        // let mut out = ArrayVec::<3, _>::new();
+        // solve_cubic(1.0, -33.0, 216.0, 0.0, |r| out.push(r));
+        // println!("roots: {out:?}");
 
-        {
-            let cubic = CubicBezier::new([
-                Point2::new(0.0, 0.0),
-                Point2::new(-200.0, 200.0),
-                Point2::new(500.0, 600.0),
-                Point2::new(500.0, 100.0),
-            ]);
-            let mut cubic_poly = cubic.flatten(0.1);
-            painter.stroke_polyline(100, 100, &cubic_poly, 0xFFFFFFFF);
-            let subcubic = cubic.subcurve(0.2, 0.5);
-            cubic_poly.clear();
-            cubic_poly.push(subcubic[0]);
-            subcubic.flatten_into(0.1, &mut cubic_poly);
-            painter.stroke_polyline(100, 100, &cubic_poly, 0xFF0000FF);
+        // {
+        //     let cubic = CubicBezier::new([
+        //         Point2::new(0.0, 0.0),
+        //         Point2::new(-200.0, 200.0),
+        //         Point2::new(500.0, 600.0),
+        //         Point2::new(500.0, 100.0),
+        //     ]);
+        //     let mut cubic_poly = cubic.flatten(0.1);
+        //     painter.stroke_polyline(100, 100, &cubic_poly, 0xFFFFFFFF);
+        //     let subcubic = cubic.subcurve(0.2, 0.5);
+        //     cubic_poly.clear();
+        //     cubic_poly.push(subcubic[0]);
+        //     subcubic.flatten_into(0.1, &mut cubic_poly);
+        //     painter.stroke_polyline(100, 100, &cubic_poly, 0xFF0000FF);
 
-            let mut ts = ArrayVec::new();
-            cubic.solve_for_t(200.0, &mut ts);
-            println!("solutions: {ts:?}");
-            for t in ts.iter().copied() {
-                let p = cubic.sample(t);
-                println!("t: {t} -> {:?}", p);
-                assert!((p.x - 200.0).abs() < 0.1);
-            }
-        }
+        //     // let mut ts = ArrayVec::new();
+        //     // cubic.solve_for_t(200.0, &mut ts);
+        //     // println!("solutions: {ts:?}");
+        //     // for t in ts.iter().copied() {
+        //     //     let p = cubic.sample(t);
+        //     //     println!("t: {t} -> {:?}", p);
+        //     //     assert!((p.x - 200.0).abs() < 0.1);
+        //     // }
+        // }
 
         {
             let quadratic = QuadraticBezier::new([
-                Point2::new(0.0, 100.0),
+                Point2::new(-50.0, 100.0),
                 Point2::new(200.0, 200.0),
                 Point2::new(500.0, 0.0),
             ]);
             let mut quad_poly = Vec::new();
+            quad_poly.push(quadratic[0]);
             quadratic.flatten_into(0.01, &mut quad_poly);
             painter.stroke_polyline(100, 100, &quad_poly, 0xFFFFFFFF);
             quad_poly.clear();
 
-            let mut ts = ArrayVec::new();
-            quadratic.solve_for_t(300.0, &mut ts);
-            let &[t] = &ts[..] else {
-                panic!();
-            };
+            // let mut ts = ArrayVec::new();
+            // quadratic.solve_for_t(300.0, &mut ts);
+            // // let &[t] = &ts[..] else {
+            // //     panic!();
+            // // };
 
-            let p = quadratic.sample(t);
-            assert!((p.x - 300.0).abs() < 0.1);
+            // let p = quadratic.sample(t);
+            // assert!((p.x - 300.0).abs() < 0.1);
 
-            let subquad = quadratic.subcurve(0.2, 0.5);
-            quad_poly.push(subquad[0]);
-            subquad.flatten_into(0.01, &mut quad_poly);
-            painter.stroke_polyline(100, 100, &quad_poly, 0x0000FFFF);
+            // let subquad = quadratic.subcurve(0.2, 0.5);
+            // quad_poly.push(subquad[0]);
+            // subquad.flatten_into(0.01, &mut quad_poly);
+            // painter.stroke_polyline(100, 100, &quad_poly, 0x0000FFFF);
+
+            let quadratic2 = CubicBezier::new([
+                Point2::new(100.0, 50.0),
+                Point2::new(150.0, 400.0),
+                Point2::new(300.0, 200.0),
+                Point2::new(400.0, 000.0),
+            ]);
+            painter.stroke_polyline(100, 100, &quadratic2.flatten(0.01), 0xFFFFFFFF);
+
+            let mut out = ArrayVec::new();
+            intersect_curves(&quadratic, &quadratic2, &mut out, 0.1);
+            println!("{:?}", out);
+            for (pa, pb) in out.iter() {
+                painter.bezier(
+                    100,
+                    100,
+                    &quadratic.subcurve(pa - 0.01, pa + 0.01),
+                    0xFF0000FF,
+                );
+
+                painter.bezier(
+                    100,
+                    100,
+                    &quadratic2.subcurve(pb - 0.01, pb + 0.01),
+                    0x0000FFFF,
+                );
+            }
+            // painter.stroke_polyline(100, 100, &s.flatten(0.01), 0xFF00FFFF);
         }
 
         return;

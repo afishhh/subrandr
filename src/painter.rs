@@ -264,6 +264,29 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
+    pub fn bezier(&mut self, x: i32, y: i32, curve: &impl Bezier, color: u32) {
+        let polyline = curve.flatten(0.01);
+        self.stroke_polyline(x, y, &polyline, color);
+    }
+
+    pub fn math_line(&mut self, x: i32, y: i32, line: Line, color: u32) {
+        if line.b == 0.0 {
+            let vx = -line.c / line.a;
+            let fx = x + vx as i32;
+            self.line(fx, 0, fx, self.height as i32, color);
+        } else {
+            let y0 = line.sample_y(-x as f32);
+            let y1 = line.sample_y(self.width as f32);
+            self.line(
+                0,
+                y0 as i32 + y,
+                x + self.width as i32,
+                y1 as i32 + y,
+                color,
+            );
+        }
+    }
+
     pub fn text<'g>(
         &mut self,
         x: i32,

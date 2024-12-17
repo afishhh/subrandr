@@ -10,6 +10,8 @@ use num::complex::Complex64;
 
 mod curve;
 pub use curve::*;
+mod fixed;
+pub use fixed::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]

@@ -2,7 +2,8 @@ use std::ops::DerefMut;
 
 use crate::{
     math::*,
-    outline, rasterize, text,
+    outline::{self, Outline},
+    rasterize, text,
     util::{hsl_to_rgb, rgb_to_hsl},
 };
 
@@ -61,6 +62,10 @@ impl<B: PainterBuffer> Painter<B> {
 
     pub fn buffer(&self) -> &[u8] {
         self.buffer.as_ref()
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        self.buffer.as_mut()
     }
 
     pub fn clear(&mut self, color: u32) {
@@ -226,6 +231,55 @@ impl<B: PainterBuffer> Painter<B> {
             }
 
             h = (h + 0.05).fract();
+        }
+    }
+
+    pub fn debug_stroke_outline(
+        &mut self,
+        x: i32,
+        y: i32,
+        outline: &Outline,
+        color: u32,
+        inverse_winding: bool,
+    ) {
+        if outline.is_empty() {
+            return;
+        }
+
+        for segments in outline.iter_contours() {
+            if segments.is_empty() {
+                continue;
+            }
+
+            let mut polyline = Vec::new();
+            for segment in segments.iter().copied() {
+                polyline.clear();
+                let segment_points = outline.points_for_segment(segment);
+                polyline.push(segment_points[0]);
+                outline.flatten_segment(segment, 0.01, &mut polyline);
+                self.stroke_polyline(x, y, &polyline, color);
+                let middle = outline.evaluate_segment(segment, 0.5);
+                let start = segment_points[0];
+                let end = *segment_points.last().unwrap();
+                let diff = (end - start).normalize();
+                let deriv = diff.normal();
+                const ARROW_SCALE: f32 = 10.0;
+
+                let f = if inverse_winding { -1.0 } else { 1.0 };
+                let top = middle + diff * f * ARROW_SCALE;
+                let left = middle - deriv * f * ARROW_SCALE;
+                let right = middle + deriv * f * ARROW_SCALE;
+
+                self.fill_triangle(
+                    x + top.x as i32,
+                    y + top.y as i32,
+                    x + left.x as i32,
+                    y + left.y as i32,
+                    x + right.x as i32,
+                    y + right.y as i32,
+                    color,
+                );
+            }
         }
     }
 

@@ -1,3 +1,8 @@
+use crate::{
+    math::{Fixed, Point2},
+    Painter, PainterBuffer,
+};
+
 #[derive(Debug, Clone)]
 struct Bresenham {
     dx: i32,
@@ -493,4 +498,231 @@ pub fn fill_triangle(
             color,
         )
     };
+}
+
+// 26.6 fixed opint signed value
+type Fixed26 = Fixed<6>;
+
+#[derive(Debug)]
+struct Profile {
+    current: Fixed26,
+    step: Fixed26,
+    end_y: u32,
+}
+
+#[derive(Debug)]
+pub struct NonZeroPolygonRasterizer {
+    queue: Vec<(u32, bool, Profile)>,
+    left: Vec<Profile>,
+    right: Vec<Profile>,
+}
+
+impl NonZeroPolygonRasterizer {
+    pub fn new() -> Self {
+        Self {
+            queue: Vec::new(),
+            left: Vec::new(),
+            right: Vec::new(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.queue.clear();
+        self.left.clear();
+        self.right.clear();
+    }
+
+    fn add_line(&mut self, offset: (i32, i32), start: Point2, end: Point2, invert_winding: bool) {
+        // TODO: round to int here instead of the math below
+        let istart = (
+            Fixed26::from_f32(start.x) + offset.0,
+            Fixed26::from_f32(start.y) + offset.1,
+        );
+        let iend = (
+            Fixed26::from_f32(end.x) + offset.0,
+            Fixed26::from_f32(end.y) + offset.1,
+        );
+
+        let ydiff = iend.1 - istart.1;
+        let direction = match ydiff.cmp(&Fixed26::ZERO) {
+            // Line is going up
+            std::cmp::Ordering::Less => false ^ invert_winding,
+            // Horizontal line, ignore
+            std::cmp::Ordering::Equal => return,
+            // Line is going down
+            std::cmp::Ordering::Greater => true ^ invert_winding,
+        };
+
+        let step = if istart.0 == iend.0 {
+            Fixed26::new(0)
+        } else {
+            (iend.1 - istart.1) / (iend.0 - istart.0)
+        };
+
+        let start_y = istart.1.round_to_i32();
+        let mut start_x = istart.0;
+        start_x -= (istart.1 - start_y) * step;
+
+        let end_y = iend.1.round_to_i32();
+        let mut end_x = iend.0;
+        end_x -= (iend.1 - end_y) * step;
+
+        println!("{} -> {start_y}, {} -> {end_y}", istart.1, iend.1);
+
+        let (mut top_y, mut bottom_y, init_x) = if end_y >= start_y {
+            (start_y, end_y, start_x)
+        } else {
+            (end_y, start_y, end_x)
+        };
+
+        bottom_y -= 1;
+        end_x -= step;
+
+        if top_y < 0 {
+            start_x += step * -top_y;
+            top_y = 0;
+        }
+
+        if top_y > bottom_y {
+            return;
+        }
+
+        println!("{istart:?} {start_y} {iend:?} {end_y} {start_x} {end_x}");
+        println!("{top_y} {bottom_y}");
+        println!(
+            "line {start:?} -- {end:?} results in top_y={top_y} direction={:?}",
+            step > 0
+        );
+        self.queue.push((
+            top_y as u32,
+            direction,
+            Profile {
+                current: init_x,
+                step,
+                end_y: bottom_y as u32,
+            },
+        ));
+    }
+
+    pub fn append_polyline(
+        &mut self,
+        offset: (i32, i32),
+        polyline: &[Point2],
+        invert_winding: bool,
+    ) {
+        if polyline.is_empty() {
+            return;
+        }
+
+        let mut i = 0;
+        while i < polyline.len() - 1 {
+            let start = polyline[i];
+            i += 1;
+            let end = polyline[i];
+            self.add_line(offset, start, end, invert_winding)
+        }
+
+        let last = *polyline.last().unwrap();
+        if polyline[0] != last {
+            self.add_line(offset, last, polyline[0], invert_winding)
+        }
+
+        // TODO: remove, only for debug output
+        self.queue.sort_unstable_by(|(ay, ..), (by, ..)| by.cmp(ay));
+    }
+
+    fn queue_pop_if(&mut self, cy: u32) -> Option<(u32, bool, Profile)> {
+        let Some(&(y, ..)) = self.queue.last() else {
+            return None;
+        };
+
+        if y <= cy {
+            self.queue.pop()
+        } else {
+            None
+        }
+    }
+
+    fn push_queue_to_lr(&mut self, cy: u32) {
+        while let Some((_, d, p)) = self.queue_pop_if(cy) {
+            let vec = if d { &mut self.right } else { &mut self.left };
+            let idx = match vec.binary_search_by_key(&p.current, |profile| profile.current) {
+                Ok(i) => i,
+                Err(i) => i,
+            };
+            vec.insert(idx, p);
+        }
+    }
+
+    fn prune_lr(&mut self, cy: u32) {
+        self.left.retain(|profile| profile.end_y >= cy);
+        self.right.retain(|profile| profile.end_y >= cy);
+    }
+
+    fn advance_lr_sort(&mut self) {
+        for profile in self.left.iter_mut() {
+            profile.current += profile.step;
+        }
+
+        for profile in self.right.iter_mut() {
+            profile.current += profile.step;
+        }
+
+        self.left.sort_unstable_by_key(|profile| profile.current);
+        self.right.sort_unstable_by_key(|profile| profile.current);
+    }
+
+    pub fn render(&mut self, width: u32, height: u32, mut filler: impl FnMut(u32, u32, u32)) {
+        self.queue.sort_unstable_by(|(ay, ..), (by, ..)| by.cmp(ay));
+
+        if self.queue.is_empty() {
+            return;
+        }
+
+        let mut y = self.queue.last().unwrap().0 as u32;
+
+        while !self.queue.is_empty() || !self.left.is_empty() {
+            self.prune_lr(y);
+            self.push_queue_to_lr(y);
+
+            println!("--- POLYLINE RASTERIZER SCANLINE y={y} ---");
+            println!("left: {:?}", self.left);
+            println!("right: {:?}", self.right);
+            assert_eq!(self.left.len(), self.right.len());
+
+            for i in 0..self.left.len() {
+                let (left, right) = (&self.left[i], &self.right[i]);
+                let round_clamp = |f: Fixed26| (f.round_to_i32().max(0) as u32).min(width);
+                let mut x0 = round_clamp(left.current);
+                let mut x1 = round_clamp(right.current);
+                // TODO: is this necessary? can this be removed?
+                if x0 > x1 {
+                    std::mem::swap(&mut x0, &mut x1);
+                }
+                filler(y, x0, x1);
+            }
+
+            self.advance_lr_sort();
+
+            y += 1;
+        }
+    }
+
+    // TODO: Move to painter
+    pub fn render_fill(&mut self, painter: &mut Painter<impl PainterBuffer>, color: u32) {
+        self.render(painter.width(), painter.height(), |y, x0, x1| {
+            println!("filling span y={y} x={x0}..={x1}");
+            let width = painter.width();
+            let height = painter.height();
+            horizontal_line(
+                y as i32,
+                x0 as i32,
+                x1 as i32,
+                painter.buffer_mut(),
+                width,
+                height,
+                color,
+            );
+        });
+    }
 }

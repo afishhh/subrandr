@@ -5,21 +5,6 @@ use crate::{
     util::{array_assume_init_ref, fmt_from_fn},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CurveDegree {
-    Linear = 1,
-    Quadratic = 2,
-    Cubic = 3,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Segment {
-    degree: CurveDegree,
-    end_of_contour: bool,
-    // Not usize so that `Segment` fits in 8 bytes
-    end: u32,
-}
-
 impl Segment {
     pub fn degree(&self) -> CurveDegree {
         self.degree
@@ -30,16 +15,10 @@ impl Segment {
     }
 }
 
-#[derive(Clone)]
-pub struct Outline {
-    points: Vec<Point2>,
-    segments: Vec<Segment>,
-}
-
 pub struct OutlineBuilder {
     outline: Outline,
     first_point_of_contour: u32,
-    last_segment_end: u32,
+    segment_start: u32,
 }
 
 impl OutlineBuilder {
@@ -47,7 +26,7 @@ impl OutlineBuilder {
         Self {
             outline: Outline::new(),
             first_point_of_contour: 0,
-            last_segment_end: 1,
+            segment_start: 0,
         }
     }
 
@@ -58,12 +37,12 @@ impl OutlineBuilder {
 
     #[inline(always)]
     pub fn add_segment(&mut self, degree: CurveDegree) {
-        self.last_segment_end += degree as u32;
         self.outline.segments.push(Segment {
             degree,
             end_of_contour: false,
-            end: self.last_segment_end,
+            start: self.segment_start,
         });
+        self.segment_start += degree as u32;
     }
 
     pub fn close_contour(&mut self) {
@@ -71,7 +50,7 @@ impl OutlineBuilder {
         self.outline
             .points
             .push(self.outline.points[self.first_point_of_contour as usize]);
-        self.last_segment_end += 1;
+        self.segment_start += 1;
         self.first_point_of_contour = self.outline.points.len() as u32;
     }
 
@@ -81,7 +60,7 @@ impl OutlineBuilder {
     }
 
     pub fn build(self) -> Outline {
-        let expected = self.last_segment_end - 1;
+        let expected = self.segment_start;
         if self.outline.points.len() != expected as usize {
             panic!(
                 "Invalid outline: Incorrect number of points: expected {} found {}\npoints: {:?}\nsegments: {:?}",
@@ -109,6 +88,27 @@ impl Default for OutlineBuilder {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveDegree {
+    Linear = 1,
+    Quadratic = 2,
+    Cubic = 3,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(packed(8))]
+pub struct Segment {
+    end_of_contour: bool,
+    degree: CurveDegree,
+    start: u32,
+}
+
+#[derive(Clone)]
+pub struct Outline {
+    points: Vec<Point2>,
+    segments: Vec<Segment>,
+}
+
 impl Outline {
     pub const fn new() -> Self {
         Self {
@@ -127,19 +127,9 @@ impl Outline {
         &self.segments
     }
 
-    pub fn points_for_segment(&self, Segment { end, degree, .. }: Segment) -> &[Point2] {
-        let start;
-        let nend;
-
-        // if end_of_contour {
-        //     start = end as usize - degree as usize - 1;
-        //     nend = end as usize;
-        // } else {
-        start = end as usize - degree as usize - 1;
-        nend = end as usize;
-        // }
-
-        &self.points[start..nend]
+    pub fn points_for_segment(&self, s: Segment) -> &[Point2] {
+        let start = s.start as usize;
+        &self.points[start..(start + s.degree as usize + 1)]
     }
 
     pub fn points(&self) -> &[Point2] {
@@ -188,7 +178,7 @@ impl Outline {
     pub fn flatten_segment(&self, segment: Segment, tolerance: f32, out: &mut Vec<Point2>) {
         let points = self.points_for_segment(segment);
         match points.len() {
-            2 => out.extend_from_slice(points),
+            2 => out.push(points[1]),
             3 => QuadraticBezier::from_ref(points.try_into().unwrap()).flatten_into(tolerance, out),
             4 => CubicBezier::from_ref(points.try_into().unwrap()).flatten_into(tolerance, out),
             _ => unreachable!(),
@@ -214,7 +204,7 @@ impl Outline {
     pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2> {
         let mut polyline = vec![self.points_for_segment(segments[0])[0]];
         for segment in segments {
-            self.flatten_segment(*segment, 0.01, &mut polyline);
+            self.flatten_segment(*segment, 0.1, &mut polyline);
         }
         polyline
     }

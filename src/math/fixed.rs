@@ -26,16 +26,25 @@ impl<const P: u32> Fixed<P> {
     }
 
     pub fn trunc(self) -> Self {
-        Self(self.0 & Self::WHOLE_MASK)
+        let signed_floor = (self.0 >> P) << P;
+        let was_negative_with_fract =
+            (self.0 & (Self::FRACTIONAL_MASK | Self::SIGN_MASK)) as u32 > Self::SIGN_MASK as u32;
+        Self(signed_floor + Self::ONE.0 * (was_negative_with_fract as i32))
     }
 
     pub fn fract(self) -> Self {
-        Self(self.0 & Self::FRACTIONAL_MASK)
+        let unsigned = self.0 & Self::FRACTIONAL_MASK;
+        let mut extension = (self.0 & Self::SIGN_MASK) >> (i32::BITS - P - 1);
+        extension *= (unsigned > 0) as i32;
+        Self(unsigned | extension)
     }
 
     pub fn round(self) -> Self {
-        if self.fract().0 >= Self::HALF {
-            self.trunc() + Self::ONE
+        let fract = self.fract();
+        if fract >= Self::HALF {
+            Self((self.0 & Self::WHOLE_MASK) + Self::ONE.0)
+        } else if fract <= -Self::HALF {
+            Self(self.0 & Self::WHOLE_MASK)
         } else {
             self.trunc()
         }
@@ -45,11 +54,17 @@ impl<const P: u32> Fixed<P> {
         self.round().trunc_to_i32()
     }
 
+    pub fn signum(&self) -> i32 {
+        // sign bit is at 1 << i32::BITS
+        self.0 >> (i32::BITS - 1 - P)
+    }
+
     pub const ONE: Self = Self(1 << P);
     pub const ZERO: Self = Self(0);
+    const HALF: Self = Self(1 << (P - 1));
+    const EPS: Self = Self(1);
 
-    pub(self) const EPS: Self = Self(1);
-    const HALF: i32 = 1 << (P - 1);
+    const SIGN_MASK: i32 = 1 << (i32::BITS - 1);
     const FRACTIONAL_MASK: i32 = (1 << P) - 1;
     const WHOLE_MASK: i32 = !Self::FRACTIONAL_MASK;
 }
@@ -191,10 +206,11 @@ mod test_24_8 {
         (2.5, 1.0),
         (60.0, 20.0),
         (2353.0, 3102.0),
-        (2.0005, 4.0005),
-        (0.0, 34031.0),
+        (3353.0, -1102.0),
+        (-2.0005, 4.0005),
+        (0.0, -34031.0),
         (EPS, EPS),
-        (1.0 + EPS, EPS),
+        (1.0 + EPS, -EPS),
     ];
 
     const EXTREME_DATA: &[(f32, f32)] = &[
@@ -235,6 +251,51 @@ mod test_24_8 {
             let e = a / b;
             println!("{a} / {b} = {r}");
             assert!((r - e).abs() < EPS);
+        }
+    }
+
+    const TRUNC_FRACT_DATA: &[(f32, f32, f32)] = &[
+        (0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.5),
+        (1.0, 1.0, 0.0),
+        (0.59765625, 0.0, 0.59765625),
+        (230.115, 230.0, 0.115),
+        (1.0 + 2.0 * EPS, 1.0, 2.0 * EPS),
+        (1.0 + EPS, 1.0, EPS),
+        (2.0 * EPS, 0.0, 2.0 * EPS),
+        (EPS, 0.0, EPS),
+    ];
+
+    #[test]
+    fn trunc_fract() {
+        for (n, w, f) in TRUNC_FRACT_DATA
+            .iter()
+            .flat_map(|&(n, w, f)| [(n, w, f), (-n, -w, -f)])
+            .map(|(a, b, c)| (TestFixed::from_f32(a), b, c))
+        {
+            let rw = n.trunc().into_f32();
+            let rf = n.fract().into_f32();
+            println!("{n}.trunc() = {rw}");
+            println!("{n}.fract() = {rf}");
+            assert!((rw - w).abs() < EPS);
+            assert!((rf - f).abs() < EPS);
+        }
+    }
+
+    const ROUND_DATA: &[f32] = &[0.0, 0.5, 0.6, 0.495, 0.499, 1.0];
+
+    #[test]
+    fn round() {
+        for &d in ROUND_DATA {
+            let ep = d.round();
+            let en = (-d).round();
+            let rp = TestFixed::from_f32(d).round().into_f32();
+            let rn = TestFixed::from_f32(-d).round().into_f32();
+            println!("{d}.round() = {rp}");
+            println!("{}.round() = {rn}", -d);
+            println!("{ep} {en}");
+            assert!((ep - rp).abs() < EPS);
+            assert!((rn - en).abs() < EPS);
         }
     }
 }

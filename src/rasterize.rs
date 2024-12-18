@@ -500,13 +500,13 @@ pub fn fill_triangle(
     };
 }
 
-// 26.6 fixed opint signed value
-type Fixed26 = Fixed<6>;
+// 22.10 fixed opint signed value
+type Fixed22 = Fixed<10>;
 
 #[derive(Debug)]
 struct Profile {
-    current: Fixed26,
-    step: Fixed26,
+    current: Fixed22,
+    step: Fixed22,
     end_y: u32,
 }
 
@@ -532,19 +532,17 @@ impl NonZeroPolygonRasterizer {
         self.right.clear();
     }
 
-    fn add_line(&mut self, offset: (i32, i32), start: Point2, end: Point2, invert_winding: bool) {
-        // TODO: round to int here instead of the math below
+    fn add_line(&mut self, offset: (i32, i32), start: &Point2, end: &Point2, invert_winding: bool) {
         let istart = (
-            Fixed26::from_f32(start.x) + offset.0,
-            Fixed26::from_f32(start.y) + offset.1,
+            Fixed22::from_f32(start.x) + offset.0,
+            Fixed22::from_f32(start.y) + offset.1,
         );
         let iend = (
-            Fixed26::from_f32(end.x) + offset.0,
-            Fixed26::from_f32(end.y) + offset.1,
+            Fixed22::from_f32(end.x) + offset.0,
+            Fixed22::from_f32(end.y) + offset.1,
         );
 
-        let ydiff = iend.1 - istart.1;
-        let direction = match ydiff.cmp(&Fixed26::ZERO) {
+        let direction = match iend.1.cmp(&istart.1) {
             // Line is going up
             std::cmp::Ordering::Less => false ^ invert_winding,
             // Horizontal line, ignore
@@ -554,7 +552,7 @@ impl NonZeroPolygonRasterizer {
         };
 
         let step = if istart.0 == iend.0 {
-            Fixed26::new(0)
+            Fixed22::ZERO
         } else {
             (iend.1 - istart.1) / (iend.0 - istart.0)
         };
@@ -567,19 +565,18 @@ impl NonZeroPolygonRasterizer {
         let mut end_x = iend.0;
         end_x -= (iend.1 - end_y) * step;
 
-        println!("{} -> {start_y}, {} -> {end_y}", istart.1, iend.1);
-
-        let (mut top_y, mut bottom_y, init_x) = if end_y >= start_y {
+        let (mut top_y, mut bottom_y, mut init_x) = if end_y >= start_y {
             (start_y, end_y, start_x)
         } else {
             (end_y, start_y, end_x)
         };
 
+        // FIXME: HACK: This is terrible but I tried everything and only this works
         bottom_y -= 1;
-        end_x -= step;
+        init_x -= step;
 
         if top_y < 0 {
-            start_x += step * -top_y;
+            init_x += step * -top_y;
             top_y = 0;
         }
 
@@ -614,21 +611,20 @@ impl NonZeroPolygonRasterizer {
             return;
         }
 
+        assert_eq!(polyline[0], *polyline.last().unwrap());
+
         let mut i = 0;
         while i < polyline.len() - 1 {
-            let start = polyline[i];
+            let start = &polyline[i];
             i += 1;
-            let end = polyline[i];
+            let end = &polyline[i];
             self.add_line(offset, start, end, invert_winding)
         }
 
-        let last = *polyline.last().unwrap();
-        if polyline[0] != last {
-            self.add_line(offset, last, polyline[0], invert_winding)
+        let last = polyline.last().unwrap();
+        if &polyline[0] != last {
+            self.add_line(offset, last, &polyline[0], invert_winding)
         }
-
-        // TODO: remove, only for debug output
-        self.queue.sort_unstable_by(|(ay, ..), (by, ..)| by.cmp(ay));
     }
 
     fn queue_pop_if(&mut self, cy: u32) -> Option<(u32, bool, Profile)> {
@@ -681,7 +677,7 @@ impl NonZeroPolygonRasterizer {
 
         let mut y = self.queue.last().unwrap().0 as u32;
 
-        while !self.queue.is_empty() || !self.left.is_empty() {
+        while (!self.queue.is_empty() || !self.left.is_empty()) && y < height {
             self.prune_lr(y);
             self.push_queue_to_lr(y);
 
@@ -692,7 +688,8 @@ impl NonZeroPolygonRasterizer {
 
             for i in 0..self.left.len() {
                 let (left, right) = (&self.left[i], &self.right[i]);
-                let round_clamp = |f: Fixed26| (f.round_to_i32().max(0) as u32).min(width);
+
+                let round_clamp = |f: Fixed22| (f.round_to_i32().max(0) as u32).min(width);
                 let mut x0 = round_clamp(left.current);
                 let mut x1 = round_clamp(right.current);
                 // TODO: is this necessary? can this be removed?

@@ -128,7 +128,7 @@ define_simple_fixed_operator!(
 );
 
 define_simple_fixed_operator!(
-    @conversions Mul, mul, /, MulAssign, mul_assign, /=
+    @conversions Mul, mul, *, MulAssign, mul_assign, *=
 );
 
 impl<const P: u32> Mul for Fixed<P> {

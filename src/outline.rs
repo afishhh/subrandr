@@ -204,7 +204,7 @@ impl Outline {
     pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2> {
         let mut polyline = vec![self.points_for_segment(segments[0])[0]];
         for segment in segments {
-            self.flatten_segment(*segment, 0.1, &mut polyline);
+            self.flatten_segment(*segment, 0.2, &mut polyline);
         }
         polyline
     }

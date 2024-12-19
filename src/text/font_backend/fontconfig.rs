@@ -78,9 +78,6 @@ impl FontBackend for FontconfigFontBackend {
         weight: f32,
         italic: bool,
     ) -> Result<Option<crate::text::Face>, AnyError> {
-        let this = &mut *self;
-        let name = name;
-        let weight = weight;
         assert!(weight.is_normal());
 
         // TODO: Free on error
@@ -134,14 +131,14 @@ impl FontBackend for FontconfigFontBackend {
             style.to_str().unwrap().to_string()
         );
 
-        if unsafe { FcConfigSubstitute(this.config, pattern, FcMatchPattern) == 0 } {
+        if unsafe { FcConfigSubstitute(self.config, pattern, FcMatchPattern) == 0 } {
             return Err(LoadError::Substitute.into());
         }
 
         unsafe { FcDefaultSubstitute(pattern) };
 
         let mut result = MaybeUninit::uninit();
-        let prepared = unsafe { FcFontMatch(this.config, pattern, result.as_mut_ptr()) };
+        let prepared = unsafe { FcFontMatch(self.config, pattern, result.as_mut_ptr()) };
         let result = unsafe { result.assume_init() };
         if result == FcResultNoMatch {
             return Ok(None);

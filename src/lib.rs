@@ -121,13 +121,13 @@ pub struct Subtitles {
 }
 
 impl Subtitles {
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self { events: vec![] }
     }
 
     #[doc(hidden)]
-    pub fn test_new() -> Subtitles {
-        Subtitles {
+    pub fn test_new() -> Self {
+        Self {
             events: vec![
                 Event {
                     start: 0,
@@ -194,7 +194,7 @@ impl Subtitles {
                                 // outline.push_line(Point2::new(300.0 / 4.0, 150.0 / 4.0));
                                 // outline.push_line(Point2::new(400.0 / 4.0, 400.0 / 4.0));
                                 // outline
-                                Outline::new()
+                                Outline::empty()
                             }],
                             size: {
                                 let mut bbox = BoundingBox::new();
@@ -387,9 +387,9 @@ struct Rect {
 }
 
 impl Rect {
-    fn from_bounding_box(bb: &BoundingBox) -> Rect {
+    fn from_bounding_box(bb: &BoundingBox) -> Self {
         bb.minmax()
-            .map(|(min, max)| Rect {
+            .map(|(min, max)| Self {
                 x: min.x.floor() as i32,
                 y: min.y.floor() as i32,
                 w: (max.x - min.x).ceil() as u32,
@@ -412,7 +412,7 @@ struct ShapedLine {
 }
 
 impl MultilineTextShaper {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             text: String::new(),
             explicit_line_bounaries: Vec::new(),
@@ -543,7 +543,7 @@ impl MultilineTextShaper {
                             let mut buffer = text::ShapingBuffer::new();
                             let direction = buffer.guess_properties();
                             if !direction.is_horizontal() {
-                                buffer.set_direction(direction.make_horizontal());
+                                buffer.set_direction(direction.to_horizontal());
                             }
                             buffer.add(&self.text[segment_slice]);
                             buffer.shape(font)
@@ -689,7 +689,7 @@ impl MultilineTextShaper {
                 segment.paint_rect.y += ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
             }
 
-            if segments.len() > 0 {
+            if !segments.is_empty() {
                 total_rect.x = total_rect
                     .x
                     .min(segments.first().map(|x| x.paint_rect.x).unwrap());
@@ -1248,15 +1248,15 @@ impl<'a> Renderer<'a> {
                     painter.stroke_whrect(
                         paint_box.0,
                         paint_box.1,
-                        shaped_segment.paint_rect.w as u32,
-                        shaped_segment.paint_rect.h as u32,
+                        shaped_segment.paint_rect.w,
+                        shaped_segment.paint_rect.h,
                         0x0000FFFF,
                     );
 
                     painter.horizontal_line(
-                        paint_box.0 as i32,
+                        paint_box.0,
                         y + shaped_segment.baseline_offset.1,
-                        shaped_segment.paint_rect.w as u32,
+                        shaped_segment.paint_rect.w,
                         0x00FF00FF,
                     );
 

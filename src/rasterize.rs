@@ -25,11 +25,11 @@ enum BresenhamKind {
 
 impl Bresenham {
     #[inline(always)]
-    pub fn current(&self) -> (i32, i32) {
+    pub const fn current(&self) -> (i32, i32) {
         (self.x, self.y)
     }
 
-    pub fn new_low(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
+    pub const fn new_low(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
         let dx = x1 - x0;
         let mut dy = y1 - y0;
         let mut yi = 1;
@@ -55,11 +55,11 @@ impl Bresenham {
     }
 
     #[inline(always)]
-    pub fn is_done_low(&self) -> bool {
+    pub const fn is_done_low(&self) -> bool {
         self.x > self.x1
     }
 
-    pub fn advance_low(&mut self) -> bool {
+    pub const fn advance_low(&mut self) -> bool {
         if self.d > 0 {
             self.y += self.i;
             self.d -= 2 * self.dx;
@@ -69,7 +69,7 @@ impl Bresenham {
         return self.is_done_low();
     }
 
-    pub fn new_high(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
+    pub const fn new_high(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
         let mut dx = x1 - x0;
         let dy = y1 - y0;
         let mut xi = 1;
@@ -95,21 +95,21 @@ impl Bresenham {
     }
 
     #[inline(always)]
-    pub fn is_done_high(&self) -> bool {
+    pub const fn is_done_high(&self) -> bool {
         self.y > self.y1
     }
 
-    pub fn advance_high(&mut self) -> bool {
+    pub const fn advance_high(&mut self) -> bool {
         if self.d > 0 {
             self.x += self.i;
             self.d -= 2 * self.dy;
         }
         self.d += 2 * self.dx;
         self.y += 1;
-        return self.is_done_high();
+        self.is_done_high()
     }
 
-    pub fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> (Self, BresenhamKind) {
+    pub const fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> (Self, BresenhamKind) {
         if (y1 - y0).abs() < (x1 - x0).abs() {
             if x0 > x1 {
                 (Self::new_low(x1, y1, x0, y0), BresenhamKind::Low)
@@ -125,14 +125,14 @@ impl Bresenham {
         }
     }
 
-    pub fn is_done(&self, kind: BresenhamKind) -> bool {
+    pub const fn is_done(&self, kind: BresenhamKind) -> bool {
         match kind {
             BresenhamKind::Low => self.is_done_low(),
             BresenhamKind::High => self.is_done_high(),
         }
     }
 
-    pub fn advance(&mut self, kind: BresenhamKind) -> bool {
+    pub const fn advance(&mut self, kind: BresenhamKind) -> bool {
         match kind {
             BresenhamKind::Low => self.advance_low(),
             BresenhamKind::High => self.advance_high(),
@@ -383,20 +383,16 @@ unsafe fn draw_triangle_half(
             let (m1x, m1y) = machine1.current();
             if m1y == current_y {
                 break m1x;
-            } else {
-                if machine1.advance(kind1) {
-                    break 'top;
-                }
+            } else if machine1.advance(kind1) {
+                break 'top;
             }
         };
         let m2x = loop {
             let (m2x, m2y) = machine2.current();
             if m2y == current_y {
                 break m2x;
-            } else {
-                if machine2.advance(kind2) {
-                    break 'top;
-                }
+            } else if machine2.advance(kind2) {
+                break 'top;
             }
         };
 
@@ -518,7 +514,7 @@ pub struct NonZeroPolygonRasterizer {
 }
 
 impl NonZeroPolygonRasterizer {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             queue: Vec::new(),
             left: Vec::new(),
@@ -628,9 +624,7 @@ impl NonZeroPolygonRasterizer {
     }
 
     fn queue_pop_if(&mut self, cy: u32) -> Option<(u32, bool, Profile)> {
-        let Some(&(y, ..)) = self.queue.last() else {
-            return None;
-        };
+        let &(y, ..) = self.queue.last()?;
 
         if y <= cy {
             self.queue.pop()

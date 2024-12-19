@@ -21,40 +21,40 @@ impl<const P: u32> Fixed<P> {
         self.0 as f32 / (1 << P) as f32
     }
 
-    pub fn trunc_to_i32(self) -> i32 {
+    pub const fn trunc_to_i32(self) -> i32 {
         self.0 >> P
     }
 
-    pub fn trunc(self) -> Self {
+    pub const fn trunc(self) -> Self {
         let signed_floor = (self.0 >> P) << P;
         let was_negative_with_fract =
             (self.0 & (Self::FRACTIONAL_MASK | Self::SIGN_MASK)) as u32 > Self::SIGN_MASK as u32;
         Self(signed_floor + Self::ONE.0 * (was_negative_with_fract as i32))
     }
 
-    pub fn fract(self) -> Self {
+    pub const fn fract(self) -> Self {
         let unsigned = self.0 & Self::FRACTIONAL_MASK;
         let mut extension = (self.0 & Self::SIGN_MASK) >> (i32::BITS - P - 1);
         extension *= (unsigned > 0) as i32;
         Self(unsigned | extension)
     }
 
-    pub fn round(self) -> Self {
+    pub const fn round(self) -> Self {
         let fract = self.fract();
-        if fract >= Self::HALF {
+        if fract.0 >= Self::HALF.0 {
             Self((self.0 & Self::WHOLE_MASK) + Self::ONE.0)
-        } else if fract <= -Self::HALF {
+        } else if fract.0 <= -Self::HALF.0 {
             Self(self.0 & Self::WHOLE_MASK)
         } else {
             self.trunc()
         }
     }
 
-    pub fn round_to_i32(self) -> i32 {
+    pub const fn round_to_i32(self) -> i32 {
         self.round().trunc_to_i32()
     }
 
-    pub fn signum(&self) -> i32 {
+    pub const fn signum(&self) -> i32 {
         // sign bit is at 1 << i32::BITS
         self.0 >> (i32::BITS - 1 - P)
     }

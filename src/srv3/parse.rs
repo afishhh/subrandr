@@ -389,10 +389,7 @@ fn parse_head(reader: &mut quick_xml::Reader<&[u8]>) -> Result<(Vec<Pen>, Vec<Wi
             XmlEvent::End(_) => break,
             XmlEvent::Empty(_) => unreachable!(),
             XmlEvent::Text(x)
-                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
-            {
-                ()
-            }
+                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {}
             XmlEvent::Text(_) | XmlEvent::CData(_) => {
                 return Err(Error::InvalidStructure(
                     "Unrecognized text content inside head element",
@@ -574,10 +571,7 @@ fn parse_body(
                 clean_segment_text(&mut current_text, &x.unescape()?);
             }
             XmlEvent::Text(x)
-                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
-            {
-                ()
-            }
+                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {}
             XmlEvent::Text(_) | XmlEvent::CData(_) => {
                 return Err(Error::InvalidStructure(
                     "Unrecognized text content inside body element",
@@ -676,10 +670,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
             }
             XmlEvent::Empty(_) => unreachable!(),
             XmlEvent::Text(x)
-                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
-            {
-                ()
-            }
+                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {}
             XmlEvent::Text(_) | XmlEvent::CData(_) => {
                 return Err(Error::InvalidStructure(
                     "Encountered content outside of a head or body element",
@@ -748,9 +739,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
                 }
                 XmlEvent::Empty(_) => unreachable!(),
                 XmlEvent::Text(x)
-                    if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) =>
-                {
-                    ()
+                    if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {
                 }
                 XmlEvent::Text(_) | XmlEvent::CData(_) => {
                     return Err(Error::InvalidStructure(

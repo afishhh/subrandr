@@ -11,7 +11,7 @@ pub trait PainterBuffer: AsRef<[u8]> + AsMut<[u8]> {}
 
 impl PainterBuffer for [u8] {}
 impl PainterBuffer for Vec<u8> {}
-impl<'a, T: PainterBuffer + ?Sized> PainterBuffer for &'a mut T {}
+impl<T: PainterBuffer + ?Sized> PainterBuffer for &mut T {}
 
 pub trait ResizablePainterBuffer: PainterBuffer {
     fn resize(&mut self, size: usize);
@@ -23,7 +23,7 @@ impl ResizablePainterBuffer for Vec<u8> {
     }
 }
 
-impl<'a, T: ResizablePainterBuffer + ?Sized> ResizablePainterBuffer for &'a mut T {
+impl<T: ResizablePainterBuffer + ?Sized> ResizablePainterBuffer for &mut T {
     fn resize(&mut self, size: usize) {
         T::resize(*self, size)
     }

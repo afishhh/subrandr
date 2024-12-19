@@ -23,11 +23,11 @@ pub struct Library {
 static FT_LIBRARY: OnceLock<Library> = OnceLock::new();
 
 impl Library {
-    pub fn get_or_init() -> &'static Library {
+    pub fn get_or_init() -> &'static Self {
         FT_LIBRARY.get_or_init(|| unsafe {
             let mut ft = std::ptr::null_mut();
             fttry!(FT_Init_FreeType(&mut ft));
-            Library {
+            Self {
                 ptr: ft,
                 face_mutation_mutex: Mutex::default(),
             }

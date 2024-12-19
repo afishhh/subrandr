@@ -12,15 +12,17 @@ use std::{
 mod rcarray;
 pub use rcarray::*;
 
-pub unsafe fn array_assume_init_ref<const N: usize, T>(array: &[MaybeUninit<T>; N]) -> &[T; N] {
+pub const unsafe fn array_assume_init_ref<const N: usize, T>(
+    array: &[MaybeUninit<T>; N],
+) -> &[T; N] {
     unsafe { &*(array as *const [_] as *const [T; N]) }
 }
 
-pub unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
+pub const unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
     unsafe { &*(slice as *const [_] as *const [T]) }
 }
 
-pub unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
+pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }
 
@@ -28,6 +30,7 @@ pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;
     let b = b as f32 / 255.0;
+
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let delta = max - min;
@@ -45,7 +48,7 @@ pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
         } else {
             delta / (2.0 - max - min)
         };
-        let h_ = (max - r as f32) / delta;
+        let h_ = (max - r) / delta;
 
         h = if r == max {
             if g == b {
@@ -114,7 +117,7 @@ pub struct ArrayVec<const CAP: usize, T> {
 }
 
 impl<const CAP: usize, T> ArrayVec<CAP, T> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             data: [const { MaybeUninit::uninit() }; CAP],
             length: 0,
@@ -131,7 +134,7 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
         result
     }
 
-    pub fn push(&mut self, value: T) {
+    pub const fn push(&mut self, value: T) {
         self.data[self.length].write(value);
         self.length += 1;
     }
@@ -144,7 +147,7 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
         unsafe { slice_assume_init_mut(&mut self.data[..self.length]) }
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.length
     }
 }
@@ -213,7 +216,7 @@ impl Eq for OrderedF32 {}
 
 impl PartialOrd for OrderedF32 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.0.total_cmp(&other.0))
+        Some(self.cmp(other))
     }
 }
 

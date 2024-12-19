@@ -23,7 +23,7 @@ impl<T> RcArray<T> {
         unsafe { Self::from_raw(Box::into_raw(slice)) }
     }
 
-    pub fn slice(array: RcArray<T>, range: impl RangeBounds<usize>) -> Self {
+    pub fn slice(array: Self, range: impl RangeBounds<usize>) -> Self {
         // TODO: std::slice::range here
         let array = std::mem::ManuallyDrop::new(array);
         Self {

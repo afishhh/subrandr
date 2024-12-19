@@ -18,10 +18,10 @@ impl FaceMmVar {
         unsafe { ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as i64) != 0 }
     }
 
-    fn get(face: FT_Face) -> Option<FaceMmVar> {
+    fn get(face: FT_Face) -> Option<Self> {
         unsafe {
             if Self::has(face) {
-                Some(FaceMmVar({
+                Some(Self({
                     let mut output = MaybeUninit::uninit();
                     fttry!(FT_Get_MM_Var(face, output.as_mut_ptr()));
                     output.assume_init()
@@ -62,13 +62,13 @@ struct SharedFaceData {
 }
 
 impl SharedFaceData {
-    fn get_ref(face: FT_Face) -> &'static SharedFaceData {
-        unsafe { &*((*face).generic.data as *const SharedFaceData) }
+    fn get_ref(face: FT_Face) -> &'static Self {
+        unsafe { &*((*face).generic.data as *const Self) }
     }
 
     unsafe extern "C" fn finalize(face: *mut std::ffi::c_void) {
         let face = face as FT_Face;
-        drop(unsafe { Box::from_raw((*face).generic.data) });
+        drop(unsafe { Box::from_raw((*face).generic.data as *mut Self) });
     }
 }
 
@@ -105,7 +105,7 @@ impl Face {
         let mut default_coords = MmCoords::default();
 
         if let Some(mm) = FaceMmVar::get(face) {
-            for (index, ft_axis) in mm.axes().into_iter().enumerate() {
+            for (index, ft_axis) in mm.axes().iter().enumerate() {
                 axes.push(Axis {
                     tag: ft_axis.tag,
                     index,
@@ -134,7 +134,7 @@ impl Face {
         Font {
             ft_face: self.face,
             hb_font: unsafe { hb_ft_font_create_referenced(self.face) },
-            frac_point_size: f32_to_fractional_points(point_size * 2.0),
+            frac_point_size: f32_to_fractional_points(point_size),
             dpi,
             coords: self.coords,
         }

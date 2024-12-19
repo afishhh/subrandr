@@ -74,7 +74,7 @@ impl Vec2 {
         self.x * self.x + self.y * self.y
     }
 
-    pub fn normal(self) -> Vec2 {
+    pub fn normal(self) -> Self {
         Vec2::new(self.y, -self.x)
     }
 
@@ -86,8 +86,8 @@ impl Vec2 {
     /// However there is also a useful geometric definition:
     /// u⋅v = ||u|| * ||v|| * cos(θ)
     /// where θ is the anglge between u and v.
-    pub fn dot(self, other: Vec2) -> f32 {
-        self.x * other.x + self.y * other.y
+    pub fn dot(self, other: Self) -> f32 {
+        self.x.mul_add(other.x, self.y * other.y)
     }
 
     /// Calculates the cross product of two vectors.
@@ -105,11 +105,11 @@ impl Vec2 {
     /// it is in the "counter-clockwise direction".
     ///
     /// another NOTE: This terminology is made up and probably not very formal.
-    pub fn cross(self, other: Vec2) -> f32 {
-        self.x * other.y - self.y * other.x
+    pub fn cross(self, other: Self) -> f32 {
+        self.x.mul_add(other.y, -self.y * other.x)
     }
 
-    pub fn normalize(self) -> Vec2 {
+    pub fn normalize(self) -> Self {
         #[cfg(target_feature = "sse")]
         unsafe {
             let length_sq = self.length_sq();
@@ -117,7 +117,7 @@ impl Vec2 {
             asm!("rsqrtss {}, {}", out(xmm_reg) invlength, in(xmm_reg) length_sq);
             // rsqrtss + one newton-raphson step = 22-bits of accuracy
             // still faster than sqrt
-            invlength *= 1.5 - (length_sq * 0.5 * invlength * invlength);
+            invlength *= (length_sq * 0.5 * invlength).mul_add(-invlength, 1.5);
             self * invlength
         }
         #[cfg(not(target_feature = "sse"))]
@@ -210,7 +210,7 @@ impl_binop!(
 
 impl Sum for Vec2 {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.reduce(Self::add).unwrap_or(Vec2::default())
+        iter.reduce(Self::add).unwrap_or_default()
     }
 }
 
@@ -259,8 +259,7 @@ impl BoundingBox {
     }
 
     pub fn size(&self) -> Vec2 {
-        let size = self.max - self.min;
-        size
+        self.max - self.min
     }
 
     pub fn area(&self) -> f32 {
@@ -298,9 +297,9 @@ impl Default for BoundingBox {
 }
 
 pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> impl Iterator<Item = f64> {
-    let det0 = b * b - 3.0 * a * c;
+    let det0 = b.mul_add(b, -3.0 * a * c);
     let det1 = 2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d;
-    let c_sqrt_sq = det1 * det1 - 4.0 * det0.powi(3);
+    let c_sqrt_sq = det1.mul_add(det1, -4.0 * det0.powi(3));
     let c_sqrt = Complex64::new(c_sqrt_sq, 0.0).sqrt();
     let c_cubed_1 = (det1 + c_sqrt) / 2.0;
     let c_cubed = if c_cubed_1 == Complex64::ZERO {
@@ -313,7 +312,7 @@ pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> impl Iterator<Item = f64> 
     let a3_neg_recip = (-3.0 * a).recip();
 
     let cube_root_of_unity = -0.5 + Complex64::new(-3.0, 0.0).sqrt() / 2.0;
-    (0..3).into_iter().filter_map(move |_| {
+    (0..3).filter_map(move |_| {
         let root = if c.re == 0.0 {
             Complex64::new(a3_neg_recip * b, 0.0)
         } else {
@@ -358,7 +357,7 @@ impl Line {
     }
 
     pub fn sample_y(&self, x: f32) -> f32 {
-        (-self.a * x - self.c) / self.b
+        x.mul_add(-self.a, -self.c) / self.b
     }
 }
 

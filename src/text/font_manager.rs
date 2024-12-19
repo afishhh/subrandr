@@ -6,7 +6,7 @@ use super::*;
 
 // TODO: Is the `ital` axis worth supporting?
 //       I don't even think I have one like that so I could use it for testing...
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[doc(hidden)]
 pub struct FamilySlot {
     variable_weight: Option<(Face, usize)>,
@@ -16,20 +16,10 @@ pub struct FamilySlot {
     variants: HashMap<(/* weight */ FT_Fixed, /* italic */ bool), Face>,
 }
 
-impl Default for FamilySlot {
-    fn default() -> Self {
-        Self {
-            variable_weight: None,
-            italic_variable_weight: None,
-            variants: HashMap::new(),
-        }
-    }
-}
-
 impl FamilySlot {
     fn add_font(&mut self, face: Face, weight: f32, italic: bool) {
         if let Some(weight_axis) = face.axis(WEIGHT_AXIS) {
-            let face_and_axis = (face.clone(), weight_axis.index);
+            let face_and_axis = (face, weight_axis.index);
             if italic {
                 self.italic_variable_weight.get_or_insert(face_and_axis);
             } else {
@@ -52,12 +42,11 @@ impl FamilySlot {
         if let Some((face, axis_index)) = variable_weight {
             let mut face = face.clone();
             face.set_axis(*axis_index, weight);
-            return Some(face);
+            Some(face)
         } else {
-            return self
-                .variants
+            self.variants
                 .get(&(f32_to_fixed_point(weight), italic))
-                .cloned();
+                .cloned()
         }
     }
 }
@@ -81,7 +70,7 @@ impl FamilyMap {
         // SAFETY: In the else branch self is not actually borrowed anymore but
         //         borrowchk is unable to see that data dependent lifetime.
         unsafe {
-            let self_: *mut Self = std::mem::transmute(self);
+            let self_: *mut Self = self as *mut Self;
 
             if let Some(slot) = (*self_).0.get_mut(name) {
                 slot
@@ -145,12 +134,12 @@ impl FontManager {
                         })?;
                     self.fallback.add_font(fallback.clone(), weight, italic);
                     set_weight_if_variable(&mut fallback, weight);
-                    return Ok(fallback);
+                    Ok(fallback)
                 }
                 Err(e) => Err(e),
             }
         } else {
-            return Err("Font not found".into());
+            Err("Font not found".into())
         }
     }
 

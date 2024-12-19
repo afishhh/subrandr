@@ -1,5 +1,5 @@
-///! An implementation of (this algorithm)[https://raphlinus.github.io/graphics/curves/2019/12/23/flatten-quadbez.html].
-///! Cubic curves are converted into quadratics using (this algorithm)[https://web.archive.org/web/20150403003715/http://www.caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html], found via (this post)[https://minus-ze.ro/posts/flattening-bezier-curves-and-arcs/].
+//! An implementation of (this algorithm)[https://raphlinus.github.io/graphics/curves/2019/12/23/flatten-quadbez.html].
+//! Cubic curves are converted into quadratics using (this algorithm)[https://web.archive.org/web/20150403003715/http://www.caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html], found via (this post)[https://minus-ze.ro/posts/flattening-bezier-curves-and-arcs/].
 use super::{Bezier as _, CubicBezier, Point2, QuadraticBezier};
 
 struct Basic {
@@ -10,7 +10,7 @@ struct Basic {
 
 /// Map a quadratic bezier to a scaled, translated and rotated segment of y=x^2
 /// (map_to_basic)[https://github.com/raphlinus/raphlinus.github.io/blob/main/_posts/2019-12-23-flatten-quadbez.md]
-pub fn map_to_basic(a: Point2, b: Point2, c: Point2) -> Basic {
+fn map_to_basic(a: Point2, b: Point2, c: Point2) -> Basic {
     // (b - a) + (b - c)
     let dd = b.to_vec() * 2.0 - a.to_vec() - c.to_vec();
     let u0 = (b.x - a.x) * dd.x + (b.y - a.y) * dd.y;

@@ -52,21 +52,21 @@ impl Direction {
         }
     }
 
-    pub fn is_horizontal(self) -> bool {
-        self == Direction::Ltr || self == Direction::Rtl
+    pub const fn is_horizontal(self) -> bool {
+        matches!(self, Self::Ltr | Self::Rtl)
     }
 
-    pub fn is_vertical(self) -> bool {
+    pub const fn is_vertical(self) -> bool {
         !self.is_horizontal()
     }
 
     #[must_use]
-    pub fn make_horizontal(self) -> Direction {
+    pub const fn to_horizontal(self) -> Self {
         match self {
-            Direction::Ltr => Direction::Ltr,
-            Direction::Rtl => Direction::Rtl,
-            Direction::Ttb => Direction::Ltr,
-            Direction::Btt => Direction::Rtl,
+            Self::Ltr => Self::Ltr,
+            Self::Rtl => Self::Rtl,
+            Self::Ttb => Self::Ltr,
+            Self::Btt => Self::Rtl,
         }
     }
 }
@@ -292,7 +292,7 @@ pub struct TextExtents {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn paint<'a>(
+pub fn paint(
     // RGBA8 buffer
     buffer: &mut [u8],
     baseline_x: i32,
@@ -333,8 +333,8 @@ pub fn paint<'a>(
 
             for biy in 0..bitmap.rows {
                 for bix in 0..(bitmap.width / pixel_width) {
-                    let fx = x as i32 + ox + bix as i32;
-                    let fy = y as i32 + oy + biy as i32;
+                    let fx = x + ox + bix as i32;
+                    let fy = y + oy + biy as i32;
 
                     if fx < 0 || fy < 0 {
                         continue;
@@ -380,8 +380,8 @@ pub fn paint<'a>(
                 }
             }
 
-            x = x + shaped_glyph.x_advance / 64;
-            y = y + shaped_glyph.y_advance / 64;
+            x += shaped_glyph.x_advance / 64;
+            y += shaped_glyph.y_advance / 64;
         }
 
         (x, y)

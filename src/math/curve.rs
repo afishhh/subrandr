@@ -1,13 +1,6 @@
-use std::{
-    cmp::Ordering,
-    mem::MaybeUninit,
-    ops::{Deref, Mul, MulAssign, Range},
-};
+use std::{mem::MaybeUninit, ops::Deref};
 
-use crate::{
-    util::{slice_assume_init_mut, ArrayVec},
-    Painter, PainterBuffer,
-};
+use crate::util::{slice_assume_init_mut, ArrayVec};
 
 use super::{BoundingBox, Point2, Vec2};
 
@@ -81,15 +74,15 @@ macro_rules! define_curve {
         pub struct $name([Point2; $npoints]);
 
         impl $name {
-            pub fn new(points: [Point2; $npoints]) -> Self {
+            pub const fn new(points: [Point2; $npoints]) -> Self {
                 Self(points)
             }
 
-            pub fn from_ref(points: &[Point2; $npoints]) -> &Self {
+            pub const fn from_ref(points: &[Point2; $npoints]) -> &Self {
                 unsafe { &*(points as *const _ as *const Self) }
             }
 
-            pub fn into_points(self) -> [Point2; $npoints] {
+            pub const fn into_points(self) -> [Point2; $npoints] {
                 self.0
             }
         }

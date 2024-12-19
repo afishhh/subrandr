@@ -24,7 +24,7 @@ pub struct OutlineBuilder {
 impl OutlineBuilder {
     pub const fn new() -> Self {
         Self {
-            outline: Outline::new(),
+            outline: Outline::empty(),
             first_point_of_contour: 0,
             segment_start: 0,
         }
@@ -110,7 +110,7 @@ pub struct Outline {
 }
 
 impl Outline {
-    pub const fn new() -> Self {
+    pub const fn empty() -> Self {
         Self {
             points: vec![],
             segments: Vec::new(),
@@ -137,24 +137,16 @@ impl Outline {
     }
 
     fn evaluate_segment_normalized(&self, i: usize, t: f32) -> Point2 {
-        assert!(0.0 <= t && t <= 1.0);
+        assert!((0.0..=1.0).contains(&t));
 
         let value = evaluate_bezier(self.points_for_segment(self.segments[i]), t);
-        eprintln!(
-            "evaluate_segment_normalized({i}, {t}), {:?} = {value:?}",
-            self.points_for_segment(self.segments[i])
-        );
         value
     }
 
     pub fn evaluate_segment(&self, segment: Segment, t: f32) -> Point2 {
-        assert!(0.0 <= t && t <= 1.0);
+        assert!((0.0..=1.0).contains(&t));
 
         let value = evaluate_bezier(self.points_for_segment(segment), t);
-        // eprintln!(
-        //     "evaluate_segment({segment:?}, {t}), {:?} = {value:?}",
-        //     self.points_for_segment(segment)
-        // );
         value
     }
 
@@ -387,11 +379,7 @@ impl Stroker {
             };
             eprintln!(
                 "stroker: emitting point (normal={normal:?}) {point:?}{dirstr}{offset:?}{}",
-                if let Some(segment) = segment {
-                    format!(" and segment {segment:?}")
-                } else {
-                    String::new()
-                }
+                segment.map_or_else(String::new, |segment| format!(" and segment {segment:?}"))
             );
         }
 

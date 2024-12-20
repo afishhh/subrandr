@@ -87,7 +87,7 @@ impl Vec2 {
     /// u⋅v = ||u|| * ||v|| * cos(θ)
     /// where θ is the anglge between u and v.
     pub fn dot(self, other: Self) -> f32 {
-        self.x.mul_add(other.x, self.y * other.y)
+        self.x * other.x + self.y * other.y
     }
 
     /// Calculates the cross product of two vectors.
@@ -106,7 +106,7 @@ impl Vec2 {
     ///
     /// another NOTE: This terminology is made up and probably not very formal.
     pub fn cross(self, other: Self) -> f32 {
-        self.x.mul_add(other.y, -self.y * other.x)
+        self.x * other.y - self.y * other.x
     }
 
     pub fn normalize(self) -> Self {
@@ -117,7 +117,7 @@ impl Vec2 {
             asm!("rsqrtss {}, {}", out(xmm_reg) invlength, in(xmm_reg) length_sq);
             // rsqrtss + one newton-raphson step = 22-bits of accuracy
             // still faster than sqrt
-            invlength *= (length_sq * 0.5 * invlength).mul_add(-invlength, 1.5);
+            invlength *= 1.5 - (length_sq * 0.5 * invlength * invlength);
             self * invlength
         }
         #[cfg(not(target_feature = "sse"))]
@@ -297,9 +297,9 @@ impl Default for BoundingBox {
 }
 
 pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> impl Iterator<Item = f64> {
-    let det0 = b.mul_add(b, -3.0 * a * c);
+    let det0 = b * b - 3.0 * a * c;
     let det1 = 2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d;
-    let c_sqrt_sq = det1.mul_add(det1, -4.0 * det0.powi(3));
+    let c_sqrt_sq = det1 * det1 - 4.0 * det0.powi(3);
     let c_sqrt = Complex64::new(c_sqrt_sq, 0.0).sqrt();
     let c_cubed_1 = (det1 + c_sqrt) / 2.0;
     let c_cubed = if c_cubed_1 == Complex64::ZERO {
@@ -357,7 +357,7 @@ impl Line {
     }
 
     pub fn sample_y(&self, x: f32) -> f32 {
-        x.mul_add(-self.a, -self.c) / self.b
+        (-x * self.a - self.c) / self.b
     }
 }
 

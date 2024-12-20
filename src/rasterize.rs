@@ -496,13 +496,13 @@ pub fn fill_triangle(
     };
 }
 
-// 22.10 fixed opint signed value
-type Fixed22 = Fixed<10>;
+// 18.14 signed fixed point value
+type Fixed18 = Fixed<14>;
 
 #[derive(Debug)]
 struct Profile {
-    current: Fixed22,
-    step: Fixed22,
+    current: Fixed18,
+    step: Fixed18,
     end_y: u32,
 }
 
@@ -530,12 +530,12 @@ impl NonZeroPolygonRasterizer {
 
     fn add_line(&mut self, offset: (i32, i32), start: &Point2, end: &Point2, invert_winding: bool) {
         let istart = (
-            Fixed22::from_f32(start.x) + offset.0,
-            Fixed22::from_f32(start.y) + offset.1,
+            Fixed18::from_f32(start.x) + offset.0,
+            Fixed18::from_f32(start.y) + offset.1,
         );
         let iend = (
-            Fixed22::from_f32(end.x) + offset.0,
-            Fixed22::from_f32(end.y) + offset.1,
+            Fixed18::from_f32(end.x) + offset.0,
+            Fixed18::from_f32(end.y) + offset.1,
         );
 
         let direction = match iend.1.cmp(&istart.1) {
@@ -548,9 +548,9 @@ impl NonZeroPolygonRasterizer {
         };
 
         let step = if istart.0 == iend.0 {
-            Fixed22::ZERO
+            Fixed18::ZERO
         } else {
-            (iend.1 - istart.1) / (iend.0 - istart.0)
+            (iend.0 - istart.0) / (iend.1 - istart.1)
         };
 
         let start_y = istart.1.round_to_i32();
@@ -580,7 +580,7 @@ impl NonZeroPolygonRasterizer {
             return;
         }
 
-        println!("{istart:?} {start_y} {iend:?} {end_y} {start_x} {end_x}");
+        println!("{start_y} {end_y} {start_x} {end_x}");
         println!("{top_y} {bottom_y}");
         println!(
             "line {start:?} -- {end:?} results in top_y={top_y} direction={:?}",
@@ -683,7 +683,7 @@ impl NonZeroPolygonRasterizer {
             for i in 0..self.left.len() {
                 let (left, right) = (&self.left[i], &self.right[i]);
 
-                let round_clamp = |f: Fixed22| (f.round_to_i32().max(0) as u32).min(width);
+                let round_clamp = |f: Fixed18| (f.round_to_i32().max(0) as u32).min(width);
                 let mut x0 = round_clamp(left.current);
                 let mut x1 = round_clamp(right.current);
                 // TODO: is this necessary? can this be removed?

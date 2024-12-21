@@ -162,7 +162,12 @@ impl FontconfigFontBackend {
             )
         };
 
-        let mut found = None;
+        struct Found {
+            pattern: *mut FcPattern,
+            family: &'static CStr,
+            is_variable: bool,
+        }
+        let mut found = None::<Found>;
 
         for font in fonts.iter().copied() {
             unsafe {
@@ -180,19 +185,49 @@ impl FontconfigFontBackend {
                 }
             }
 
-            found = Some(font);
-            break;
-        }
-
-        let result = if let Some(prepared) = found {
-            let mut path = MaybeUninit::uninit();
+            let mut family = MaybeUninit::uninit();
             if unsafe {
                 FcPatternGetString(
-                    prepared,
-                    FC_FILE.as_ptr() as *const i8,
+                    font,
+                    FC_FAMILY.as_ptr() as *const i8,
                     0,
-                    path.as_mut_ptr(),
+                    family.as_mut_ptr(),
                 ) != FcResultMatch
+            } {
+                return Err(LoadError::NoFamily.into());
+            }
+            let family = unsafe { CStr::from_ptr(family.assume_init() as *const i8) };
+
+            let is_variable = {
+                let mut out = 0;
+                unsafe {
+                    FcPatternGetBool(font, FC_VARIABLE.as_ptr() as *const i8, 0, &mut out)
+                        == FcResultMatch
+                        && out > 0
+                }
+            };
+
+            if found
+                .as_ref()
+                .is_none_or(|x| !x.is_variable && is_variable && family == x.family)
+            {
+                found = Some(Found {
+                    pattern: font,
+                    family,
+                    is_variable,
+                });
+
+                if is_variable {
+                    break;
+                }
+            }
+        }
+
+        let result = if let Some(Found { pattern, .. }) = found {
+            let mut path = MaybeUninit::uninit();
+            if unsafe {
+                FcPatternGetString(pattern, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
+                    != FcResultMatch
             } {
                 return Err(LoadError::NoFile.into());
             }
@@ -209,7 +244,6 @@ impl FontconfigFontBackend {
             println!("font found for query name={name:?} weight={weight} italic={italic} codepoint={codepoint:?}: {face:?}");
             Some(face)
         } else {
-            panic!("no font found for query name={name:?} weight={fc_weight} italic={italic} codepoint={codepoint:?}");
             None
         };
 

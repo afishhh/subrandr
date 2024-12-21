@@ -573,7 +573,7 @@ pub fn paint(
             let glyph = (*face).glyph;
             fttry!(FT_Render_Glyph(glyph, FT_RENDER_MODE_NORMAL));
 
-            let scale6 = dbg!(font.scale).into_raw();
+            let scale6 = font.scale.into_raw();
 
             let (ox, oy) = (
                 ((*glyph).bitmap_left * scale6 + shaped_glyph.x_offset) / 64,
@@ -646,12 +646,6 @@ pub fn paint(
                         let factor_next_x = source_pixel_x6 & 0x3F;
                         let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
                         let factor_next_y = source_pixel_y6 & 0x3F;
-
-                        println!(
-                            "x={bix} -> {:?}, y={biy} -> {:?}",
-                            Fixed::<6>::from_raw(source_pixel_x6 as i32),
-                            Fixed::<6>::from_raw(source_pixel_y6 as i32),
-                        );
 
                         if next_x >= bitmap.width {
                             if next_y >= bitmap.rows {

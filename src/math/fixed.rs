@@ -5,12 +5,28 @@ use std::{
 
 // signed 32bit fixed point number
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Fixed<const P: u32>(i32);
 
 impl<const P: u32> Fixed<P> {
     pub const fn new(value: i32) -> Self {
         Self(value << P)
+    }
+
+    pub const fn from_quotient(numerator: i32, denominator: i32) -> Self {
+        Self::from_quotient64(numerator as i64, denominator as i64)
+    }
+
+    pub const fn from_quotient64(numerator: i64, denominator: i64) -> Self {
+        Self(((numerator << P) / denominator) as i32)
+    }
+
+    pub const fn from_raw(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub const fn into_raw(self) -> i32 {
+        self.0
     }
 
     pub const fn from_f32(value: f32) -> Self {
@@ -52,6 +68,10 @@ impl<const P: u32> Fixed<P> {
 
     pub const fn round_to_i32(self) -> i32 {
         self.round().trunc_to_i32()
+    }
+
+    pub const fn abs(self) -> Self {
+        Fixed(self.0.abs())
     }
 
     pub const fn signum(&self) -> i32 {
@@ -123,6 +143,8 @@ define_simple_fixed_operator!(
     @all Sub, sub, -, SubAssign, sub_assign, -=
 );
 
+// TODO: Both Div and Mul can be implemented more efficiently when
+//       multiplying by integers
 define_simple_fixed_operator!(
     @conversions Div, div, /, DivAssign, div_assign, /=
 );
@@ -207,6 +229,8 @@ mod test_24_8 {
         (60.0, 20.0),
         (2353.0, 3102.0),
         (3353.0, -1102.0),
+        (-200.0, -500.0),
+        (-500.0, -200.0),
         (-2.0005, 4.0005),
         (0.0, -34031.0),
         (EPS, EPS),

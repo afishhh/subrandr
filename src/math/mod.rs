@@ -1,6 +1,5 @@
 use std::{
     arch::asm,
-    borrow::Borrow,
     fmt::Debug,
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign},
@@ -224,34 +223,36 @@ impl Sum<Vec2> for Point2 {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct BoundingBox {
-    min: Point2,
-    max: Point2,
+#[derive(Debug, Clone, Default)]
+pub struct Rect2 {
+    pub min: Point2,
+    pub max: Point2,
 }
 
-impl BoundingBox {
-    pub const fn new() -> Self {
-        Self {
-            min: Point2::new(f32::MAX, f32::MAX),
-            max: Point2::new(f32::MIN, f32::MIN),
-        }
-    }
-
-    pub fn from_points(points: impl IntoIterator<Item: Borrow<Point2>>) -> Self {
-        let mut result = Self::new();
-        for point in points {
-            result.add(point.borrow());
-        }
-        result
-    }
-
-    pub const NOTHING: BoundingBox = BoundingBox {
+impl Rect2 {
+    pub const NOTHING: Rect2 = Rect2 {
         min: Point2::new(f32::MAX, f32::MAX),
         max: Point2::new(f32::MIN, f32::MIN),
     };
 
-    pub fn intersects(&self, other: &BoundingBox) -> bool {
+    pub const ZERO: Rect2 = Rect2 {
+        min: Point2::ZERO,
+        max: Point2::ZERO,
+    };
+
+    pub fn is_negative(&self) -> bool {
+        self.min.x > self.max.x || self.min.y > self.max.y
+    }
+
+    pub fn clamp_to_positive(&self) -> Self {
+        if self.is_negative() {
+            Self::ZERO
+        } else {
+            self.clone()
+        }
+    }
+
+    pub fn intersects(&self, other: &Self) -> bool {
         self.min.x <= other.max.x
             && self.max.x >= other.min.x
             && self.min.y <= other.max.y
@@ -264,35 +265,27 @@ impl BoundingBox {
 
     pub fn area(&self) -> f32 {
         let size = self.size();
-        size.x * size.y
+        // Rect2::NOTHING
+        if self.min.x > self.max.x {
+            0.0
+        } else {
+            size.x * size.y
+        }
     }
 
-    pub fn add(&mut self, point: &Point2) {
+    pub fn expand_to_point(&mut self, point: &Point2) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
         self.max.x = self.max.x.max(point.x);
         self.max.y = self.max.y.max(point.y);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.min.x == f32::MAX
-            && self.min.y == f32::MAX
-            && self.max.x == f32::MIN
-            && self.max.y == f32::MIN
-    }
-
-    pub fn minmax(&self) -> Option<(Point2, Point2)> {
-        if self.is_empty() {
-            None
-        } else {
-            Some((self.min, self.max))
+    pub fn bounding_from_points(points: &[Point2]) -> Self {
+        let mut bb = Self::NOTHING;
+        for point in points {
+            bb.expand_to_point(point);
         }
-    }
-}
-
-impl Default for BoundingBox {
-    fn default() -> Self {
-        Self::new()
+        bb
     }
 }
 

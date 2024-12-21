@@ -1,10 +1,14 @@
 // The library is still under active development
 #![allow(dead_code)]
+// #![cfg_attr(test, feature(test))]
+#![warn(clippy::suboptimal_flops)]
+#![warn(clippy::cognitive_complexity)]
+#![warn(clippy::nursery)]
 
 use std::rc::Rc;
 
-use math::{BoundingBox, Point2};
-use outline::{CurveDegree, Outline, OutlineBuilder};
+use math::Point2;
+use outline::{CurveDegree, OutlineBuilder};
 use rasterize::NonZeroPolygonRasterizer;
 use text::{FontManager, TextExtents};
 
@@ -111,9 +115,21 @@ struct TextSegment {
 // Size does not take into account negative coordinates
 #[derive(Debug, Clone)]
 pub struct ShapeSegment {
-    outlines: Vec<outline::Outline>,
-    size: Rect,
+    outline: outline::Outline,
+    bounding_box: math::Rect2,
+    stroke_width: f32,
     color: u32,
+}
+
+impl ShapeSegment {
+    pub fn new(outline: outline::Outline, stroke_width: f32, color: u32) -> Self {
+        Self {
+            bounding_box: { outline.bounding_box().clamp_to_positive() },
+            stroke_width,
+            outline,
+            color,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -186,25 +202,23 @@ impl Subtitles {
                             underline: false,
                             strike_out: false,
                             color: 0xFF0000FF,
-                            text: "iね".to_string(),
+                            text: "iね❌".to_string(),
                         }),
-                        Segment::Shape(ShapeSegment {
-                            outlines: vec![{
-                                // let mut outline = Outline::new(Point2::new(0.0, 0.0));
-                                // outline.push_line(Point2::new(50.0 / 4.0, 200.0 / 4.0));
-                                // outline.push_line(Point2::new(300.0 / 4.0, 150.0 / 4.0));
-                                // outline.push_line(Point2::new(400.0 / 4.0, 400.0 / 4.0));
-                                // outline
-                                Outline::empty()
-                            }],
-                            size: {
-                                let mut bbox = BoundingBox::new();
-                                bbox.add(&Point2::new(0.0, 0.0));
-                                bbox.add(&Point2::new(400.0 / 4.0, 400.0 / 4.0));
-                                Rect::from_bounding_box(&bbox)
+                        Segment::Shape(ShapeSegment::new(
+                            {
+                                let mut b = OutlineBuilder::new();
+                                b.add_point(Point2::new(0.0, 0.0));
+                                b.add_point(Point2::new(30.0, 120.));
+                                b.add_point(Point2::new(120.0, 120.));
+                                b.add_segment(CurveDegree::Linear);
+                                b.add_segment(CurveDegree::Linear);
+                                b.add_segment(CurveDegree::Linear);
+                                b.close_contour();
+                                b.build()
                             },
-                            color: 0x00FF00FF,
-                        }),
+                            5.0,
+                            0x00FF00FF,
+                        )),
                     ],
                 },
                 Event {
@@ -279,98 +293,17 @@ impl Subtitles {
     }
 }
 
-// impl Subtitles {
-//     pub fn test_new() -> Subtitles {
-//         Subtitles {
-//             events: vec![
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.5,
-//                     y: 0.0,
-//                     alignment: Alignment::Top,
-//                     text: "上".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.0,
-//                     y: 0.0,
-//                     alignment: Alignment::TopLeft,
-//                     text: "左上".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.0,
-//                     y: 0.5,
-//                     alignment: Alignment::Left,
-//                     text: "左".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.0,
-//                     y: 1.0,
-//                     alignment: Alignment::BottomLeft,
-//                     text: "左下".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.5,
-//                     y: 0.5,
-//                     alignment: Alignment::Center,
-//                     text: "中".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 1.0,
-//                     y: 1.0,
-//                     alignment: Alignment::BottomRight,
-//                     text: "右下".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 1.0,
-//                     y: 0.0,
-//                     alignment: Alignment::TopRight,
-//                     text: "右上".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 1.0,
-//                     y: 0.5,
-//                     alignment: Alignment::Right,
-//                     text: "右".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 1.0,
-//                     y: 1.0,
-//                     alignment: Alignment::BottomRight,
-//                     text: "右下".to_string(),
-//                 },
-//                 Event {
-//                     start: 0,
-//                     end: 3000,
-//                     x: 0.5,
-//                     y: 1.0,
-//                     alignment: Alignment::Bottom,
-//                     text: "下".to_string(),
-//                 },
-//             ],
-//         }
-//     }
-// }
+#[derive(Clone, Debug, Copy)]
+struct PixelRect {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+}
 
 enum ShaperSegment {
     Text(text::Font),
-    Shape(Rect),
+    Shape(PixelRect),
 }
 
 struct MultilineTextShaper {
@@ -384,32 +317,11 @@ struct MultilineTextShaper {
 struct ShapedLineSegment {
     glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
     baseline_offset: (i32, i32),
-    paint_rect: Rect,
+    paint_rect: PixelRect,
     corresponding_input_segment: usize,
     // Implementation details
     max_bearing_y: i64,
     corresponding_font_boundary: usize,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Rect {
-    x: i32,
-    y: i32,
-    w: u32,
-    h: u32,
-}
-
-impl Rect {
-    fn from_bounding_box(bb: &BoundingBox) -> Self {
-        bb.minmax()
-            .map(|(min, max)| Self {
-                x: min.x.floor() as i32,
-                y: min.y.floor() as i32,
-                w: (max.x - min.x).ceil() as u32,
-                h: (max.y - min.y).ceil() as u32,
-            })
-            .unwrap_or_default()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,7 +368,7 @@ impl MultilineTextShaper {
             .push((ShaperSegment::Text(font.clone()), self.text.len()));
     }
 
-    fn add_shape(&mut self, dim: Rect) {
+    fn add_shape(&mut self, dim: PixelRect) {
         self.text.push('\0');
         self.segment_boundaries
             .push((ShaperSegment::Shape(dim), self.text.len()))
@@ -467,7 +379,7 @@ impl MultilineTextShaper {
         line_alignment: HorizontalAlignment,
         wrapping: TextWrappingMode,
         font_manager: &mut FontManager,
-    ) -> (Vec<ShapedLine>, Rect) {
+    ) -> (Vec<ShapedLine>, PixelRect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
         println!("SHAPING V2 TEXT {:?}", self.text);
@@ -481,7 +393,7 @@ impl MultilineTextShaper {
             paint_width: 0,
             paint_height: 0,
         };
-        let mut total_rect = Rect {
+        let mut total_rect = PixelRect {
             x: 0,
             y: 0,
             w: 0,
@@ -594,7 +506,7 @@ impl MultilineTextShaper {
                                     line_extents.paint_width / 64,
                                     total_extents.paint_height / 64,
                                 ),
-                                paint_rect: Rect {
+                                paint_rect: PixelRect {
                                     x: line_extents.paint_width / 64,
                                     y: total_extents.paint_height / 64,
                                     w: extents.paint_width as u32 / 64,
@@ -624,7 +536,7 @@ impl MultilineTextShaper {
                                 segments.push(ShapedLineSegment {
                                     glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
                                     baseline_offset: (x / 64, total_extents.paint_height / 64),
-                                    paint_rect: Rect {
+                                    paint_rect: PixelRect {
                                         x: x / 64,
                                         y: total_extents.paint_height / 64,
                                         w: extents.paint_width as u32 / 64,
@@ -653,19 +565,22 @@ impl MultilineTextShaper {
                             line_extents.paint_height = extents.paint_height;
                         }
                     }
+                    // TODO: Figure out exactly how libass lays out shapes
                     ShaperSegment::Shape(dim) => {
-                        let logical_w = dim.w - (-dim.x).max(0) as u32;
-                        let logical_h = dim.h - (-dim.y).max(0) as u32;
+                        let logical_w = dim.w - (-dim.x).min(0) as u32;
+                        let logical_h = dim.h - (-dim.y).min(0) as u32;
                         let segment_max_bearing_y = (logical_h * 64) as i64;
+                        let y = dim.y.max(0);
+                        // let x = dim.x.max(0);
                         segments.push(ShapedLineSegment {
                             glyphs_and_fonts: None,
                             baseline_offset: (
                                 line_extents.paint_width / 64,
-                                total_extents.paint_height / 64,
+                                total_extents.paint_height / 64 - y,
                             ),
-                            paint_rect: Rect {
+                            paint_rect: PixelRect {
                                 x: line_extents.paint_width / 64,
-                                y: total_extents.paint_height / 64,
+                                y: total_extents.paint_height / 64 - y,
                                 w: logical_w,
                                 h: logical_h,
                             },
@@ -873,252 +788,7 @@ impl<'a> Renderer<'a> {
             &mut painter,
         );
 
-        // self.draw_outline(
-        //     &mut painter,
-        //     0,
-        //     0,
-        //     &{
-        //         let mut builder = OutlineBuilder::new();
-        //         builder.add_point(Point2::new(0., 0.));
-        //         builder.add_point(Point2::new(100., 200.));
-        //         builder.add_point(Point2::new(350., 300.));
-        //         builder.add_point(Point2::new(400., 300.));
-        //         builder.add_segment(SplineDegree::Cubic);
-        //         builder.add_point(Point2::new(300., 200.));
-        //         builder.add_point(Point2::new(550., 100.));
-        //         builder.add_point(Point2::new(500., 0.));
-        //         builder.add_segment(SplineDegree::Cubic);
-        //         builder.add_point(Point2::new(100., 100.));
-        //         builder.add_segment(SplineDegree::Quadratic);
-        //         builder.close_contour();
-        //         builder.build()
-        //     },
-        //     0xFFFFFFFF,
-        // );
-
-        let shape_scale = self.dpi as f32 * 7.0 / 72.0;
-
-        // let polyline_base = vec![
-        //     Point2::ZERO,
-        //     Point2::new(0.0, 100.0),
-        //     // Point2::new(30.0, 100.0),
-        //     Point2::new(100.0, 100.0),
-        //     // Point2::new(120.0, 0.0),
-        //     Point2::ZERO,
-        // ];
-
-        // let polyline_base2 = vec![
-        //     Point2::ZERO,
-        //     // Point2::new(12.0, 50.0),
-        //     Point2::new(0.0, 100.0),
-        //     Point2::new(100.0, 100.0),
-        //     Point2::ZERO,
-        // ];
-
-        // let offset = |base: &[Point2], scale: f32, offset: Vec2| -> Vec<Point2> {
-        //     base.iter()
-        //         .map(|p| (p.to_vec() * scale + offset).to_point())
-        //         .collect()
-        // };
-
-        // let inner = offset(&polyline_base2, 0.6 * shape_scale, Vec2::new(20.0, 50.0));
-        // let outer = offset(&polyline_base, 0.9 * shape_scale, Vec2::ZERO);
-        // let triangles = polyline::tessellate_area_between_polylines(&outer, &inner);
-        // for (a, b, c) in triangles {
-        //     painter.stroke_triangle(
-        //         a.x as i32 + 100,
-        //         a.y as i32 + 100,
-        //         b.x as i32 + 100,
-        //         b.y as i32 + 100,
-        //         c.x as i32 + 100,
-        //         c.y as i32 + 100,
-        //         0x00FF00FF,
-        //     );
-        // }
-        // painter.stroke_polyline(100, 100, &inner, 0xFF0000FF);
-        // painter.stroke_polyline(100, 100, &outer, 0x0000FFFF);
-
-        // let mut out = ArrayVec::<3, _>::new();
-        // solve_cubic(1.0, -33.0, 216.0, 0.0, |r| out.push(r));
-        // println!("roots: {out:?}");
-
-        // {
-        //     let cubic = CubicBezier::new([
-        //         Point2::new(0.0, 0.0),
-        //         Point2::new(-200.0, 200.0),
-        //         Point2::new(500.0, 600.0),
-        //         Point2::new(500.0, 100.0),
-        //     ]);
-        //     let mut cubic_poly = cubic.flatten(0.1);
-        //     painter.stroke_polyline(100, 100, &cubic_poly, 0xFFFFFFFF);
-        //     let subcubic = cubic.subcurve(0.2, 0.5);
-        //     cubic_poly.clear();
-        //     cubic_poly.push(subcubic[0]);
-        //     subcubic.flatten_into(0.1, &mut cubic_poly);
-        //     painter.stroke_polyline(100, 100, &cubic_poly, 0xFF0000FF);
-
-        //     // let mut ts = ArrayVec::new();
-        //     // cubic.solve_for_t(200.0, &mut ts);
-        //     // println!("solutions: {ts:?}");
-        //     // for t in ts.iter().copied() {
-        //     //     let p = cubic.sample(t);
-        //     //     println!("t: {t} -> {:?}", p);
-        //     //     assert!((p.x - 200.0).abs() < 0.1);
-        //     // }
-        // }
-
-        {
-            let quadratic = QuadraticBezier::new([
-                Point2::new(-50.0, 100.0),
-                Point2::new(200.0, 200.0),
-                Point2::new(500.0, 0.0),
-            ]);
-            let mut quad_poly = Vec::new();
-            quad_poly.push(quadratic[0]);
-            quadratic.flatten_into(0.01, &mut quad_poly);
-            painter.stroke_polyline(100, 100, &quad_poly, 0xFFFFFFFF);
-            quad_poly.clear();
-
-            // let mut ts = ArrayVec::new();
-            // quadratic.solve_for_t(300.0, &mut ts);
-            // // let &[t] = &ts[..] else {
-            // //     panic!();
-            // // };
-
-            // let p = quadratic.sample(t);
-            // assert!((p.x - 300.0).abs() < 0.1);
-
-            // let subquad = quadratic.subcurve(0.2, 0.5);
-            // quad_poly.push(subquad[0]);
-            // subquad.flatten_into(0.01, &mut quad_poly);
-            // painter.stroke_polyline(100, 100, &quad_poly, 0x0000FFFF);
-
-            let quadratic2 = CubicBezier::new([
-                Point2::new(100.0, 50.0),
-                Point2::new(150.0, 400.0),
-                Point2::new(300.0, 200.0),
-                Point2::new(400.0, 000.0),
-            ]);
-            painter.stroke_polyline(100, 100, &quadratic2.flatten(0.01), 0xFFFFFFFF);
-
-            let mut out = ArrayVec::new();
-            intersect_curves(&quadratic, &quadratic2, &mut out, 0.1);
-            println!("{:?}", out);
-            for (pa, pb) in out.iter() {
-                painter.bezier(
-                    100,
-                    100,
-                    &quadratic.subcurve(pa - 0.01, pa + 0.01),
-                    0xFF0000FF,
-                );
-
-                painter.bezier(
-                    100,
-                    100,
-                    &quadratic2.subcurve(pb - 0.01, pb + 0.01),
-                    0x0000FFFF,
-                );
-            }
-            // painter.stroke_polyline(100, 100, &s.flatten(0.01), 0xFF00FFFF);
-        }
-
-        return;
-
-        let eight = {
-            let mut b = OutlineBuilder::new();
-
-            b.add_point(Point2::new(25.0, 0.0));
-            b.add_point(Point2::new(50.0, 0.0));
-            b.add_point(Point2::new(50.0, 25.0));
-            b.add_segment(CurveDegree::Quadratic);
-            b.add_point(Point2::new(50.0, 50.0));
-            b.add_point(Point2::new(25.0, 50.0));
-            b.add_segment(CurveDegree::Quadratic);
-            b.add_point(Point2::new(0.0, 50.0));
-            b.add_point(Point2::new(0.0, 75.0));
-            b.add_segment(CurveDegree::Quadratic);
-
-            b.add_point(Point2::new(0.0, 100.0));
-            b.add_point(Point2::new(25.0, 100.0));
-            b.add_segment(CurveDegree::Quadratic);
-            b.add_point(Point2::new(50.0, 100.0));
-            b.add_point(Point2::new(50.0, 75.0));
-            b.add_segment(CurveDegree::Quadratic);
-
-            b.add_point(Point2::new(50.0, 50.0));
-            b.add_point(Point2::new(25.0, 50.0));
-            b.add_segment(CurveDegree::Quadratic);
-            b.add_point(Point2::new(0.0, 50.0));
-            b.add_point(Point2::new(0.0, 25.0));
-            b.add_segment(CurveDegree::Quadratic);
-
-            b.add_point(Point2::new(0.0, 0.0));
-            b.add_segment(CurveDegree::Quadratic);
-
-            // c.add_segment(SplineDegree::Linear);
-            // b.add_point(Point2::new(150.0, 50.0));
-            b.close_contour();
-
-            b.build()
-        };
-
-        {
-            let mut c = {
-                let mut b = OutlineBuilder::new();
-
-                b.add_point(Point2::ZERO);
-                b.add_segment(CurveDegree::Linear);
-                b.add_point(Point2::new(0.0, 100.0));
-                b.add_segment(CurveDegree::Linear);
-                b.add_point(Point2::new(100.0, 100.0));
-                // c.add_segment(SplineDegree::Linear);
-                b.add_point(Point2::new(150.0, 75.0));
-                b.add_point(Point2::new(150.0, 50.0));
-                b.add_segment(CurveDegree::Quadratic);
-                b.add_point(Point2::new(150.0, 45.0));
-                b.add_point(Point2::new(100.0, 10.0));
-                b.add_segment(CurveDegree::Quadratic);
-                b.add_point(Point2::new(80.0, -10.0));
-                b.add_point(Point2::new(40.0, 30.0));
-                b.add_segment(CurveDegree::Cubic);
-                b.close_contour();
-
-                // c.add_segment(SplineDegree::Linear);
-                // b.add_point(Point2::new(150.0, 50.0));
-
-                b.build()
-            };
-            let x = 150;
-            let y = 150;
-            println!("{c:?}");
-            c.scale(shape_scale);
-            let outer = outline::stroke(&c, 10.0 * shape_scale, 10.0 * shape_scale, 0.01);
-            painter.stroke_outline_polyline(x, y, &c, 0xFFFFFFFF);
-
-            dbg!(&c);
-            // dbg!(&outer);
-
-            let outer0_flat = outer.0.flatten_contour(outer.0.segments());
-            let outer1_flat = outer.1.flatten_contour(outer.1.segments());
-            // let base_flat = c.flatten_contour(c.segments());
-            // let triangles = polyline::tessellate_area_between_polylines(&outer0_flat, &outer1_flat);
-            // for (a, b, c) in triangles {
-            //     painter.stroke_triangle(
-            //         a.x as i32 + x,
-            //         a.y as i32 + y,
-            //         b.x as i32 + x,
-            //         b.y as i32 + y,
-            //         c.x as i32 + x,
-            //         c.y as i32 + y,
-            //         0x00FF00FF,
-            //     );
-            // }
-
-            dbg!(&outer.0);
-            self.draw_outline(&mut painter, x, y, &outer.0, 0xFF0000FF);
-            dbg!(&outer.1);
-            self.draw_outline(&mut painter, x, y, &outer.1, 0x0000FFFF);
-        }
+        let shape_scale = self.dpi as f32 / 72.0;
 
         {
             for event in self
@@ -1154,14 +824,18 @@ impl<'a> Renderer<'a> {
                         Segment::Shape(shape) => {
                             println!(
                                 "SHAPING V2 INPUT SHAPE: {:?} {:?}",
-                                shape.outlines, shape.size
+                                shape.outline, shape.bounding_box
                             );
 
-                            shaper.add_shape(Rect {
-                                x: (shape.size.x as f32 * shape_scale).floor() as i32,
-                                y: (shape.size.y as f32 * shape_scale).floor() as i32,
-                                w: (shape.size.w as f32 * shape_scale).ceil() as u32,
-                                h: (shape.size.h as f32 * shape_scale).ceil() as u32,
+                            shaper.add_shape(PixelRect {
+                                x: (shape.bounding_box.min.x as f32 * shape_scale).floor() as i32,
+                                y: (shape.bounding_box.min.y as f32 * shape_scale).floor() as i32,
+                                w: ((shape.bounding_box.size().x as f32 + shape.stroke_width / 2.0)
+                                    * shape_scale)
+                                    .ceil() as u32,
+                                h: ((shape.bounding_box.size().y as f32 + shape.stroke_width / 2.0)
+                                    * shape_scale)
+                                    .ceil() as u32,
                             });
                             segment_fonts.push(None);
                         }
@@ -1290,28 +964,38 @@ impl<'a> Renderer<'a> {
                             painter.text(x, y, fonts, glyphs, t.color);
                         }
                         Segment::Shape(s) => {
-                            for c in s.outlines.iter() {
-                                let mut c = c.clone();
-                                let shape_scale = shape_scale * 5.;
-                                let x = 150;
-                                let y = 150;
-                                println!("{c:?}");
-                                c.scale(shape_scale);
-                                let outer = outline::stroke(
-                                    &c,
-                                    10.0 * shape_scale,
-                                    10.0 * shape_scale,
-                                    0.01,
+                            let mut outline = s.outline.clone();
+                            outline.scale(shape_scale);
+
+                            let (x, y) = ((x as f32) as i32, (y as f32) as i32);
+
+                            let stroked = outline::stroke(
+                                &outline,
+                                s.stroke_width * shape_scale / 2.0,
+                                s.stroke_width * shape_scale / 2.0,
+                                0.01,
+                            );
+                            painter.stroke_outline(x, y, &outline, 0xFFFFFFFF);
+
+                            dbg!(&stroked.0);
+                            painter.debug_stroke_outline(x, y, &stroked.0, 0xFF0000FF, false);
+                            dbg!(&stroked.1);
+                            painter.debug_stroke_outline(x, y, &stroked.1, 0x0000FFFF, true);
+
+                            let mut rasterizer = NonZeroPolygonRasterizer::new();
+                            for (a, b) in stroked.0.iter_contours().zip(stroked.1.iter_contours()) {
+                                rasterizer.append_polyline(
+                                    (x, y),
+                                    &stroked.0.flatten_contour(a),
+                                    false,
                                 );
-                                painter.stroke_outline(x, y, &c, 0xFFFFFFFF);
-
-                                dbg!(&c);
-                                // dbg!(&outer);
-
-                                dbg!(&outer.0);
-                                self.draw_outline(&mut painter, x, y, &outer.0, 0xFF0000FF);
-                                dbg!(&outer.1);
-                                self.draw_outline(&mut painter, x, y, &outer.1, 0x0000FFFF);
+                                rasterizer.append_polyline(
+                                    (x, y),
+                                    &stroked.1.flatten_contour(b),
+                                    true,
+                                );
+                                rasterizer.render_fill(&mut painter, s.color);
+                                rasterizer.reset();
                             }
                         }
                     }

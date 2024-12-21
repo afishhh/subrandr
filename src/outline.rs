@@ -154,10 +154,12 @@ impl Outline {
         self.evaluate_segment_normalized(t.trunc() as usize, t.fract())
     }
 
-    pub fn calculate_control_box(&self, bb: &mut BoundingBox) {
+    pub fn bounding_box(&self) -> Rect2 {
+        let mut bb = Rect2::NOTHING;
         for point in self.points.iter() {
-            bb.add(point);
+            bb.expand_to_point(point);
         }
+        bb
     }
 
     pub fn scale(&mut self, xy: f32) {
@@ -840,6 +842,7 @@ impl Stroker {
     }
 
     // WHAT: TODO
+    // TODO: contour_start case
     fn close_contour(&mut self, mut dir: StrokerDir) {
         if self.contour_start {
             if dir == StrokerDir::ALL {

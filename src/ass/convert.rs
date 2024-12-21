@@ -1,7 +1,7 @@
 use std::num::IntErrorKind;
 
 use crate::{
-    math::{BoundingBox, Point2},
+    math::{Point2, Rect2},
     outline::OutlineBuilder,
     Segment, TextSegment, TextWrappingMode,
 };

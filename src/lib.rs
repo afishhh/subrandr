@@ -744,34 +744,6 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    fn draw_outline(
-        &mut self,
-        painter: &mut Painter<&mut [u8]>,
-        x: i32,
-        y: i32,
-        outline: &outline::Outline,
-        color: u32,
-    ) {
-        // for point in outline.points() {
-        //     let (x, y) = (point.x as i32 + x, point.y as i32 + y);
-        //     if !self.painter.in_bounds(x, y) {
-        //         continue;
-        //     }
-        //     self.debug_text(
-        //         x,
-        //         y,
-        //         &format!("{x},{y}"),
-        //         Alignment::TopLeft,
-        //         8.0,
-        //         0xFFFFFFFF,
-        //     );
-        //     self.painter.dot(x, y, 0xFFFFFFFF);
-        // }
-
-        // painter.stroke_outline(x, y, outline, color);
-        painter.stroke_outline_polyline(x, y, outline, color);
-    }
-
     pub fn render(&mut self, mut painter: Painter<&mut [u8]>, t: u32) {
         if painter.height() == 0 || painter.height() == 0 {
             return;

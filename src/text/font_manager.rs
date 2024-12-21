@@ -75,25 +75,25 @@ pub trait FontBackend: Sealed + std::fmt::Debug {
 struct FamilyMap<K>(HashMap<K, FamilySlot>);
 
 impl<K: Hash + Eq> FamilyMap<K> {
-    fn get_mut<Q: ?Sized>(&mut self, name: &Q) -> &mut FamilySlot
+    fn get_mut<Q>(&mut self, name: &Q) -> &mut FamilySlot
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ToOwned<Owned = K>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
     {
-        // SAFETY: In the else branch self is not actually borrowed anymore but
+        // SAFETY: After the if self is not actually borrowed anymore but
         //         borrowchk is unable to see that data dependent lifetime.
         unsafe {
             let self_: *mut Self = self as *mut Self;
 
             if let Some(slot) = (*self_).0.get_mut(name) {
-                slot
-            } else {
-                (*self_)
-                    .0
-                    .entry(name.to_owned())
-                    .insert_entry(FamilySlot::default())
-                    .into_mut()
+                return slot;
             }
+
+            (*self_)
+                .0
+                .entry(name.to_owned())
+                .insert_entry(FamilySlot::default())
+                .into_mut()
         }
     }
 }
@@ -176,17 +176,17 @@ impl FontManager {
         if let Some(result) = self.codepoint_fallbacks.get(&key) {
             Ok(result.clone())
         } else {
-            let result = match self
+            let result = self
                 .backend
                 .load_glyph_fallback(weight, italic, codepoint)?
-            {
-                Some(mut f) => {
-                    self.insert(f.family_name(), f.clone(), weight, italic);
-                    set_weight_if_variable(&mut f, weight);
-                    Some(f)
-                }
-                None => None,
-            };
+                .map_or_else(
+                    || None,
+                    |mut f| {
+                        self.insert(f.family_name(), f.clone(), weight, italic);
+                        set_weight_if_variable(&mut f, weight);
+                        Some(f)
+                    },
+                );
 
             self.codepoint_fallbacks.insert(key, result.clone());
 

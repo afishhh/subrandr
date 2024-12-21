@@ -7,7 +7,12 @@ macro_rules! fttry {
         let code = $expr;
         #[allow(unused_unsafe)]
         if code != 0 {
-            panic!("ft error: 0x{code:X}")
+            panic!(
+                "ft error: 0x{code:X} {:?}",
+                text_sys::FREETYPE_ERRORS
+                    .iter()
+                    .find_map(|&(c, msg)| (c == code).then_some(msg))
+            )
         }
     };
 }

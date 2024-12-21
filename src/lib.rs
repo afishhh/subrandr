@@ -1,11 +1,12 @@
 // The library is still under active development
 #![allow(dead_code)]
 
-use math::{
-    intersect_curves, solve_cubic, Bezier, BoundingBox, CubicBezier, Point2, QuadraticBezier,
-};
+use std::rc::Rc;
+
+use math::{BoundingBox, Point2};
 use outline::{CurveDegree, Outline, OutlineBuilder};
-use text::TextExtents;
+use rasterize::NonZeroPolygonRasterizer;
+use text::{FontManager, TextExtents};
 
 pub mod ass;
 mod capi;
@@ -19,7 +20,7 @@ mod text;
 mod util;
 
 pub use painter::*;
-use util::{ArrayVec, RcArray};
+use util::{ref_to_slice, RcArray};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
@@ -185,7 +186,7 @@ impl Subtitles {
                             underline: false,
                             strike_out: false,
                             color: 0xFF0000FF,
-                            text: "ine".to_string(),
+                            text: "iね".to_string(),
                         }),
                         Segment::Shape(ShapeSegment {
                             outlines: vec![{
@@ -243,24 +244,36 @@ impl Subtitles {
                     })],
                 },
                 // FIXME: Doesn't work, scaling emoji font fails
-                // Event {
-                //     start: 0,
-                //     end: 600000,
-                //     x: 0.5,
-                //     y: 0.6,
-                //     alignment: Alignment::Bottom,
-                //     text_wrap: TextWrappingMode::None,
-                //     segments: vec![Segment::Text {
-                //         font: "emoji".to_string(),
-                //         font_size: 32.,
-                //         font_weight: 700,
-                //         italic: false,
-                //         underline: false,
-                //         strike_out: false,
-                //         color: 0xFFFFFFFF,
-                //         text: "😭".to_string(),
-                //     })],
-                // },
+                Event {
+                    start: 0,
+                    end: 600000,
+                    x: 0.5,
+                    y: 0.6,
+                    alignment: Alignment::Bottom,
+                    text_wrap: TextWrappingMode::None,
+                    segments: vec![
+                        Segment::Text(TextSegment {
+                            font: "emoji".to_string(),
+                            font_size: 32.,
+                            font_weight: 700,
+                            italic: false,
+                            underline: false,
+                            strike_out: false,
+                            color: 0xFFFFFFFF,
+                            text: "😭".to_string(),
+                        }),
+                        Segment::Text(TextSegment {
+                            font: "emoji".to_string(),
+                            font_size: 64.,
+                            font_weight: 700,
+                            italic: false,
+                            underline: false,
+                            strike_out: false,
+                            color: 0xFFFFFFFF,
+                            text: "😭".to_string(),
+                        }),
+                    ],
+                },
             ],
         }
     }
@@ -369,7 +382,7 @@ struct MultilineTextShaper {
 
 #[derive(Debug)]
 struct ShapedLineSegment {
-    glyphs: Option<RcArray<text::Glyph>>,
+    glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
     baseline_offset: (i32, i32),
     paint_rect: Rect,
     corresponding_input_segment: usize,
@@ -429,10 +442,6 @@ impl MultilineTextShaper {
         }
         self.text.push_str(text);
 
-        if let Some((ShaperSegment::Text(ref last_font), _)) = self.segment_boundaries.last() {
-            assert_eq!(last_font.dpi(), font.dpi());
-        }
-
         if let Some((ShaperSegment::Text(ref last_font), ref mut last_end)) =
             self.segment_boundaries.last_mut()
         {
@@ -457,6 +466,7 @@ impl MultilineTextShaper {
         &self,
         line_alignment: HorizontalAlignment,
         wrapping: TextWrappingMode,
+        font_manager: &mut FontManager,
     ) -> (Vec<ShapedLine>, Rect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
@@ -539,6 +549,7 @@ impl MultilineTextShaper {
 
                 match segment {
                     ShaperSegment::Text(font) => {
+                        let mut segment_fonts = Vec::new();
                         let glyphs = {
                             let mut buffer = text::ShapingBuffer::new();
                             let direction = buffer.guess_properties();
@@ -546,32 +557,39 @@ impl MultilineTextShaper {
                                 buffer.set_direction(direction.to_horizontal());
                             }
                             buffer.add(&self.text[segment_slice]);
-                            buffer.shape(font)
+                            buffer.shape(font, &mut segment_fonts, font_manager)
                         };
+                        let segment_fonts = Rc::new(segment_fonts);
+
                         let (extents, (trailing_x_advance, _)) =
-                            text::compute_extents_ex(true, font, &glyphs);
+                            text::compute_extents_ex(true, &segment_fonts, &glyphs);
 
                         let segment_max_bearing_y = glyphs
                             .iter()
-                            .map(|x| font.glyph_extents(x.codepoint).horiBearingY)
+                            .map(|x| {
+                                segment_fonts[x.font_index]
+                                    .glyph_extents(x.index)
+                                    .horiBearingY
+                            })
                             .max()
                             .unwrap_or(0);
 
                         max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
 
-                        let rc_glyphs = RcArray::from_boxed(glyphs);
+                        let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
                         println!(
                             "last: {last}, end: {end}, intra font splits: {:?}, binary search result: {}",
                             self.intra_font_segment_splits, first_internal_split_idx
                         );
+
                         if self
                             .intra_font_segment_splits
                             .get(first_internal_split_idx)
                             .is_none_or(|split| *split >= end)
                         {
                             segments.push(ShapedLineSegment {
-                                glyphs: Some(rc_glyphs),
+                                glyphs_and_fonts: Some((rc_glyphs, segment_fonts)),
                                 baseline_offset: (
                                     line_extents.paint_width / 64,
                                     total_extents.paint_height / 64,
@@ -602,9 +620,9 @@ impl MultilineTextShaper {
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
                                 let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
                                 let (extents, (x_advance, _)) =
-                                    text::compute_extents_ex(true, font, &glyph_slice);
+                                    text::compute_extents_ex(true, &segment_fonts, &glyph_slice);
                                 segments.push(ShapedLineSegment {
-                                    glyphs: Some(glyph_slice),
+                                    glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
                                     baseline_offset: (x / 64, total_extents.paint_height / 64),
                                     paint_rect: Rect {
                                         x: x / 64,
@@ -640,7 +658,7 @@ impl MultilineTextShaper {
                         let logical_h = dim.h - (-dim.y).max(0) as u32;
                         let segment_max_bearing_y = (logical_h * 64) as i64;
                         segments.push(ShapedLineSegment {
-                            glyphs: None,
+                            glyphs_and_fonts: None,
                             baseline_offset: (
                                 line_extents.paint_width / 64,
                                 total_extents.paint_height / 64,
@@ -680,7 +698,7 @@ impl MultilineTextShaper {
             for segment in segments.iter_mut() {
                 segment.baseline_offset.0 += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset;
-                if segment.glyphs.is_none() {
+                if segment.glyphs_and_fonts.is_none() {
                     segment.baseline_offset.1 +=
                         ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
                 } else {
@@ -776,10 +794,10 @@ impl<'a> Renderer<'a> {
         let (ox, oy) = Self::translate_for_aligned_text(
             &font,
             true,
-            &text::compute_extents(true, &font, &shaped.glyphs),
+            &text::compute_extents(true, ref_to_slice(&font), &shaped.glyphs),
             alignment,
         );
-        painter.text(x + ox, y + oy, &font, &shaped.glyphs, color);
+        painter.text(x + ox, y + oy, ref_to_slice(&font), &shaped.glyphs, color);
     }
 
     fn translate_for_aligned_text(
@@ -1151,8 +1169,11 @@ impl<'a> Renderer<'a> {
                 }
 
                 let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
-                let (lines, total_rect) =
-                    shaper.shape(horizontal_alignment, TextWrappingMode::None);
+                let (lines, total_rect) = shaper.shape(
+                    horizontal_alignment,
+                    TextWrappingMode::None,
+                    &mut self.fonts,
+                );
                 println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
 
                 let x = x as i32;
@@ -1265,15 +1286,8 @@ impl<'a> Renderer<'a> {
 
                     match segment {
                         Segment::Text(t) => {
-                            painter.text(
-                                x,
-                                y,
-                                segment_fonts[shaped_segment.corresponding_input_segment]
-                                    .as_ref()
-                                    .unwrap(),
-                                shaped_segment.glyphs.as_deref().unwrap(),
-                                t.color,
-                            );
+                            let (glyphs, fonts) = shaped_segment.glyphs_and_fonts.as_ref().unwrap();
+                            painter.text(x, y, fonts, glyphs, t.color);
                         }
                         Segment::Shape(s) => {
                             for c in s.outlines.iter() {

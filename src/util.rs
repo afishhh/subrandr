@@ -26,6 +26,10 @@ pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &m
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }
 
+pub const fn ref_to_slice<T>(reference: &T) -> &[T; 1] {
+    unsafe { std::mem::transmute(reference) }
+}
+
 pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;

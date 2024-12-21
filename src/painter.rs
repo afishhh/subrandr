@@ -345,7 +345,7 @@ impl<B: PainterBuffer> Painter<B> {
         &mut self,
         x: i32,
         y: i32,
-        font: &text::Font,
+        fonts: &[text::Font],
         text: &[text::Glyph],
         color: u32,
     ) -> (i32, i32) {
@@ -356,7 +356,7 @@ impl<B: PainterBuffer> Painter<B> {
             self.width as usize,
             self.height as usize,
             (self.width * 4) as usize,
-            font,
+            fonts,
             text,
             [
                 ((color & 0xFF000000) >> 24) as u8,

@@ -35,6 +35,8 @@ pub enum LoadError {
     PatternAddInteger(&'static CStr, c_int),
     #[error("Failed to execute substitutions")]
     Substitute,
+    #[error("Failed to add codepoint {0:?} to FcCharSet")]
+    AddChar(u32),
     #[error("Failed to find matching font: {0:?}")]
     Match(FcResult),
     #[error("Match did not contain a family name")]
@@ -67,17 +69,14 @@ const FONT_WEIGHTS: &[(f32, c_int)] = &[
     (700.0, FC_WEIGHT_BOLD as c_int),
 ];
 
-impl FontBackend for FontconfigFontBackend {
-    fn load_fallback(&mut self, weight: f32, italic: bool) -> Result<Option<Face>, AnyError> {
-        self.load("sans-serif", weight, italic)
-    }
-
-    fn load(
+impl FontconfigFontBackend {
+    fn load_internal(
         &mut self,
-        name: &str,
+        name: Option<&str>,
         weight: f32,
         italic: bool,
-    ) -> Result<Option<crate::text::Face>, AnyError> {
+        codepoint: Option<u32>,
+    ) -> Result<Option<Face>, AnyError> {
         assert!(weight.is_normal());
 
         // TODO: Free on error
@@ -98,28 +97,30 @@ impl FontBackend for FontconfigFontBackend {
             };
         }
 
-        let Ok(weight) = FONT_WEIGHTS
+        let Ok(fc_weight) = FONT_WEIGHTS
             .binary_search_by(|x| x.0.partial_cmp(&weight).unwrap())
             .map(|idx| FONT_WEIGHTS[idx].1)
         else {
             return Ok(None);
         };
 
-        let cname = CString::new(name).map_err(|_| AnyError::from(LoadError::NullInName))?;
-        pattern_add!(
-            FcPatternAddString,
-            PatternAddString,
-            FC_FAMILY,
-            cname.as_ptr() as *const u8,
-            name.to_string()
-        );
+        if let Some(name) = name {
+            let cname = CString::new(name).map_err(|_| AnyError::from(LoadError::NullInName))?;
+            pattern_add!(
+                FcPatternAddString,
+                PatternAddString,
+                FC_FAMILY,
+                cname.as_ptr() as *const u8,
+                name.to_string()
+            );
+        }
 
         pattern_add!(
             FcPatternAddInteger,
             PatternAddInteger,
             FC_WEIGHT,
-            weight,
-            weight
+            fc_weight,
+            fc_weight
         );
 
         let style = if italic { c"Italic" } else { c"Regular" };
@@ -138,7 +139,15 @@ impl FontBackend for FontconfigFontBackend {
         unsafe { FcDefaultSubstitute(pattern) };
 
         let mut result = MaybeUninit::uninit();
-        let prepared = unsafe { FcFontMatch(self.config, pattern, result.as_mut_ptr()) };
+        let font_set = unsafe {
+            FcFontSort(
+                self.config,
+                pattern,
+                (codepoint.is_some() && name.is_none()) as i32,
+                std::ptr::null_mut(),
+                result.as_mut_ptr(),
+            )
+        };
         let result = unsafe { result.assume_init() };
         if result == FcResultNoMatch {
             return Ok(None);
@@ -146,32 +155,95 @@ impl FontBackend for FontconfigFontBackend {
             return Err(LoadError::Match(result).into());
         }
 
-        let mut path = MaybeUninit::uninit();
-        if unsafe {
-            FcPatternGetString(
-                prepared,
-                FC_FILE.as_ptr() as *const i8,
-                0,
-                path.as_mut_ptr(),
-            ) != FcResultMatch
-        } {
-            return Err(LoadError::NoFile.into());
+        let fonts = unsafe {
+            std::slice::from_raw_parts(
+                (*font_set).fonts as *const *mut FcPattern,
+                (*font_set).nfont as usize,
+            )
+        };
+
+        let mut found = None;
+
+        for font in fonts.iter().copied() {
+            unsafe {
+                if let Some(codepoint) = codepoint {
+                    let mut charset = std::ptr::null_mut();
+                    if FcPatternGetCharSet(font, FC_CHARSET.as_ptr() as *const i8, 0, &mut charset)
+                        != FcResultMatch
+                    {
+                        continue;
+                    }
+
+                    if FcCharSetHasChar(charset, codepoint) == 0 {
+                        continue;
+                    }
+                }
+            }
+
+            found = Some(font);
+            break;
         }
 
-        let owned_path = unsafe {
-            PathBuf::from(OsString::from_vec(
-                CStr::from_ptr(path.assume_init() as *const _)
-                    .to_bytes()
-                    .to_vec(),
-            ))
+        let result = if let Some(prepared) = found {
+            let mut path = MaybeUninit::uninit();
+            if unsafe {
+                FcPatternGetString(
+                    prepared,
+                    FC_FILE.as_ptr() as *const i8,
+                    0,
+                    path.as_mut_ptr(),
+                ) != FcResultMatch
+            } {
+                return Err(LoadError::NoFile.into());
+            }
+
+            let owned_path = unsafe {
+                PathBuf::from(OsString::from_vec(
+                    CStr::from_ptr(path.assume_init() as *const _)
+                        .to_bytes()
+                        .to_vec(),
+                ))
+            };
+
+            let face = Face::load_from_file(owned_path);
+            println!("font found for query name={name:?} weight={weight} italic={italic} codepoint={codepoint:?}: {face:?}");
+            Some(face)
+        } else {
+            panic!("no font found for query name={name:?} weight={fc_weight} italic={italic} codepoint={codepoint:?}");
+            None
         };
 
         unsafe {
             FcPatternDestroy(pattern);
-            FcPatternDestroy(prepared);
+            FcFontSetDestroy(font_set);
         };
 
-        Ok(Some(Face::load_from_file(owned_path)))
+        Ok(result)
+    }
+}
+
+impl FontBackend for FontconfigFontBackend {
+    fn load_fallback(&mut self, weight: f32, italic: bool) -> Result<Option<Face>, AnyError> {
+        self.load("sans-serif", weight, italic)
+    }
+
+    fn load(
+        &mut self,
+        name: &str,
+        weight: f32,
+        italic: bool,
+    ) -> Result<Option<crate::text::Face>, AnyError> {
+        self.load_internal(Some(name), weight, italic, None)
+    }
+
+    fn load_glyph_fallback(
+        &mut self,
+        weight: f32,
+        italic: bool,
+        codepoint: u32,
+    ) -> Result<Option<Face>, AnyError> {
+        // NOTE: Passing a family here does not seem to make substitutions work better
+        self.load_internal(None, weight, italic, Some(codepoint))
     }
 }
 

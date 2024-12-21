@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::util::fmt_from_fn;
+use crate::{math::Fixed, util::fmt_from_fn};
 
 use super::ft_utils::*;
 use text_sys::*;
@@ -72,6 +72,7 @@ impl SharedFaceData {
     }
 }
 
+#[repr(C)]
 pub struct Face {
     face: FT_Face,
     coords: MmCoords,
@@ -131,13 +132,12 @@ impl Face {
 
     #[inline(always)]
     pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
-        Font {
-            ft_face: self.face,
-            hb_font: unsafe { hb_ft_font_create_referenced(self.face) },
-            frac_point_size: f32_to_fractional_points(point_size),
-            dpi,
-            coords: self.coords,
-        }
+        let point_size = f32_to_fractional_points(point_size);
+        Font::create(self.face, self.coords, point_size, dpi)
+    }
+
+    pub fn with_size_from(&self, other: &Font) -> Font {
+        Font::create(self.face, self.coords, other.point_size, other.dpi)
     }
 
     pub fn family_name(&self) -> &str {
@@ -201,6 +201,36 @@ impl Face {
     pub fn set_axis(&mut self, index: usize, value: f32) {
         assert!(self.shared_data().axes[index].is_value_in_range(value));
         self.coords[index] = f32_to_fixed_point(value);
+    }
+
+    pub fn weight(&self) -> f32 {
+        if let Some(idx) = SharedFaceData::get_ref(self.face)
+            .axes
+            .iter()
+            .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
+        {
+            fixed_point_to_f32(self.coords[idx])
+        } else {
+            // TODO: implement something more robust for non-variable fonts
+            //       (store weight in font data)
+            if unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0 } {
+                700.0
+            } else {
+                400.0
+            }
+        }
+    }
+
+    pub fn italic(&self) -> bool {
+        if let Some(idx) = SharedFaceData::get_ref(self.face)
+            .axes
+            .iter()
+            .find_map(|x| (x.tag == ITALIC_AXIS).then_some(x.index))
+        {
+            fixed_point_to_f32(self.coords[idx]) > 0.5
+        } else {
+            unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 }
+        }
     }
 }
 
@@ -310,25 +340,104 @@ impl Drop for Face {
     }
 }
 
+#[repr(C)]
 pub struct Font {
     // owned by hb_font
     ft_face: FT_Face,
-    hb_font: *mut hb_font_t,
-    frac_point_size: FT_F26Dot6,
-    dpi: u32,
     coords: MmCoords,
+    hb_font: *mut hb_font_t,
+    point_size: FT_F26Dot6,
+    dpi: u32,
+
+    /// -1 = not fixed size
+    fixed_size_index: i32,
+    pub(super) scale: Fixed<6>,
 }
 
 impl Font {
+    fn create(face: FT_Face, coords: MmCoords, point_size: FT_F26Dot6, dpi: u32) -> Self {
+        let (fixed_size_index, scale) =
+            if unsafe { (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0 } {
+                unsafe {
+                    fttry!(FT_Set_Char_Size(face, point_size, point_size, dpi, dpi));
+                }
+
+                (-1, Fixed::ONE)
+            } else {
+                let sizes = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        (*face).available_sizes,
+                        (*face).num_fixed_sizes as usize,
+                    )
+                };
+
+                // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
+                let map_to_ppem =
+                    |dimension: i64, resolution: i64| ((dimension * resolution + 36) / 72) as i64;
+                let ppem = map_to_ppem(point_size, dpi.into());
+
+                // First size larger than requested, or the largest size if not found
+                // TODO: don't assume sorted order?
+                let best_size_index = sizes
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, s)| (s.x_ppem > ppem).then_some(i))
+                    .or_else(|| sizes.len().checked_sub(1))
+                    .unwrap();
+
+                println!("best size for bitmap font: {ppem:?} {best_size_index:?} {sizes:?}");
+
+                let scale = Fixed::<6>::from_quotient64(ppem, sizes[best_size_index].x_ppem);
+
+                unsafe {
+                    fttry!(FT_Select_Size(face, best_size_index as i32));
+                }
+
+                (best_size_index as i32, scale)
+            };
+
+        Self {
+            ft_face: face,
+            coords,
+            hb_font: unsafe { hb_ft_font_create_referenced(face) },
+            point_size,
+            dpi,
+            fixed_size_index,
+            scale,
+        }
+    }
+
     pub(super) fn with_applied_size(&self) -> FT_Face {
         unsafe {
-            fttry!(FT_Set_Char_Size(
-                self.ft_face,
-                self.frac_point_size,
-                self.frac_point_size,
-                self.dpi,
-                self.dpi,
-            ));
+            if self.fixed_size_index != -1 {
+                fttry!(FT_Select_Size(self.ft_face, self.fixed_size_index));
+
+                let metrics = &mut (*(*self.ft_face).size).metrics;
+                macro_rules! scale_field {
+                    ($name: ident, $intermediate: ident, $final: ident) => {
+                        metrics.$name = ((metrics.$name as $intermediate
+                            * self.scale.into_raw() as $intermediate)
+                            >> 6) as $final;
+                    };
+                }
+
+                scale_field!(x_ppem, u32, u16);
+                scale_field!(y_ppem, u32, u16);
+                scale_field!(x_scale, i64, i64);
+                scale_field!(y_scale, i64, i64);
+                scale_field!(ascender, i64, i64);
+                scale_field!(descender, i64, i64);
+                scale_field!(height, i64, i64);
+                scale_field!(max_advance, i64, i64);
+            } else {
+                fttry!(FT_Set_Char_Size(
+                    self.ft_face,
+                    self.point_size,
+                    self.point_size,
+                    self.dpi,
+                    self.dpi,
+                ));
+            }
         }
 
         if FaceMmVar::has(self.ft_face) {
@@ -349,16 +458,30 @@ impl Font {
         (ft_face, self.hb_font)
     }
 
-    pub fn dpi(&self) -> u32 {
-        self.dpi
-    }
-
-    pub fn glyph_extents(&self, codepoint: u32) -> FT_Glyph_Metrics_ {
+    pub fn glyph_extents(&self, index: u32) -> FT_Glyph_Metrics_ {
         let face = self.with_applied_size();
-        unsafe {
-            fttry!(FT_Load_Glyph(face, codepoint, FT_LOAD_COLOR as i32));
+        let mut metrics = unsafe {
+            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
             (*(*face).glyph).metrics
+        };
+
+        if let Some(scale) = Some(self.scale).filter(|s| *s != 1) {
+            macro_rules! scale_field {
+                ($name: ident) => {
+                    metrics.$name = (metrics.$name * scale.into_raw() as i64) >> 6;
+                };
+            }
+            scale_field!(width);
+            scale_field!(height);
+            scale_field!(horiBearingX);
+            scale_field!(horiBearingY);
+            scale_field!(horiAdvance);
+            scale_field!(vertBearingX);
+            scale_field!(vertBearingY);
+            scale_field!(vertAdvance);
         }
+
+        metrics
     }
 
     pub fn metrics(&self) -> FT_Size_Metrics {
@@ -382,6 +505,18 @@ impl Font {
             result.assume_init()
         }
     }
+
+    pub fn face(&self) -> &Face {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    pub fn weight(&self) -> f32 {
+        self.face().weight()
+    }
+
+    pub fn italic(&self) -> bool {
+        self.face().italic()
+    }
 }
 
 impl std::fmt::Debug for Font {
@@ -392,10 +527,7 @@ impl std::fmt::Debug for Font {
         });
         f.debug_struct("Font")
             .field("face", &*tmp_face)
-            .field(
-                "point_size",
-                &fractional_points_to_f32(self.frac_point_size),
-            )
+            .field("point_size", &Fixed::<6>::from_raw(self.point_size as i32))
             .field("dpi", &self.dpi)
             .finish()
     }
@@ -406,9 +538,11 @@ impl Clone for Font {
         Self {
             ft_face: self.ft_face,
             hb_font: { unsafe { hb_font_reference(self.hb_font) } },
-            frac_point_size: self.frac_point_size,
+            point_size: self.point_size,
             dpi: self.dpi,
             coords: self.coords,
+            fixed_size_index: self.fixed_size_index,
+            scale: self.scale,
         }
     }
 }
@@ -416,7 +550,7 @@ impl Clone for Font {
 impl PartialEq for Font {
     fn eq(&self, other: &Self) -> bool {
         self.ft_face == other.ft_face
-            && self.frac_point_size == other.frac_point_size
+            && self.point_size == other.point_size
             && self.dpi == other.dpi
             && self.coords == other.coords
     }

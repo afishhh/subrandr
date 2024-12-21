@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
-use crate::util::{AnyError, Sealed};
+use crate::{
+    math::Fixed,
+    util::{AnyError, Sealed},
+};
 
 use super::*;
 
@@ -60,13 +63,23 @@ fn set_weight_if_variable(face: &mut Face, weight: f32) {
 pub trait FontBackend: Sealed + std::fmt::Debug {
     fn load_fallback(&mut self, weight: f32, italic: bool) -> Result<Option<Face>, AnyError>;
     fn load(&mut self, name: &str, weight: f32, italic: bool) -> Result<Option<Face>, AnyError>;
+    fn load_glyph_fallback(
+        &mut self,
+        weight: f32,
+        italic: bool,
+        codepoint: u32,
+    ) -> Result<Option<Face>, AnyError>;
 }
 
 #[derive(Debug)]
-struct FamilyMap(HashMap<String, FamilySlot>);
+struct FamilyMap<K>(HashMap<K, FamilySlot>);
 
-impl FamilyMap {
-    fn get_mut(&mut self, name: &str) -> &mut FamilySlot {
+impl<K: Hash + Eq> FamilyMap<K> {
+    fn get_mut<Q: ?Sized>(&mut self, name: &Q) -> &mut FamilySlot
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K>,
+    {
         // SAFETY: In the else branch self is not actually borrowed anymore but
         //         borrowchk is unable to see that data dependent lifetime.
         unsafe {
@@ -77,7 +90,7 @@ impl FamilyMap {
             } else {
                 (*self_)
                     .0
-                    .entry(name.to_string())
+                    .entry(name.to_owned())
                     .insert_entry(FamilySlot::default())
                     .into_mut()
             }
@@ -87,7 +100,8 @@ impl FamilyMap {
 
 #[derive(Debug)]
 pub struct FontManager {
-    families: FamilyMap,
+    families: FamilyMap<String>,
+    codepoint_fallbacks: HashMap<(Fixed<16>, bool, u32), Option<Face>>,
     fallback: FamilySlot,
     backend: Box<dyn FontBackend>,
 }
@@ -96,6 +110,7 @@ impl FontManager {
     pub fn new(backend: Box<dyn FontBackend>) -> Self {
         Self {
             families: FamilyMap(HashMap::new()),
+            codepoint_fallbacks: HashMap::new(),
             fallback: FamilySlot::default(),
             backend,
         }
@@ -149,5 +164,33 @@ impl FontManager {
 
     pub fn get_or_load(&mut self, name: &str, weight: f32, italic: bool) -> Result<Face, AnyError> {
         self.get_internal(name, weight, italic, true)
+    }
+
+    pub fn get_or_load_fallback_for(
+        &mut self,
+        weight: f32,
+        italic: bool,
+        codepoint: u32,
+    ) -> Result<Option<Face>, AnyError> {
+        let key = (Fixed::from_f32(weight), italic, codepoint);
+        if let Some(result) = self.codepoint_fallbacks.get(&key) {
+            Ok(result.clone())
+        } else {
+            let result = match self
+                .backend
+                .load_glyph_fallback(weight, italic, codepoint)?
+            {
+                Some(mut f) => {
+                    self.insert(f.family_name(), f.clone(), weight, italic);
+                    set_weight_if_variable(&mut f, weight);
+                    Some(f)
+                }
+                None => None,
+            };
+
+            self.codepoint_fallbacks.insert(key, result.clone());
+
+            Ok(result)
+        }
     }
 }

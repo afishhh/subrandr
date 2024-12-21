@@ -21,6 +21,8 @@ bindgen \
 	--no-prepend-enum-name \
 	./header.h >src/lib.rs
 
+./generate_errordefs.py >>src/lib.rs
+
 bindgen \
 	--raw-line '#![allow(non_upper_case_globals)]' \
 	--raw-line '#![allow(non_camel_case_types)]' \

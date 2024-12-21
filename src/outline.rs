@@ -5,16 +5,6 @@ use crate::{
     util::{array_assume_init_ref, fmt_from_fn},
 };
 
-impl Segment {
-    pub fn degree(&self) -> CurveDegree {
-        self.degree
-    }
-
-    pub fn end_of_contour(&self) -> bool {
-        self.end_of_contour
-    }
-}
-
 pub struct OutlineBuilder {
     outline: Outline,
     first_point_of_contour: u32,
@@ -103,6 +93,16 @@ pub struct Segment {
     start: u32,
 }
 
+impl Segment {
+    pub const fn degree(&self) -> CurveDegree {
+        self.degree
+    }
+
+    pub const fn end_of_contour(&self) -> bool {
+        self.end_of_contour
+    }
+}
+
 #[derive(Clone)]
 pub struct Outline {
     points: Vec<Point2>,
@@ -180,18 +180,20 @@ impl Outline {
     }
 
     pub fn iter_contours(&self) -> impl Iterator<Item = &[Segment]> + use<'_> {
-        let mut it = self.segments.iter().copied().enumerate();
+        let mut it = self
+            .segments
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(i, s)| if s.end_of_contour { Some(i) } else { None });
+
         let mut last = 0;
         std::iter::from_fn(move || {
-            if let Some(end_of_contour) =
-                it.find_map(|(i, s)| if s.end_of_contour { Some(i) } else { None })
-            {
+            it.next().map(|end_of_contour| {
                 let segments = &self.segments[last..=end_of_contour];
                 last = end_of_contour;
-                Some(segments)
-            } else {
-                None
-            }
+                segments
+            })
         })
     }
 
@@ -323,16 +325,16 @@ impl StrokerDir {
     const DOWN: Self = Self(2);
     const ALL: Self = Self(3);
 
-    fn includes(self, other: Self) -> bool {
+    const fn includes(self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
 }
 
 impl BitAnd for StrokerDir {
-    type Output = StrokerDir;
+    type Output = Self;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        StrokerDir(self.0 & rhs.0)
+        Self(self.0 & rhs.0)
     }
 }
 
@@ -356,7 +358,7 @@ struct WeirdNormal {
 }
 
 impl WeirdNormal {
-    fn new(v: Vec2, len: f32) -> Self {
+    const fn new(v: Vec2, len: f32) -> Self {
         Self { v, len }
     }
 }
@@ -640,7 +642,7 @@ impl Stroker {
     /// Returns optimal offset for quadratic bezier control point
     /// or None if the error is too large.
     fn estimate_quadratic_error(
-        &mut self,
+        &self,
         cos: f32,
         sin: f32,
         // WHAT: these normals have a len??

@@ -19,7 +19,7 @@ pub trait ResizablePainterBuffer: PainterBuffer {
 
 impl ResizablePainterBuffer for Vec<u8> {
     fn resize(&mut self, size: usize) {
-        Vec::resize(self, size, 0)
+        Self::resize(self, size, 0)
     }
 }
 
@@ -42,7 +42,7 @@ impl Painter<Vec<u8>> {
 }
 
 impl<B: PainterBuffer> Painter<B> {
-    pub fn new(width: u32, height: u32, buffer: B) -> Self {
+    pub const fn new(width: u32, height: u32, buffer: B) -> Self {
         Self {
             buffer,
             width,
@@ -51,12 +51,12 @@ impl<B: PainterBuffer> Painter<B> {
     }
 
     #[inline(always)]
-    pub fn height(&self) -> u32 {
+    pub const fn height(&self) -> u32 {
         self.height
     }
 
     #[inline(always)]
-    pub fn width(&self) -> u32 {
+    pub const fn width(&self) -> u32 {
         self.width
     }
 
@@ -82,7 +82,7 @@ impl<B: PainterBuffer> Painter<B> {
     }
 
     #[inline(always)]
-    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
+    pub const fn in_bounds(&self, x: i32, y: i32) -> bool {
         x >= 0 && x < self.width as i32 && y >= 0 && y < self.height as i32
     }
 
@@ -341,7 +341,7 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
-    pub fn text<'g>(
+    pub fn text(
         &mut self,
         x: i32,
         y: i32,

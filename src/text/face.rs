@@ -88,7 +88,6 @@ const fn create_freetype_tag(text: [u8; 4]) -> u64 {
 pub const WEIGHT_AXIS: u64 = create_freetype_tag(*b"wght");
 #[expect(dead_code)]
 pub const WIDTH_AXIS: u64 = create_freetype_tag(*b"wdth");
-#[expect(dead_code)]
 pub const ITALIC_AXIS: u64 = create_freetype_tag(*b"ital");
 
 impl Face {
@@ -204,33 +203,31 @@ impl Face {
     }
 
     pub fn weight(&self) -> f32 {
-        if let Some(idx) = SharedFaceData::get_ref(self.face)
+        SharedFaceData::get_ref(self.face)
             .axes
             .iter()
             .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
-        {
-            fixed_point_to_f32(self.coords[idx])
-        } else {
-            // TODO: implement something more robust for non-variable fonts
-            //       (store weight in font data)
-            if unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0 } {
-                700.0
-            } else {
-                400.0
-            }
-        }
+            .map_or_else(
+                || {
+                    if unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0 } {
+                        700.0
+                    } else {
+                        400.0
+                    }
+                },
+                |idx| fixed_point_to_f32(self.coords[idx]),
+            )
     }
 
     pub fn italic(&self) -> bool {
-        if let Some(idx) = SharedFaceData::get_ref(self.face)
+        SharedFaceData::get_ref(self.face)
             .axes
             .iter()
             .find_map(|x| (x.tag == ITALIC_AXIS).then_some(x.index))
-        {
-            fixed_point_to_f32(self.coords[idx]) > 0.5
-        } else {
-            unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 }
-        }
+            .map_or_else(
+                || unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 },
+                |idx| fixed_point_to_f32(self.coords[idx]) > 0.5,
+            )
     }
 }
 
@@ -298,7 +295,7 @@ impl Axis {
     }
 
     #[inline(always)]
-    fn is_fixed_value_in_range(&self, fixed: i64) -> bool {
+    const fn is_fixed_value_in_range(&self, fixed: i64) -> bool {
         self.minimum <= fixed && fixed <= self.maximum
     }
 
@@ -356,45 +353,45 @@ pub struct Font {
 
 impl Font {
     fn create(face: FT_Face, coords: MmCoords, point_size: FT_F26Dot6, dpi: u32) -> Self {
-        let (fixed_size_index, scale) =
-            if unsafe { (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0 } {
-                unsafe {
-                    fttry!(FT_Set_Char_Size(face, point_size, point_size, dpi, dpi));
-                }
+        let (fixed_size_index, scale) = if unsafe {
+            (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0
+        } {
+            unsafe {
+                fttry!(FT_Set_Char_Size(face, point_size, point_size, dpi, dpi));
+            }
 
-                (-1, Fixed::ONE)
-            } else {
-                let sizes = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        (*face).available_sizes,
-                        (*face).num_fixed_sizes as usize,
-                    )
-                };
-
-                // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
-                let map_to_ppem =
-                    |dimension: i64, resolution: i64| ((dimension * resolution + 36) / 72) as i64;
-                let ppem = map_to_ppem(point_size, dpi.into());
-
-                // First size larger than requested, or the largest size if not found
-                // TODO: don't assume sorted order?
-                let best_size_index = sizes
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, s)| (s.x_ppem > ppem).then_some(i))
-                    .or_else(|| sizes.len().checked_sub(1))
-                    .unwrap();
-
-                println!("best size for bitmap font: {ppem:?} {best_size_index:?} {sizes:?}");
-
-                let scale = Fixed::<6>::from_quotient64(ppem, sizes[best_size_index].x_ppem);
-
-                unsafe {
-                    fttry!(FT_Select_Size(face, best_size_index as i32));
-                }
-
-                (best_size_index as i32, scale)
+            (-1, Fixed::ONE)
+        } else {
+            let sizes = unsafe {
+                std::slice::from_raw_parts_mut(
+                    (*face).available_sizes,
+                    (*face).num_fixed_sizes as usize,
+                )
             };
+
+            // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
+            let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
+            let ppem = map_to_ppem(point_size, dpi.into());
+
+            // First size larger than requested, or the largest size if not found
+            // TODO: don't assume sorted order?
+            let best_size_index = sizes
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| (s.x_ppem > ppem).then_some(i))
+                .or_else(|| sizes.len().checked_sub(1))
+                .unwrap();
+
+            println!("best size for bitmap font: {ppem:?} {best_size_index:?} {sizes:?}");
+
+            let scale = Fixed::<6>::from_quotient64(ppem, sizes[best_size_index].x_ppem);
+
+            unsafe {
+                fttry!(FT_Select_Size(face, best_size_index as i32));
+            }
+
+            (best_size_index as i32, scale)
+        };
 
         Self {
             ft_face: face,
@@ -497,7 +494,6 @@ impl Font {
         }
     }
 
-    #[expect(dead_code)]
     pub fn vertical_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {

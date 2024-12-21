@@ -43,6 +43,7 @@ pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     let s;
     let l = (max + min) / 2.0;
 
+    #[allow(clippy::collapsible_else_if)]
     if delta == 0.0 {
         h = 0.0;
         s = 0.0;
@@ -255,7 +256,7 @@ where
     }
 }
 
-pub fn fmt_from_fn<F>(f: F) -> FormatterFn<F>
+pub const fn fmt_from_fn<F>(f: F) -> FormatterFn<F>
 where
     F: Fn(&mut std::fmt::Formatter<'_>) -> std::fmt::Result,
 {

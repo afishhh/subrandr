@@ -66,7 +66,7 @@ impl Bresenham {
         }
         self.d += 2 * self.dy;
         self.x += 1;
-        return self.is_done_low();
+        self.is_done_low()
     }
 
     pub const fn new_high(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
@@ -110,6 +110,7 @@ impl Bresenham {
     }
 
     pub const fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> (Self, BresenhamKind) {
+        #[allow(clippy::collapsible_else_if)]
         if (y1 - y0).abs() < (x1 - x0).abs() {
             if x0 > x1 {
                 (Self::new_low(x1, y1, x0, y0), BresenhamKind::Low)
@@ -669,7 +670,7 @@ impl NonZeroPolygonRasterizer {
             return;
         }
 
-        let mut y = self.queue.last().unwrap().0 as u32;
+        let mut y = self.queue.last().unwrap().0;
 
         while (!self.queue.is_empty() || !self.left.is_empty()) && y < height {
             self.prune_lr(y);

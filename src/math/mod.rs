@@ -32,7 +32,7 @@ impl Point2 {
         Vec2::new(self.x, self.y)
     }
 
-    pub fn distance(self, other: Point2) -> f32 {
+    pub fn distance(self, other: Self) -> f32 {
         (self - other).length()
     }
 
@@ -230,12 +230,12 @@ pub struct Rect2 {
 }
 
 impl Rect2 {
-    pub const NOTHING: Rect2 = Rect2 {
+    pub const NOTHING: Self = Self {
         min: Point2::new(f32::MAX, f32::MAX),
         max: Point2::new(f32::MIN, f32::MIN),
     };
 
-    pub const ZERO: Rect2 = Rect2 {
+    pub const ZERO: Self = Self {
         min: Point2::ZERO,
         max: Point2::ZERO,
     };
@@ -355,10 +355,10 @@ impl Line {
 }
 
 impl Mul<f32> for Line {
-    type Output = Line;
+    type Output = Self;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        Line::new(self.a * rhs, self.b * rhs, self.c * rhs)
+        Self::new(self.a * rhs, self.b * rhs, self.c * rhs)
     }
 }
 

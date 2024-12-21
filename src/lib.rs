@@ -1,9 +1,11 @@
 // The library is still under active development
 #![allow(dead_code)]
 // #![cfg_attr(test, feature(test))]
-#![warn(clippy::suboptimal_flops)]
-#![warn(clippy::cognitive_complexity)]
 #![warn(clippy::nursery)]
+#![allow(clippy::too_many_arguments)]
+// FIXME: enable this when suboptimal_flops stops recommending you mul_add
+#![allow(clippy::suboptimal_flops)]
+#![allow(clippy::missing_transmute_annotations)]
 
 use std::rc::Rc;
 
@@ -40,26 +42,26 @@ enum Alignment {
 }
 
 impl Alignment {
-    pub fn into_parts(self) -> (HorizontalAlignment, VerticalAlignment) {
+    pub const fn into_parts(self) -> (HorizontalAlignment, VerticalAlignment) {
         match self {
-            Alignment::TopLeft => (HorizontalAlignment::Left, VerticalAlignment::Top),
-            Alignment::Top => (HorizontalAlignment::Center, VerticalAlignment::Top),
-            Alignment::TopRight => (HorizontalAlignment::Right, VerticalAlignment::Top),
-            Alignment::Left => (
+            Self::TopLeft => (HorizontalAlignment::Left, VerticalAlignment::Top),
+            Self::Top => (HorizontalAlignment::Center, VerticalAlignment::Top),
+            Self::TopRight => (HorizontalAlignment::Right, VerticalAlignment::Top),
+            Self::Left => (
                 HorizontalAlignment::Left,
                 VerticalAlignment::BaselineCentered,
             ),
-            Alignment::Center => (
+            Self::Center => (
                 HorizontalAlignment::Center,
                 VerticalAlignment::BaselineCentered,
             ),
-            Alignment::Right => (
+            Self::Right => (
                 HorizontalAlignment::Right,
                 VerticalAlignment::BaselineCentered,
             ),
-            Alignment::BottomLeft => (HorizontalAlignment::Left, VerticalAlignment::Bottom),
-            Alignment::Bottom => (HorizontalAlignment::Center, VerticalAlignment::Bottom),
-            Alignment::BottomRight => (HorizontalAlignment::Right, VerticalAlignment::Bottom),
+            Self::BottomLeft => (HorizontalAlignment::Left, VerticalAlignment::Bottom),
+            Self::Bottom => (HorizontalAlignment::Center, VerticalAlignment::Bottom),
+            Self::BottomRight => (HorizontalAlignment::Right, VerticalAlignment::Bottom),
         }
     }
 }
@@ -686,8 +688,7 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.painter.resize(width, height);
+    pub fn resize(&mut self, _width: u32, _height: u32) {
     }
 
     fn debug_text(
@@ -802,7 +803,6 @@ impl<'a> Renderer<'a> {
                 let y = (painter.height() as f32 * event.y) as u32;
 
                 let mut shaper = MultilineTextShaper::new();
-                let mut segment_fonts = vec![];
                 for segment in event.segments.iter() {
                     match segment {
                         Segment::Text(segment) => {
@@ -819,7 +819,6 @@ impl<'a> Renderer<'a> {
                             println!("SHAPING V2 INPUT TEXT: {:?} {:?}", segment.text, font);
 
                             shaper.add_text(&segment.text, &font);
-                            segment_fonts.push(Some(font));
                         }
                         Segment::Shape(shape) => {
                             println!(
@@ -828,16 +827,15 @@ impl<'a> Renderer<'a> {
                             );
 
                             shaper.add_shape(PixelRect {
-                                x: (shape.bounding_box.min.x as f32 * shape_scale).floor() as i32,
-                                y: (shape.bounding_box.min.y as f32 * shape_scale).floor() as i32,
-                                w: ((shape.bounding_box.size().x as f32 + shape.stroke_width / 2.0)
+                                x: (shape.bounding_box.min.x * shape_scale).floor() as i32,
+                                y: (shape.bounding_box.min.y * shape_scale).floor() as i32,
+                                w: ((shape.bounding_box.size().x + shape.stroke_width / 2.0)
                                     * shape_scale)
                                     .ceil() as u32,
-                                h: ((shape.bounding_box.size().y as f32 + shape.stroke_width / 2.0)
+                                h: ((shape.bounding_box.size().y + shape.stroke_width / 2.0)
                                     * shape_scale)
                                     .ceil() as u32,
                             });
-                            segment_fonts.push(None);
                         }
                     }
                 }
@@ -875,8 +873,8 @@ impl<'a> Renderer<'a> {
                 };
 
                 self.debug_text(
-                    (x + total_rect.x + total_rect.w as i32 / 2) as i32,
-                    (y + total_rect.y + total_position_debug_pos.0) as i32,
+                    x + total_rect.x + total_rect.w as i32 / 2,
+                    y + total_rect.y + total_position_debug_pos.0,
                     &format!(
                         "x:{} y:{} w:{} h:{}",
                         x + total_rect.x,
@@ -932,7 +930,7 @@ impl<'a> Renderer<'a> {
                         &if let Segment::Text(segment) = segment {
                             format!("{:.0}pt", segment.font_size)
                         } else {
-                            format!("shape")
+                            "shape".to_owned()
                         },
                         Alignment::BottomRight,
                         16.0,

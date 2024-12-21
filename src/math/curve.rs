@@ -101,6 +101,7 @@ impl Bezier for QuadraticBezier {
         &self.0
     }
 
+    // FIXME: This is actually broken
     fn split_at(&self, t: f32) -> (Self, Self)
     where
         Self: Sized,
@@ -116,8 +117,8 @@ impl Bezier for QuadraticBezier {
         let pr = mid + vl;
 
         (
-            QuadraticBezier([self[0], vl.to_point(), mid]),
-            QuadraticBezier([mid, pr, self[2]]),
+            Self([self[0], vl.to_point(), mid]),
+            Self([mid, pr, self[2]]),
         )
     }
 
@@ -136,7 +137,7 @@ impl Bezier for QuadraticBezier {
         let dt = t1 - t0;
         let p1 = from + super::evaluate_bezier(&d, t0).to_vec() * dt;
 
-        QuadraticBezier([from, p1, to])
+        Self([from, p1, to])
     }
 
     fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>) {
@@ -155,6 +156,7 @@ impl Bezier for CubicBezier {
         &self.0
     }
 
+    // FIXME: This is actually broken
     fn split_at(&self, t: f32) -> (Self, Self)
     where
         Self: Sized,
@@ -173,14 +175,14 @@ impl Bezier for CubicBezier {
             let p1 = d[0].to_vec() * t;
             let p2 = mid - offmid;
 
-            CubicBezier([self[0], p1.to_point(), p2, mid])
+            Self([self[0], p1.to_point(), p2, mid])
         };
 
         let right = {
             let p1 = mid + offmid;
             let p2 = self[3] - d[2].to_vec() * t;
 
-            CubicBezier([mid, p1, p2, self[3]])
+            Self([mid, p1, p2, self[3]])
         };
 
         (left, right)
@@ -203,7 +205,7 @@ impl Bezier for CubicBezier {
         let p1 = from + super::evaluate_bezier(&d, t0).to_vec() * dt;
         let p2 = to - super::evaluate_bezier(&d, t1).to_vec() * dt;
 
-        CubicBezier([from, p1, p2, to])
+        Self([from, p1, p2, to])
     }
 
     fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>) {
@@ -220,5 +222,3 @@ impl CubicBezier {
         solve_x::cubic_x_to_t(self, x, out);
     }
 }
-
-pub use intersect::intersect_curves;

@@ -9,7 +9,7 @@ pub use face::*;
 mod font_manager;
 pub use font_manager::*;
 
-use crate::{math::Fixed, util::AnyError};
+use crate::util::AnyError;
 
 pub mod font_backend {
     #[cfg(target_family = "unix")]
@@ -156,7 +156,7 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    fn from_info_and_position(
+    const fn from_info_and_position(
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
         font_index: usize,
@@ -225,8 +225,8 @@ pub fn compute_extents(horizontal: bool, fonts: &[Font], glyphs: &[Glyph]) -> Te
     compute_extents_ex(horizontal, fonts, glyphs).0
 }
 
-impl AsRef<Font> for Font {
-    fn as_ref(&self) -> &Font {
+impl AsRef<Self> for Font {
+    fn as_ref(&self) -> &Self {
         self
     }
 }
@@ -247,7 +247,7 @@ fn linear_to_srgb(color: f32) -> u8 {
     (color.powf(2.2 / 1.0) * 255.0).round() as u8
 }
 
-trait FallbackFontProvider {
+pub trait FallbackFontProvider {
     fn get_font_for_glyph(
         &mut self,
         weight: f32,
@@ -400,7 +400,7 @@ impl ShapingBuffer {
                     .unwrap()
                     .map(|face| face.with_size_from(font))
                 {
-                    let mut sub_buffer = ShapingBuffer::new();
+                    let mut sub_buffer = Self::new();
                     for (codepoint, i) in codepoints[range.clone()].iter().copied().zip(range) {
                         hb_buffer_add(sub_buffer.buffer, codepoint, i as u32);
                     }
@@ -450,8 +450,8 @@ impl ShapingBuffer {
                 if start == 0 {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
-                        return;
                     }
+                    return;
                 }
 
                 let info_range = start..infos.len();

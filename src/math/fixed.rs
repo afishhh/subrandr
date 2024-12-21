@@ -71,7 +71,7 @@ impl<const P: u32> Fixed<P> {
     }
 
     pub const fn abs(self) -> Self {
-        Fixed(self.0.abs())
+        Self(self.0.abs())
     }
 
     pub const fn signum(&self) -> i32 {

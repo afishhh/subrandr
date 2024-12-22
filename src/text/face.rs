@@ -382,8 +382,6 @@ impl Font {
                 .or_else(|| sizes.len().checked_sub(1))
                 .unwrap();
 
-            println!("best size for bitmap font: {ppem:?} {best_size_index:?} {sizes:?}");
-
             let scale = Fixed::<6>::from_quotient64(ppem, sizes[best_size_index].x_ppem);
 
             unsafe {

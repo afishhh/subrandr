@@ -21,6 +21,18 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.outline.is_empty()
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.outline
+            .segments
+            .last()
+            .is_none_or(Segment::end_of_contour)
+    }
+
+    #[inline(always)]
     pub fn add_point(&mut self, point: Point2) {
         self.outline.points.push(point)
     }
@@ -59,13 +71,8 @@ impl OutlineBuilder {
             );
         }
 
-        if !self
-            .outline
-            .segments
-            .last()
-            .is_none_or(|x| x.end_of_contour)
-        {
-            panic!("Invalid outline: last segment is not marked end of contour")
+        if !self.is_closed() {
+            panic!("Invalid outline: Last segment is not marked end of contour")
         }
 
         self.outline
@@ -94,10 +101,12 @@ pub struct Segment {
 }
 
 impl Segment {
+    #[inline(always)]
     pub const fn degree(&self) -> CurveDegree {
         self.degree
     }
 
+    #[inline(always)]
     pub const fn end_of_contour(&self) -> bool {
         self.end_of_contour
     }
@@ -112,7 +121,7 @@ pub struct Outline {
 impl Outline {
     pub const fn empty() -> Self {
         Self {
-            points: vec![],
+            points: Vec::new(),
             segments: Vec::new(),
         }
     }
@@ -127,11 +136,13 @@ impl Outline {
         &self.segments
     }
 
+    #[inline(always)]
     pub fn points_for_segment(&self, s: Segment) -> &[Point2] {
         let start = s.start as usize;
         &self.points[start..(start + s.degree as usize + 1)]
     }
 
+    #[inline(always)]
     pub fn points(&self) -> &[Point2] {
         &self.points
     }
@@ -150,6 +161,7 @@ impl Outline {
         value
     }
 
+    #[inline(always)]
     pub fn evaluate(&self, t: f32) -> Point2 {
         self.evaluate_segment_normalized(t.trunc() as usize, t.fract())
     }
@@ -259,6 +271,8 @@ fn b_spline_to_bezier(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> [Point2
 
 // TODO: Make sqrt(0.5) a const once sqrt is stable in constants
 //       ... or just paste the value as a literal.
+
+const STROKER_PRINT_DEBUG: bool = false;
 
 struct Stroker {
     result_top: OutlineBuilder,
@@ -373,7 +387,7 @@ impl Stroker {
     ) {
         let offset = Vec2::new(normal.x * self.xbord, normal.y * self.ybord);
 
-        if dir.0 != 0 {
+        if STROKER_PRINT_DEBUG && dir.0 != 0 {
             let mut dirstr = String::with_capacity(2);
             if dir.includes(StrokerDir::UP) {
                 dirstr.push('+')
@@ -420,8 +434,6 @@ impl Stroker {
 
         let center = (normal0 + normal1) * coeff;
 
-        dbg!(center);
-
         // WHAT: Hopefully this is correct
 
         if coeffs.len() > 1 {
@@ -456,8 +468,6 @@ impl Stroker {
         // If the angle is greater than 90° (i.e. the cosine is smaller than zero)
         // split the arc into two separate arcs between a center normal vector.
         if cos < 0.0 {
-            dbg!(cos);
-            dbg!(normal0, normal1);
             // FIXME: The common opinion on the internet seems to be that finding the midpoint
             //        vector is usually quicker using linear interpolation and renormalisation
             //        than with the trigonometric methods.
@@ -482,7 +492,6 @@ impl Stroker {
             // sqrt(1 + cos(θ)) is going to give us cos(θ/2).
             cos = (0.5 + 0.5 * cos).max(0.0).sqrt();
             small_angle = false;
-            dbg!(center, cos);
         } else {
             center = Vec2::default();
         }
@@ -495,11 +504,8 @@ impl Stroker {
             mul[subdivisions_left].write(cmul);
             // cos(θ/2)**2 * (1 / cos(0/2)) = cos(θ/2)
             cos = (1.0 + cos) * cmul;
-            eprintln!("cmul={cmul} new cos={cos}");
             subdivisions_left -= 1;
         }
-
-        eprintln!("{center:?}");
 
         // cos²(θ/2)
         mul[subdivisions_left].write((1.0 + cos).recip());
@@ -528,12 +534,14 @@ impl Stroker {
             self.first_skip = StrokerDir::NONE;
             self.last_skip = StrokerDir::NONE;
 
-            eprintln!(
+            if STROKER_PRINT_DEBUG {
+                eprintln!(
                 "stroker: starting new contour (first point: {point:?}, first normal: {normal:?})",
             );
+            }
 
             return;
-        } else {
+        } else if STROKER_PRINT_DEBUG {
             eprintln!(
                 "stroker: starting new segment (last point: {:?}, last normal: {:?}, first point: {point:?}, first normal: {normal:?})",
                 self.last_point,
@@ -576,7 +584,9 @@ impl Stroker {
 
             let dir = StrokerDir(dir.0 & !skip.0);
             if dir.0 != 0 {
-                eprintln!("stroker: adding circular cap for direction {dir:?} between {previous_normal:?} and {normal:?} (cos = {cos})");
+                if STROKER_PRINT_DEBUG {
+                    eprintln!("stroker: adding circular cap for direction {dir:?} between {previous_normal:?} and {normal:?} (cos = {cos})");
+                }
                 self.draw_arc(point, previous_normal, normal, cos, dir);
             }
         }
@@ -614,10 +624,12 @@ impl Stroker {
         let deriv = Vec2::new(d.y * self.yscale, -d.x * self.xscale);
         let normal = deriv.normalize();
 
-        eprintln!(
+        if STROKER_PRINT_DEBUG {
+            eprintln!(
             "stroker: adding line from {:?} to {p1:?} (last normal: {:?}, current normal: {normal:?})",
             self.last_point, self.last_normal
         );
+        }
 
         self.start_segment(self.last_point, normal, dir);
         self.emit_first_point(self.last_point, Some(CurveDegree::Linear), dir);
@@ -682,7 +694,9 @@ impl Stroker {
         mut dir: StrokerDir,
         first: bool,
     ) {
-        eprintln!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
+        if STROKER_PRINT_DEBUG {
+            eprintln!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
+        }
         assert!((points[0] - points[1]).length() > 0.01);
 
         let cos = normals[0].v.dot(normals[1].v);
@@ -726,7 +740,6 @@ impl Stroker {
             }
         }
 
-        dbg!(check_dir, cos, sin, normals);
         if let Some(Some(offset)) =
             (check_dir.0 != 0).then(|| self.estimate_quadratic_error(cos, sin, normals))
         {
@@ -764,7 +777,7 @@ impl Stroker {
         let next = unsafe { array_assume_init_ref(&next) };
         let next_deriv = unsafe { array_assume_init_ref(&next_deriv) };
 
-        let len = dbg!(next_deriv[1].length());
+        let len = next_deriv[1].length();
         if len < self.min_len {
             self.emit_first_point(next[0], Some(CurveDegree::Linear), dir);
             self.start_segment(next[2], normals[1].v, dir);
@@ -941,13 +954,13 @@ pub fn stroke(outline: &Outline, x: f32, y: f32, eps: f32) -> (Outline, Outline)
         err_a: e,
     };
 
-    dbg!(stroker.merge_cos);
-
     let (top, bottom) = stroker.stroke(outline);
 
-    eprintln!("stroker: stroked outline {outline:?}");
-    eprintln!("stroker: result top {top:?}");
-    eprintln!("stroker: result bottom {bottom:?}");
+    if STROKER_PRINT_DEBUG {
+        eprintln!("stroker: stroked outline {outline:?}");
+        eprintln!("stroker: result top {top:?}");
+        eprintln!("stroker: result bottom {bottom:?}");
+    }
 
     (top, bottom)
 }

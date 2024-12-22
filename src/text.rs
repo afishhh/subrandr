@@ -385,16 +385,6 @@ impl ShapingBuffer {
                 &[hb_glyph_info_t],
                 &[hb_glyph_position_t],
             )| {
-                println!(
-                    "Segment contains range of unknown glyphs: {:?} ({:?})",
-                    codepoints[range.clone()]
-                        .iter()
-                        .copied()
-                        .map(|x| char::from_u32(x).unwrap())
-                        .collect::<String>(),
-                    properties,
-                );
-
                 if let Some(font) = fallback
                     .get_font_for_glyph(font.weight(), font.italic(), codepoints[range.start])
                     .unwrap()
@@ -406,7 +396,6 @@ impl ShapingBuffer {
                     }
                     hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
                     hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
-                    println!("new font={font:?}",);
 
                     // TODO: figure out a way to not clone this and still have corrent font_idx
                     //       will require MaybeUninit?

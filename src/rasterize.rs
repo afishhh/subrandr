@@ -497,6 +497,8 @@ pub fn fill_triangle(
     };
 }
 
+const POLYGON_RASTERIZER_DEBUG_PRINT: bool = false;
+
 // 18.14 signed fixed point value
 type Fixed18 = Fixed<14>;
 
@@ -581,12 +583,15 @@ impl NonZeroPolygonRasterizer {
             return;
         }
 
-        println!("{start_y} {end_y} {start_x} {end_x}");
-        println!("{top_y} {bottom_y}");
-        println!(
-            "line {start:?} -- {end:?} results in top_y={top_y} direction={:?}",
-            step > 0
-        );
+        if POLYGON_RASTERIZER_DEBUG_PRINT {
+            println!("{start_y} {end_y} {start_x} {end_x}");
+            println!("{top_y} {bottom_y}");
+            println!(
+                "line {start:?} -- {end:?} results in top_y={top_y} direction={:?}",
+                step > 0
+            );
+        }
+
         self.queue.push((
             top_y as u32,
             direction,
@@ -676,10 +681,12 @@ impl NonZeroPolygonRasterizer {
             self.prune_lr(y);
             self.push_queue_to_lr(y);
 
-            println!("--- POLYLINE RASTERIZER SCANLINE y={y} ---");
-            println!("left: {:?}", self.left);
-            println!("right: {:?}", self.right);
-            assert_eq!(self.left.len(), self.right.len());
+            if POLYGON_RASTERIZER_DEBUG_PRINT {
+                println!("--- POLYLINE RASTERIZER SCANLINE y={y} ---");
+                println!("left: {:?}", self.left);
+                println!("right: {:?}", self.right);
+                assert_eq!(self.left.len(), self.right.len());
+            }
 
             for i in 0..self.left.len() {
                 let (left, right) = (&self.left[i], &self.right[i]);
@@ -703,7 +710,6 @@ impl NonZeroPolygonRasterizer {
     // TODO: Move to painter
     pub fn render_fill(&mut self, painter: &mut Painter<impl PainterBuffer>, color: u32) {
         self.render(painter.width(), painter.height(), |y, x0, x1| {
-            println!("filling span y={y} x={x0}..={x1}");
             let width = painter.width();
             let height = painter.height();
             horizontal_line(

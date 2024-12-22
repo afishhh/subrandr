@@ -6,6 +6,8 @@
 // FIXME: enable this when suboptimal_flops stops recommending you mul_add
 #![allow(clippy::suboptimal_flops)]
 #![allow(clippy::missing_transmute_annotations)]
+// .as_ptr() is not expensive.
+#![allow(clippy::or_fun_call)]
 
 use std::rc::Rc;
 
@@ -120,16 +122,23 @@ pub struct ShapeSegment {
     outline: outline::Outline,
     bounding_box: math::Rect2,
     stroke_width: f32,
-    color: u32,
+    stroke_color: u32,
+    fill_color: u32,
 }
 
 impl ShapeSegment {
-    pub fn new(outline: outline::Outline, stroke_width: f32, color: u32) -> Self {
+    pub fn new(
+        outline: outline::Outline,
+        stroke_width: f32,
+        stroke_color: u32,
+        fill_color: u32,
+    ) -> Self {
         Self {
             bounding_box: { outline.bounding_box().clamp_to_positive() },
-            stroke_width,
             outline,
-            color,
+            stroke_width,
+            stroke_color,
+            fill_color,
         }
     }
 }
@@ -220,6 +229,7 @@ impl Subtitles {
                             },
                             5.0,
                             0x00FF00FF,
+                            0x00FFFFFF,
                         )),
                     ],
                 },
@@ -303,6 +313,8 @@ struct PixelRect {
     h: u32,
 }
 
+const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
+
 enum ShaperSegment {
     Text(text::Font),
     Shape(PixelRect),
@@ -349,6 +361,10 @@ impl MultilineTextShaper {
     }
 
     fn add_text(&mut self, mut text: &str, font: &text::Font) {
+        if MULTILINE_SHAPER_DEBUG_PRINT {
+            println!("SHAPING V2 INPUT TEXT: {:?} {:?}", text, font);
+        }
+
         while let Some(nl) = text.find('\n') {
             self.text.push_str(&text[..nl]);
             self.explicit_line_bounaries.push(self.text.len());
@@ -371,6 +387,10 @@ impl MultilineTextShaper {
     }
 
     fn add_shape(&mut self, dim: PixelRect) {
+        if MULTILINE_SHAPER_DEBUG_PRINT {
+            println!("SHAPING V2 INPUT SHAPE: {dim:?}",);
+        }
+
         self.text.push('\0');
         self.segment_boundaries
             .push((ShaperSegment::Shape(dim), self.text.len()))
@@ -384,11 +404,13 @@ impl MultilineTextShaper {
     ) -> (Vec<ShapedLine>, PixelRect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
-        println!("SHAPING V2 TEXT {:?}", self.text);
-        println!(
-            "SHAPING V2 LINE BOUNDARIES {:?}",
-            self.explicit_line_bounaries
-        );
+        if MULTILINE_SHAPER_DEBUG_PRINT {
+            println!("SHAPING V2 TEXT {:?}", self.text);
+            println!(
+                "SHAPING V2 LINE BOUNDARIES {:?}",
+                self.explicit_line_bounaries
+            );
+        }
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut total_extents = TextExtents {
@@ -430,6 +452,7 @@ impl MultilineTextShaper {
                 paint_width: 0,
             };
 
+            // TODO: These binary searches can be replaced by a pointer
             let starting_font_segment = match self
                 .segment_boundaries
                 .binary_search_by_key(&last, |(_, b)| *b)
@@ -438,14 +461,16 @@ impl MultilineTextShaper {
                 Err(idx) => idx,
             };
 
-            println!(
-                "last: {last}, font boundaries: {:?}, binary search result: {}",
-                self.segment_boundaries
-                    .iter()
-                    .map(|(_, s)| s)
-                    .collect::<Vec<_>>(),
-                starting_font_segment
-            );
+            if MULTILINE_SHAPER_DEBUG_PRINT {
+                println!(
+                    "last: {last}, font boundaries: {:?}, binary search result: {}",
+                    self.segment_boundaries
+                        .iter()
+                        .map(|(_, s)| s)
+                        .collect::<Vec<_>>(),
+                    starting_font_segment
+                );
+            }
 
             let mut max_bearing_y = 0;
 
@@ -492,10 +517,12 @@ impl MultilineTextShaper {
 
                         let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
-                        println!(
+                        if MULTILINE_SHAPER_DEBUG_PRINT {
+                            println!(
                             "last: {last}, end: {end}, intra font splits: {:?}, binary search result: {}",
                             self.intra_font_segment_splits, first_internal_split_idx
                         );
+                        }
 
                         if self
                             .intra_font_segment_splits
@@ -641,17 +668,18 @@ impl MultilineTextShaper {
             if line_boundary == self.text.len() {
                 total_extents.paint_height += line_extents.paint_height;
             } else {
-                total_extents.paint_height += dbg!(segments
+                total_extents.paint_height += segments
                     .iter()
                     .map(
                         |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
-                            ShaperSegment::Text(f) =>
-                                x.paint_rect.y as i64 * 64 + f.metrics().height,
+                            ShaperSegment::Text(f) => {
+                                x.paint_rect.y as i64 * 64 + f.metrics().height
+                            }
                             ShaperSegment::Shape(_) => (x.paint_rect.h * 64) as i64,
-                        }
+                        },
                     )
                     .max()
-                    .unwrap_or(0) as i32);
+                    .unwrap_or(0) as i32;
             }
 
             total_extents.paint_width =
@@ -667,6 +695,10 @@ impl MultilineTextShaper {
         }
 
         total_rect.h = (total_extents.paint_height / 64) as u32;
+
+        if MULTILINE_SHAPER_DEBUG_PRINT {
+            println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
+        }
 
         (lines, total_rect)
     }
@@ -770,7 +802,6 @@ impl<'a> Renderer<'a> {
                 .iter()
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
-                println!("{event:?}");
                 let x = (painter.width() as f32 * event.x) as u32;
                 let y = (painter.height() as f32 * event.y) as u32;
 
@@ -788,16 +819,9 @@ impl<'a> Renderer<'a> {
                                 .unwrap()
                                 .with_size(segment.font_size, self.dpi);
 
-                            println!("SHAPING V2 INPUT TEXT: {:?} {:?}", segment.text, font);
-
                             shaper.add_text(&segment.text, &font);
                         }
                         Segment::Shape(shape) => {
-                            println!(
-                                "SHAPING V2 INPUT SHAPE: {:?} {:?}",
-                                shape.outline, shape.bounding_box
-                            );
-
                             shaper.add_shape(PixelRect {
                                 x: (shape.bounding_box.min.x * shape_scale).floor() as i32,
                                 y: (shape.bounding_box.min.y * shape_scale).floor() as i32,
@@ -818,7 +842,6 @@ impl<'a> Renderer<'a> {
                     TextWrappingMode::None,
                     &mut self.fonts,
                 );
-                println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
 
                 let x = x as i32;
                 let y = y as i32
@@ -945,15 +968,19 @@ impl<'a> Renderer<'a> {
                                 s.stroke_width * shape_scale / 2.0,
                                 0.01,
                             );
-                            painter.stroke_outline(x, y, &outline, 0xFFFFFFFF);
-
-                            dbg!(&stroked.0);
-                            painter.debug_stroke_outline(x, y, &stroked.0, 0xFF0000FF, false);
-                            dbg!(&stroked.1);
-                            painter.debug_stroke_outline(x, y, &stroked.1, 0x0000FFFF, true);
 
                             let mut rasterizer = NonZeroPolygonRasterizer::new();
+                            for c in outline.iter_contours() {
+                                rasterizer.append_polyline(
+                                    (x, y),
+                                    &outline.flatten_contour(c),
+                                    false,
+                                );
+                                rasterizer.render_fill(&mut painter, s.fill_color);
+                            }
+
                             for (a, b) in stroked.0.iter_contours().zip(stroked.1.iter_contours()) {
+                                rasterizer.reset();
                                 rasterizer.append_polyline(
                                     (x, y),
                                     &stroked.0.flatten_contour(a),
@@ -964,9 +991,11 @@ impl<'a> Renderer<'a> {
                                     &stroked.1.flatten_contour(b),
                                     true,
                                 );
-                                rasterizer.render_fill(&mut painter, s.color);
-                                rasterizer.reset();
+                                rasterizer.render_fill(&mut painter, s.stroke_color);
                             }
+
+                            painter.debug_stroke_outline(x, y, &stroked.0, 0xFF0000FF, false);
+                            painter.debug_stroke_outline(x, y, &stroked.1, 0x0000FFFF, true);
                         }
                     }
                 }

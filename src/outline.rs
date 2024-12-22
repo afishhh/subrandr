@@ -38,7 +38,7 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    pub fn add_segment(&mut self, degree: CurveDegree) {
+    pub fn add_segment(&mut self, degree: SegmentDegree) {
         self.outline.segments.push(Segment {
             degree,
             end_of_contour: false,
@@ -86,7 +86,7 @@ impl Default for OutlineBuilder {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CurveDegree {
+pub enum SegmentDegree {
     Linear = 1,
     Quadratic = 2,
     Cubic = 3,
@@ -96,13 +96,13 @@ pub enum CurveDegree {
 #[repr(packed(8))]
 pub struct Segment {
     end_of_contour: bool,
-    degree: CurveDegree,
+    degree: SegmentDegree,
     start: u32,
 }
 
 impl Segment {
     #[inline(always)]
-    pub const fn degree(&self) -> CurveDegree {
+    pub const fn degree(&self) -> SegmentDegree {
         self.degree
     }
 
@@ -382,7 +382,7 @@ impl Stroker {
         &mut self,
         point: Point2,
         normal: Vec2,
-        segment: Option<CurveDegree>,
+        segment: Option<SegmentDegree>,
         dir: StrokerDir,
     ) {
         let offset = Vec2::new(normal.x * self.xbord, normal.y * self.ybord);
@@ -416,7 +416,7 @@ impl Stroker {
         }
     }
 
-    fn emit_first_point(&mut self, point: Point2, segment: Option<CurveDegree>, dir: StrokerDir) {
+    fn emit_first_point(&mut self, point: Point2, segment: Option<SegmentDegree>, dir: StrokerDir) {
         self.last_skip.0 &= !dir.0;
         self.emit_point(point, self.last_normal, segment, dir);
     }
@@ -440,7 +440,7 @@ impl Stroker {
             self.process_arc(point, normal0, center, &coeffs[..coeffs.len() - 1], dir);
             self.process_arc(point, center, normal1, &coeffs[..coeffs.len() - 1], dir);
         } else {
-            self.emit_point(point, normal0, Some(CurveDegree::Quadratic), dir);
+            self.emit_point(point, normal0, Some(SegmentDegree::Quadratic), dir);
             self.emit_point(point, center, None, dir);
         }
     }
@@ -574,10 +574,10 @@ impl Stroker {
                 self.emit_point(
                     point,
                     previous_normal,
-                    Some(CurveDegree::Linear),
+                    Some(SegmentDegree::Linear),
                     StrokerDir(!self.last_skip.0 & skip.0),
                 );
-                self.emit_point(point, Vec2::ZERO, Some(CurveDegree::Linear), skip)
+                self.emit_point(point, Vec2::ZERO, Some(SegmentDegree::Linear), skip)
             }
             self.last_skip = skip;
             // WHAT: Hopefully this is correct
@@ -632,7 +632,7 @@ impl Stroker {
         }
 
         self.start_segment(self.last_point, normal, dir);
-        self.emit_first_point(self.last_point, Some(CurveDegree::Linear), dir);
+        self.emit_first_point(self.last_point, Some(SegmentDegree::Linear), dir);
         self.last_normal = normal;
         self.last_point = p1;
     }
@@ -644,7 +644,7 @@ impl Stroker {
         self.emit_point(
             point,
             self.last_normal,
-            Some(CurveDegree::Linear),
+            Some(SegmentDegree::Linear),
             StrokerDir(!self.last_skip.0 & dir.0),
         );
         self.last_skip.0 |= dir.0;
@@ -721,12 +721,22 @@ impl Stroker {
                 if d2 < g0 && d2 < g1 {
                     self.prepare_skip(points[0], skip_dir, first);
                     if f0 < 0.0 || f1 < 0.0 {
-                        self.emit_point(points[0], Vec2::ZERO, Some(CurveDegree::Linear), skip_dir);
-                        self.emit_point(points[2], Vec2::ZERO, Some(CurveDegree::Linear), skip_dir);
+                        self.emit_point(
+                            points[0],
+                            Vec2::ZERO,
+                            Some(SegmentDegree::Linear),
+                            skip_dir,
+                        );
+                        self.emit_point(
+                            points[2],
+                            Vec2::ZERO,
+                            Some(SegmentDegree::Linear),
+                            skip_dir,
+                        );
                     } else {
                         let mul = f0 / abs_sin;
                         let offs = normals[0].v * mul;
-                        self.emit_point(points[0], offs, Some(CurveDegree::Linear), skip_dir);
+                        self.emit_point(points[0], offs, Some(SegmentDegree::Linear), skip_dir);
                     }
                     dir.0 &= !skip_dir.0;
                     if dir.0 == 0 {
@@ -743,7 +753,7 @@ impl Stroker {
         if let Some(Some(offset)) =
             (check_dir.0 != 0).then(|| self.estimate_quadratic_error(cos, sin, normals))
         {
-            self.emit_first_point(points[0], Some(CurveDegree::Quadratic), check_dir);
+            self.emit_first_point(points[0], Some(SegmentDegree::Quadratic), check_dir);
             self.emit_point(points[1], offset, None, check_dir);
             dir.0 &= !check_dir.0;
             if dir.0 == 0 {
@@ -779,10 +789,10 @@ impl Stroker {
 
         let len = next_deriv[1].length();
         if len < self.min_len {
-            self.emit_first_point(next[0], Some(CurveDegree::Linear), dir);
+            self.emit_first_point(next[0], Some(SegmentDegree::Linear), dir);
             self.start_segment(next[2], normals[1].v, dir);
             self.last_skip.0 &= !dir.0;
-            self.emit_point(next[2], normals[1].v, Some(CurveDegree::Linear), dir);
+            self.emit_point(next[2], normals[1].v, Some(SegmentDegree::Linear), dir);
             return;
         }
 
@@ -870,7 +880,7 @@ impl Stroker {
             self.emit_point(
                 self.first_point,
                 self.first_normal,
-                Some(CurveDegree::Linear),
+                Some(SegmentDegree::Linear),
                 dir,
             );
             if self.first_normal != self.last_normal {
@@ -897,9 +907,11 @@ impl Stroker {
             }
 
             match segment.degree {
-                CurveDegree::Linear => self.add_line(points[1], StrokerDir::ALL),
-                CurveDegree::Quadratic => self.add_quadratic(points[1], points[2], StrokerDir::ALL),
-                CurveDegree::Cubic => {
+                SegmentDegree::Linear => self.add_line(points[1], StrokerDir::ALL),
+                SegmentDegree::Quadratic => {
+                    self.add_quadratic(points[1], points[2], StrokerDir::ALL)
+                }
+                SegmentDegree::Cubic => {
                     self.add_cubic(points[1], points[2], points[3], StrokerDir::ALL)
                 }
             }

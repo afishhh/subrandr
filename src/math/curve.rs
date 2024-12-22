@@ -7,7 +7,6 @@ use super::{Point2, Rect2, Vec2};
 const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
 mod flatten;
-mod intersect;
 mod solve_x;
 
 pub fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {

@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use color::BGRA8;
 use math::Point2;
-use outline::{CurveDegree, OutlineBuilder};
+use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use text::{FontManager, TextExtents};
 
@@ -123,7 +123,8 @@ struct TextSegment {
 pub struct ShapeSegment {
     outline: outline::Outline,
     bounding_box: math::Rect2,
-    stroke_width: f32,
+    stroke_x: f32,
+    stroke_y: f32,
     stroke_color: BGRA8,
     fill_color: BGRA8,
 }
@@ -131,14 +132,16 @@ pub struct ShapeSegment {
 impl ShapeSegment {
     pub fn new(
         outline: outline::Outline,
-        stroke_width: f32,
+        stroke_x: f32,
+        stroke_y: f32,
         stroke_color: BGRA8,
         fill_color: BGRA8,
     ) -> Self {
         Self {
             bounding_box: { outline.bounding_box().clamp_to_positive() },
             outline,
-            stroke_width,
+            stroke_x,
+            stroke_y,
             stroke_color,
             fill_color,
         }
@@ -223,12 +226,13 @@ impl Subtitles {
                                 b.add_point(Point2::new(0.0, 0.0));
                                 b.add_point(Point2::new(30.0, 120.));
                                 b.add_point(Point2::new(120.0, 120.));
-                                b.add_segment(CurveDegree::Linear);
-                                b.add_segment(CurveDegree::Linear);
-                                b.add_segment(CurveDegree::Linear);
+                                b.add_segment(SegmentDegree::Linear);
+                                b.add_segment(SegmentDegree::Linear);
+                                b.add_segment(SegmentDegree::Linear);
                                 b.close_contour();
                                 b.build()
                             },
+                            2.0,
                             5.0,
                             BGRA8::from_rgba32(0x00FF00FF),
                             BGRA8::from_rgba32(0x00FFFFFF),
@@ -827,10 +831,10 @@ impl<'a> Renderer<'a> {
                             shaper.add_shape(PixelRect {
                                 x: (shape.bounding_box.min.x * shape_scale).floor() as i32,
                                 y: (shape.bounding_box.min.y * shape_scale).floor() as i32,
-                                w: ((shape.bounding_box.size().x + shape.stroke_width / 2.0)
+                                w: ((shape.bounding_box.size().x + shape.stroke_x / 2.0)
                                     * shape_scale)
                                     .ceil() as u32,
-                                h: ((shape.bounding_box.size().y + shape.stroke_width / 2.0)
+                                h: ((shape.bounding_box.size().y + shape.stroke_y / 2.0)
                                     * shape_scale)
                                     .ceil() as u32,
                             });
@@ -964,13 +968,6 @@ impl<'a> Renderer<'a> {
 
                             let (x, y) = ((x as f32) as i32, (y as f32) as i32);
 
-                            let stroked = outline::stroke(
-                                &outline,
-                                s.stroke_width * shape_scale / 2.0,
-                                s.stroke_width * shape_scale / 2.0,
-                                0.01,
-                            );
-
                             let mut rasterizer = NonZeroPolygonRasterizer::new();
                             for c in outline.iter_contours() {
                                 rasterizer.append_polyline(
@@ -981,35 +978,46 @@ impl<'a> Renderer<'a> {
                                 rasterizer.render_fill(painter, s.fill_color);
                             }
 
-                            for (a, b) in stroked.0.iter_contours().zip(stroked.1.iter_contours()) {
-                                rasterizer.reset();
-                                rasterizer.append_polyline(
-                                    (x, y),
-                                    &stroked.0.flatten_contour(a),
+                            if s.stroke_x >= 0.01 || s.stroke_y >= 0.01 {
+                                let stroked = outline::stroke(
+                                    &outline,
+                                    s.stroke_x * shape_scale / 2.0,
+                                    s.stroke_y * shape_scale / 2.0,
+                                    0.01,
+                                );
+
+                                for (a, b) in
+                                    stroked.0.iter_contours().zip(stroked.1.iter_contours())
+                                {
+                                    rasterizer.reset();
+                                    rasterizer.append_polyline(
+                                        (x, y),
+                                        &stroked.0.flatten_contour(a),
+                                        false,
+                                    );
+                                    rasterizer.append_polyline(
+                                        (x, y),
+                                        &stroked.1.flatten_contour(b),
+                                        true,
+                                    );
+                                    rasterizer.render_fill(painter, s.stroke_color);
+                                }
+
+                                painter.debug_stroke_outline(
+                                    x,
+                                    y,
+                                    &stroked.0,
+                                    BGRA8::from_rgba32(0xFF0000FF),
                                     false,
                                 );
-                                rasterizer.append_polyline(
-                                    (x, y),
-                                    &stroked.1.flatten_contour(b),
+                                painter.debug_stroke_outline(
+                                    x,
+                                    y,
+                                    &stroked.1,
+                                    BGRA8::from_rgba32(0x0000FFFF),
                                     true,
                                 );
-                                rasterizer.render_fill(painter, s.stroke_color);
                             }
-
-                            painter.debug_stroke_outline(
-                                x,
-                                y,
-                                &stroked.0,
-                                BGRA8::from_rgba32(0xFF0000FF),
-                                false,
-                            );
-                            painter.debug_stroke_outline(
-                                x,
-                                y,
-                                &stroked.1,
-                                BGRA8::from_rgba32(0x0000FFFF),
-                                true,
-                            );
                         }
                     }
                 }

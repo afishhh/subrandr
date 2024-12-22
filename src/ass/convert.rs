@@ -3,7 +3,7 @@ use std::str::Chars;
 use crate::{
     color::BGRA8,
     math::Point2,
-    outline::{CurveDegree, Outline, OutlineBuilder},
+    outline::{Outline, OutlineBuilder, SegmentDegree},
     Segment, ShapeSegment, TextSegment, TextWrappingMode,
 };
 
@@ -128,7 +128,7 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
                     was_valid = true;
                 }
                 if was_valid && started {
-                    outline.add_segment(CurveDegree::Linear);
+                    outline.add_segment(SegmentDegree::Linear);
                     outline.close_contour();
                     started = false;
                 }
@@ -147,6 +147,20 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
                     pen = Some(p);
                 }
             }
+            'l' => {
+                let Some(pen) = pen else {
+                    continue;
+                };
+
+                while let Some(p) = get_scaled_point(&mut chars, scaling_factor) {
+                    if !started {
+                        outline.add_point(pen);
+                        started = true;
+                    }
+                    outline.add_point(p);
+                    outline.add_segment(SegmentDegree::Linear);
+                }
+            }
             _ => (),
         }
     }
@@ -154,6 +168,11 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
     if pen.is_none() {
         None
     } else {
+        if started {
+            outline.add_segment(SegmentDegree::Linear);
+            outline.close_contour();
+        }
+
         Some(outline.build())
     }
 }
@@ -200,7 +219,8 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                         if let Some(outline) = process_drawing_commands(content, drawing_scale) {
                             segments.push(Segment::Shape(ShapeSegment::new(
                                 outline,
-                                current_style.outline,
+                                current_style.outline_x,
+                                current_style.outline_y,
                                 convert_ass_color(current_style.outline_colour),
                                 convert_ass_color(current_style.primary_colour),
                             )))
@@ -245,6 +265,16 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                 }
                 Override(Command::R(style)) => {
                     current_style = ass.get_style(style).unwrap_or(&DEFAULT_STYLE).clone();
+                }
+                Override(Command::XBord(size)) => {
+                    current_style.outline_x = size;
+                }
+                Override(Command::YBord(size)) => {
+                    current_style.outline_y = size;
+                }
+                Override(Command::Bord(size)) => {
+                    current_style.outline_x = size;
+                    current_style.outline_y = size;
                 }
                 Override(Command::P(scale)) => {
                     drawing_scale = scale;

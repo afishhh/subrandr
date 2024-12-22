@@ -188,7 +188,7 @@ impl<'a> Painter<'a> {
             let [r, g, b] = hsl_to_rgb(h, s, l);
             color = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | (color & 0xFF);
 
-            if segment.degree() == outline::CurveDegree::Linear {
+            if segment.degree() == outline::SegmentDegree::Linear {
                 let points = outline.points_for_segment(segment);
                 let (x, y) = (x + points[1].x as i32, y + points[1].y as i32);
                 self.line(last_point.0, last_point.1, x, y, BGRA8::from_rgba32(color));

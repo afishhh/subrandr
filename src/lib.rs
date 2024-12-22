@@ -605,17 +605,15 @@ impl MultilineTextShaper {
                         let logical_w = dim.w - (-dim.x).min(0) as u32;
                         let logical_h = dim.h - (-dim.y).min(0) as u32;
                         let segment_max_bearing_y = (logical_h * 64) as i64;
-                        let y = dim.y.max(0);
-                        // let x = dim.x.max(0);
                         segments.push(ShapedLineSegment {
                             glyphs_and_fonts: None,
                             baseline_offset: (
                                 line_extents.paint_width / 64,
-                                total_extents.paint_height / 64 - y,
+                                total_extents.paint_height / 64,
                             ),
                             paint_rect: PixelRect {
                                 x: line_extents.paint_width / 64,
-                                y: total_extents.paint_height / 64 - y,
+                                y: total_extents.paint_height / 64,
                                 w: logical_w,
                                 h: logical_h,
                             },

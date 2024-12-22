@@ -92,7 +92,7 @@ impl<const P: u32> Fixed<P> {
 macro_rules! define_simple_fixed_operator {
     (@all $($tt: tt)*) => {
         define_simple_fixed_operator!(
-            [Self],
+            [Self [Self] [.0]],
             $($tt)*
         );
         define_simple_fixed_operator!(
@@ -102,16 +102,16 @@ macro_rules! define_simple_fixed_operator {
     };
     (@conversions $($tt: tt)*) => {
         define_simple_fixed_operator!(
-            [i32 Self::new],
+            [i32 [] [] Self::new],
             $($tt)*
         );
         define_simple_fixed_operator!(
-            [f32 Self::from_f32],
+            [f32 [] [] Self::from_f32],
             $($tt)*
         );
     };
     (
-        [$type: ident $($construct: tt)*],
+        [$type: ident [$($ctor: tt)?] [$($dot: tt)*] $($construct: tt)*],
         $trait: ident,
         $f: ident,
         $op: tt,
@@ -123,13 +123,13 @@ macro_rules! define_simple_fixed_operator {
             type Output = Self;
 
             fn $f(self, rhs: $type) -> Self::Output {
-                Self(self.0 $op $($construct)*(rhs).0)
+                $($ctor)? (self$($dot)* $op $($construct)*(rhs)$($dot)*)
             }
         }
 
         impl<const P: u32> $trait_assign<$type> for Fixed<P> {
             fn $f_assign(&mut self, rhs: $type) {
-                self.0 $op_assign $($construct)*(rhs).0
+                (*self)$($dot)* $op_assign $($construct)*(rhs)$($dot)*
             }
         }
     };
@@ -157,8 +157,13 @@ impl<const P: u32> Mul for Fixed<P> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        assert!(P % 2 == 0);
         Self(((self.0 as i64 * rhs.0 as i64) >> P) as i32)
+    }
+}
+
+impl<const P: u32> MulAssign for Fixed<P> {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 
@@ -168,6 +173,12 @@ impl<const P: u32> Div for Fixed<P> {
     fn div(self, rhs: Self) -> Self::Output {
         let wide_result = ((self.0 as i64) << P) / rhs.0 as i64;
         Self(wide_result as i32)
+    }
+}
+
+impl<const P: u32> DivAssign for Fixed<P> {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
     }
 }
 

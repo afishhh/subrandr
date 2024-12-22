@@ -70,7 +70,7 @@ fn large_zpixmap32_putimage(
 ) -> xcb::Result<()> {
     // the PutImage request itself will naturally have some overhead we want to account for
     let max_length = (conn.get_maximum_request_length() as usize * 4) - 1024;
-    let chunk_height = max_length as usize / pitch;
+    let chunk_height = max_length / pitch;
 
     for y in (0..height).step_by(chunk_height).map(|x| x as usize) {
         let current_end_y = (y + chunk_height).min(height as usize);
@@ -87,7 +87,7 @@ fn large_zpixmap32_putimage(
             dst_y: y as i16,
             left_pad: 0,
             depth: 32,
-            data: &data,
+            data,
         }))?;
     }
 
@@ -173,7 +173,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
         ],
     })?;
 
-    if let Some(_) = args.overlay_window {
+    if args.overlay_window.is_some() {
         conn.send_and_check_request(&xcb::x::ChangeWindowAttributes {
             window,
             value_list: &[xcb::x::Cw::OverrideRedirect(true)],
@@ -203,7 +203,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
     // TODO: get and scale by dpi
 
     let mut render = Renderer::new(&subs, args.dpi);
-    let mut painter = Painter::new_vec(0, 0);
+    let mut buffer = Vec::<u32>::new();
 
     let start = Instant::now();
     loop {
@@ -238,7 +238,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
         let (width, height) = (s_width as u32, s_height as u32);
         render.resize(width, height);
-        painter.resize(width, height);
+        buffer.resize(width as usize * height as usize, 0);
         let now = Instant::now();
         let t = if let Some(ref mut mpv_socket) = mpv_socket {
             mpv_socket.get_playback_time()
@@ -246,26 +246,22 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             ((now - start).as_secs_f64() * args.speed * 1000.) as u32 + args.start_at
         };
 
+        let mut painter = Painter::new(width, height, buffer.as_mut_slice());
         println!("render t = {}ms to {}x{}", t, width, height);
-        render.render(painter.as_deref(), t);
+        render.render(&mut painter, t);
         let end = Instant::now();
         println!("took {:.2}ms", (end - now).as_micros() as f64 / 1000.);
-
-        // FIXME: X11 expects ARGB, maybe everything should be switched to ARGB?
-        let bitmap = painter.buffer();
-        let mut new_bitmap = vec![0u8; s_width as usize * s_height as usize * 4];
-        for i in (0..new_bitmap.len()).step_by(4) {
-            new_bitmap[i] = bitmap[i + 2];
-            new_bitmap[i + 1] = bitmap[i + 1];
-            new_bitmap[i + 2] = bitmap[i];
-            new_bitmap[i + 3] = bitmap[i + 3];
-        }
 
         large_zpixmap32_putimage(
             &conn,
             xcb::x::Drawable::Window(window),
             gc,
-            &new_bitmap,
+            unsafe {
+                std::slice::from_raw_parts(
+                    buffer.as_ptr() as *const u8,
+                    std::mem::size_of_val(buffer.as_slice()),
+                )
+            },
             s_width,
             s_width as usize * 4,
             s_height,

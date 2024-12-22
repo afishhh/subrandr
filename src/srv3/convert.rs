@@ -1,4 +1,4 @@
-use crate::Subtitles;
+use crate::{color::BGRA8, Subtitles};
 
 use super::Document;
 
@@ -40,7 +40,7 @@ pub fn convert(document: Document) -> Subtitles {
                 italic: false,
                 underline: false,
                 strike_out: false,
-                color: segment.pen().foreground_color,
+                color: BGRA8::from_rgba32(segment.pen().foreground_color),
                 text: segment.text.clone(),
             }))
         }

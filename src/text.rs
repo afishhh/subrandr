@@ -9,7 +9,10 @@ pub use face::*;
 mod font_manager;
 pub use font_manager::*;
 
-use crate::util::AnyError;
+use crate::{
+    color::{BlendMode, BGRA8},
+    util::AnyError,
+};
 
 pub mod font_backend {
     #[cfg(target_family = "unix")]
@@ -534,8 +537,7 @@ pub struct TextExtents {
 
 #[allow(clippy::too_many_arguments)]
 pub fn paint(
-    // RGBA8 buffer
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     baseline_x: i32,
     baseline_y: i32,
     width: usize,
@@ -597,8 +599,6 @@ pub fn paint(
                         continue;
                     }
 
-                    // TODO: assume it fits in a u32 and just load the u32
-                    //       for bgra this would allow a direct load to register on LE
                     let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
                         let bpos = (y as i32 * bitmap.pitch) + (x * pixel_width) as i32;
                         let bslice = std::slice::from_raw_parts(
@@ -663,36 +663,24 @@ pub fn paint(
                         }
                     };
 
-                    let (colors, alpha) = match bitmap.pixel_mode.into() {
+                    let (b, g, r, a) = match bitmap.pixel_mode.into() {
                         FT_PIXEL_MODE_GRAY => (
-                            [color[0], color[1], color[2]],
-                            (pixel_data[0] as f32 / 255.0) * alpha,
+                            color[0],
+                            color[1],
+                            color[2],
+                            (pixel_data[0] as f32) / 255.0 * alpha,
                         ),
                         FT_PIXEL_MODE_BGRA => (
-                            [pixel_data[2], pixel_data[1], pixel_data[0]],
-                            (pixel_data[3] as f32 / 255.0) * alpha,
+                            pixel_data[0],
+                            pixel_data[1],
+                            pixel_data[2],
+                            (pixel_data[3] as f32) / 255.0 * alpha,
                         ),
                         _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
                     };
 
-                    let i = fy * stride + fx * 4;
-                    buffer[i] = linear_to_srgb(blend_over(
-                        srgb_to_linear(buffer[i]),
-                        srgb_to_linear(colors[0]),
-                        alpha,
-                    ));
-                    buffer[i + 1] = linear_to_srgb(blend_over(
-                        srgb_to_linear(buffer[i + 1]),
-                        srgb_to_linear(colors[1]),
-                        alpha,
-                    ));
-                    buffer[i + 2] = linear_to_srgb(blend_over(
-                        srgb_to_linear(buffer[i + 2]),
-                        srgb_to_linear(colors[2]),
-                        alpha,
-                    ));
-                    buffer[i + 3] =
-                        ((alpha + (buffer[i + 3] as f32 / 255.0) * (1.0 - alpha)) * 255.0) as u8;
+                    let i = fy * stride + fx;
+                    BlendMode::Over.blend_with_parts(&mut buffer[i], [b, g, r], a);
                 }
             }
 

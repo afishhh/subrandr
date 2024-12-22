@@ -1,6 +1,7 @@
 use crate::{
+    color::BGRA8,
     math::{Fixed, Point2},
-    Painter, PainterBuffer,
+    Painter,
 };
 
 #[derive(Debug, Clone)]
@@ -146,11 +147,11 @@ pub unsafe fn line_unchecked(
     y0: i32,
     x1: i32,
     y1: i32,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     stride: usize,
     width: i32,
     height: i32,
-    color: u32,
+    color: BGRA8,
 ) {
     let (mut machine, kind) = Bresenham::new(x0, y0, x1, y1);
     loop {
@@ -165,11 +166,8 @@ pub unsafe fn line_unchecked(
                 break 'a;
             }
 
-            let i = y as usize * stride + 4 * (x as usize);
-            let pixel = unsafe {
-                <&mut [u8; 4]>::try_from(buffer.get_unchecked_mut(i..i + 4)).unwrap_unchecked()
-            };
-            *pixel = color.to_be_bytes();
+            let i = y as usize * stride + x as usize;
+            buffer[i] = color;
         }
 
         if machine.advance(kind) {
@@ -181,22 +179,18 @@ pub unsafe fn line_unchecked(
 pub unsafe fn horizontal_line_unchecked(
     x0: i32,
     x1: i32,
-    offset_buffer: &mut [u8],
+    offset_buffer: &mut [BGRA8],
     width: i32,
-    color: u32,
+    color: BGRA8,
 ) {
     for x in x0.clamp(0, width)..=x1.clamp(0, width) {
-        let i = 4 * (x as usize);
-        let pixel = unsafe {
-            <&mut [u8; 4]>::try_from(offset_buffer.get_unchecked_mut(i..i + 4)).unwrap_unchecked()
-        };
-        *pixel = color.to_be_bytes();
+        offset_buffer[x as usize] = color;
     }
 }
 
 macro_rules! check_buffer {
     ($what: literal, $buffer: ident, $width: ident, $height: ident) => {
-        if $buffer.len() < $width as usize * $height as usize * 4 {
+        if $buffer.len() < $width as usize * $height as usize {
             panic!(concat!(
                 "Buffer passed to rasterize::",
                 $what,
@@ -211,10 +205,10 @@ pub fn line(
     y0: i32,
     x1: i32,
     y1: i32,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) {
     check_buffer!("line", buffer, width, height);
 
@@ -225,7 +219,7 @@ pub fn line(
             x1,
             y1,
             buffer,
-            4 * width as usize,
+            width as usize,
             width as i32,
             height as i32,
             color,
@@ -237,10 +231,10 @@ pub fn horizontal_line(
     y: i32,
     x0: i32,
     x1: i32,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) {
     check_buffer!("horizontal_line", buffer, width, height);
 
@@ -252,7 +246,7 @@ pub fn horizontal_line(
         horizontal_line_unchecked(
             x0,
             x1,
-            &mut buffer[y as usize * width as usize * 4..],
+            &mut buffer[y as usize * width as usize..],
             width as i32,
             color,
         )
@@ -261,14 +255,13 @@ pub fn horizontal_line(
 
 pub fn stroke_polygon(
     points: impl IntoIterator<Item = (i32, i32)>,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) {
     check_buffer!("stroke_rectangle", buffer, width, height);
 
-    let stride = 4 * width as usize;
     let mut it = points.into_iter();
     let Some(first) = it.next() else {
         return;
@@ -283,7 +276,7 @@ pub fn stroke_polygon(
                 next.0,
                 next.1,
                 buffer,
-                stride,
+                width as usize,
                 width as i32,
                 height as i32,
                 color,
@@ -300,7 +293,7 @@ pub fn stroke_polygon(
             first.0,
             first.1,
             buffer,
-            stride,
+            width as usize,
             width as i32,
             height as i32,
             color,
@@ -315,14 +308,14 @@ pub fn stroke_triangle(
     y1: i32,
     x2: i32,
     y2: i32,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) {
     check_buffer!("stroke_triangle", buffer, width, height);
 
-    let stride = 4 * width as usize;
+    let stride = width as usize;
     unsafe {
         line_unchecked(
             x0,
@@ -372,11 +365,11 @@ unsafe fn draw_triangle_half(
     kind1: BresenhamKind,
     machine2: &mut Bresenham,
     kind2: BresenhamKind,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
     stride: usize,
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) -> i32 {
     'top: loop {
         // Advance both lines until they are at the current y
@@ -424,10 +417,11 @@ pub fn fill_triangle(
     mut y1: i32,
     mut x2: i32,
     mut y2: i32,
-    buffer: &mut [u8],
+    buffer: &mut [BGRA8],
+    stride: usize,
     width: u32,
     height: u32,
-    color: u32,
+    color: BGRA8,
 ) {
     check_buffer!("fill_triangle", buffer, width, height);
 
@@ -450,8 +444,6 @@ pub fn fill_triangle(
         std::mem::swap(&mut y2, &mut y1);
         std::mem::swap(&mut x2, &mut x1);
     }
-
-    let stride = 4 * width as usize;
 
     let (mut machine1, kind1) = Bresenham::new(x0, y0, x1, y1);
     let (mut machine2, kind2) = Bresenham::new(x0, y0, x2, y2);
@@ -708,19 +700,9 @@ impl NonZeroPolygonRasterizer {
     }
 
     // TODO: Move to painter
-    pub fn render_fill(&mut self, painter: &mut Painter<impl PainterBuffer>, color: u32) {
-        self.render(painter.width(), painter.height(), |y, x0, x1| {
-            let width = painter.width();
-            let height = painter.height();
-            horizontal_line(
-                y as i32,
-                x0 as i32,
-                x1 as i32,
-                painter.buffer_mut(),
-                width,
-                height,
-                color,
-            );
+    pub fn render_fill(&mut self, painter: &mut Painter, color: BGRA8) {
+        self.render(painter.width(), painter.height(), |y, x1, x2| {
+            painter.horizontal_line(y as i32, x1 as i32, x2 as i32, color);
         });
     }
 }

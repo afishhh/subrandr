@@ -1,6 +1,7 @@
 use std::str::Chars;
 
 use crate::{
+    color::BGRA8,
     math::Point2,
     outline::{CurveDegree, Outline, OutlineBuilder},
     Segment, ShapeSegment, TextSegment, TextWrappingMode,
@@ -157,11 +158,13 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
     }
 }
 
-pub const fn ass_to_rgba(abgr: u32) -> u32 {
-    ((abgr & 0xFF) << 24)
-        | ((abgr & 0xFF00) << 8)
-        | ((abgr & 0xFF0000) >> 8)
-        | (0xFF - ((abgr & 0xFF000000) >> 24))
+pub const fn convert_ass_color(abgr: u32) -> BGRA8 {
+    BGRA8::from_argb32(
+        ((abgr & 0xFF) << 16)
+            | (abgr & 0xFF00)
+            | ((abgr & 0xFF0000) >> 16)
+            | (0xFF000000 - (abgr & 0xFF000000)),
+    )
 }
 
 pub fn convert(ass: Script) -> crate::Subtitles {
@@ -198,8 +201,8 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                             segments.push(Segment::Shape(ShapeSegment::new(
                                 outline,
                                 current_style.outline,
-                                current_style.outline_colour,
-                                current_style.primary_colour,
+                                convert_ass_color(current_style.outline_colour),
+                                convert_ass_color(current_style.primary_colour),
                             )))
                         }
                     } else {
@@ -229,7 +232,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                             italic: current_style.italic,
                             underline: current_style.underline,
                             strike_out: current_style.strike_out,
-                            color: ass_to_rgba(current_style.primary_colour),
+                            color: convert_ass_color(current_style.primary_colour),
                             text,
                         }))
                     }

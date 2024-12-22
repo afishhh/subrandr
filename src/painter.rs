@@ -1,50 +1,44 @@
-use std::ops::DerefMut;
-
 use crate::{
+    color::{BGRA8Slice, BGRA8},
     math::*,
     outline::{self, Outline},
     rasterize, text,
     util::{hsl_to_rgb, rgb_to_hsl},
 };
 
-pub trait PainterBuffer: AsRef<[u8]> + AsMut<[u8]> {}
-
-impl PainterBuffer for [u8] {}
-impl PainterBuffer for Vec<u8> {}
-impl<T: PainterBuffer + ?Sized> PainterBuffer for &mut T {}
-
-pub trait ResizablePainterBuffer: PainterBuffer {
-    fn resize(&mut self, size: usize);
+pub trait AsBGRA8Buffer {
+    fn as_ref(&self) -> &[BGRA8];
+    fn as_mut(&mut self) -> &mut [BGRA8];
 }
 
-impl ResizablePainterBuffer for Vec<u8> {
-    fn resize(&mut self, size: usize) {
-        Self::resize(self, size, 0)
-    }
+macro_rules! impl_painter_buffer {
+    ($type: ty, $slice: ty) => {
+        impl AsBGRA8Buffer for $type {
+            fn as_ref(&self) -> &[BGRA8] {
+                unsafe { std::mem::transmute(AsRef::<$slice>::as_ref(self)) }
+            }
+
+            fn as_mut(&mut self) -> &mut [BGRA8] {
+                unsafe { std::mem::transmute(AsMut::<$slice>::as_mut(self)) }
+            }
+        }
+    };
 }
 
-impl<T: ResizablePainterBuffer + ?Sized> ResizablePainterBuffer for &mut T {
-    fn resize(&mut self, size: usize) {
-        T::resize(*self, size)
-    }
-}
+impl_painter_buffer!([BGRA8], [BGRA8]);
+impl_painter_buffer!([u32], [u32]);
 
-pub struct Painter<B: PainterBuffer> {
-    buffer: B,
+pub struct Painter<'a> {
+    buffer: &'a mut [BGRA8],
     width: u32,
     height: u32,
 }
 
-impl Painter<Vec<u8>> {
-    pub fn new_vec(width: u32, height: u32) -> Self {
-        Self::new(width, height, vec![0; width as usize * height as usize * 4])
-    }
-}
-
-impl<B: PainterBuffer> Painter<B> {
-    pub const fn new(width: u32, height: u32, buffer: B) -> Self {
+impl<'a> Painter<'a> {
+    pub fn new(width: u32, height: u32, buffer: &'a mut (impl AsBGRA8Buffer + ?Sized)) -> Self {
+        assert!(buffer.as_ref().len() >= width as usize * height as usize);
         Self {
-            buffer,
+            buffer: buffer.as_mut(),
             width,
             height,
         }
@@ -60,24 +54,28 @@ impl<B: PainterBuffer> Painter<B> {
         self.width
     }
 
-    pub fn buffer(&self) -> &[u8] {
-        self.buffer.as_ref()
+    pub fn buffer(&self) -> &[BGRA8] {
+        self.buffer
     }
 
-    pub fn buffer_mut(&mut self) -> &mut [u8] {
-        self.buffer.as_mut()
+    pub fn buffer_mut(&mut self) -> &mut [BGRA8] {
+        self.buffer
     }
 
-    pub fn clear(&mut self, color: u32) {
-        let end = 4 * self.width as usize * self.height as usize;
+    pub fn buffer_bytes(&self) -> &[u8] {
+        self.buffer.as_bytes()
+    }
+
+    pub fn buffer_bytes_mut(&mut self) -> &mut [u8] {
+        self.buffer.as_bytes_mut()
+    }
+
+    pub fn clear(&mut self, color: BGRA8) {
+        let end = self.width as usize * self.height as usize;
         let mut current = 0;
         while current < end {
-            let next = current + 4;
-            *unsafe {
-                TryInto::<&mut [u8; 4]>::try_into(&mut self.buffer.as_mut()[current..next])
-                    .unwrap_unchecked()
-            } = color.to_be_bytes();
-            current = next;
+            self.buffer[current] = color;
+            current += 1;
         }
     }
 
@@ -87,46 +85,27 @@ impl<B: PainterBuffer> Painter<B> {
     }
 
     #[inline(always)]
-    fn pixel(&mut self, x: u32, y: u32) -> &mut [u8; 4] {
-        let start = ((y * self.width + x) * 4) as usize;
+    fn pixel(&mut self, x: u32, y: u32) -> &mut BGRA8 {
+        let start = (y * self.width + x) as usize;
         assert!(x < self.width && y < self.height);
-        (&mut self.buffer.as_mut()[start..start + 4])
-            .try_into()
-            .unwrap()
+        &mut self.buffer[start]
     }
 
-    pub fn dot(&mut self, x: i32, y: i32, color: u32) {
+    pub fn dot(&mut self, x: i32, y: i32, color: BGRA8) {
         if self.in_bounds(x, y) {
-            *self.pixel(x as u32, y as u32) = color.to_be_bytes();
+            *self.pixel(x as u32, y as u32) = color;
         }
     }
 
-    pub fn horizontal_line(&mut self, x: i32, y: i32, w: u32, color: u32) {
-        rasterize::horizontal_line(
-            y,
-            x,
-            x.saturating_add_unsigned(w),
-            self.buffer.as_mut(),
-            self.width,
-            self.height,
-            color,
-        )
+    pub fn horizontal_line(&mut self, y: i32, x1: i32, x2: i32, color: BGRA8) {
+        rasterize::horizontal_line(y, x1, x2, self.buffer, self.width, self.height, color)
     }
 
-    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
-        rasterize::line(
-            x0,
-            y0,
-            x1,
-            y1,
-            self.buffer.as_mut(),
-            self.width,
-            self.height,
-            color,
-        )
+    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: BGRA8) {
+        rasterize::line(x0, y0, x1, y1, self.buffer, self.width, self.height, color)
     }
 
-    pub fn stroke_whrect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32) {
+    pub fn stroke_whrect(&mut self, x: i32, y: i32, w: u32, h: u32, color: BGRA8) {
         rasterize::stroke_polygon(
             [
                 (x, y),
@@ -134,7 +113,7 @@ impl<B: PainterBuffer> Painter<B> {
                 (x.saturating_add_unsigned(w), y.saturating_add_unsigned(h)),
                 (x, y.saturating_add_unsigned(h)),
             ],
-            self.buffer.as_mut(),
+            self.buffer,
             self.width,
             self.height,
             color,
@@ -149,7 +128,7 @@ impl<B: PainterBuffer> Painter<B> {
         y1: i32,
         x2: i32,
         y2: i32,
-        color: u32,
+        color: BGRA8,
     ) {
         rasterize::stroke_triangle(
             x0,
@@ -158,7 +137,7 @@ impl<B: PainterBuffer> Painter<B> {
             y1,
             x2,
             y2,
-            self.buffer.as_mut(),
+            self.buffer,
             self.width,
             self.height,
             color,
@@ -173,7 +152,7 @@ impl<B: PainterBuffer> Painter<B> {
         y1: i32,
         x2: i32,
         y2: i32,
-        color: u32,
+        color: BGRA8,
     ) {
         rasterize::fill_triangle(
             x0,
@@ -182,7 +161,8 @@ impl<B: PainterBuffer> Painter<B> {
             y1,
             x2,
             y2,
-            self.buffer.as_mut(),
+            self.buffer,
+            self.width as usize,
             self.width,
             self.height,
             color,
@@ -211,7 +191,7 @@ impl<B: PainterBuffer> Painter<B> {
             if segment.degree() == outline::CurveDegree::Linear {
                 let points = outline.points_for_segment(segment);
                 let (x, y) = (x + points[1].x as i32, y + points[1].y as i32);
-                self.line(last_point.0, last_point.1, x, y, color);
+                self.line(last_point.0, last_point.1, x, y, BGRA8::from_rgba32(color));
                 last_point = (x, y)
             } else {
                 dbg!(outline
@@ -225,7 +205,7 @@ impl<B: PainterBuffer> Painter<B> {
                     let p = outline.evaluate_segment(segment, t);
                     let (x, y) = (p.x as i32 + x, p.y as i32 + y);
 
-                    self.line(last_point.0, last_point.1, x, y, color);
+                    self.line(last_point.0, last_point.1, x, y, BGRA8::from_rgba32(color));
                     last_point = (x, y);
                 }
             }
@@ -239,7 +219,7 @@ impl<B: PainterBuffer> Painter<B> {
         x: i32,
         y: i32,
         outline: &Outline,
-        color: u32,
+        color: BGRA8,
         inverse_winding: bool,
     ) {
         if outline.is_empty() {
@@ -283,7 +263,7 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
-    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[Point2], color: u32) {
+    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[Point2], color: BGRA8) {
         let mut last = points[0];
         for point in &points[1..] {
             self.line(
@@ -302,7 +282,7 @@ impl<B: PainterBuffer> Painter<B> {
         x: i32,
         y: i32,
         outline: &outline::Outline,
-        color: u32,
+        color: BGRA8,
     ) {
         if outline.is_empty() {
             return;
@@ -318,12 +298,12 @@ impl<B: PainterBuffer> Painter<B> {
         }
     }
 
-    pub fn bezier(&mut self, x: i32, y: i32, curve: &impl Bezier, color: u32) {
+    pub fn bezier(&mut self, x: i32, y: i32, curve: &impl Bezier, color: BGRA8) {
         let polyline = curve.flatten(0.01);
         self.stroke_polyline(x, y, &polyline, color);
     }
 
-    pub fn math_line(&mut self, x: i32, y: i32, line: Line, color: u32) {
+    pub fn math_line(&mut self, x: i32, y: i32, line: Line, color: BGRA8) {
         if line.b == 0.0 {
             let vx = -line.c / line.a;
             let fx = x + vx as i32;
@@ -347,62 +327,19 @@ impl<B: PainterBuffer> Painter<B> {
         y: i32,
         fonts: &[text::Font],
         text: &[text::Glyph],
-        color: u32,
+        color: BGRA8,
     ) -> (i32, i32) {
         text::paint(
-            self.buffer.as_mut(),
+            self.buffer,
             x,
             y,
             self.width as usize,
             self.height as usize,
-            (self.width * 4) as usize,
+            self.width as usize,
             fonts,
             text,
-            [
-                ((color & 0xFF000000) >> 24) as u8,
-                ((color & 0x00FF0000) >> 16) as u8,
-                ((color & 0x0000FF00) >> 8) as u8,
-            ],
-            ((color & 0xFF) as f32) / 255.0,
+            color.to_bgr_bytes(),
+            color.a as f32 / 255.0,
         )
-    }
-}
-
-impl<B: ResizablePainterBuffer> Painter<B> {
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.width = width;
-        self.height = height;
-        self.buffer.resize((width * height * 4) as usize);
-    }
-}
-
-impl<B: PainterBuffer> Painter<B> {
-    pub fn as_ref(&mut self) -> Painter<&mut B> {
-        Painter {
-            buffer: &mut self.buffer,
-            width: self.width,
-            height: self.height,
-        }
-    }
-
-    pub fn map<Y: PainterBuffer>(self, mapper: impl FnOnce(B) -> Y) -> Painter<Y> {
-        Painter {
-            buffer: mapper(self.buffer),
-            width: self.width,
-            height: self.height,
-        }
-    }
-}
-
-impl<B: PainterBuffer + DerefMut> Painter<B>
-where
-    B::Target: PainterBuffer,
-{
-    pub fn as_deref(&mut self) -> Painter<&mut B::Target> {
-        Painter {
-            buffer: DerefMut::deref_mut(&mut self.buffer),
-            width: self.width,
-            height: self.height,
-        }
     }
 }

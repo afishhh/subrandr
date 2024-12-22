@@ -11,6 +11,7 @@
 
 use std::rc::Rc;
 
+use color::BGRA8;
 use math::Point2;
 use outline::{CurveDegree, OutlineBuilder};
 use rasterize::NonZeroPolygonRasterizer;
@@ -18,6 +19,7 @@ use text::{FontManager, TextExtents};
 
 pub mod ass;
 mod capi;
+mod color;
 mod math;
 mod outline;
 mod painter;
@@ -110,7 +112,7 @@ struct TextSegment {
     italic: bool,
     underline: bool,
     strike_out: bool,
-    color: u32,
+    color: BGRA8,
     text: String,
 }
 
@@ -122,16 +124,16 @@ pub struct ShapeSegment {
     outline: outline::Outline,
     bounding_box: math::Rect2,
     stroke_width: f32,
-    stroke_color: u32,
-    fill_color: u32,
+    stroke_color: BGRA8,
+    fill_color: BGRA8,
 }
 
 impl ShapeSegment {
     pub fn new(
         outline: outline::Outline,
         stroke_width: f32,
-        stroke_color: u32,
-        fill_color: u32,
+        stroke_color: BGRA8,
+        fill_color: BGRA8,
     ) -> Self {
         Self {
             bounding_box: { outline.bounding_box().clamp_to_positive() },
@@ -172,7 +174,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFF0000FF,
+                            color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "this ".to_string(),
                         }),
                         Segment::Text(TextSegment {
@@ -182,7 +184,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0x0000FFFF,
+                            color: BGRA8::from_rgba32(0x0000FFFF),
                             text: "is\n".to_string(),
                         }),
                         Segment::Text(TextSegment {
@@ -192,7 +194,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFF0000FF,
+                            color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "mu".to_string(),
                         }),
                         Segment::Text(TextSegment {
@@ -202,7 +204,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFF0000FF,
+                            color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "ltil".to_string(),
                         }),
                         Segment::Text(TextSegment {
@@ -212,7 +214,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFF0000FF,
+                            color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "iね❌".to_string(),
                         }),
                         Segment::Shape(ShapeSegment::new(
@@ -228,8 +230,8 @@ impl Subtitles {
                                 b.build()
                             },
                             5.0,
-                            0x00FF00FF,
-                            0x00FFFFFF,
+                            BGRA8::from_rgba32(0x00FF00FF),
+                            BGRA8::from_rgba32(0x00FFFFFF),
                         )),
                     ],
                 },
@@ -247,7 +249,7 @@ impl Subtitles {
                         italic: false,
                         underline: false,
                         strike_out: false,
-                        color: 0x00FF00AA,
+                        color: BGRA8::from_rgba32(0x00FF00AA),
                         text: "this is for comparison".to_string(),
                     })],
                 },
@@ -265,7 +267,7 @@ impl Subtitles {
                         italic: false,
                         underline: false,
                         strike_out: false,
-                        color: 0xFFFFFFFF,
+                        color: BGRA8::from_rgba32(0xFFFFFFFF),
                         text: "this is bold..".to_string(),
                     })],
                 },
@@ -285,7 +287,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFFFFFFFF,
+                            color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
                         }),
                         Segment::Text(TextSegment {
@@ -295,7 +297,7 @@ impl Subtitles {
                             italic: false,
                             underline: false,
                             strike_out: false,
-                            color: 0xFFFFFFFF,
+                            color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
                         }),
                     ],
@@ -730,8 +732,8 @@ impl<'a> Renderer<'a> {
         text: &str,
         alignment: Alignment,
         size: f32,
-        color: u32,
-        painter: &mut Painter<&mut [u8]>,
+        color: BGRA8,
+        painter: &mut Painter,
     ) {
         let font = self
             .fonts
@@ -776,12 +778,12 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    pub fn render(&mut self, mut painter: Painter<&mut [u8]>, t: u32) {
+    pub fn render(&mut self, painter: &mut Painter, t: u32) {
         if painter.height() == 0 || painter.height() == 0 {
             return;
         }
 
-        painter.clear(0x00000000);
+        painter.clear(BGRA8::ZERO);
 
         self.debug_text(
             painter.width() as i32,
@@ -789,8 +791,8 @@ impl<'a> Renderer<'a> {
             &format!("{}x{} dpi:{}", painter.width(), painter.height(), self.dpi),
             Alignment::TopRight,
             16.0,
-            0xFFFFFFFF,
-            &mut painter,
+            BGRA8::from_rgba32(0xFFFFFFFF),
+            painter,
         );
 
         let shape_scale = self.dpi as f32 / 72.0;
@@ -856,7 +858,7 @@ impl<'a> Renderer<'a> {
                     y + total_rect.y - 1,
                     total_rect.w + 2,
                     total_rect.h + 2,
-                    0xFF00FFFF,
+                    BGRA8::from_rgba32(0xFF00FFFF),
                 );
 
                 let total_position_debug_pos = match vertical_alignment {
@@ -879,8 +881,8 @@ impl<'a> Renderer<'a> {
                     ),
                     total_position_debug_pos.1,
                     16.0,
-                    0xFF00FFFF,
-                    &mut painter,
+                    BGRA8::from_rgba32(0xFF00FFFF),
+                    painter,
                 );
 
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
@@ -901,8 +903,8 @@ impl<'a> Renderer<'a> {
                         ),
                         Alignment::BottomLeft,
                         16.0,
-                        0xFF0000FF,
-                        &mut painter,
+                        BGRA8::from_rgba32(0xFF0000FF),
+                        painter,
                     );
 
                     self.debug_text(
@@ -915,8 +917,8 @@ impl<'a> Renderer<'a> {
                         ),
                         Alignment::TopLeft,
                         16.0,
-                        0xFF0000FF,
-                        &mut painter,
+                        BGRA8::from_rgba32(0xFF0000FF),
+                        painter,
                     );
 
                     self.debug_text(
@@ -929,8 +931,8 @@ impl<'a> Renderer<'a> {
                         },
                         Alignment::BottomRight,
                         16.0,
-                        0xFFFFFFFF,
-                        &mut painter,
+                        BGRA8::from_rgba32(0xFFFFFFFF),
+                        painter,
                     );
 
                     painter.stroke_whrect(
@@ -938,14 +940,14 @@ impl<'a> Renderer<'a> {
                         paint_box.1,
                         shaped_segment.paint_rect.w,
                         shaped_segment.paint_rect.h,
-                        0x0000FFFF,
+                        BGRA8::from_rgba32(0x0000FFFF),
                     );
 
                     painter.horizontal_line(
-                        paint_box.0,
                         y + shaped_segment.baseline_offset.1,
-                        shaped_segment.paint_rect.w,
-                        0x00FF00FF,
+                        paint_box.0,
+                        paint_box.0 + shaped_segment.paint_rect.w as i32,
+                        BGRA8::from_rgba32(0x00FF00FF),
                     );
 
                     let x = x + shaped_segment.baseline_offset.0;
@@ -976,7 +978,7 @@ impl<'a> Renderer<'a> {
                                     &outline.flatten_contour(c),
                                     false,
                                 );
-                                rasterizer.render_fill(&mut painter, s.fill_color);
+                                rasterizer.render_fill(painter, s.fill_color);
                             }
 
                             for (a, b) in stroked.0.iter_contours().zip(stroked.1.iter_contours()) {
@@ -991,11 +993,23 @@ impl<'a> Renderer<'a> {
                                     &stroked.1.flatten_contour(b),
                                     true,
                                 );
-                                rasterizer.render_fill(&mut painter, s.stroke_color);
+                                rasterizer.render_fill(painter, s.stroke_color);
                             }
 
-                            painter.debug_stroke_outline(x, y, &stroked.0, 0xFF0000FF, false);
-                            painter.debug_stroke_outline(x, y, &stroked.1, 0x0000FFFF, true);
+                            painter.debug_stroke_outline(
+                                x,
+                                y,
+                                &stroked.0,
+                                BGRA8::from_rgba32(0xFF0000FF),
+                                false,
+                            );
+                            painter.debug_stroke_outline(
+                                x,
+                                y,
+                                &stroked.1,
+                                BGRA8::from_rgba32(0x0000FFFF),
+                                true,
+                            );
                         }
                     }
                 }

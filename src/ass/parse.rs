@@ -72,8 +72,8 @@ impl FromStr for YCbCrMatrix {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
-            "None" => YCbCrMatrix::None,
-            _ => YCbCrMatrix::Unknown,
+            "None" => Self::None,
+            _ => Self::Unknown,
         })
     }
 }
@@ -94,9 +94,9 @@ impl FromStr for WrapStyle {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
-            "0" => WrapStyle::WrapEvenly,
-            "1" => WrapStyle::Wrap,
-            "2" => WrapStyle::None,
+            "0" => Self::WrapEvenly,
+            "1" => Self::Wrap,
+            "2" => Self::None,
             _ => return Err(WrapStyleParseError),
         })
     }
@@ -131,15 +131,11 @@ impl FromStr for BorderStyle {
     type Err = BorderStyleParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        println!("{s}");
         Ok(match s.trim() {
-            "1" => BorderStyle::Outline,
-            "3" => BorderStyle::Box,
-            "4" => BorderStyle::ShadowBox,
-            _ => {
-                // TODO: warn
-                BorderStyle::Outline
-            }
+            "1" => Self::Outline,
+            "3" => Self::Box,
+            "4" => Self::ShadowBox,
+            _ => return Err(BorderStyleParseError),
         })
     }
 }
@@ -158,7 +154,7 @@ pub enum Alignment {
 }
 
 impl Alignment {
-    pub fn from_ass(value: &str) -> Option<Alignment> {
+    pub fn from_ass(value: &str) -> Option<Self> {
         Some(match value {
             "1" => Self::BottomLeft,
             "2" => Self::BottomCenter,
@@ -173,7 +169,7 @@ impl Alignment {
         })
     }
 
-    pub fn from_ssa(value: &str) -> Option<Alignment> {
+    pub fn from_ssa(value: &str) -> Option<Self> {
         Some(match value {
             "1" => Self::BottomLeft,
             "2" => Self::BottomCenter,

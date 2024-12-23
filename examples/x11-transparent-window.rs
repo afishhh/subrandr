@@ -576,7 +576,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
         let mut painter = Painter::new(width, height, buffer.as_mut_slice());
         println!("render t = {}ms to {}x{}", t, width, height);
-        render.render(ctx, t, &mut painter);
+        render.render(&ctx, t, &mut painter);
         let end = Instant::now();
         println!(
             "took {:.2}ms",

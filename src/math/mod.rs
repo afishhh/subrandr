@@ -5,8 +5,6 @@ use std::{
     ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign},
 };
 
-use num::complex::Complex64;
-
 mod curve;
 pub use curve::*;
 mod fixed;
@@ -287,38 +285,6 @@ impl Rect2 {
         }
         bb
     }
-}
-
-pub fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> impl Iterator<Item = f64> {
-    let det0 = b * b - 3.0 * a * c;
-    let det1 = 2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d;
-    let c_sqrt_sq = det1 * det1 - 4.0 * det0.powi(3);
-    let c_sqrt = Complex64::new(c_sqrt_sq, 0.0).sqrt();
-    let c_cubed_1 = (det1 + c_sqrt) / 2.0;
-    let c_cubed = if c_cubed_1 == Complex64::ZERO {
-        (det1 - c_sqrt) / 2.0
-    } else {
-        c_cubed_1
-    };
-    let mut c = c_cubed.cbrt();
-
-    let a3_neg_recip = (-3.0 * a).recip();
-
-    let cube_root_of_unity = -0.5 + Complex64::new(-3.0, 0.0).sqrt() / 2.0;
-    (0..3).filter_map(move |_| {
-        let root = if c.re == 0.0 {
-            Complex64::new(a3_neg_recip * b, 0.0)
-        } else {
-            a3_neg_recip * (b + c + det0 / c)
-        };
-
-        c *= cube_root_of_unity;
-        if root.im > 10.0 * -f64::EPSILON && root.im < 10.0 * f64::EPSILON {
-            Some(root.re)
-        } else {
-            None
-        }
-    })
 }
 
 #[derive(Debug, Clone, Copy)]

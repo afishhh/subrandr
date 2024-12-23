@@ -1,13 +1,12 @@
 use std::{mem::MaybeUninit, ops::Deref};
 
-use crate::util::{slice_assume_init_mut, ArrayVec};
+use crate::util::slice_assume_init_mut;
 
 use super::{Point2, Rect2, Vec2};
 
 const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
 mod flatten;
-mod solve_x;
 
 pub fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
     assert!(points.len() <= MAX_BEZIER_CONTROL_POINTS);
@@ -144,12 +143,6 @@ impl Bezier for QuadraticBezier {
     }
 }
 
-impl QuadraticBezier {
-    pub fn solve_for_t(&self, x: f32, out: &mut ArrayVec<2, f32>) {
-        solve_x::quadratic_x_to_t(self, x, out);
-    }
-}
-
 impl Bezier for CubicBezier {
     fn points(&self) -> &[Point2] {
         &self.0
@@ -215,9 +208,5 @@ impl Bezier for CubicBezier {
 impl CubicBezier {
     pub fn to_quadratics(&self, tolerance: f32) -> impl Iterator<Item = QuadraticBezier> + use<'_> {
         flatten::cubic_to_quadratics(self, tolerance)
-    }
-
-    pub fn solve_for_t(&self, x: f32, out: &mut ArrayVec<3, f32>) {
-        solve_x::cubic_x_to_t(self, x, out);
     }
 }

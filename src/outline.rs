@@ -464,10 +464,10 @@ impl Stroker {
         let mut mul = [MaybeUninit::<f32>::uninit(); MAX_SUBDIVISIONS + 1];
 
         let center: Vec2;
-        let mut small_angle = true;
+        let small_angle = cos >= 0.0;
         // If the angle is greater than 90° (i.e. the cosine is smaller than zero)
         // split the arc into two separate arcs between a center normal vector.
-        if cos < 0.0 {
+        if !small_angle {
             // FIXME: The common opinion on the internet seems to be that finding the midpoint
             //        vector is usually quicker using linear interpolation and renormalisation
             //        than with the trigonometric methods.
@@ -491,7 +491,6 @@ impl Stroker {
             // We know cos(θ) is going to be positive, therefore
             // sqrt(1 + cos(θ)) is going to give us cos(θ/2).
             cos = (0.5 + 0.5 * cos).max(0.0).sqrt();
-            small_angle = false;
         } else {
             center = Vec2::default();
         }

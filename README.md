@@ -6,6 +6,13 @@
 - ASS (very incomplete)
 - SRV3 (less incomplete, still very incomplete)
 
+#### x11-transparent-window example
+
+An example program for X11 is also present in this repository. It allows testing this library by rendering subtitles onto a transparent X11 window. To aid in this testing it also provides functionality that allows you to overlay the window on an existing video player (or even the YouTube website).
+
+The `--overlay` flag allows you to specify an X window id to overlay the window over.
+Subtitles can be synchronized with video playback in the `mpv` video player by specifying an `--mpv-socket` (created using `--input-ipc-server` mpv option). You can also synchronize and overlay over a YouTube tab by using the `--cbp` flag which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.
+
 #### Usage
 
 Currently only a C API is provided, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.

@@ -622,7 +622,10 @@ impl MultilineTextShaper {
                                 .chain(std::iter::once(end))
                                 .enumerate()
                             {
-                                let end_glyph_idx = split_end - last;
+                                let end_glyph_idx = rc_glyphs
+                                    .iter()
+                                    .position(|x| x.cluster >= split_end - last)
+                                    .unwrap_or(rc_glyphs.len());
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
                                 let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
                                 let (extents, (x_advance, _)) =

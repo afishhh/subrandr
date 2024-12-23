@@ -150,6 +150,8 @@ struct GlyphProvider<'a> {
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub index: hb_codepoint_t,
+    /// Byte position where this glyph started in the original UTF-8 string
+    pub cluster: usize,
     // NOTE: hb_position_t seems to be a Fixed<6>
     pub x_advance: hb_position_t,
     pub y_advance: hb_position_t,
@@ -162,10 +164,12 @@ impl Glyph {
     const fn from_info_and_position(
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
+        original_cluster: usize,
         font_index: usize,
     ) -> Self {
         Self {
             index: info.codepoint,
+            cluster: original_cluster,
             x_advance: position.x_advance,
             y_advance: position.y_advance,
             x_offset: position.x_offset,
@@ -363,7 +367,7 @@ impl ShapingBuffer {
         result: &mut Vec<Glyph>,
         fallbacks: &mut Vec<Font>,
         font_index: usize,
-        codepoints: &[u32],
+        codepoints: &[(u32, u32)],
         properties: &hb_segment_properties_t,
         font: &Font,
         fallback: &mut impl FallbackFontProvider,
@@ -379,7 +383,12 @@ impl ShapingBuffer {
             let mut invalid_range_start = None;
 
             let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {
-                Glyph::from_info_and_position(info, position, font_index)
+                Glyph::from_info_and_position(
+                    info,
+                    position,
+                    codepoints[info.cluster as usize].1 as usize,
+                    font_index,
+                )
             };
             let mut reshape_with_fallback = |range: Range<usize>,
                                              result: &mut Vec<Glyph>,
@@ -389,12 +398,13 @@ impl ShapingBuffer {
                 &[hb_glyph_position_t],
             )| {
                 if let Some(font) = fallback
-                    .get_font_for_glyph(font.weight(), font.italic(), codepoints[range.start])
+                    .get_font_for_glyph(font.weight(), font.italic(), codepoints[range.start].0)
                     .unwrap()
                     .map(|face| face.with_size_from(font))
                 {
                     let mut sub_buffer = Self::new();
-                    for (codepoint, i) in codepoints[range.clone()].iter().copied().zip(range) {
+                    for ((codepoint, _), i) in codepoints[range.clone()].iter().copied().zip(range)
+                    {
                         hb_buffer_add(sub_buffer.buffer, codepoint, i as u32);
                     }
                     hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
@@ -463,15 +473,16 @@ impl ShapingBuffer {
         fonts_output: &mut Vec<Font>,
         fallback: &mut impl FallbackFontProvider,
     ) -> Vec<Glyph> {
-        let codepoints: Vec<u32> = self
+        let codepoints: Vec<_> = self
             .glyphs()
             .0
             .iter_mut()
             .enumerate()
             // TODO: What if a surrogate code point appears here?
             .map(|(i, x)| {
+                let original_cluster = x.cluster;
                 x.cluster = i as u32;
-                x.codepoint
+                (x.codepoint, original_cluster)
             })
             .collect();
 

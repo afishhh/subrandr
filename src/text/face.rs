@@ -1,6 +1,6 @@
 use std::{
     ffi::{CStr, CString},
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::MaybeUninit,
     path::Path,
 };
 

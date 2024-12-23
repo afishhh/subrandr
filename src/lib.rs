@@ -18,7 +18,6 @@ mod color;
 mod math;
 mod outline;
 mod painter;
-mod polyline;
 mod rasterize;
 pub mod srv3;
 mod text;
@@ -146,6 +145,7 @@ impl ShapeSegment {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 // TODO: Maybe call this a viewport or have a field called "viewport"
 pub struct SubtitleContext {
     pub dpi: u32,
@@ -835,7 +835,7 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    pub fn render(&mut self, ctx: SubtitleContext, t: u32, painter: &mut Painter) {
+    pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {
         if painter.height() == 0 || painter.height() == 0 {
             return;
         }
@@ -878,7 +878,7 @@ impl<'a> Renderer<'a> {
                 .iter()
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
-                let Point2 { x, y } = self.subs.class.get_position(&ctx, event);
+                let Point2 { x, y } = self.subs.class.get_position(ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
                 for segment in event.segments.iter() {
@@ -893,7 +893,7 @@ impl<'a> Renderer<'a> {
                                 )
                                 .unwrap()
                                 .with_size(
-                                    self.subs.class.get_font_size(&ctx, event, segment),
+                                    self.subs.class.get_font_size(ctx, event, segment),
                                     ctx.dpi,
                                 );
 
@@ -1003,7 +1003,7 @@ impl<'a> Renderer<'a> {
                         &if let Segment::Text(segment) = segment {
                             format!(
                                 "{:.0}pt",
-                                self.subs.class.get_font_size(&ctx, event, segment)
+                                self.subs.class.get_font_size(ctx, event, segment)
                             )
                         } else {
                             "shape".to_owned()

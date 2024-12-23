@@ -964,19 +964,19 @@ impl<'a> Renderer<'a> {
                             let mut outline = s.outline.clone();
                             outline.scale(shape_scale);
 
-                            let (x, y) = ((x as f32) as i32, (y as f32) as i32);
-
                             let mut rasterizer = NonZeroPolygonRasterizer::new();
-                            for c in outline.iter_contours() {
-                                rasterizer.append_polyline(
-                                    (x, y),
-                                    &outline.flatten_contour(c),
-                                    false,
-                                );
-                                rasterizer.render_fill(painter, s.fill_color);
+                            if s.fill_color.a > 0 {
+                                for c in outline.iter_contours() {
+                                    rasterizer.append_polyline(
+                                        (x, y),
+                                        &outline.flatten_contour(c),
+                                        false,
+                                    );
+                                    rasterizer.render_fill(painter, s.fill_color);
+                                }
                             }
 
-                            if s.stroke_x >= 0.01 || s.stroke_y >= 0.01 {
+                            if s.stroke_color.a > 0 && (s.stroke_x >= 0.01 || s.stroke_y >= 0.01) {
                                 let stroked = outline::stroke(
                                     &outline,
                                     s.stroke_x * shape_scale / 2.0,

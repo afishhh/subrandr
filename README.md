@@ -16,7 +16,7 @@ Subtitles can be synchronized with video playback in the `mpv` video player by s
 #### Usage
 
 Currently only a C API is provided, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.
-The C API is contained in the `subrandr.h` function, items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined are no API stability is guaranteed for them.
+The C API is contained in the `subrandr.h` function, items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined and no API stability is guaranteed for them.
 
 The library performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
 

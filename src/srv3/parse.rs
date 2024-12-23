@@ -59,7 +59,7 @@ const DEFAULT_PEN: Pen = Pen {
 
 impl Default for Pen {
     fn default() -> Self {
-        DEFAULT_PEN.clone()
+        DEFAULT_PEN
     }
 }
 
@@ -127,7 +127,7 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn pen(&self) -> &Pen {
+    pub const fn pen(&self) -> &Pen {
         self.pen
     }
 }
@@ -140,7 +140,7 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn position(&self) -> &WindowPos {
+    pub const fn position(&self) -> &WindowPos {
         self.position
     }
 }
@@ -201,13 +201,13 @@ impl FromStr for HexRGBColor {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let hex = s
             .strip_prefix("#")
-            .ok_or_else(|| "Hex color is missing a '#' prefix")?;
+            .ok_or("Hex color is missing a '#' prefix")?;
 
         if hex.len() != 6 {
             return Err("Hex color code does not consist of six characters".into());
         }
 
-        Ok(HexRGBColor(u32::from_str_radix(hex, 16)?))
+        Ok(Self(u32::from_str_radix(hex, 16)?))
     }
 }
 
@@ -219,8 +219,8 @@ impl FromStr for Bool01 {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
-            "0" => Bool01(false),
-            "1" => Bool01(true),
+            "0" => Self(false),
+            "1" => Self(true),
             _ => return Err("Boolean values must be either '0' or '1'".into()),
         })
     }
@@ -231,11 +231,11 @@ impl FromStr for EdgeType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
-            "0" => EdgeType::None,
-            "1" => EdgeType::HardShadow,
-            "2" => EdgeType::Bevel,
-            "3" => EdgeType::Glow,
-            "4" => EdgeType::SoftShadow,
+            "0" => Self::None,
+            "1" => Self::HardShadow,
+            "2" => Self::Bevel,
+            "3" => Self::Glow,
+            "4" => Self::SoftShadow,
             _ => return Err("Unknown edge type".into()),
         })
     }
@@ -246,11 +246,11 @@ impl FromStr for RubyPart {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
-            "0" => RubyPart::None,
-            "1" => RubyPart::Base,
-            "2" => RubyPart::Parenthesis,
-            "4" => RubyPart::Before,
-            "5" => RubyPart::After,
+            "0" => Self::None,
+            "1" => Self::Base,
+            "2" => Self::Parenthesis,
+            "4" => Self::Before,
+            "5" => Self::After,
             _ => return Err("Unknown ruby part".into()),
         })
     }
@@ -261,15 +261,15 @@ impl FromStr for Point {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
-            "0" => Point::TopLeft,
-            "1" => Point::TopCenter,
-            "2" => Point::TopRight,
-            "3" => Point::MiddleLeft,
-            "4" => Point::MiddleCenter,
-            "5" => Point::MiddleRight,
-            "6" => Point::BottomLeft,
-            "7" => Point::BottomCenter,
-            "8" => Point::BottomRight,
+            "0" => Self::TopLeft,
+            "1" => Self::TopCenter,
+            "2" => Self::TopRight,
+            "3" => Self::MiddleLeft,
+            "4" => Self::MiddleCenter,
+            "5" => Self::MiddleRight,
+            "6" => Self::BottomLeft,
+            "7" => Self::BottomCenter,
+            "8" => Self::BottomRight,
             _ => return Err("Point number out of range".into()),
         })
     }

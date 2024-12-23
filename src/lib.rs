@@ -1,13 +1,8 @@
 // The library is still under active development
 #![allow(dead_code)]
 // #![cfg_attr(test, feature(test))]
-#![warn(clippy::nursery)]
 #![allow(clippy::too_many_arguments)]
-// FIXME: enable this when suboptimal_flops stops recommending you mul_add
-#![allow(clippy::suboptimal_flops)]
 #![allow(clippy::missing_transmute_annotations)]
-// .as_ptr() is not expensive.
-#![allow(clippy::or_fun_call)]
 
 use std::rc::Rc;
 

@@ -72,7 +72,7 @@ impl Vec2 {
     }
 
     pub fn normal(self) -> Self {
-        Vec2::new(self.y, -self.x)
+        Self::new(self.y, -self.x)
     }
 
     /// Calculates the dot product of two vectors.

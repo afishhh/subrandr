@@ -69,9 +69,9 @@ fn quadratic_count_for_cubic(points: &[Point2; 4], tolerance: f32) -> f32 {
 pub fn cubic_to_quadratics(
     points: &CubicBezier,
     tolerance: f32,
-) -> impl Iterator<Item = QuadraticBezier> + ExactSizeIterator + use<'_> {
+) -> impl ExactSizeIterator<Item = QuadraticBezier> + use<'_> {
     let count = quadratic_count_for_cubic(points, tolerance);
-    let step = 1.0 / count as f32;
+    let step = 1.0 / count;
 
     let mut t = 0.0;
     (0..count as u32).map(move |_| {

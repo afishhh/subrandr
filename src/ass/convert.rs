@@ -2,7 +2,7 @@ use std::str::Chars;
 
 use crate::{
     color::BGRA8,
-    math::Point2,
+    math::{CubicBezier, Point2},
     outline::{Outline, OutlineBuilder, SegmentDegree},
     Segment, ShapeSegment, TextSegment, TextWrappingMode,
 };
@@ -85,15 +85,20 @@ fn get_f32(chars: &mut Chars) -> Option<f32> {
     string[..number_end].parse::<f32>().ok()
 }
 
-fn get_point(chars: &mut Chars) -> Option<Point2> {
-    Some(Point2::new(get_f32(chars)?, get_f32(chars)?))
-}
-
 fn get_scaled_point(chars: &mut Chars, factor: f32) -> Option<Point2> {
     Some(Point2::new(
         get_f32(chars)? * factor,
         get_f32(chars)? * factor,
     ))
+}
+
+fn get_scaled_point_batch<const N: usize>(chars: &mut Chars, factor: f32) -> Option<[Point2; N]> {
+    // TODO: Once a way to convert [MaybeUninit<T>; N] to [T; N] is stable, do that instead.
+    let mut points = [Point2::ZERO; N];
+    for p in points.iter_mut() {
+        *p = get_scaled_point(chars, factor)?;
+    }
+    Some(points)
 }
 
 fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
@@ -113,13 +118,36 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
     let mut started = false;
     // If an outline has not been started yet, this is used as the initial point.
     let mut pen: Option<Point2> = None;
+    // Used to keep track of the point positions for extending B-Splines
+    let mut original_points = Vec::new();
+    let mut bspline_start = None;
+
     loop {
         skip_space(&mut chars);
         let Some(cmd) = chars.next() else {
             break;
         };
 
+        let extend_spline = |outline: &mut OutlineBuilder,
+                             original_points: &[Point2],
+                             b3: Point2,
+                             pen: &mut Option<Point2>| {
+            let &[.., b0, b1, b2] = original_points else {
+                return;
+            };
+
+            let CubicBezier([_, p1, p2, p3]) = CubicBezier::from_b_spline(b0, b1, b2, b3);
+
+            outline.add_point(p1);
+            outline.add_point(p2);
+            outline.add_point(p3);
+            outline.add_segment(SegmentDegree::Cubic);
+
+            *pen = Some(p3);
+        };
+
         match cmd {
+            // Move
             'm' => {
                 m_seen = true;
                 let mut was_valid = false;
@@ -127,12 +155,14 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
                     pen = Some(p);
                     was_valid = true;
                 }
+
                 if was_valid && started {
                     outline.add_segment(SegmentDegree::Linear);
                     outline.close_contour();
                     started = false;
                 }
             }
+            // Move without closing
             'n' => {
                 if pen.is_none() {
                     let Some(p) = get_scaled_point(&mut chars, scaling_factor) else {
@@ -143,23 +173,107 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
                     }
                     pen = Some(p);
                 }
+
                 while let Some(p) = get_scaled_point(&mut chars, scaling_factor) {
                     pen = Some(p);
                 }
             }
+            // Line
             'l' => {
-                let Some(pen) = pen else {
+                let Some(ref mut pen) = pen else {
                     continue;
                 };
 
                 while let Some(p) = get_scaled_point(&mut chars, scaling_factor) {
                     if !started {
-                        outline.add_point(pen);
+                        outline.add_point(*pen);
+                        original_points.push(*pen);
                         started = true;
                     }
                     outline.add_point(p);
+                    original_points.push(p);
                     outline.add_segment(SegmentDegree::Linear);
+                    *pen = p;
                 }
+            }
+            // Cubic Bézier
+            'b' => {
+                let Some(ref mut pen) = pen else {
+                    continue;
+                };
+
+                while let Some(points) = get_scaled_point_batch::<3>(&mut chars, scaling_factor) {
+                    if !started {
+                        outline.add_point(*pen);
+                        original_points.push(*pen);
+                        started = true;
+                    }
+                    for point in points {
+                        outline.add_point(point);
+                        original_points.push(point);
+                    }
+                    outline.add_segment(SegmentDegree::Cubic);
+                    *pen = points[2];
+                }
+            }
+            // Start B-Spline
+            's' => {
+                let Some(b0) = pen else {
+                    continue;
+                };
+
+                if let Some([b1, b2, b3]) = get_scaled_point_batch(&mut chars, scaling_factor) {
+                    let CubicBezier([p0, p1, p2, p3]) = CubicBezier::from_b_spline(b0, b1, b2, b3);
+
+                    bspline_start = Some(original_points.len());
+
+                    if !started {
+                        outline.add_point(p0);
+                        original_points.push(b0);
+                        started = true;
+                    }
+
+                    outline.add_point(p1);
+                    outline.add_point(p2);
+                    outline.add_point(p3);
+                    outline.add_segment(SegmentDegree::Cubic);
+                    original_points.extend([b1, b2, b3]);
+
+                    pen = Some(p3);
+                }
+
+                while let Some(b3) = get_scaled_point(&mut chars, scaling_factor) {
+                    extend_spline(&mut outline, &original_points, b3, &mut pen);
+                    original_points.push(b3);
+                }
+            }
+            // Extend B-Spline
+            'p' => {
+                if outline.contour_points().len() < 3 {
+                    continue;
+                }
+
+                while let Some(b3) = get_scaled_point(&mut chars, scaling_factor) {
+                    extend_spline(&mut outline, &original_points, b3, &mut pen);
+                    original_points.push(b3);
+                }
+            }
+            // Close B-Spline
+            'c' => {
+                let Some(start) = bspline_start else {
+                    continue;
+                };
+
+                let &[b0, b1, b2, ..] = &original_points[start..] else {
+                    unreachable!("bspline_start is set but not enough points are present");
+                };
+
+                // TODO: I don't actually remember whether this is the right order
+                extend_spline(&mut outline, &original_points, b0, &mut pen);
+                extend_spline(&mut outline, &original_points, b1, &mut pen);
+                extend_spline(&mut outline, &original_points, b2, &mut pen);
+                original_points.extend([b0, b1, b2]);
+                outline.add_segment(SegmentDegree::Cubic);
             }
             _ => (),
         }
@@ -187,7 +301,10 @@ pub const fn convert_ass_color(abgr: u32) -> BGRA8 {
 }
 
 pub fn convert(ass: Script) -> crate::Subtitles {
-    let mut subs = crate::Subtitles { events: vec![] };
+    let mut subs = crate::Subtitles {
+        class: todo!(),
+        events: vec![],
+    };
 
     let layout_resolution = if ass.layout_resolution.0 > 0 && ass.layout_resolution.1 > 0 {
         ass.layout_resolution

@@ -65,7 +65,7 @@ macro_rules! define_curve {
     ($name: ident, $npoints: literal) => {
         #[repr(transparent)]
         #[derive(Clone)]
-        pub struct $name([Point2; $npoints]);
+        pub struct $name(pub [Point2; $npoints]);
 
         impl $name {
             pub const fn new(points: [Point2; $npoints]) -> Self {
@@ -208,5 +208,14 @@ impl Bezier for CubicBezier {
 impl CubicBezier {
     pub fn to_quadratics(&self, tolerance: f32) -> impl Iterator<Item = QuadraticBezier> + use<'_> {
         flatten::cubic_to_quadratics(self, tolerance)
+    }
+
+    pub fn from_b_spline(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> Self {
+        Self([
+            ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),
+            ((b1.to_vec() * 2.0 + b2.to_vec()) / 3.0).to_point(),
+            ((b1.to_vec() + b2.to_vec() * 2.0) / 3.0).to_point(),
+            ((b1.to_vec() + b2.to_vec() * 4.0 + b3.to_vec()) / 6.0).to_point(),
+        ])
     }
 }

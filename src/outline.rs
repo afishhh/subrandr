@@ -7,7 +7,7 @@ use crate::{
 
 pub struct OutlineBuilder {
     outline: Outline,
-    first_point_of_contour: u32,
+    first_point_of_contour: usize,
     segment_start: u32,
 }
 
@@ -18,6 +18,21 @@ impl OutlineBuilder {
             first_point_of_contour: 0,
             segment_start: 0,
         }
+    }
+
+    #[inline(always)]
+    pub fn points(&self) -> &[Point2] {
+        self.outline.points()
+    }
+
+    #[inline(always)]
+    pub fn contour_points(&self) -> &[Point2] {
+        &self.outline.points()[self.first_point_of_contour..]
+    }
+
+    #[inline(always)]
+    pub fn contour_points_mut(&mut self) -> &mut [Point2] {
+        &mut self.outline.points[self.first_point_of_contour..]
     }
 
     #[inline(always)]
@@ -51,14 +66,9 @@ impl OutlineBuilder {
         self.outline.segments.last_mut().unwrap().end_of_contour = true;
         self.outline
             .points
-            .push(self.outline.points[self.first_point_of_contour as usize]);
+            .push(self.outline.points[self.first_point_of_contour]);
         self.segment_start += 1;
-        self.first_point_of_contour = self.outline.points.len() as u32;
-    }
-
-    #[inline(always)]
-    pub fn current_contour_points_mut(&mut self) -> &mut [Point2] {
-        &mut self.outline.points[self.first_point_of_contour as usize..]
+        self.first_point_of_contour = self.outline.points.len();
     }
 
     pub fn build(self) -> Outline {
@@ -598,11 +608,11 @@ impl Stroker {
         );
 
         if dir.includes(StrokerDir::UP) {
-            self.result_top.current_contour_points_mut()[0] = point + offset;
+            self.result_top.contour_points_mut()[0] = point + offset;
         }
 
         if dir.includes(StrokerDir::DOWN) {
-            self.result_bottom.current_contour_points_mut()[0] = point - offset;
+            self.result_bottom.contour_points_mut()[0] = point - offset;
         }
     }
 
@@ -696,7 +706,6 @@ impl Stroker {
         if STROKER_PRINT_DEBUG {
             eprintln!("stroker: process quadratic {points:?} {deriv:?} {normals:?}");
         }
-        assert!((points[0] - points[1]).length() > 0.01);
 
         let cos = normals[0].v.dot(normals[1].v);
         let sin = normals[0].v.cross(normals[1].v);

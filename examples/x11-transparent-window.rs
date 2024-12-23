@@ -49,19 +49,28 @@ impl MpvSocket {
     }
 
     fn get_playback_time(&mut self) -> u32 {
-        self.stream
-            .get_mut()
-            .write_all(br#"{ "command": ["get_property", "playback-time"] }"#)
-            .unwrap();
-        self.stream.get_mut().write_all(b"\n").unwrap();
-
-        let mut line = String::new();
         loop {
-            self.stream.read_line(&mut line).unwrap();
-            if let Some(data_idx) = line.find(r#""data""#) {
-                let colon_idx = data_idx + line[data_idx..].find(":").unwrap() + 1;
-                let comma_idx = colon_idx + line[colon_idx..].find(',').unwrap();
-                return (line[colon_idx..comma_idx].trim().parse::<f32>().unwrap() * 1000.) as u32;
+            self.stream
+                .get_mut()
+                .write_all(
+                    concat!(r#"{ "command": ["get_property", "playback-time"] }"#, "\n").as_bytes(),
+                )
+                .unwrap();
+
+            let mut line = String::new();
+            loop {
+                self.stream.read_line(&mut line).unwrap();
+
+                if line.contains("property unavailable") {
+                    break;
+                }
+
+                if let Some(data_idx) = line.find(r#""data""#) {
+                    let colon_idx = data_idx + line[data_idx..].find(":").unwrap() + 1;
+                    let comma_idx = colon_idx + line[colon_idx..].find(',').unwrap();
+                    return (line[colon_idx..comma_idx].trim().parse::<f32>().unwrap() * 1000.)
+                        as u32;
+                }
             }
         }
     }

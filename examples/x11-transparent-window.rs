@@ -540,7 +540,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
             if let Some(PlayerViewport { offset_x, offset_y }) = state.viewport {
                 s_width -= offset_x as u16;
-                s_width -= offset_y as u16;
+                s_height -= offset_y as u16;
                 voffset_x = offset_x;
                 voffset_y = offset_y;
             }
@@ -560,8 +560,8 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
                 ctx.padding_right = padding_x;
                 ctx.padding_top = padding_y;
                 ctx.padding_bottom = padding_y;
-                s_width = s_width.min(ctx.player_width().ceil() as u16);
-                s_height = s_height.min(ctx.player_height().ceil() as u16);
+                s_width = s_width.min(player_width.ceil() as u16);
+                s_height = s_height.min(player_height.ceil() as u16);
             }
 
             state.current_time

@@ -379,7 +379,6 @@ fn parse_head(reader: &mut quick_xml::Reader<&[u8]>) -> Result<(Vec<Pen>, Vec<Wi
                         println!("Unknown element encountered in head: {}", unsafe {
                             std::str::from_utf8_unchecked(element.local_name().into_inner())
                         });
-                        // warn!("")
                     }
                 }
                 depth += 1;
@@ -403,29 +402,7 @@ fn parse_head(reader: &mut quick_xml::Reader<&[u8]>) -> Result<(Vec<Pen>, Vec<Wi
     Ok((pens, wps))
 }
 
-// TODO: Use this code from my ffmpeg patch:
-// static int srv3_clean_segment_text(char *text) {
-//     char *out = text, *start = text;
-
-//     while (1) {
-//         char *zw = strstr(start, ZERO_WIDTH_SPACE);
-//         char *pad = strstr(start, YTSUBCONV_PADDING_SPACE);
-//         char *end = pad ? pad : zw;
-//         unsigned cnt = end ? (unsigned)(end - start) : (unsigned)strlen(start);
-
-//         memmove(out, start, cnt);
-//         out += cnt;
-//         if (end) {
-//             if (pad)
-//                 start = pad + strlen(YTSUBCONV_PADDING_SPACE);
-//             else
-//                 start = zw + strlen(ZERO_WIDTH_SPACE);
-//         } else break;
-//     }
-
-//     *out = '\0';
-//     return out - text;
-// }
+// TODO: this technically can be improved
 fn clean_segment_text(output: &mut String, text: &str) {
     output.push_str(
         &text

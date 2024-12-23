@@ -515,12 +515,8 @@ impl Font {
 
 impl std::fmt::Debug for Font {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tmp_face = ManuallyDrop::new(Face {
-            face: self.ft_face,
-            coords: self.coords,
-        });
         f.debug_struct("Font")
-            .field("face", &*tmp_face)
+            .field("face", self.face())
             .field("point_size", &Fixed::<6>::from_raw(self.point_size as i32))
             .field("dpi", &self.dpi)
             .finish()

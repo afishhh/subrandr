@@ -4,7 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::rc::Rc;
+use std::{fmt::Debug, rc::Rc};
 
 use color::BGRA8;
 use math::Point2;
@@ -101,6 +101,8 @@ enum Segment {
 
 #[derive(Debug, Clone)]
 struct TextSegment {
+    // TODO: allow specifying multiple fonts here
+    //       not for fallback, but for selection of primary font is not available
     font: String,
     font_size: f32,
     font_weight: u32,
@@ -143,19 +145,81 @@ impl ShapeSegment {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+// TODO: Maybe call this a viewport or have a field called "viewport"
+pub struct SubtitleContext {
+    pub dpi: u32,
+    pub video_width: f32,
+    pub video_height: f32,
+    pub padding_left: f32,
+    pub padding_right: f32,
+    pub padding_top: f32,
+    pub padding_bottom: f32,
+}
+
+impl SubtitleContext {
+    pub fn padding_width(&self) -> f32 {
+        self.padding_left + self.padding_right
+    }
+
+    pub fn padding_height(&self) -> f32 {
+        self.padding_top + self.padding_bottom
+    }
+
+    pub fn player_width(&self) -> f32 {
+        self.video_width + self.padding_width()
+    }
+
+    pub fn player_height(&self) -> f32 {
+        self.video_height + self.padding_height()
+    }
+}
+
+trait SubtitleClass: Debug {
+    fn get_name(&self) -> &'static str;
+    fn get_font_size(&self, ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32;
+    fn get_position(&self, ctx: &SubtitleContext, event: &Event) -> Point2;
+}
+
+// Font size passed through directly.
+// Coordinate system 0.0-1.0 percentages
+#[derive(Debug)]
+struct TestSubtitleClass;
+impl SubtitleClass for TestSubtitleClass {
+    fn get_name(&self) -> &'static str {
+        "<test>"
+    }
+
+    fn get_font_size(&self, _ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
+        segment.font_size
+    }
+
+    fn get_position(&self, ctx: &SubtitleContext, event: &Event) -> Point2 {
+        Point2::new(
+            ctx.padding_left + (event.x * ctx.video_width),
+            ctx.padding_top + (event.y * ctx.video_height),
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct Subtitles {
+    class: &'static dyn SubtitleClass,
     events: Vec<Event>,
 }
 
 impl Subtitles {
     pub const fn empty() -> Self {
-        Self { events: vec![] }
+        Self {
+            class: &TestSubtitleClass,
+            events: vec![],
+        }
     }
 
     #[doc(hidden)]
     pub fn test_new() -> Self {
         Self {
+            class: &TestSubtitleClass,
             events: vec![
                 Event {
                     start: 0,
@@ -705,21 +769,17 @@ impl MultilineTextShaper {
 
 pub struct Renderer<'a> {
     fonts: text::FontManager,
-    // always should be 72 for ass?
     dpi: u32,
     subs: &'a Subtitles,
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(subs: &'a Subtitles, dpi: u32) -> Self {
+    pub fn new(subs: &'a Subtitles) -> Self {
         Self {
             fonts: text::FontManager::new(text::font_backend::platform_default().unwrap()),
-            dpi,
+            dpi: 0,
             subs,
         }
-    }
-
-    pub fn resize(&mut self, _width: u32, _height: u32) {
     }
 
     fn debug_text(
@@ -775,24 +835,41 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    pub fn render(&mut self, painter: &mut Painter, t: u32) {
+    pub fn render(&mut self, ctx: SubtitleContext, t: u32, painter: &mut Painter) {
         if painter.height() == 0 || painter.height() == 0 {
             return;
         }
 
         painter.clear(BGRA8::ZERO);
+        self.dpi = ctx.dpi;
 
         self.debug_text(
             painter.width() as i32,
             0,
-            &format!("{}x{} dpi:{}", painter.width(), painter.height(), self.dpi),
+            &format!(
+                "{:.2}x{:.2} dpi:{}",
+                ctx.video_width, ctx.video_height, ctx.dpi
+            ),
             Alignment::TopRight,
             16.0,
             BGRA8::from_rgba32(0xFFFFFFFF),
             painter,
         );
 
-        let shape_scale = self.dpi as f32 / 72.0;
+        self.debug_text(
+            painter.width() as i32,
+            20 * ctx.dpi as i32 / 72,
+            &format!(
+                "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
+            ),
+            Alignment::TopRight,
+            16.0,
+            BGRA8::from_rgba32(0xFFFFFFFF),
+            painter,
+        );
+
+        let shape_scale = ctx.dpi as f32 / 72.0;
 
         {
             for event in self
@@ -801,8 +878,7 @@ impl<'a> Renderer<'a> {
                 .iter()
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
-                let x = (painter.width() as f32 * event.x) as u32;
-                let y = (painter.height() as f32 * event.y) as u32;
+                let Point2 { x, y } = self.subs.class.get_position(&ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
                 for segment in event.segments.iter() {
@@ -816,7 +892,10 @@ impl<'a> Renderer<'a> {
                                     segment.italic,
                                 )
                                 .unwrap()
-                                .with_size(segment.font_size, self.dpi);
+                                .with_size(
+                                    self.subs.class.get_font_size(&ctx, event, segment),
+                                    ctx.dpi,
+                                );
 
                             shaper.add_text(&segment.text, &font);
                         }
@@ -922,7 +1001,10 @@ impl<'a> Renderer<'a> {
                         paint_box.0 + shaped_segment.paint_rect.w as i32,
                         paint_box.1,
                         &if let Segment::Text(segment) = segment {
-                            format!("{:.0}pt", segment.font_size)
+                            format!(
+                                "{:.0}pt",
+                                self.subs.class.get_font_size(&ctx, event, segment)
+                            )
                         } else {
                             "shape".to_owned()
                         },
@@ -976,7 +1058,7 @@ impl<'a> Renderer<'a> {
                                     &outline,
                                     s.stroke_x * shape_scale / 2.0,
                                     s.stroke_y * shape_scale / 2.0,
-                                    0.01,
+                                    1.0,
                                 );
 
                                 for (a, b) in

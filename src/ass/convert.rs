@@ -374,6 +374,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                             },
                             color: convert_ass_color(current_style.primary_colour),
                             text,
+                            shadows: Vec::new(),
                         }))
                     }
                 }

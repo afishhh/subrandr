@@ -109,6 +109,7 @@ struct TextSegment {
     decorations: TextDecorations,
     color: BGRA8,
     text: String,
+    shadows: Vec<TextShadow>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +121,14 @@ struct TextDecorations {
     underline_color: BGRA8,
     strike_out: bool,
     strike_out_color: BGRA8,
+}
+
+#[derive(Debug, Clone)]
+/// CSS text-shadow
+struct TextShadow {
+    offset: Vec2,
+    // TODO: blur
+    color: BGRA8,
 }
 
 impl TextDecorations {
@@ -270,6 +279,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "this ".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
                             font: "monospace".to_string(),
@@ -279,6 +289,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x0000FFFF),
                             text: "is\n".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
                             font: "monospace".to_string(),
@@ -288,6 +299,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "mu".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
                             font: "monospace".to_string(),
@@ -297,6 +309,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "ltil".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
                             font: "Arial".to_string(),
@@ -306,6 +319,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "iね❌".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Shape(ShapeSegment::new(
                             {
@@ -345,9 +359,38 @@ impl Subtitles {
                             underline_color: BGRA8::new(255, 255, 255, 255),
                             strike_out: true,
                             strike_out_color: BGRA8::new(255, 255, 255, 255),
+                            ..Default::default()
                         },
                         color: BGRA8::from_rgba32(0x00FF00AA),
                         text: "this is for comparison".to_string(),
+                        shadows: Vec::new(),
+                    })],
+                },
+                Event {
+                    start: 0,
+                    end: 600000,
+                    x: 0.2,
+                    y: 0.7,
+                    alignment: Alignment::BottomLeft,
+                    text_wrap: TextWrappingMode::None,
+                    segments: vec![Segment::Text(TextSegment {
+                        font: "sans-serif".to_string(),
+                        font_size: 64.0,
+                        font_weight: 400,
+                        italic: false,
+                        decorations: TextDecorations::none(),
+                        color: BGRA8::from_rgba32(0x00FF00FF),
+                        text: "with shadows".to_string(),
+                        shadows: vec![
+                            TextShadow {
+                                offset: Vec2::new(4.0, 4.0),
+                                color: BGRA8::from_rgba32(0xFF0000FF),
+                            },
+                            TextShadow {
+                                offset: Vec2::new(8.0, 8.0),
+                                color: BGRA8::from_rgba32(0x0000FFFF),
+                            },
+                        ],
                     })],
                 },
                 Event {
@@ -365,6 +408,7 @@ impl Subtitles {
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0xFFFFFFFF),
                         text: "this is bold..".to_string(),
+                        shadows: Vec::new(),
                     })],
                 },
                 Event {
@@ -383,6 +427,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
+                            shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
                             font: "emoji".to_string(),
@@ -392,6 +437,7 @@ impl Subtitles {
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
+                            shadows: Vec::new(),
                         }),
                     ],
                 },
@@ -868,8 +914,7 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
-    // TODO: move to painter?
-    fn draw_text_with_decoration(
+    fn draw_text_full(
         &mut self,
         x: i32,
         y: i32,
@@ -878,9 +923,21 @@ impl<'a> Renderer<'a> {
         glyphs: &[text::Glyph],
         color: BGRA8,
         decoration: &TextDecorations,
+        shadows: &[TextShadow],
         scale: f32,
     ) {
         let border = decoration.border * scale;
+        // TODO: This should also draw an offset underline I think and possibly strike through
+        for shadow in shadows.iter().rev() {
+            painter.text(
+                x + (shadow.offset.x * scale) as i32,
+                y + (shadow.offset.x * scale) as i32,
+                fonts,
+                glyphs,
+                shadow.color,
+            );
+        }
+
         if decoration.border_color.a > 0 || border.x.max(border.y) >= 1.0 {
             // Draw the border first
             // TODO: in reality the border should probably be blended with the text using
@@ -1134,7 +1191,7 @@ impl<'a> Renderer<'a> {
                     match segment {
                         Segment::Text(t) => {
                             let (glyphs, fonts) = shaped_segment.glyphs_and_fonts.as_ref().unwrap();
-                            self.draw_text_with_decoration(
+                            self.draw_text_full(
                                 x,
                                 y,
                                 painter,
@@ -1142,6 +1199,7 @@ impl<'a> Renderer<'a> {
                                 glyphs,
                                 t.color,
                                 &t.decorations,
+                                &t.shadows,
                                 ctx.dpi_scale(),
                             );
                         }

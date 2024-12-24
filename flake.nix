@@ -9,7 +9,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         runtimeLibs = with pkgs; [
-          alsaLib
+          alsa-lib
           udev
           vulkan-loader
           gcc-unwrapped

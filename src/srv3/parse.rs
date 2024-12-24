@@ -279,7 +279,7 @@ fn parse_pen(attributes: Attributes) -> Result<Pen, Error> {
     let mut result = Pen::default();
     match_attributes! {
         attributes,
-        "id"(id: i32) if (id > 0) "pen ID must be positive" => {
+        "id"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
             result.id = id;
         },
         "fc"(color: HexRGBColor) => {
@@ -336,7 +336,7 @@ fn parse_wp(attributes: Attributes) -> Result<WindowPos, Error> {
 
     match_attributes! {
         attributes,
-        "id"(id: i32) if (id >= 0) "wp ID must be positive" => {
+        "id"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
             result.id = id;
         },
         "ap"(point: Point) => {
@@ -449,7 +449,7 @@ fn parse_body(
                                 result.duration = duration;
                                 has_duration = true;
                             },
-                            "wp"(id: i32) if (id > 0) "wp ID must be positive" => {
+                            "wp"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
                                 result.position = wps.get(&id).ok_or_else(|| Error::MissingWp(id))?;
                                 has_duration = true;
                             },
@@ -472,7 +472,6 @@ fn parse_body(
                         println!("Unknown element encountered in body: {}", unsafe {
                             std::str::from_utf8_unchecked(element.local_name().into_inner())
                         });
-                        // warn!("")
                     }
                 }
                 depth += 1;
@@ -491,7 +490,7 @@ fn parse_body(
 
                         match_attributes! {
                             element.attributes(),
-                            "p"(id: i32) if (id > 0) "pen ID must be positive" => {
+                            "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
                                 current_segment_pen = pens.get(&id).ok_or_else(|| Error::MissingPen(id))?;
                             },
                             else other => {
@@ -633,7 +632,6 @@ pub fn parse(text: &str) -> Result<Document, Error> {
                         println!("Non-head element encountered: {}", unsafe {
                             std::str::from_utf8_unchecked(element.local_name().into_inner())
                         })
-                        // warn!("")
                     }
                 }
                 depth += 1;
@@ -702,7 +700,6 @@ pub fn parse(text: &str) -> Result<Document, Error> {
                             println!("Non-body element encountered: {}", unsafe {
                                 std::str::from_utf8_unchecked(element.local_name().into_inner())
                             })
-                            // warn!("")
                         }
                     }
                     depth += 1;

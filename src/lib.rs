@@ -10,6 +10,7 @@ use color::BGRA8;
 use math::{Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
+use srv3::Srv3TextShadow;
 use text::{FontSelect, TextExtents};
 
 pub mod ass;
@@ -124,8 +125,13 @@ struct TextDecorations {
 }
 
 #[derive(Debug, Clone)]
-/// CSS text-shadow
-struct TextShadow {
+enum TextShadow {
+    Css(CssTextShadow),
+    Srv3(Srv3TextShadow),
+}
+
+#[derive(Debug, Clone)]
+struct CssTextShadow {
     offset: Vec2,
     // TODO: blur
     color: BGRA8,
@@ -359,7 +365,6 @@ impl Subtitles {
                             underline_color: BGRA8::new(255, 255, 255, 255),
                             strike_out: true,
                             strike_out_color: BGRA8::new(255, 255, 255, 255),
-                            ..Default::default()
                         },
                         color: BGRA8::from_rgba32(0x00FF00AA),
                         text: "this is for comparison".to_string(),
@@ -381,16 +386,16 @@ impl Subtitles {
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0x00FF00FF),
                         text: "with shadows".to_string(),
-                        shadows: vec![
-                            TextShadow {
-                                offset: Vec2::new(4.0, 4.0),
-                                color: BGRA8::from_rgba32(0xFF0000FF),
-                            },
-                            TextShadow {
-                                offset: Vec2::new(8.0, 8.0),
-                                color: BGRA8::from_rgba32(0x0000FFFF),
-                            },
-                        ],
+                        shadows: Vec::new(), // shadows: vec![
+                                             //     TextShadow {
+                                             //         offset: Vec2::new(4.0, 4.0),
+                                             //         color: BGRA8::from_rgba32(0xFF0000FF),
+                                             //     },
+                                             //     TextShadow {
+                                             //         offset: Vec2::new(8.0, 8.0),
+                                             //         color: BGRA8::from_rgba32(0x0000FFFF),
+                                             //     },
+                                             // ],
                     })],
                 },
                 Event {
@@ -925,17 +930,33 @@ impl<'a> Renderer<'a> {
         decoration: &TextDecorations,
         shadows: &[TextShadow],
         scale: f32,
+        ctx: &SubtitleContext,
     ) {
         let border = decoration.border * scale;
+
         // TODO: This should also draw an offset underline I think and possibly strike through
-        for shadow in shadows.iter().rev() {
+        let mut draw_css_shadow = |shadow: &CssTextShadow| {
             painter.text(
-                x + (shadow.offset.x * scale) as i32,
-                y + (shadow.offset.x * scale) as i32,
+                x + shadow.offset.x as i32,
+                y + shadow.offset.y as i32,
                 fonts,
                 glyphs,
                 shadow.color,
             );
+        };
+
+        let mut out = Vec::new();
+        for shadow in shadows.iter().rev() {
+            match shadow {
+                TextShadow::Css(css_shadow) => draw_css_shadow(css_shadow),
+                TextShadow::Srv3(srv3_shadow) => {
+                    srv3_shadow.to_css(ctx, &mut out);
+                    for css_shadow in &out {
+                        draw_css_shadow(css_shadow)
+                    }
+                    out.clear();
+                }
+            }
         }
 
         if decoration.border_color.a > 0 || border.x.max(border.y) >= 1.0 {
@@ -1201,6 +1222,7 @@ impl<'a> Renderer<'a> {
                                 &t.decorations,
                                 &t.shadows,
                                 ctx.dpi_scale(),
+                                ctx,
                             );
                         }
                         Segment::Shape(s) => {

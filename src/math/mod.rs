@@ -2,7 +2,7 @@ use std::{
     arch::asm,
     fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 mod curve;
@@ -204,6 +204,14 @@ impl_binop!(
     Sub, sub;
     Point2, -, _, Point2, Vec2
 );
+
+impl Neg for Vec2 {
+    type Output = Vec2;
+
+    fn neg(self) -> Self::Output {
+        Vec2::new(-self.x, -self.y)
+    }
+}
 
 impl Sum for Vec2 {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {

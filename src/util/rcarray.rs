@@ -69,6 +69,7 @@ impl<T> Drop for RcArray<T> {
             *self.refcount -= 1;
             *self.refcount == 0
         } {
+            drop(unsafe { Box::from_raw(self.refcount) });
             drop(unsafe { Box::from_raw(self.elements as *mut [T]) });
         }
     }

@@ -202,6 +202,13 @@ impl Face {
         self.coords[index] = f32_to_fixed_point(value);
     }
 
+    fn os2_weight(&self) -> Option<u16> {
+        unsafe {
+            let table = FT_Get_Sfnt_Table(self.face, FT_SFNT_OS2) as *const TT_OS2;
+            table.as_ref().map(|os2| os2.usWeightClass)
+        }
+    }
+
     pub fn weight(&self) -> f32 {
         SharedFaceData::get_ref(self.face)
             .axes
@@ -209,10 +216,14 @@ impl Face {
             .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
             .map_or_else(
                 || {
-                    if unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0 } {
-                        700.0
+                    if let Some(weight) = self.os2_weight() {
+                        weight as f32
                     } else {
-                        400.0
+                        let has_bold_flag = unsafe {
+                            (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0
+                        };
+
+                        (300 + 400 * has_bold_flag as i32) as f32
                     }
                 },
                 |idx| fixed_point_to_f32(self.coords[idx]),

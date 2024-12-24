@@ -372,7 +372,7 @@ impl ShapingBuffer {
             }
 
             if let Some(start) = invalid_range_start {
-                if start == 0 {
+                if start == 0 && font_index != 0 {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
                     }

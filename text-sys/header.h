@@ -4,5 +4,6 @@
 #include FT_MULTIPLE_MASTERS_H
 #include FT_SFNT_NAMES_H
 #include FT_TRUETYPE_IDS_H
-#include <harfbuzz/hb.h>
+#include FT_TRUETYPE_TABLES_H
 #include <harfbuzz/hb-ft.h>
+#include <harfbuzz/hb.h>

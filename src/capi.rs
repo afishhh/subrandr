@@ -213,6 +213,11 @@ unsafe extern "C" fn sbr_load_file(path: *const i8) -> *mut Subtitles {
     }
 }
 
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitles_destroy(subtitles: *mut Subtitles) {
+    drop(Box::from_raw(subtitles));
+}
+
 // #[unsafe(no_mangle)]
 // unsafe extern "C" fn sbr_subtitles_get_class_name(subtitles: *mut Subtitles) -> *const i8 {
 //   TODO: SubtitleClass::get_name_cstr()
@@ -249,4 +254,9 @@ unsafe extern "C" fn sbr_renderer_render(
     let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
     (*renderer).render(&*ctx, t, &mut Painter::new(width, height, buffer));
     0
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_destroy(renderer: *mut Renderer<'static>) {
+    drop(Box::from_raw(renderer));
 }

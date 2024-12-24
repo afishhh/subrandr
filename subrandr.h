@@ -33,6 +33,7 @@ typedef uint16_t SBR_UNSTABLE sbr_subtitle_format;
 #define SBR_SUBTITLE_FORMAT_SRV3 (sbr_subtitle_format)2
 
 sbr_subtitles *sbr_load_file(char const *path);
+void sbr_subtitles_destroy(sbr_subtitles *subs);
 
 sbr_renderer *sbr_renderer_create(sbr_subtitles *subs);
 int sbr_renderer_render(
@@ -42,6 +43,7 @@ int sbr_renderer_render(
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height
 );
+void sbr_renderer_destroy(sbr_renderer *renderer);
 
 typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_OTHER (sbr_error_code)1

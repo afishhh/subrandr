@@ -118,9 +118,12 @@ fn set_weight_if_variable(face: &mut Face, weight: f32) {
 impl FontSelect {
     pub fn new() -> Result<FontSelect, Error> {
         #[cfg(target_os = "linux")]
+        let provider: Box<dyn FontProvider> =
+            provider::platform_default().map_err(Error::Provider)?;
+
         Ok(Self {
             cache: HashMap::new(),
-            provider: provider::platform_default().map_err(Error::Provider)?,
+            provider,
         })
     }
 

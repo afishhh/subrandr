@@ -334,7 +334,6 @@ impl Subtitles {
                         text: "this is bold..".to_string(),
                     })],
                 },
-                // FIXME: Doesn't work, scaling emoji font fails
                 Event {
                     start: 0,
                     end: 600000,
@@ -346,7 +345,7 @@ impl Subtitles {
                         Segment::Text(TextSegment {
                             font: "emoji".to_string(),
                             font_size: 32.,
-                            font_weight: 700,
+                            font_weight: 400,
                             italic: false,
                             underline: false,
                             strike_out: false,
@@ -356,7 +355,7 @@ impl Subtitles {
                         Segment::Text(TextSegment {
                             font: "emoji".to_string(),
                             font_size: 64.,
-                            font_weight: 700,
+                            font_weight: 400,
                             italic: false,
                             underline: false,
                             strike_out: false,

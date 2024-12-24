@@ -117,7 +117,6 @@ impl Face {
         }
 
         unsafe {
-            // TODO: finalizer
             (*face).generic.data =
                 Box::into_raw(Box::new(SharedFaceData { axes })) as *mut std::ffi::c_void;
             (*face).generic.finalizer = Some(SharedFaceData::finalize);
@@ -140,47 +139,6 @@ impl Face {
     }
 
     pub fn family_name(&self) -> &str {
-        // TODO:
-        // for idx in 0..unsafe { FT_Get_Sfnt_Name_Count(self.face) } {
-        //     let name = unsafe {
-        //         let mut name = MaybeUninit::uninit();
-        //         fttry!(FT_Get_Sfnt_Name(self.face, idx, name.as_mut_ptr()));
-        //         name.assume_init()
-        //     };
-
-        //     const ENGLISHES: [u32; 19] = [
-        //         TT_MS_LANGID_ENGLISH_UNITED_STATES,
-        //         TT_MS_LANGID_ENGLISH_UNITED_KINGDOM,
-        //         TT_MS_LANGID_ENGLISH_AUSTRALIA,
-        //         TT_MS_LANGID_ENGLISH_CANADA,
-        //         TT_MS_LANGID_ENGLISH_NEW_ZEALAND,
-        //         TT_MS_LANGID_ENGLISH_IRELAND,
-        //         TT_MS_LANGID_ENGLISH_SOUTH_AFRICA,
-        //         TT_MS_LANGID_ENGLISH_JAMAICA,
-        //         TT_MS_LANGID_ENGLISH_CARIBBEAN,
-        //         TT_MS_LANGID_ENGLISH_BELIZE,
-        //         TT_MS_LANGID_ENGLISH_TRINIDAD,
-        //         TT_MS_LANGID_ENGLISH_ZIMBABWE,
-        //         TT_MS_LANGID_ENGLISH_PHILIPPINES,
-        //         TT_MS_LANGID_ENGLISH_INDIA,
-        //         TT_MS_LANGID_ENGLISH_MALAYSIA,
-        //         TT_MS_LANGID_ENGLISH_SINGAPORE,
-        //         TT_MS_LANGID_ENGLISH_GENERAL,
-        //         TT_MS_LANGID_ENGLISH_INDONESIA,
-        //         TT_MS_LANGID_ENGLISH_HONG_KONG,
-        //     ];
-
-        //     if name.platform_id == TT_PLATFORM_MICROSOFT as u16
-        //         && name.encoding_id == TT_MS_ID_UNICODE_CS as u16
-        //         && ENGLISHES.contains(&name.language_id.into())
-        //     {
-        //         // FIXME: Polyfill or wait for https://github.com/rust-lang/rust/issues/116258
-        //         // String::from_utf16be(unsafe {
-        //         //     std::slice::from_raw_parts(name.string, name.string_len as usize)
-        //         // })
-        //     }
-        // }
-
         // NOTE: FreeType says this is *always* an ASCII string.
         unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
     }
@@ -385,21 +343,20 @@ impl Font {
             let ppem = map_to_ppem(point_size, dpi.into());
 
             // First size larger than requested, or the largest size if not found
-            // TODO: don't assume sorted order?
-            let best_size_index = sizes
-                .iter()
-                .enumerate()
-                .find_map(|(i, s)| (s.x_ppem > ppem).then_some(i))
-                .or_else(|| sizes.len().checked_sub(1))
-                .unwrap();
-
-            let scale = Fixed::<6>::from_quotient64(ppem, sizes[best_size_index].x_ppem);
-
-            unsafe {
-                fttry!(FT_Select_Size(face, best_size_index as i32));
+            let mut picked_size_index = 0usize;
+            for (i, size) in sizes.iter().enumerate() {
+                if size.x_ppem > ppem && size.x_ppem < sizes[picked_size_index].x_ppem {
+                    picked_size_index = i;
+                }
             }
 
-            (best_size_index as i32, scale)
+            let scale = Fixed::<6>::from_quotient64(ppem, sizes[picked_size_index].x_ppem);
+
+            unsafe {
+                fttry!(FT_Select_Size(face, picked_size_index as i32));
+            }
+
+            (picked_size_index as i32, scale)
         };
 
         Self {

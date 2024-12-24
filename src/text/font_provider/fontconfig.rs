@@ -25,8 +25,6 @@ pub struct NewError(());
 
 #[derive(Error, Debug)]
 pub enum LoadError {
-    #[error("Family name contains null byte")]
-    NullInName,
     #[error("Failed to create pattern")]
     PatternCreate,
     #[error("Failed to set pattern key {0:?} to {1:?}")]
@@ -35,8 +33,6 @@ pub enum LoadError {
     PatternAddInteger(&'static CStr, c_int),
     #[error("Failed to execute substitutions")]
     Substitute,
-    #[error("Failed to add codepoint {0:?} to FcCharSet")]
-    AddChar(u32),
     #[error("Failed to find matching font: {0:?}")]
     Match(FcResult),
 }
@@ -54,6 +50,15 @@ impl FontconfigFontProvider {
 
     pub fn fallback_font(&self) -> String {
         "sans-serif".to_string()
+    }
+}
+
+impl Drop for FontconfigFontProvider {
+    fn drop(&mut self) {
+        unsafe {
+            FcConfigDestroy(self.config);
+            FcFini()
+        };
     }
 }
 
@@ -77,6 +82,7 @@ impl FontProvider for FontconfigFontProvider {
 
         macro_rules! pattern_add {
             ($cfun: ident, $err: ident, $key: ident, $value: expr, $errvalue: expr) => {
+                #[allow(unused_unsafe)]
                 if unsafe { $cfun(pattern, $key.as_ptr() as *const i8, $value) == 0 } {
                     return Err(LoadError::$err(
                         const { CStr::from_bytes_with_nul($key) }.unwrap(),
@@ -92,12 +98,14 @@ impl FontProvider for FontconfigFontProvider {
             .binary_search_by(|x| x.0.partial_cmp(&req.weight.0).unwrap())
             .map(|idx| FONT_WEIGHTS[idx].1)
         else {
-            return Ok(Vec::new());
+            todo!();
         };
 
         for family in &req.families {
-            let cname =
-                CString::new(family.clone()).map_err(|_| AnyError::from(LoadError::NullInName))?;
+            let Ok(cname) = CString::new(family.clone()) else {
+                continue;
+            };
+
             pattern_add!(
                 FcPatternAddString,
                 PatternAddString,
@@ -134,8 +142,6 @@ impl FontProvider for FontconfigFontProvider {
         }
 
         unsafe { FcDefaultSubstitute(pattern) };
-
-        unsafe { FcPatternPrint(pattern) };
 
         let mut result = MaybeUninit::uninit();
         let font_set = unsafe {
@@ -179,7 +185,6 @@ impl FontProvider for FontconfigFontProvider {
                 }
             }
 
-            println!("hiii!!");
             let family = unsafe {
                 let mut family = MaybeUninit::uninit();
                 if FcPatternGetString(
@@ -198,7 +203,6 @@ impl FontProvider for FontconfigFontProvider {
                 }
             };
 
-            println!("hiii2!!");
             let weight = unsafe {
                 let mut wght = MaybeUninit::uninit();
                 let mut range = MaybeUninit::uninit();
@@ -246,7 +250,6 @@ impl FontProvider for FontconfigFontProvider {
                 }
             };
 
-            println!("hiii3!!");
             let italic = unsafe {
                 let mut slant = 0;
                 if FcPatternGetInteger(font, FC_SLANT.as_ptr() as *const i8, 0, &mut slant)
@@ -262,7 +265,6 @@ impl FontProvider for FontconfigFontProvider {
                 slant == FC_SLANT_ITALIC as i32
             };
 
-            println!("hiii5!!");
             let path = unsafe {
                 let mut path = MaybeUninit::uninit();
                 if FcPatternGetString(font, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
@@ -277,8 +279,6 @@ impl FontProvider for FontconfigFontProvider {
                         .to_vec(),
                 ))
             };
-
-            println!("yay!!");
 
             results.push(FontInfo {
                 family: family.to_owned(),

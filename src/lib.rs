@@ -10,7 +10,7 @@ use color::BGRA8;
 use math::Point2;
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
-use text::{FontManager, TextExtents};
+use text::{FontSelect, TextExtents};
 
 pub mod ass;
 mod capi;
@@ -465,7 +465,7 @@ impl MultilineTextShaper {
         &self,
         line_alignment: HorizontalAlignment,
         wrapping: TextWrappingMode,
-        font_manager: &mut FontManager,
+        font_select: &mut FontSelect,
     ) -> (Vec<ShapedLine>, PixelRect) {
         assert_eq!(wrapping, TextWrappingMode::None);
 
@@ -561,7 +561,7 @@ impl MultilineTextShaper {
                                 buffer.set_direction(direction.to_horizontal());
                             }
                             buffer.add(&self.text[segment_slice]);
-                            buffer.shape(font, &mut segment_fonts, font_manager)
+                            buffer.shape(font, &mut segment_fonts, font_select)
                         };
                         let segment_fonts = Rc::new(segment_fonts);
 
@@ -771,7 +771,7 @@ impl MultilineTextShaper {
 }
 
 pub struct Renderer<'a> {
-    fonts: text::FontManager,
+    fonts: text::FontSelect,
     dpi: u32,
     subs: &'a Subtitles,
 }
@@ -779,7 +779,7 @@ pub struct Renderer<'a> {
 impl<'a> Renderer<'a> {
     pub fn new(subs: &'a Subtitles) -> Self {
         Self {
-            fonts: text::FontManager::new(text::font_backend::platform_default().unwrap()),
+            fonts: text::FontSelect::new().unwrap(),
             dpi: 0,
             subs,
         }
@@ -797,7 +797,7 @@ impl<'a> Renderer<'a> {
     ) {
         let font = self
             .fonts
-            .get_or_load("monospace", 400., false)
+            .select_simple("monospace", 400., false)
             .unwrap()
             .with_size(size, self.dpi);
         let shaped = text::shape_text(&font, text);
@@ -847,7 +847,7 @@ impl<'a> Renderer<'a> {
         self.dpi = ctx.dpi;
 
         self.debug_text(
-            painter.width() as i32,
+            (ctx.padding_left + ctx.video_width) as i32,
             0,
             &format!(
                 "{:.2}x{:.2} dpi:{}",
@@ -860,7 +860,7 @@ impl<'a> Renderer<'a> {
         );
 
         self.debug_text(
-            painter.width() as i32,
+            (ctx.padding_left + ctx.video_width) as i32,
             20 * ctx.dpi as i32 / 72,
             &format!(
                 "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
@@ -889,7 +889,7 @@ impl<'a> Renderer<'a> {
                         Segment::Text(segment) => {
                             let font = self
                                 .fonts
-                                .get_or_load(
+                                .select_simple(
                                     &segment.font,
                                     segment.font_weight as f32,
                                     segment.italic,

@@ -5,6 +5,7 @@ pub trait Sealed {}
 use std::{
     cmp::Ordering,
     fmt::Debug,
+    hash::Hash,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
@@ -209,6 +210,8 @@ impl<const CAP: usize, T: Debug> Debug for ArrayVec<CAP, T> {
     }
 }
 
+#[derive(Debug, Clone)]
+#[repr(transparent)]
 pub struct OrderedF32(pub f32);
 
 impl PartialEq for OrderedF32 {
@@ -228,6 +231,12 @@ impl PartialOrd for OrderedF32 {
 impl Ord for OrderedF32 {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.total_cmp(&other.0)
+    }
+}
+
+impl Hash for OrderedF32 {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u32(self.0.to_bits());
     }
 }
 

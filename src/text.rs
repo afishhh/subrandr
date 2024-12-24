@@ -6,29 +6,13 @@ mod ft_utils;
 use ft_utils::*;
 mod face;
 pub use face::*;
-mod font_manager;
-pub use font_manager::*;
+pub mod font_select;
+pub use font_select::*;
 
 use crate::{
     color::{BlendMode, BGRA8},
-    util::AnyError,
+    util::{AnyError, OrderedF32},
 };
-
-pub mod font_backend {
-    #[cfg(target_family = "unix")]
-    pub mod fontconfig;
-    pub use fontconfig::FontconfigFontBackend;
-
-    use super::FontBackend;
-    use crate::util::AnyError;
-
-    pub fn platform_default() -> Result<Box<dyn FontBackend>, AnyError> {
-        #[cfg(target_family = "unix")]
-        FontconfigFontBackend::new()
-            .map(|x| Box::new(x) as Box<dyn FontBackend>)
-            .map_err(Into::into)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -275,14 +259,24 @@ impl FallbackFontProvider for NoopFallbackProvider {
     }
 }
 
-impl FallbackFontProvider for FontManager {
+impl FallbackFontProvider for FontSelect {
     fn get_font_for_glyph(
         &mut self,
         weight: f32,
         italic: bool,
         codepoint: hb_codepoint_t,
     ) -> Result<Option<Face>, AnyError> {
-        self.get_or_load_fallback_for(weight, italic, codepoint)
+        let request = FontRequest {
+            families: Vec::new(),
+            weight: OrderedF32(weight),
+            italic,
+            codepoint: Some(codepoint),
+        };
+        match self.select(&request) {
+            Ok(face) => Ok(Some(face)),
+            Err(Error::NotFound) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 

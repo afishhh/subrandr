@@ -9,13 +9,13 @@ use text_sys::unix::*;
 use thiserror::Error;
 
 use crate::{
-    text::{Face, FontBackend},
+    text::font_select::{FontInfo, FontProvider, FontRequest, FontSource, FontWeight},
     util::{AnyError, Sealed},
 };
 
 // TODO: FcFini
 #[derive(Debug)]
-pub struct FontconfigFontBackend {
+pub struct FontconfigFontProvider {
     config: *mut FcConfig,
 }
 
@@ -39,16 +39,9 @@ pub enum LoadError {
     AddChar(u32),
     #[error("Failed to find matching font: {0:?}")]
     Match(FcResult),
-    #[error("Match did not contain a family name")]
-    NoFamily,
-    #[error("Match did not contain a file path")]
-    NoFile,
-    // TODO: FtError or whatever we'll use in text
-    #[error("Failed to load font")]
-    Load(),
 }
 
-impl FontconfigFontBackend {
+impl FontconfigFontProvider {
     pub fn new() -> Result<Self, NewError> {
         unsafe {
             let config = FcInitLoadConfigAndFonts();
@@ -69,15 +62,12 @@ const FONT_WEIGHTS: &[(f32, c_int)] = &[
     (700.0, FC_WEIGHT_BOLD as c_int),
 ];
 
-impl FontconfigFontBackend {
-    fn load_internal(
+impl FontProvider for FontconfigFontProvider {
+    fn query(
         &mut self,
-        name: Option<&str>,
-        weight: f32,
-        italic: bool,
-        codepoint: Option<u32>,
-    ) -> Result<Option<Face>, AnyError> {
-        assert!(weight.is_normal());
+        req: &FontRequest,
+    ) -> Result<Vec<crate::text::font_select::FontInfo>, AnyError> {
+        assert!(req.weight.0.is_normal() && req.weight.0.is_sign_positive());
 
         // TODO: Free on error
         let pattern = unsafe { FcPatternCreate() };
@@ -97,21 +87,23 @@ impl FontconfigFontBackend {
             };
         }
 
+        // TODO: closest match
         let Ok(fc_weight) = FONT_WEIGHTS
-            .binary_search_by(|x| x.0.partial_cmp(&weight).unwrap())
+            .binary_search_by(|x| x.0.partial_cmp(&req.weight.0).unwrap())
             .map(|idx| FONT_WEIGHTS[idx].1)
         else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
 
-        if let Some(name) = name {
-            let cname = CString::new(name).map_err(|_| AnyError::from(LoadError::NullInName))?;
+        for family in &req.families {
+            let cname =
+                CString::new(family.clone()).map_err(|_| AnyError::from(LoadError::NullInName))?;
             pattern_add!(
                 FcPatternAddString,
                 PatternAddString,
                 FC_FAMILY,
                 cname.as_ptr() as *const u8,
-                name.to_string()
+                family.to_string()
             );
         }
 
@@ -123,13 +115,18 @@ impl FontconfigFontBackend {
             fc_weight
         );
 
-        let style = if italic { c"Italic" } else { c"Regular" };
+        let slant = if req.italic {
+            FC_SLANT_ITALIC as i32
+        } else {
+            FC_SLANT_ROMAN as i32
+        };
+
         pattern_add!(
-            FcPatternAddString,
-            PatternAddString,
-            FC_STYLE,
-            style.as_ptr() as *const u8,
-            style.to_str().unwrap().to_string()
+            FcPatternAddInteger,
+            PatternAddInteger,
+            FC_SLANT,
+            slant,
+            slant
         );
 
         if unsafe { FcConfigSubstitute(self.config, pattern, FcMatchPattern) == 0 } {
@@ -138,19 +135,21 @@ impl FontconfigFontBackend {
 
         unsafe { FcDefaultSubstitute(pattern) };
 
+        unsafe { FcPatternPrint(pattern) };
+
         let mut result = MaybeUninit::uninit();
         let font_set = unsafe {
             FcFontSort(
                 self.config,
                 pattern,
-                (codepoint.is_some() && name.is_none()) as i32,
+                (req.codepoint.is_some() && req.families.is_empty()) as i32,
                 std::ptr::null_mut(),
                 result.as_mut_ptr(),
             )
         };
         let result = unsafe { result.assume_init() };
         if result == FcResultNoMatch {
-            return Ok(None);
+            return Ok(Vec::new());
         } else if result != FcResultMatch {
             return Err(LoadError::Match(result).into());
         }
@@ -162,16 +161,11 @@ impl FontconfigFontBackend {
             )
         };
 
-        struct Found {
-            pattern: *mut FcPattern,
-            family: &'static CStr,
-            is_variable: bool,
-        }
-        let mut found = None::<Found>;
+        let mut results = Vec::new();
 
         for font in fonts.iter().copied() {
             unsafe {
-                if let Some(codepoint) = codepoint {
+                if let Some(codepoint) = req.codepoint {
                     let mut charset = std::ptr::null_mut();
                     if FcPatternGetCharSet(font, FC_CHARSET.as_ptr() as *const i8, 0, &mut charset)
                         != FcResultMatch
@@ -185,54 +179,98 @@ impl FontconfigFontBackend {
                 }
             }
 
-            let mut family = MaybeUninit::uninit();
-            if unsafe {
-                FcPatternGetString(
+            println!("hiii!!");
+            let family = unsafe {
+                let mut family = MaybeUninit::uninit();
+                if FcPatternGetString(
                     font,
                     FC_FAMILY.as_ptr() as *const i8,
                     0,
                     family.as_mut_ptr(),
                 ) != FcResultMatch
-            } {
-                return Err(LoadError::NoFamily.into());
-            }
-            let family = unsafe { CStr::from_ptr(family.assume_init() as *const i8) };
+                {
+                    continue;
+                }
 
-            let is_variable = {
-                let mut out = 0;
-                unsafe {
-                    FcPatternGetBool(font, FC_VARIABLE.as_ptr() as *const i8, 0, &mut out)
-                        == FcResultMatch
-                        && out > 0
+                match CStr::from_ptr(family.assume_init() as *const i8).to_str() {
+                    Ok(family) => family,
+                    Err(_) => continue,
                 }
             };
 
-            if found
-                .as_ref()
-                .is_none_or(|x| !x.is_variable && is_variable && family == x.family)
-            {
-                found = Some(Found {
-                    pattern: font,
-                    family,
-                    is_variable,
-                });
+            println!("hiii2!!");
+            let weight = unsafe {
+                let mut wght = MaybeUninit::uninit();
+                let mut range = MaybeUninit::uninit();
+                if FcPatternGetInteger(font, FC_WEIGHT.as_ptr() as *const i8, 0, wght.as_mut_ptr())
+                    == FcResultMatch
+                {
+                    let wght = wght.assume_init();
 
-                if is_variable {
-                    break;
+                    if let Some(weight) = FONT_WEIGHTS
+                        .iter()
+                        .find_map(|&(ot, fc)| (fc == wght).then_some(ot))
+                        .map(FontWeight::Static)
+                    {
+                        weight
+                    } else {
+                        continue;
+                    }
+                } else {
+                    let is_variable = if FcPatternGetRange(
+                        font,
+                        FC_WEIGHT.as_ptr() as *const i8,
+                        0,
+                        range.as_mut_ptr(),
+                    ) == FcResultMatch
+                    {
+                        let range = range.assume_init();
+                        let mut begin = MaybeUninit::uninit();
+                        let mut end = MaybeUninit::uninit();
+                        if FcRangeGetDouble(range, begin.as_mut_ptr(), end.as_mut_ptr()) == 0 {
+                            false
+                        } else {
+                            let begin = begin.assume_init();
+                            let end = end.assume_init();
+                            begin.abs() < f64::EPSILON && (210.0 - end).abs() < f64::EPSILON
+                        }
+                    } else {
+                        false
+                    };
+
+                    if is_variable {
+                        FontWeight::Variable
+                    } else {
+                        continue;
+                    }
                 }
-            }
-        }
+            };
 
-        let result = if let Some(Found { pattern, .. }) = found {
-            let mut path = MaybeUninit::uninit();
-            if unsafe {
-                FcPatternGetString(pattern, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
+            println!("hiii3!!");
+            let italic = unsafe {
+                let mut slant = 0;
+                if FcPatternGetInteger(font, FC_SLANT.as_ptr() as *const i8, 0, &mut slant)
                     != FcResultMatch
-            } {
-                return Err(LoadError::NoFile.into());
-            }
+                {
+                    continue;
+                }
 
-            let owned_path = unsafe {
+                if slant == FC_SLANT_OBLIQUE as i32 {
+                    continue;
+                }
+
+                slant == FC_SLANT_ITALIC as i32
+            };
+
+            println!("hiii5!!");
+            let path = unsafe {
+                let mut path = MaybeUninit::uninit();
+                if FcPatternGetString(font, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
+                    != FcResultMatch
+                {
+                    continue;
+                }
+
                 PathBuf::from(OsString::from_vec(
                     CStr::from_ptr(path.assume_init() as *const _)
                         .to_bytes()
@@ -240,45 +278,23 @@ impl FontconfigFontBackend {
                 ))
             };
 
-            let face = Face::load_from_file(owned_path);
-            println!("font found for query name={name:?} weight={weight} italic={italic} codepoint={codepoint:?}: {face:?}");
-            Some(face)
-        } else {
-            None
-        };
+            println!("yay!!");
+
+            results.push(FontInfo {
+                family: family.to_owned(),
+                weight,
+                italic,
+                source: FontSource::File(path),
+            });
+        }
 
         unsafe {
             FcPatternDestroy(pattern);
             FcFontSetDestroy(font_set);
         };
 
-        Ok(result)
+        Ok(results)
     }
 }
 
-impl FontBackend for FontconfigFontBackend {
-    fn load_fallback(&mut self, weight: f32, italic: bool) -> Result<Option<Face>, AnyError> {
-        self.load("sans-serif", weight, italic)
-    }
-
-    fn load(
-        &mut self,
-        name: &str,
-        weight: f32,
-        italic: bool,
-    ) -> Result<Option<crate::text::Face>, AnyError> {
-        self.load_internal(Some(name), weight, italic, None)
-    }
-
-    fn load_glyph_fallback(
-        &mut self,
-        weight: f32,
-        italic: bool,
-        codepoint: u32,
-    ) -> Result<Option<Face>, AnyError> {
-        // NOTE: Passing a family here does not seem to make substitutions work better
-        self.load_internal(None, weight, italic, Some(codepoint))
-    }
-}
-
-impl Sealed for FontconfigFontBackend {}
+impl Sealed for FontconfigFontProvider {}

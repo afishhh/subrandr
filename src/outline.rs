@@ -1,5 +1,7 @@
 use std::{fmt::Debug, mem::MaybeUninit, ops::BitAnd};
 
+use text_sys::{FT_Outline, FT_Vector, FT_CURVE_TAG_CONIC, FT_CURVE_TAG_CUBIC, FT_CURVE_TAG_ON};
+
 use crate::{
     math::*,
     util::{array_assume_init_ref, fmt_from_fn},
@@ -136,6 +138,86 @@ impl Outline {
         }
     }
 
+    pub unsafe fn from_freetype(ft: &FT_Outline) -> Self {
+        let mut first = 0;
+        let mut builder = OutlineBuilder::new();
+        let contours = std::slice::from_raw_parts(ft.contours, ft.n_contours as usize);
+        let points = std::slice::from_raw_parts(ft.points, ft.n_points as usize);
+        let tags = std::slice::from_raw_parts(ft.tags, ft.n_points as usize);
+
+        // TODO: Convert FT_CURVE_TAG* to u8 in text-sys
+        for last in contours.iter().map(|&x| x as usize) {
+            // FT_Pos in FT_Outline seems to be 26.6
+            let to_point = |vec: FT_Vector| {
+                Point2::new(
+                    vec.x as f32 * 2.0f32.powi(-6),
+                    // FreeType uses a "Y axis at the bottom" coordinate system,
+                    // flip that to match ours
+                    -vec.y as f32 * 2.0f32.powi(-6),
+                )
+            };
+
+            let midpoint = |a: Point2, b: Point2| Point2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+
+            let mut last_tag;
+            let mut final_degree = SegmentDegree::Linear;
+            let mut add_range = first..last + 1;
+            if (tags[first] & 0b11) != FT_CURVE_TAG_ON as u8 {
+                if (tags[last] & 0b11) == FT_CURVE_TAG_CONIC as u8 {
+                    builder.add_point(midpoint(to_point(points[first]), to_point(points[last])));
+                    last_tag = FT_CURVE_TAG_ON as u8;
+                    final_degree = SegmentDegree::Quadratic;
+                } else {
+                    assert_eq!(tags[last] & 0b11, FT_CURVE_TAG_ON as u8);
+                    builder.add_point(to_point(points[last]));
+                    last_tag = tags[last] & 0b11;
+                    add_range.end -= 1;
+                }
+            } else {
+                builder.add_point(to_point(points[first]));
+                last_tag = tags[first] & 0b11;
+                add_range.start += 1;
+                if tags[last] & 0b11 == FT_CURVE_TAG_CUBIC as u8 {
+                    final_degree = SegmentDegree::Cubic;
+                } else if tags[last] & 0b11 == FT_CURVE_TAG_CONIC as u8 {
+                    final_degree = SegmentDegree::Quadratic;
+                }
+            }
+
+            for (&point, &tag) in points[add_range.clone()].iter().zip(tags[add_range].iter()) {
+                let tag = tag & 0b11;
+                let point = to_point(point);
+
+                if tag == FT_CURVE_TAG_ON as u8 {
+                    if last_tag == FT_CURVE_TAG_ON as u8 {
+                        builder.add_segment(SegmentDegree::Linear);
+                    } else if last_tag == FT_CURVE_TAG_CONIC as u8 {
+                        builder.add_segment(SegmentDegree::Quadratic);
+                    } else {
+                        builder.add_segment(SegmentDegree::Cubic);
+                    }
+                }
+
+                if tag == FT_CURVE_TAG_CONIC as u8 && last_tag == FT_CURVE_TAG_CONIC as u8 {
+                    let last = *builder.points().last().unwrap();
+                    builder.add_point(midpoint(last, point));
+                    builder.add_segment(SegmentDegree::Quadratic);
+                }
+
+                last_tag = tag;
+                builder.add_point(point);
+            }
+
+            builder.add_segment(final_degree);
+            builder.close_contour();
+            first = last + 1;
+        }
+
+        assert_eq!(first, points.len());
+
+        builder.build()
+    }
+
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
@@ -176,7 +258,7 @@ impl Outline {
         self.evaluate_segment_normalized(t.trunc() as usize, t.fract())
     }
 
-    pub fn bounding_box(&self) -> Rect2 {
+    pub fn control_box(&self) -> Rect2 {
         let mut bb = Rect2::NOTHING;
         for point in self.points.iter() {
             bb.expand_to_point(point);
@@ -213,7 +295,7 @@ impl Outline {
         std::iter::from_fn(move || {
             it.next().map(|end_of_contour| {
                 let segments = &self.segments[last..=end_of_contour];
-                last = end_of_contour;
+                last = end_of_contour + 1;
                 segments
             })
         })
@@ -265,9 +347,9 @@ fn b_spline_to_bezier(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> [Point2
 
 // libass/ass_outline.c
 
-// WHAT: I think "normal" space is defined as the space where we're aiming for a
-//       1 unit offsfet spline which we then multiply to get our spline in
-//       outline space.
+// Additional notes:
+// libass's stroker produces self intersections, FreeType avoids this in the
+// ft_stroker_inside function.
 //
 // NOTE: sqrt(0.5) = 2/sqrt2 = cos(45) = sin(45)
 //
@@ -289,14 +371,8 @@ struct Stroker {
     result_bottom: OutlineBuilder,
 
     /// Normal vector for [`first_point`](Self::first_point).
-    ///
-    /// # Note
-    /// These normal vectors always should have length 1.
     first_normal: Vec2,
     /// Normal vector for [`last_point`](Self::last_point).
-    ///
-    /// # Note
-    /// These normal vectors always should have length 1.
     last_normal: Vec2,
     first_point: Point2,
     last_point: Point2,

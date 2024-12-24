@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{math::Fixed, util::fmt_from_fn};
+use crate::{math::Fixed, outline::Outline, util::fmt_from_fn};
 
 use super::ft_utils::*;
 use text_sys::*;
@@ -445,6 +445,26 @@ impl Font {
         }
 
         metrics
+    }
+
+    /// Gets the Outline associated with the glyph at `index`.
+    ///
+    /// Returns [`None`] if the glyph does not exist in this font, or it is not
+    /// an outline glyph.
+    pub fn glyph_outline(&self, index: u32) -> Option<Outline> {
+        let face = self.with_applied_size();
+        unsafe {
+            // According to FreeType documentation, bitmap-only fonts ignore
+            // FT_LOAD_NO_BITMAP.
+            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as i64) == 0 {
+                return None;
+            }
+
+            // TODO: return none if the glyph does not exist in the fonot
+            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32));
+
+            Some(Outline::from_freetype(&(*(*face).glyph).outline))
+        }
     }
 
     pub fn metrics(&self) -> FT_Size_Metrics {

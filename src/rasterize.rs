@@ -605,8 +605,6 @@ impl NonZeroPolygonRasterizer {
             return;
         }
 
-        assert_eq!(polyline[0], *polyline.last().unwrap());
-
         let mut i = 0;
         while i < polyline.len() - 1 {
             let start = &polyline[i];

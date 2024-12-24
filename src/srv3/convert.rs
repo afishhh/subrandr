@@ -1,4 +1,4 @@
-use crate::{color::BGRA8, math::Point2, SubtitleClass, Subtitles};
+use crate::{color::BGRA8, math::Point2, SubtitleClass, Subtitles, TextDecorations};
 
 use super::Document;
 
@@ -116,8 +116,7 @@ pub fn convert(document: Document) -> Subtitles {
                 font_size: font_size_to_pixels(segment.pen().font_size) * 0.749_999_4,
                 font_weight: if segment.pen().bold { 700 } else { 400 },
                 italic: segment.pen().italic,
-                underline: false,
-                strike_out: false,
+                decorations: TextDecorations::none(),
                 color: BGRA8::from_rgba32(segment.pen().foreground_color),
                 text: segment.text.clone(),
             }))

@@ -7,7 +7,7 @@
 use std::{fmt::Debug, rc::Rc};
 
 use color::BGRA8;
-use math::Point2;
+use math::{Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use text::{FontSelect, TextExtents};
@@ -106,10 +106,39 @@ struct TextSegment {
     font_size: f32,
     font_weight: u32,
     italic: bool,
-    underline: bool,
-    strike_out: bool,
+    decorations: TextDecorations,
     color: BGRA8,
     text: String,
+}
+
+#[derive(Debug, Clone)]
+struct TextDecorations {
+    border: Vec2,
+    border_color: BGRA8,
+    // TODO: f32 for size
+    underline: bool,
+    underline_color: BGRA8,
+    strike_out: bool,
+    strike_out_color: BGRA8,
+}
+
+impl TextDecorations {
+    pub const fn none() -> Self {
+        Self {
+            border: Vec2::ZERO,
+            border_color: BGRA8::ZERO,
+            underline: false,
+            underline_color: BGRA8::ZERO,
+            strike_out: false,
+            strike_out_color: BGRA8::ZERO,
+        }
+    }
+}
+
+impl Default for TextDecorations {
+    fn default() -> Self {
+        Self::none()
+    }
 }
 
 // Shape segment behaviour:
@@ -134,7 +163,7 @@ impl ShapeSegment {
         fill_color: BGRA8,
     ) -> Self {
         Self {
-            bounding_box: { outline.bounding_box().clamp_to_positive() },
+            bounding_box: { outline.control_box().clamp_to_positive() },
             outline,
             stroke_x,
             stroke_y,
@@ -158,6 +187,10 @@ pub struct SubtitleContext {
 }
 
 impl SubtitleContext {
+    pub fn dpi_scale(&self) -> f32 {
+        self.dpi as f32 / 72.0
+    }
+
     pub fn padding_width(&self) -> f32 {
         self.padding_left + self.padding_right
     }
@@ -234,8 +267,7 @@ impl Subtitles {
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "this ".to_string(),
                         }),
@@ -244,8 +276,7 @@ impl Subtitles {
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x0000FFFF),
                             text: "is\n".to_string(),
                         }),
@@ -254,8 +285,7 @@ impl Subtitles {
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "mu".to_string(),
                         }),
@@ -264,8 +294,7 @@ impl Subtitles {
                             font_size: 48.0,
                             font_weight: 700,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "ltil".to_string(),
                         }),
@@ -274,8 +303,7 @@ impl Subtitles {
                             font_size: 80.0,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
                             text: "iね❌".to_string(),
                         }),
@@ -310,8 +338,14 @@ impl Subtitles {
                         font_size: 64.0,
                         font_weight: 400,
                         italic: false,
-                        underline: false,
-                        strike_out: false,
+                        decorations: TextDecorations {
+                            border: Vec2::new(2.0, 2.0),
+                            border_color: BGRA8::new(255, 0, 0, 255),
+                            underline: true,
+                            underline_color: BGRA8::new(255, 255, 255, 255),
+                            strike_out: true,
+                            strike_out_color: BGRA8::new(255, 255, 255, 255),
+                        },
                         color: BGRA8::from_rgba32(0x00FF00AA),
                         text: "this is for comparison".to_string(),
                     })],
@@ -328,8 +362,7 @@ impl Subtitles {
                         font_size: 64.0,
                         font_weight: 700,
                         italic: false,
-                        underline: false,
-                        strike_out: false,
+                        decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0xFFFFFFFF),
                         text: "this is bold..".to_string(),
                     })],
@@ -347,8 +380,7 @@ impl Subtitles {
                             font_size: 32.,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
                         }),
@@ -357,8 +389,7 @@ impl Subtitles {
                             font_size: 64.,
                             font_weight: 400,
                             italic: false,
-                            underline: false,
-                            strike_out: false,
+                            decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
                             text: "😭".to_string(),
                         }),
@@ -837,6 +868,72 @@ impl<'a> Renderer<'a> {
         (ox, oy)
     }
 
+    // TODO: move to painter?
+    fn draw_text_with_decoration(
+        &mut self,
+        x: i32,
+        y: i32,
+        painter: &mut Painter,
+        fonts: &[text::Font],
+        glyphs: &[text::Glyph],
+        color: BGRA8,
+        decoration: &TextDecorations,
+        scale: f32,
+    ) {
+        let border = decoration.border * scale;
+        if decoration.border_color.a > 0 || border.x.max(border.y) >= 1.0 {
+            // Draw the border first
+            // TODO: in reality the border should probably be blended with the text using
+            //       a substraction function (i.e. only draw the border where there is no glyph)
+            //       same thing applies to shadow
+            let mut x = x;
+            let mut rasterizer = NonZeroPolygonRasterizer::new();
+
+            for glyph in glyphs {
+                if let Some(outline) = fonts[glyph.font_index].glyph_outline(glyph.index) {
+                    let (one, two) = outline::stroke(&outline, border.x, border.y, 1.0);
+
+                    rasterizer.reset();
+                    for (a, b) in one.iter_contours().zip(two.iter_contours()) {
+                        rasterizer.append_polyline((x, y), &one.flatten_contour(a), false);
+                        rasterizer.append_polyline((x, y), &two.flatten_contour(b), true);
+                    }
+                    rasterizer.render_fill(painter, decoration.border_color);
+                }
+
+                x += glyph.x_advance >> 6;
+            }
+        }
+
+        let text_end_x = {
+            let mut end_x = x;
+            let mut it = glyphs.iter();
+            _ = it.next_back();
+            for glyph in it {
+                end_x += glyph.x_advance >> 6;
+            }
+            end_x += (glyphs
+                .last()
+                .map(|g| fonts[g.font_index].glyph_extents(g.index).width)
+                .unwrap_or(0)
+                >> 6) as i32;
+
+            end_x
+        };
+
+        if decoration.underline {
+            painter.horizontal_line(y, x, text_end_x, decoration.underline_color);
+        }
+
+        if decoration.strike_out {
+            let metrics = fonts[0].metrics();
+            let strike_y = y - (((metrics.height >> 1) + metrics.descender) >> 6) as i32;
+            painter.horizontal_line(strike_y, x, text_end_x, decoration.strike_out_color);
+        }
+
+        painter.text(x, y, fonts, glyphs, color);
+    }
+
     pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {
         if painter.height() == 0 || painter.height() == 0 {
             return;
@@ -1037,7 +1134,16 @@ impl<'a> Renderer<'a> {
                     match segment {
                         Segment::Text(t) => {
                             let (glyphs, fonts) = shaped_segment.glyphs_and_fonts.as_ref().unwrap();
-                            painter.text(x, y, fonts, glyphs, t.color);
+                            self.draw_text_with_decoration(
+                                x,
+                                y,
+                                painter,
+                                fonts,
+                                glyphs,
+                                t.color,
+                                &t.decorations,
+                                ctx.dpi_scale(),
+                            );
                         }
                         Segment::Shape(s) => {
                             let mut outline = s.outline.clone();

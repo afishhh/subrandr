@@ -4,7 +4,7 @@ use crate::{
     color::BGRA8,
     math::{CubicBezier, Point2},
     outline::{Outline, OutlineBuilder, SegmentDegree},
-    Segment, ShapeSegment, TextSegment, TextWrappingMode,
+    Segment, ShapeSegment, TextDecorations, TextSegment, TextWrappingMode,
 };
 
 use super::*;
@@ -367,8 +367,11 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                             font_size: current_style.fontsize,
                             font_weight: current_style.weight,
                             italic: current_style.italic,
-                            underline: current_style.underline,
-                            strike_out: current_style.strike_out,
+                            decorations: TextDecorations {
+                                underline: current_style.underline,
+                                strike_out: current_style.strike_out,
+                                ..Default::default()
+                            },
                             color: convert_ass_color(current_style.primary_colour),
                             text,
                         }))

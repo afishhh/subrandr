@@ -7,7 +7,7 @@
 use std::{fmt::Debug, rc::Rc};
 
 use color::{BlendMode, BGRA8};
-use math::{Point2, Vec2};
+use math::{Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::Srv3TextShadow;
@@ -480,11 +480,11 @@ struct MultilineTextShaper {
 #[derive(Debug)]
 struct ShapedLineSegment {
     glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
-    baseline_offset: (i32, i32),
+    baseline_offset: (Fixed<6>, Fixed<6>),
     paint_rect: PixelRect,
     corresponding_input_segment: usize,
     // Implementation details
-    max_bearing_y: i64,
+    max_bearing_y: Fixed<6>,
     corresponding_font_boundary: usize,
 }
 
@@ -564,8 +564,8 @@ impl MultilineTextShaper {
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut total_extents = TextExtents {
-            paint_width: 0,
-            paint_height: 0,
+            paint_width: Fixed::ZERO,
+            paint_height: Fixed::ZERO,
         };
         let mut total_rect = PixelRect {
             x: 0,
@@ -598,8 +598,8 @@ impl MultilineTextShaper {
 
             let mut segments: Vec<ShapedLineSegment> = vec![];
             let mut line_extents = TextExtents {
-                paint_height: 0,
-                paint_width: 0,
+                paint_height: Fixed::ZERO,
+                paint_width: Fixed::ZERO,
             };
 
             // TODO: These binary searches can be replaced by a pointer
@@ -622,7 +622,7 @@ impl MultilineTextShaper {
                 );
             }
 
-            let mut max_bearing_y = 0;
+            let mut max_bearing_y = Fixed::ZERO;
 
             for current_segment in starting_font_segment..self.segment_boundaries.len() {
                 let (segment, font_boundary) = &self.segment_boundaries[current_segment];
@@ -658,10 +658,10 @@ impl MultilineTextShaper {
                             .map(|x| {
                                 segment_fonts[x.font_index]
                                     .glyph_extents(x.index)
-                                    .horiBearingY
+                                    .hori_bearing_y
                             })
                             .max()
-                            .unwrap_or(0);
+                            .unwrap_or(Fixed::ZERO);
 
                         max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
 
@@ -682,14 +682,14 @@ impl MultilineTextShaper {
                             segments.push(ShapedLineSegment {
                                 glyphs_and_fonts: Some((rc_glyphs, segment_fonts)),
                                 baseline_offset: (
-                                    line_extents.paint_width / 64,
-                                    total_extents.paint_height / 64,
+                                    line_extents.paint_width,
+                                    total_extents.paint_height,
                                 ),
                                 paint_rect: PixelRect {
-                                    x: line_extents.paint_width / 64,
-                                    y: total_extents.paint_height / 64,
-                                    w: extents.paint_width as u32 / 64,
-                                    h: extents.paint_height as u32 / 64,
+                                    x: line_extents.paint_width.trunc_to_i32(),
+                                    y: total_extents.paint_height.trunc_to_i32(),
+                                    w: extents.paint_width.trunc_to_i32() as u32,
+                                    h: extents.paint_height.trunc_to_i32() as u32,
                                 },
                                 max_bearing_y: segment_max_bearing_y,
                                 corresponding_font_boundary: current_segment,
@@ -698,7 +698,7 @@ impl MultilineTextShaper {
                             });
                         } else {
                             let mut last_glyph_idx = 0;
-                            let mut x = 0;
+                            let mut x = Fixed::ZERO;
                             for (i, split_end) in self.intra_font_segment_splits
                                 [first_internal_split_idx..]
                                 .iter()
@@ -717,12 +717,12 @@ impl MultilineTextShaper {
                                     text::compute_extents_ex(true, &segment_fonts, &glyph_slice);
                                 segments.push(ShapedLineSegment {
                                     glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
-                                    baseline_offset: (x / 64, total_extents.paint_height / 64),
+                                    baseline_offset: (x, total_extents.paint_height),
                                     paint_rect: PixelRect {
-                                        x: x / 64,
-                                        y: total_extents.paint_height / 64,
-                                        w: extents.paint_width as u32 / 64,
-                                        h: extents.paint_height as u32 / 64,
+                                        x: x.trunc_to_i32(),
+                                        y: total_extents.paint_height.trunc_to_i32(),
+                                        w: extents.paint_width.trunc_to_i32() as u32,
+                                        h: extents.paint_height.trunc_to_i32() as u32,
                                     },
                                     max_bearing_y: segment_max_bearing_y,
                                     corresponding_font_boundary: current_segment,
@@ -751,16 +751,13 @@ impl MultilineTextShaper {
                     ShaperSegment::Shape(dim) => {
                         let logical_w = dim.w - (-dim.x).min(0) as u32;
                         let logical_h = dim.h - (-dim.y).min(0) as u32;
-                        let segment_max_bearing_y = (logical_h * 64) as i64;
+                        let segment_max_bearing_y = Fixed::new(logical_h as i32);
                         segments.push(ShapedLineSegment {
                             glyphs_and_fonts: None,
-                            baseline_offset: (
-                                line_extents.paint_width / 64,
-                                total_extents.paint_height / 64,
-                            ),
+                            baseline_offset: (line_extents.paint_width, total_extents.paint_height),
                             paint_rect: PixelRect {
-                                x: line_extents.paint_width / 64,
-                                y: total_extents.paint_height / 64,
+                                x: line_extents.paint_width.trunc_to_i32(),
+                                y: total_extents.paint_height.trunc_to_i32(),
                                 w: logical_w,
                                 h: logical_h,
                             },
@@ -771,7 +768,7 @@ impl MultilineTextShaper {
                         line_extents.paint_width += (logical_w * 64) as i32;
                         max_bearing_y = max_bearing_y.max(segment_max_bearing_y);
                         line_extents.paint_height =
-                            line_extents.paint_height.max((logical_h * 64) as i32);
+                            line_extents.paint_height.max(Fixed::new(logical_h as i32));
                     }
                 }
 
@@ -786,20 +783,19 @@ impl MultilineTextShaper {
 
             let aligning_x_offset = match line_alignment {
                 HorizontalAlignment::Left => 0,
-                HorizontalAlignment::Center => -line_extents.paint_width / 128,
-                HorizontalAlignment::Right => -line_extents.paint_width / 64,
+                HorizontalAlignment::Center => -line_extents.paint_width.trunc_to_i32() / 2,
+                HorizontalAlignment::Right => -line_extents.paint_width.trunc_to_i32(),
             };
 
             for segment in segments.iter_mut() {
                 segment.baseline_offset.0 += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset;
                 if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.1 +=
-                        ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
+                    segment.baseline_offset.1 += max_bearing_y - segment.max_bearing_y;
                 } else {
-                    segment.baseline_offset.1 += (max_bearing_y / 64) as i32;
+                    segment.baseline_offset.1 += max_bearing_y;
                 }
-                segment.paint_rect.y += ((max_bearing_y - segment.max_bearing_y) / 64) as i32;
+                segment.paint_rect.y += (max_bearing_y - segment.max_bearing_y).trunc_to_i32();
             }
 
             if !segments.is_empty() {
@@ -824,13 +820,14 @@ impl MultilineTextShaper {
                     .map(
                         |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
                             ShaperSegment::Text(f) => {
-                                x.paint_rect.y as i64 * 64 + f.metrics().height
+                                Fixed::new(x.paint_rect.y)
+                                    + Fixed::from_raw(f.metrics().height as i32)
                             }
-                            ShaperSegment::Shape(_) => (x.paint_rect.h * 64) as i64,
+                            ShaperSegment::Shape(_) => Fixed::new(x.paint_rect.h as i32),
                         },
                     )
                     .max()
-                    .unwrap_or(0) as i32;
+                    .unwrap_or(Fixed::ZERO);
             }
 
             total_extents.paint_width =
@@ -839,13 +836,13 @@ impl MultilineTextShaper {
             lines.push(ShapedLine {
                 segments,
                 paint_size: Size2 {
-                    w: (line_extents.paint_width / 64) as u32,
-                    h: (line_extents.paint_height / 64) as u32,
+                    w: line_extents.paint_width.trunc_to_i32() as u32,
+                    h: line_extents.paint_height.trunc_to_i32() as u32,
                 },
             });
         }
 
-        total_rect.h = (total_extents.paint_height / 64) as u32;
+        total_rect.h = total_extents.paint_height.trunc_to_i32() as u32;
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
@@ -910,10 +907,10 @@ impl<'a> Renderer<'a> {
         // TODO: Numbers chosen arbitrarily
         let ox = match horizontal {
             HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
-            HorizontalAlignment::Center => -extents.paint_width / 128,
-            HorizontalAlignment::Right => {
-                (-extents.paint_width + font.horizontal_extents().descender) / 64
-            }
+            HorizontalAlignment::Center => -extents.paint_width.trunc_to_i32() / 2,
+            HorizontalAlignment::Right => (-extents.paint_width
+                + Fixed::from_raw(font.horizontal_extents().descender))
+            .trunc_to_i32(),
         };
 
         let oy = match vertical {
@@ -927,8 +924,8 @@ impl<'a> Renderer<'a> {
 
     fn draw_text_full(
         &mut self,
-        x: i32,
-        y: i32,
+        x: Fixed<6>,
+        y: Fixed<6>,
         painter: &mut Painter,
         fonts: &[text::Font],
         glyphs: &[text::Glyph],
@@ -938,7 +935,7 @@ impl<'a> Renderer<'a> {
         scale: f32,
         ctx: &SubtitleContext,
     ) {
-        let image = text::render(fonts, glyphs);
+        let image = text::render(x.fract(), y.fract(), fonts, glyphs);
         let border = decoration.border * scale;
 
         // TODO: This should also draw an offset underline I think and possibly strike through
@@ -951,16 +948,16 @@ impl<'a> Renderer<'a> {
                     // equal to half the blur radius.
                     painter.blit_blurred_monochrome_text(
                         shadow.blur_radius / 2.0,
-                        x + shadow.offset.x as i32,
-                        y + shadow.offset.y as i32,
+                        (x + shadow.offset.x).trunc_to_i32(),
+                        (y + shadow.offset.y).trunc_to_i32(),
                         image.monochrome(),
                         shadow.color.to_bgr_bytes(),
                         BlendMode::Over,
                     );
                 } else {
                     painter.blit_monochrome_text(
-                        x + shadow.offset.x as i32,
-                        y + shadow.offset.y as i32,
+                        (x + shadow.offset.x).trunc_to_i32(),
+                        (y + shadow.offset.y).trunc_to_i32(),
                         image.monochrome(),
                         shadow.color,
                         BlendMode::Over,
@@ -997,8 +994,16 @@ impl<'a> Renderer<'a> {
 
                     rasterizer.reset();
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
-                        rasterizer.append_polyline((x >> 6, y), &one.flatten_contour(a), false);
-                        rasterizer.append_polyline((x >> 6, y), &two.flatten_contour(b), true);
+                        rasterizer.append_polyline(
+                            (x.trunc_to_i32(), y.trunc_to_i32()),
+                            &one.flatten_contour(a),
+                            false,
+                        );
+                        rasterizer.append_polyline(
+                            (x.trunc_to_i32(), y.trunc_to_i32()),
+                            &two.flatten_contour(b),
+                            true,
+                        );
                     }
                     rasterizer.render_fill(painter, decoration.border_color);
                 }
@@ -1011,26 +1016,39 @@ impl<'a> Renderer<'a> {
             let mut end_x = x;
             let mut it = glyphs.iter();
             if let Some(last) = it.next_back() {
-                end_x += fonts[last.font_index].glyph_extents(last.index).width as i32;
+                end_x += fonts[last.font_index].glyph_extents(last.index).width;
             }
             for glyph in it {
                 end_x += glyph.x_advance;
             }
 
-            end_x >> 6
+            // TODO: ceil_to_i32
+            end_x.round_to_i32()
         };
 
         if decoration.underline {
-            painter.horizontal_line(y, x, text_end_x, decoration.underline_color);
+            painter.horizontal_line(
+                y.trunc_to_i32(),
+                x.trunc_to_i32(),
+                text_end_x,
+                decoration.underline_color,
+            );
         }
 
         if decoration.strike_out {
             let metrics = fonts[0].metrics();
-            let strike_y = y - (((metrics.height >> 1) + metrics.descender) >> 6) as i32;
-            painter.horizontal_line(strike_y, x, text_end_x, decoration.strike_out_color);
+            let strike_y =
+                (y - Fixed::from_raw(((metrics.height >> 1) + metrics.descender) as i32))
+                    .trunc_to_i32();
+            painter.horizontal_line(
+                strike_y,
+                x.trunc_to_i32(),
+                text_end_x,
+                decoration.strike_out_color,
+            );
         }
 
-        painter.blit_text_image(x, y, &image, color);
+        painter.blit_text_image(x.trunc_to_i32(), y.trunc_to_i32(), &image, color);
     }
 
     pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {
@@ -1191,8 +1209,8 @@ impl<'a> Renderer<'a> {
                             paint_box.1 + shaped_segment.paint_rect.h as i32,
                             &format!(
                                 "{},{}",
-                                x + shaped_segment.baseline_offset.0,
-                                y + shaped_segment.baseline_offset.1
+                                shaped_segment.baseline_offset.0 + x,
+                                shaped_segment.baseline_offset.1 + y
                             ),
                             Alignment::TopLeft,
                             16.0,
@@ -1226,15 +1244,15 @@ impl<'a> Renderer<'a> {
                         );
 
                         painter.horizontal_line(
-                            y + shaped_segment.baseline_offset.1,
+                            (shaped_segment.baseline_offset.1 + y).trunc_to_i32(),
                             paint_box.0,
                             paint_box.0 + shaped_segment.paint_rect.w as i32,
                             BGRA8::from_rgba32(0x00FF00FF),
                         );
                     }
 
-                    let x = x + shaped_segment.baseline_offset.0;
-                    let y = y + shaped_segment.baseline_offset.1;
+                    let x = shaped_segment.baseline_offset.0 + x;
+                    let y = shaped_segment.baseline_offset.1 + y;
 
                     match segment {
                         Segment::Text(t) => {
@@ -1260,7 +1278,7 @@ impl<'a> Renderer<'a> {
                             if s.fill_color.a > 0 {
                                 for c in outline.iter_contours() {
                                     rasterizer.append_polyline(
-                                        (x, y),
+                                        (x.trunc_to_i32(), y.trunc_to_i32()),
                                         &outline.flatten_contour(c),
                                         false,
                                     );
@@ -1281,12 +1299,12 @@ impl<'a> Renderer<'a> {
                                 {
                                     rasterizer.reset();
                                     rasterizer.append_polyline(
-                                        (x, y),
+                                        (x.trunc_to_i32(), y.trunc_to_i32()),
                                         &stroked.0.flatten_contour(a),
                                         false,
                                     );
                                     rasterizer.append_polyline(
-                                        (x, y),
+                                        (x.trunc_to_i32(), y.trunc_to_i32()),
                                         &stroked.1.flatten_contour(b),
                                         true,
                                     );
@@ -1294,15 +1312,15 @@ impl<'a> Renderer<'a> {
                                 }
 
                                 painter.debug_stroke_outline(
-                                    x,
-                                    y,
+                                    x.trunc_to_i32(),
+                                    y.trunc_to_i32(),
                                     &stroked.0,
                                     BGRA8::from_rgba32(0xFF0000FF),
                                     false,
                                 );
                                 painter.debug_stroke_outline(
-                                    x,
-                                    y,
+                                    x.trunc_to_i32(),
+                                    y.trunc_to_i32(),
                                     &stroked.1,
                                     BGRA8::from_rgba32(0x0000FFFF),
                                     true,

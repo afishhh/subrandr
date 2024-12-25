@@ -306,6 +306,17 @@ impl Drop for Face {
     }
 }
 
+pub struct GlyphMetrics {
+    pub width: Fixed<6>,
+    pub height: Fixed<6>,
+    pub hori_bearing_x: Fixed<6>,
+    pub hori_bearing_y: Fixed<6>,
+    pub hori_advance: Fixed<6>,
+    pub vert_bearing_x: Fixed<6>,
+    pub vert_bearing_y: Fixed<6>,
+    pub vert_advance: Fixed<6>,
+}
+
 #[repr(C)]
 pub struct Font {
     // owned by hb_font
@@ -421,7 +432,7 @@ impl Font {
         (ft_face, self.hb_font)
     }
 
-    pub fn glyph_extents(&self, index: u32) -> FT_Glyph_Metrics_ {
+    pub fn glyph_extents(&self, index: u32) -> GlyphMetrics {
         let face = self.with_applied_size();
         let mut metrics = unsafe {
             fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
@@ -444,7 +455,16 @@ impl Font {
             scale_field!(vertAdvance);
         }
 
-        metrics
+        GlyphMetrics {
+            width: Fixed::from_raw(metrics.width as i32),
+            height: Fixed::from_raw(metrics.height as i32),
+            hori_bearing_x: Fixed::from_raw(metrics.horiBearingX as i32),
+            hori_bearing_y: Fixed::from_raw(metrics.horiBearingY as i32),
+            hori_advance: Fixed::from_raw(metrics.horiAdvance as i32),
+            vert_bearing_x: Fixed::from_raw(metrics.vertBearingX as i32),
+            vert_bearing_y: Fixed::from_raw(metrics.vertBearingY as i32),
+            vert_advance: Fixed::from_raw(metrics.vertAdvance as i32),
+        }
     }
 
     /// Gets the Outline associated with the glyph at `index`.

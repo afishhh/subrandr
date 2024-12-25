@@ -11,6 +11,7 @@ pub use font_select::*;
 
 use crate::{
     color::{BlendMode, BGRA8},
+    math::Fixed,
     util::{AnyError, OrderedF32},
 };
 
@@ -65,9 +66,8 @@ pub struct Glyph {
     pub index: hb_codepoint_t,
     /// Byte position where this glyph started in the original UTF-8 string
     pub cluster: usize,
-    // NOTE: hb_position_t seems to be a Fixed<6>
-    pub x_advance: hb_position_t,
-    pub y_advance: hb_position_t,
+    pub x_advance: Fixed<6>,
+    pub y_advance: Fixed<6>,
     pub x_offset: hb_position_t,
     pub y_offset: hb_position_t,
     pub font_index: usize,
@@ -83,8 +83,8 @@ impl Glyph {
         Self {
             index: info.codepoint,
             cluster: original_cluster,
-            x_advance: position.x_advance,
-            y_advance: position.y_advance,
+            x_advance: Fixed::from_raw(position.x_advance),
+            y_advance: Fixed::from_raw(position.y_advance),
             x_offset: position.x_offset,
             y_offset: position.y_offset,
             font_index,
@@ -96,10 +96,10 @@ pub fn compute_extents_ex(
     horizontal: bool,
     fonts: &[Font],
     glyphs: &[Glyph],
-) -> (TextExtents, (i32, i32)) {
+) -> (TextExtents, (Fixed<6>, Fixed<6>)) {
     let mut results = TextExtents {
-        paint_height: 0,
-        paint_width: 0,
+        paint_height: Fixed::ZERO,
+        paint_width: Fixed::ZERO,
     };
 
     let trailing_advance;
@@ -108,24 +108,24 @@ pub fn compute_extents_ex(
 
     if let Some(glyph) = glyphs.next_back() {
         let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
-        results.paint_height += extents.height.abs() as i32;
-        results.paint_width += extents.width as i32;
+        results.paint_height += extents.height.abs();
+        results.paint_width += extents.width;
         if horizontal {
-            trailing_advance = ((glyph.x_advance - extents.width as i32), 0);
+            trailing_advance = ((glyph.x_advance - extents.width), Fixed::ZERO);
         } else {
-            trailing_advance = (0, (glyph.y_advance - extents.height as i32));
+            trailing_advance = (Fixed::ZERO, (glyph.y_advance - extents.height));
         }
     } else {
-        trailing_advance = (0, 0);
+        trailing_advance = (Fixed::ZERO, Fixed::ZERO);
     }
 
     for glyph in glyphs {
         let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
         if horizontal {
-            results.paint_height = results.paint_height.max(extents.height.abs() as i32);
+            results.paint_height = results.paint_height.max(extents.height.abs());
             results.paint_width += glyph.x_advance;
         } else {
-            results.paint_width = results.paint_width.max(extents.width.abs() as i32);
+            results.paint_width = results.paint_width.max(extents.width.abs());
             results.paint_height += glyph.y_advance;
         }
     }
@@ -457,8 +457,8 @@ pub fn shape_text(font: &Font, text: &str) -> ShapedText {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextExtents {
-    pub paint_height: i32,
-    pub paint_width: i32,
+    pub paint_height: Fixed<6>,
+    pub paint_width: Fixed<6>,
 }
 
 struct GlyphBitmap {
@@ -586,15 +586,18 @@ impl Image {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
+pub fn render(xf: Fixed<6>, yf: Fixed<6>, fonts: &[Font], glyphs: &[Glyph]) -> Image {
     let mut result = Image {
         glyphs: Vec::new(),
         monochrome: OnceCell::new(),
     };
 
+    assert!((-Fixed::ONE..Fixed::ONE).contains(&xf));
+    assert!((-Fixed::ONE..Fixed::ONE).contains(&yf));
+
     unsafe {
-        let mut x = 0;
-        let mut y = 0;
+        let mut x = xf;
+        let mut y = yf;
         for shaped_glyph in glyphs {
             let font = &fonts[shaped_glyph.font_index];
             let face = font.with_applied_size();
@@ -629,7 +632,7 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
 
             let n_pixels = scaled_width as usize * scaled_height as usize;
             let mut glyph_result = GlyphBitmap {
-                offset: ((x >> 6) + ox, (y >> 6) + oy),
+                offset: (x.trunc_to_i32() + ox, y.trunc_to_i32() + oy),
                 width: scaled_width,
                 height: scaled_height,
                 data: if pixel_width == 1 {

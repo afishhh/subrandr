@@ -329,7 +329,12 @@ impl<'a> Painter<'a> {
         glyphs: &[text::Glyph],
         color: BGRA8,
     ) {
-        self.blit_text_image(x, y, &text::render(fonts, glyphs), color);
+        self.blit_text_image(
+            x,
+            y,
+            &text::render(Fixed::ZERO, Fixed::ZERO, fonts, glyphs),
+            color,
+        );
     }
 
     #[inline(always)]

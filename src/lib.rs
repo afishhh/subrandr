@@ -133,7 +133,7 @@ enum TextShadow {
 #[derive(Debug, Clone)]
 struct CssTextShadow {
     offset: Vec2,
-    blur_radius: Option<f32>,
+    blur_radius: f32,
     color: BGRA8,
 }
 
@@ -202,7 +202,11 @@ pub struct SubtitleContext {
 }
 
 impl SubtitleContext {
-    pub fn dpi_scale(&self) -> f32 {
+    pub fn ppi(&self) -> u32 {
+        self.dpi * 96 / 72
+    }
+
+    pub fn pixel_scale(&self) -> f32 {
         self.dpi as f32 / 72.0
     }
 
@@ -389,12 +393,12 @@ impl Subtitles {
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(48.0, 48.0),
-                                blur_radius: Some(10.0),
+                                blur_radius: 20.0,
                                 color: BGRA8::new(255, 0, 0, 255),
                             }),
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(96.0, 96.0),
-                                blur_radius: None,
+                                blur_radius: 20.0,
                                 color: BGRA8::new(0, 0, 255, 255),
                             }),
                         ],
@@ -942,9 +946,13 @@ impl<'a> Renderer<'a> {
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
             if shadow.color.a > 0 {
-                if let Some(radius) = shadow.blur_radius {
+                if shadow.blur_radius > f32::EPSILON {
+                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
+                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
+                    // ... by applying to the shadow a Gaussian blur with a standard deviation
+                    // equal to half the blur radius.
                     painter.blit_blurred_monochrome_text(
-                        radius.sqrt(),
+                        shadow.blur_radius / 2.0,
                         x + shadow.offset.x as i32,
                         y + shadow.offset.y as i32,
                         image.monochrome(),
@@ -1054,7 +1062,7 @@ impl<'a> Renderer<'a> {
 
             self.debug_text(
                 (ctx.padding_left + ctx.video_width) as i32,
-                20 * ctx.dpi as i32 / 72,
+                (20.0 * ctx.pixel_scale()) as i32,
                 &format!(
                     "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                     ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
@@ -1066,7 +1074,7 @@ impl<'a> Renderer<'a> {
             );
         }
 
-        let shape_scale = ctx.dpi as f32 / 72.0;
+        let shape_scale = ctx.pixel_scale();
 
         {
             for event in self
@@ -1247,7 +1255,7 @@ impl<'a> Renderer<'a> {
                                 t.color,
                                 &t.decorations,
                                 &t.shadows,
-                                ctx.dpi_scale(),
+                                ctx.pixel_scale(),
                                 ctx,
                             );
                         }

@@ -55,10 +55,10 @@ fn calculate_font_scale(
 
 fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     calculate_font_scale(
-        to_css_pixels(ctx.video_width, ctx.dpi),
-        to_css_pixels(ctx.video_height, ctx.dpi),
-        to_css_pixels(ctx.player_width(), ctx.dpi),
-        to_css_pixels(ctx.player_height(), ctx.dpi),
+        to_css_pixels(ctx.video_width, ctx.ppi()),
+        to_css_pixels(ctx.video_height, ctx.ppi()),
+        to_css_pixels(ctx.player_width(), ctx.ppi()),
+        to_css_pixels(ctx.player_height(), ctx.ppi()),
     )
 }
 
@@ -77,16 +77,16 @@ fn font_size_to_pixels(size: u16) -> f32 {
 }
 
 // 1px = 1/96in
-fn to_css_pixels(real_pixels: f32, dpi: u32) -> f32 {
-    (real_pixels / dpi as f32) * 96.0
+fn to_css_pixels(real_pixels: f32, ppi: u32) -> f32 {
+    real_pixels * 96.0 / ppi as f32
 }
 
-fn to_real_pixels(css_pixels: f32, dpi: u32) -> f32 {
-    css_pixels * (dpi as f32 / 96.0)
+fn to_real_pixels(css_pixels: f32, ppi: u32) -> f32 {
+    css_pixels * ppi as f32 / 96.0
 }
 
-fn css_pixels_to_dpi72(value: f32) -> f32 {
-    value * (72.0 / 96.0)
+fn pixels_to_points(pixels: f32) -> f32 {
+    pixels * 96.0 / 72.0
 }
 
 #[derive(Debug, Clone)]
@@ -117,7 +117,7 @@ impl Srv3TextShadow {
                 while x <= t {
                     out.push(CssTextShadow {
                         offset: Vec2::new(to_real_pixels(x, ctx.dpi), to_real_pixels(x, ctx.dpi)),
-                        blur_radius: None,
+                        blur_radius: 0.0,
                         color: self.color,
                     });
                     x += step;
@@ -127,12 +127,12 @@ impl Srv3TextShadow {
                 let offset = Vec2::new(to_real_pixels(e, ctx.dpi), to_real_pixels(e, ctx.dpi));
                 out.push(CssTextShadow {
                     offset,
-                    blur_radius: None,
+                    blur_radius: 0.0,
                     color: self.color,
                 });
                 out.push(CssTextShadow {
                     offset: -offset,
-                    blur_radius: None,
+                    blur_radius: 0.0,
                     color: self.color,
                 });
             }
@@ -140,17 +140,17 @@ impl Srv3TextShadow {
                 for _ in 0..5 {
                     out.push(CssTextShadow {
                         offset: Vec2::ZERO,
-                        blur_radius: Some(to_real_pixels(l, ctx.dpi)),
+                        blur_radius: l,
                         color: self.color,
                     })
                 }
             }
             EdgeType::SoftShadow => {
-                let offset = Vec2::new(to_real_pixels(l, ctx.dpi), to_real_pixels(l, ctx.dpi));
+                let offset = Vec2::new(to_real_pixels(l, ctx.ppi()), to_real_pixels(l, ctx.ppi()));
                 while t <= c {
                     out.push(CssTextShadow {
                         offset,
-                        blur_radius: Some(to_real_pixels(t, ctx.dpi)),
+                        blur_radius: t,
                         color: self.color,
                     });
                     t += a;
@@ -196,7 +196,7 @@ pub fn convert(document: Document) -> Subtitles {
             }
             segments.push(crate::Segment::Text(TextSegment {
                 font: font_style_to_name(segment.pen().font_style).to_owned(),
-                font_size: font_size_to_pixels(segment.pen().font_size) * 0.749_999_4,
+                font_size: pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75),
                 font_weight: if segment.pen().bold { 700 } else { 400 },
                 italic: segment.pen().italic,
                 decorations: TextDecorations {

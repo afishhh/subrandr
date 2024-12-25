@@ -37,6 +37,8 @@ int main() {
     exit(1);
 
   sbr_subtitle_context ctx = {
+    // this is **dots per inch**, not **pixels per inch**
+    // if you have pixels per inch: dpi = ppi * 72 / 96
     .dpi = 144,
     .video_width = 1920.0,
     .video_height = 1080.0,
@@ -68,5 +70,12 @@ int main() {
 
     /* blit bitmap to the screen OVER the video */
     /* note: OVER is an alpha blending function */
+    /* note: bitmap is already premultiplied, use premultiplied blending function */
+
+    // some time later
+    sbr_renderer_destroy(renderer);
+    // destroying subtitles before the renderer is undefined behaviour
+    // (dangling Rust reference)
+    sbr_subtitles_destroy(renderer);
 }
 ```

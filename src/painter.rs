@@ -1,9 +1,9 @@
 use crate::{
-    color::{BGRA8Slice, BlendMode, BGRA8},
+    color::{BGRA8Slice, BlendMode, Premultiply, BGRA8},
     math::*,
     outline::{self, Outline},
     rasterize, text,
-    util::{hsl_to_rgb, rgb_to_hsl},
+    util::{calculate_blit_rectangle, hsl_to_rgb, rgb_to_hsl, BlitRectangle},
 };
 
 pub trait AsBGRA8Buffer {
@@ -332,6 +332,24 @@ impl<'a> Painter<'a> {
         self.blit_text_image(x, y, &text::render(fonts, glyphs), color);
     }
 
+    #[inline(always)]
+    fn blit_rectangle_with(
+        &self,
+        x: i32,
+        y: i32,
+        other_width: u32,
+        other_height: u32,
+    ) -> Option<BlitRectangle> {
+        calculate_blit_rectangle(
+            x,
+            y,
+            self.width as usize,
+            self.height as usize,
+            other_width as usize,
+            other_height as usize,
+        )
+    }
+
     pub fn blit_text_image(&mut self, x: i32, y: i32, image: &text::Image, color: BGRA8) {
         image.blit(
             x,
@@ -355,24 +373,20 @@ impl<'a> Painter<'a> {
         color: BGRA8,
         blend: BlendMode,
     ) {
-        // TODO: Extract these calculations to a "safe_blit_rectangle" function
-        let isx = if x < 0 { (-x) as usize } else { 0 };
-        let isy = if y < 0 { (-y) as usize } else { 0 };
-        let msx = (width as i32).min(self.width as i32 - x);
-        let msy = (height as i32).min(self.height as i32 - y);
-        if msx <= 0 || msy <= 0 {
+        let Some(BlitRectangle { xs, ys }) = self.blit_rectangle_with(x, y, width, height) else {
             return;
-        }
-        let msx = msx as usize;
-        let msy = msy as usize;
+        };
 
-        for sy in isy..msy {
-            for sx in isx..msx {
+        for sy in ys {
+            for sx in xs.clone() {
                 let si = sy * width as usize + sx;
                 let di = (y + sy as i32) as usize * self.width as usize + (x + sx as i32) as usize;
                 // TODO: is better accuracy then a simple u8*u8 mul for alpha required?
                 //       if not then this could also be done instead of blend_with_parts...
-                blend.blend(&mut self.buffer[di], color.mul_alpha(buffer[si]));
+                blend.blend(
+                    &mut self.buffer[di],
+                    color.mul_alpha(buffer[si]).premultiply(),
+                );
             }
         }
     }
@@ -386,6 +400,54 @@ impl<'a> Painter<'a> {
         blend: BlendMode,
     ) {
         self.blit_monochrome(
+            x + text.offset.0,
+            y + text.offset.1,
+            &text.data,
+            text.width,
+            text.height,
+            color,
+            blend,
+        );
+    }
+
+    // TODO: A Bitmap<> type would be really useful, not sure what the design should be though.
+    pub fn blit_blurred_monochrome(
+        &mut self,
+        sigma: f32,
+        x: i32,
+        y: i32,
+        buffer: &[u8],
+        width: u32,
+        height: u32,
+        color: [u8; 3],
+        blend: BlendMode,
+    ) {
+        rasterize::monochrome_gaussian_blit(
+            sigma,
+            x as isize,
+            y as isize,
+            self.buffer,
+            self.width as usize,
+            self.height as usize,
+            buffer,
+            width as usize,
+            height as usize,
+            color,
+            blend,
+        );
+    }
+
+    pub fn blit_blurred_monochrome_text(
+        &mut self,
+        sigma: f32,
+        x: i32,
+        y: i32,
+        text: &text::MonochromeImage,
+        color: [u8; 3],
+        blend: BlendMode,
+    ) {
+        self.blit_blurred_monochrome(
+            sigma,
             x + text.offset.0,
             y + text.offset.1,
             &text.data,

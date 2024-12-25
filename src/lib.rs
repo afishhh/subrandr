@@ -133,7 +133,7 @@ enum TextShadow {
 #[derive(Debug, Clone)]
 struct CssTextShadow {
     offset: Vec2,
-    // TODO: blur
+    blur_radius: Option<f32>,
     color: BGRA8,
 }
 
@@ -375,7 +375,7 @@ impl Subtitles {
                     start: 0,
                     end: 600000,
                     x: 0.2,
-                    y: 0.7,
+                    y: 0.9,
                     alignment: Alignment::BottomLeft,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment::Text(TextSegment {
@@ -384,18 +384,20 @@ impl Subtitles {
                         font_weight: 400,
                         italic: false,
                         decorations: TextDecorations::none(),
-                        color: BGRA8::from_rgba32(0x00FF00FF),
+                        color: BGRA8::from_rgba32(0x00FF0099),
                         text: "with shadows".to_string(),
-                        shadows: Vec::new(), // shadows: vec![
-                                             //     TextShadow {
-                                             //         offset: Vec2::new(4.0, 4.0),
-                                             //         color: BGRA8::from_rgba32(0xFF0000FF),
-                                             //     },
-                                             //     TextShadow {
-                                             //         offset: Vec2::new(8.0, 8.0),
-                                             //         color: BGRA8::from_rgba32(0x0000FFFF),
-                                             //     },
-                                             // ],
+                        shadows: vec![
+                            TextShadow::Css(CssTextShadow {
+                                offset: Vec2::new(48.0, 48.0),
+                                blur_radius: Some(10.0),
+                                color: BGRA8::new(255, 0, 0, 255),
+                            }),
+                            TextShadow::Css(CssTextShadow {
+                                offset: Vec2::new(96.0, 96.0),
+                                blur_radius: None,
+                                color: BGRA8::new(0, 0, 255, 255),
+                            }),
+                        ],
                     })],
                 },
                 Event {
@@ -937,13 +939,26 @@ impl<'a> Renderer<'a> {
 
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
-            painter.blit_monochrome_text(
-                x + shadow.offset.x as i32,
-                y + shadow.offset.y as i32,
-                image.monochrome(),
-                shadow.color,
-                BlendMode::Over,
-            );
+            if shadow.color.a > 0 {
+                if let Some(sigma) = shadow.blur_radius {
+                    painter.blit_blurred_monochrome_text(
+                        sigma,
+                        x + shadow.offset.x as i32,
+                        y + shadow.offset.y as i32,
+                        image.monochrome(),
+                        shadow.color.to_bgr_bytes(),
+                        BlendMode::Over,
+                    );
+                } else {
+                    painter.blit_monochrome_text(
+                        x + shadow.offset.x as i32,
+                        y + shadow.offset.y as i32,
+                        image.monochrome(),
+                        shadow.color,
+                        BlendMode::Over,
+                    );
+                }
+            }
         };
 
         let mut out = Vec::new();

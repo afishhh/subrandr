@@ -4,6 +4,9 @@ use crate::{
     Painter,
 };
 
+mod blur;
+pub use blur::*;
+
 #[derive(Debug, Clone)]
 struct Bresenham {
     dx: i32,

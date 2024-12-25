@@ -575,10 +575,10 @@ impl Image {
 
                     let si = y * glyph.width as usize + x;
                     let ([b, g, r], a) = match &glyph.data {
-                        BufferData::Monochrome(pixels) => (
-                            [color[0], color[1], color[2]],
-                            (pixels[si] as f32) / 255.0 * alpha,
-                        ),
+                        BufferData::Monochrome(pixels) => {
+                            let na = (pixels[si] as f32) / 255.0 * alpha;
+                            (color.map(|c| (c as f32 * na) as u8), na)
+                        }
                         BufferData::Color(pixels) => (
                             pixels[si].to_bgr_bytes(),
                             (pixels[si].a as f32) / 255.0 * alpha,
@@ -649,7 +649,10 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
 
             let buffer_data = match &mut glyph_result.data {
                 BufferData::Monochrome(vec) => vec.spare_capacity_mut(),
-                BufferData::Color(vec) => std::mem::transmute(vec.spare_capacity_mut()),
+                BufferData::Color(vec) => std::slice::from_raw_parts_mut(
+                    vec.spare_capacity_mut().as_mut_ptr() as *mut MaybeUninit<u8>,
+                    vec.capacity() * std::mem::size_of::<BGRA8>(),
+                ),
             };
 
             for biy in 0..scaled_height {

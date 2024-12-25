@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 #[allow(clippy::upper_case_acronyms)]
 #[repr(C, align(4))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +83,35 @@ impl BGRA8Slice for [BGRA8] {
     }
 }
 
+pub trait Premultiply: Debug + Clone + Copy {
+    fn premultiply(self) -> Premultiplied<Self>;
+    fn unpremultiply(premultiplied: Premultiplied<Self>) -> Self;
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct Premultiplied<T: Premultiply>(pub T);
+
+impl Premultiply for BGRA8 {
+    fn premultiply(self) -> Premultiplied<Self> {
+        Premultiplied(Self {
+            b: ((self.b as u16 * self.a as u16) / 255) as u8,
+            g: ((self.g as u16 * self.a as u16) / 255) as u8,
+            r: ((self.r as u16 * self.a as u16) / 255) as u8,
+            a: self.a,
+        })
+    }
+
+    fn unpremultiply(premultiplied: Premultiplied<Self>) -> Self {
+        Self {
+            b: (premultiplied.0.b as u16 * 255 / premultiplied.0.a as u16) as u8,
+            g: (premultiplied.0.g as u16 * 255 / premultiplied.0.a as u16) as u8,
+            r: (premultiplied.0.r as u16 * 255 / premultiplied.0.a as u16) as u8,
+            a: premultiplied.0.a,
+        }
+    }
+}
+
 #[inline(always)]
 fn srgb_to_linear(color: u8) -> f32 {
     (color as f32 / 255.0).powf(1.0 / 2.2)
@@ -88,7 +119,7 @@ fn srgb_to_linear(color: u8) -> f32 {
 
 #[inline(always)]
 fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
-    alpha * src + (1.0 - alpha) * dst
+    src + (1.0 - alpha) * dst
 }
 
 #[inline(always)]
@@ -114,8 +145,6 @@ fn linear_to_color([b, g, r]: [f32; 3], a: f32) -> BGRA8 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {
-    /// out = in
-    None,
     /// out = over(out, in)
     Over,
 }
@@ -123,7 +152,6 @@ pub enum BlendMode {
 impl BlendMode {
     pub fn blend_with_parts(self, b: &mut BGRA8, ac: [u8; 3], aa: f32) {
         match self {
-            Self::None => *b = BGRA8::new(ac[0], ac[1], ac[2], (aa * 255.0) as u8),
             Self::Over => {
                 let ([bb, bg, br], ba) = color_to_linear(*b);
                 let [ab, ag, ar] = ac.map(srgb_to_linear);
@@ -139,7 +167,10 @@ impl BlendMode {
         }
     }
 
-    pub fn blend(self, b: &mut BGRA8, a: BGRA8) {
+    // FIXME: b should also be Premultiplied<BGRA8> but for **legacy reasons**
+    //        &(mut?) [BGRA8] buffers are implicitly treated as premultiplied
+    //        (read: I don't want to change all that code again)
+    pub fn blend(self, b: &mut BGRA8, Premultiplied(a): Premultiplied<BGRA8>) {
         self.blend_with_parts(b, [a.b, a.g, a.r], a.a as f32 / 255.0);
     }
 }

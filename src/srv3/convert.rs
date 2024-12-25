@@ -122,6 +122,7 @@ impl Srv3TextShadow {
                 while x <= t {
                     out.push(CssTextShadow {
                         offset: Vec2::new(to_real_pixels(x, ctx.dpi), to_real_pixels(x, ctx.dpi)),
+                        blur_radius: None,
                         color: self.color,
                     });
                     x += step;
@@ -131,10 +132,12 @@ impl Srv3TextShadow {
                 let offset = Vec2::new(to_real_pixels(e, ctx.dpi), to_real_pixels(e, ctx.dpi));
                 out.push(CssTextShadow {
                     offset,
+                    blur_radius: None,
                     color: self.color,
                 });
                 out.push(CssTextShadow {
                     offset: -offset,
+                    blur_radius: None,
                     color: self.color,
                 });
             }

@@ -7,7 +7,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     mem::MaybeUninit,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
 };
 
 mod rcarray;
@@ -29,6 +29,35 @@ pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &m
 
 pub const fn ref_to_slice<T>(reference: &T) -> &[T; 1] {
     unsafe { std::mem::transmute(reference) }
+}
+
+pub struct BlitRectangle {
+    pub xs: Range<usize>,
+    pub ys: Range<usize>,
+}
+
+pub fn calculate_blit_rectangle(
+    x: i32,
+    y: i32,
+    target_width: usize,
+    target_height: usize,
+    source_width: usize,
+    source_height: usize,
+) -> Option<BlitRectangle> {
+    let isx = if x < 0 { (-x) as usize } else { 0 };
+    let isy = if y < 0 { (-y) as usize } else { 0 };
+    let msx = (source_width as i32).min(target_width as i32 - x);
+    let msy = (source_height as i32).min(target_height as i32 - y);
+    if msx <= 0 || msy <= 0 {
+        return None;
+    }
+    let msx = msx as usize;
+    let msy = msy as usize;
+
+    Some(BlitRectangle {
+        xs: isx..msx,
+        ys: isy..msy,
+    })
 }
 
 pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {

@@ -98,15 +98,10 @@ pub struct Srv3TextShadow {
 
 impl Srv3TextShadow {
     pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<CssTextShadow>) {
-        let a = calculate_font_scale(
-            ctx.video_width,
-            ctx.video_height,
-            ctx.player_width(),
-            ctx.player_height(),
-        ) / 32.0;
+        let a = font_scale_from_ctx(ctx) / 32.0;
         let e = a.max(1.0);
         let l = (2.0 * a).max(1.0);
-        let t = (3.0 * a).max(1.0);
+        let mut t = (3.0 * a).max(1.0);
         let c = (5.0 * a).max(1.0);
 
         match self.kind {
@@ -141,8 +136,26 @@ impl Srv3TextShadow {
                     color: self.color,
                 });
             }
-            EdgeType::Glow => (),       // todo!(),
-            EdgeType::SoftShadow => (), // ,
+            EdgeType::Glow => {
+                for _ in 0..5 {
+                    out.push(CssTextShadow {
+                        offset: Vec2::ZERO,
+                        blur_radius: Some(to_real_pixels(l, ctx.dpi)),
+                        color: self.color,
+                    })
+                }
+            }
+            EdgeType::SoftShadow => {
+                let offset = Vec2::new(to_real_pixels(l, ctx.dpi), to_real_pixels(l, ctx.dpi));
+                while t <= c {
+                    out.push(CssTextShadow {
+                        offset,
+                        blur_radius: Some(to_real_pixels(t, ctx.dpi)),
+                        color: self.color,
+                    });
+                    t += a;
+                }
+            }
         }
     }
 }
@@ -175,9 +188,10 @@ pub fn convert(document: Document) -> Subtitles {
         for segment in event.segments.iter() {
             let mut shadows = Vec::new();
             if segment.pen().edge_type != EdgeType::None {
+                let edge_color = BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000);
                 shadows.push(crate::TextShadow::Srv3(Srv3TextShadow {
                     kind: segment.pen().edge_type,
-                    color: BGRA8::from_rgba32(segment.pen().edge_color),
+                    color: edge_color,
                 }));
             }
             segments.push(crate::Segment::Text(TextSegment {

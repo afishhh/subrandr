@@ -853,6 +853,8 @@ impl MultilineTextShaper {
     }
 }
 
+const DRAW_LAYOUT_DEBUG_INFO: bool = false;
+
 pub struct Renderer<'a> {
     fonts: text::FontSelect,
     dpi: u32,
@@ -940,9 +942,9 @@ impl<'a> Renderer<'a> {
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
             if shadow.color.a > 0 {
-                if let Some(sigma) = shadow.blur_radius {
+                if let Some(radius) = shadow.blur_radius {
                     painter.blit_blurred_monochrome_text(
-                        sigma,
+                        radius.sqrt(),
                         x + shadow.offset.x as i32,
                         y + shadow.offset.y as i32,
                         image.monochrome(),
@@ -967,7 +969,7 @@ impl<'a> Renderer<'a> {
                 TextShadow::Css(css_shadow) => draw_css_shadow(css_shadow),
                 TextShadow::Srv3(srv3_shadow) => {
                     srv3_shadow.to_css(ctx, &mut out);
-                    for css_shadow in &out {
+                    for css_shadow in out.iter().rev() {
                         draw_css_shadow(css_shadow)
                     }
                     out.clear();
@@ -1036,31 +1038,33 @@ impl<'a> Renderer<'a> {
         painter.clear(BGRA8::ZERO);
         self.dpi = ctx.dpi;
 
-        self.debug_text(
-            (ctx.padding_left + ctx.video_width) as i32,
-            0,
-            &format!(
-                "{:.2}x{:.2} dpi:{}",
-                ctx.video_width, ctx.video_height, ctx.dpi
-            ),
-            Alignment::TopRight,
-            16.0,
-            BGRA8::from_rgba32(0xFFFFFFFF),
-            painter,
-        );
+        if DRAW_LAYOUT_DEBUG_INFO {
+            self.debug_text(
+                (ctx.padding_left + ctx.video_width) as i32,
+                0,
+                &format!(
+                    "{:.2}x{:.2} dpi:{}",
+                    ctx.video_width, ctx.video_height, ctx.dpi
+                ),
+                Alignment::TopRight,
+                16.0,
+                BGRA8::from_rgba32(0xFFFFFFFF),
+                painter,
+            );
 
-        self.debug_text(
-            (ctx.padding_left + ctx.video_width) as i32,
-            20 * ctx.dpi as i32 / 72,
-            &format!(
-                "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
-                ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
-            ),
-            Alignment::TopRight,
-            16.0,
-            BGRA8::from_rgba32(0xFFFFFFFF),
-            painter,
-        );
+            self.debug_text(
+                (ctx.padding_left + ctx.video_width) as i32,
+                20 * ctx.dpi as i32 / 72,
+                &format!(
+                    "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                    ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
+                ),
+                Alignment::TopRight,
+                16.0,
+                BGRA8::from_rgba32(0xFFFFFFFF),
+                painter,
+            );
+        }
 
         let shape_scale = ctx.dpi as f32 / 72.0;
 
@@ -1122,13 +1126,15 @@ impl<'a> Renderer<'a> {
                         VerticalAlignment::Bottom => -(total_rect.h as i32),
                     };
 
-                painter.stroke_whrect(
-                    x + total_rect.x - 1,
-                    y + total_rect.y - 1,
-                    total_rect.w + 2,
-                    total_rect.h + 2,
-                    BGRA8::from_rgba32(0xFF00FFFF),
-                );
+                if DRAW_LAYOUT_DEBUG_INFO {
+                    painter.stroke_whrect(
+                        x + total_rect.x - 1,
+                        y + total_rect.y - 1,
+                        total_rect.w + 2,
+                        total_rect.h + 2,
+                        BGRA8::from_rgba32(0xFF00FFFF),
+                    );
+                }
 
                 let total_position_debug_pos = match vertical_alignment {
                     VerticalAlignment::Top => (total_rect.h as i32 + 20, Alignment::Top),
@@ -1138,21 +1144,23 @@ impl<'a> Renderer<'a> {
                     VerticalAlignment::Bottom => (-32, Alignment::Bottom),
                 };
 
-                self.debug_text(
-                    x + total_rect.x + total_rect.w as i32 / 2,
-                    y + total_rect.y + total_position_debug_pos.0,
-                    &format!(
-                        "x:{} y:{} w:{} h:{}",
-                        x + total_rect.x,
-                        y + total_rect.y,
-                        total_rect.w,
-                        total_rect.h
-                    ),
-                    total_position_debug_pos.1,
-                    16.0,
-                    BGRA8::from_rgba32(0xFF00FFFF),
-                    painter,
-                );
+                if DRAW_LAYOUT_DEBUG_INFO {
+                    self.debug_text(
+                        x + total_rect.x + total_rect.w as i32 / 2,
+                        y + total_rect.y + total_position_debug_pos.0,
+                        &format!(
+                            "x:{} y:{} w:{} h:{}",
+                            x + total_rect.x,
+                            y + total_rect.y,
+                            total_rect.w,
+                            total_rect.h
+                        ),
+                        total_position_debug_pos.1,
+                        16.0,
+                        BGRA8::from_rgba32(0xFF00FFFF),
+                        painter,
+                    );
+                }
 
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
@@ -1162,65 +1170,67 @@ impl<'a> Renderer<'a> {
                         y + shaped_segment.paint_rect.y,
                     );
 
-                    self.debug_text(
-                        paint_box.0,
-                        paint_box.1,
-                        &format!(
-                            "{},{}",
-                            x + shaped_segment.paint_rect.x,
-                            y + shaped_segment.paint_rect.y
-                        ),
-                        Alignment::BottomLeft,
-                        16.0,
-                        BGRA8::from_rgba32(0xFF0000FF),
-                        painter,
-                    );
+                    if DRAW_LAYOUT_DEBUG_INFO {
+                        self.debug_text(
+                            paint_box.0,
+                            paint_box.1,
+                            &format!(
+                                "{},{}",
+                                x + shaped_segment.paint_rect.x,
+                                y + shaped_segment.paint_rect.y
+                            ),
+                            Alignment::BottomLeft,
+                            16.0,
+                            BGRA8::from_rgba32(0xFF0000FF),
+                            painter,
+                        );
 
-                    self.debug_text(
-                        paint_box.0,
-                        paint_box.1 + shaped_segment.paint_rect.h as i32,
-                        &format!(
-                            "{},{}",
-                            x + shaped_segment.baseline_offset.0,
-                            y + shaped_segment.baseline_offset.1
-                        ),
-                        Alignment::TopLeft,
-                        16.0,
-                        BGRA8::from_rgba32(0xFF0000FF),
-                        painter,
-                    );
+                        self.debug_text(
+                            paint_box.0,
+                            paint_box.1 + shaped_segment.paint_rect.h as i32,
+                            &format!(
+                                "{},{}",
+                                x + shaped_segment.baseline_offset.0,
+                                y + shaped_segment.baseline_offset.1
+                            ),
+                            Alignment::TopLeft,
+                            16.0,
+                            BGRA8::from_rgba32(0xFF0000FF),
+                            painter,
+                        );
 
-                    self.debug_text(
-                        paint_box.0 + shaped_segment.paint_rect.w as i32,
-                        paint_box.1,
-                        &if let Segment::Text(segment) = segment {
-                            format!(
-                                "{:.0}pt",
-                                self.subs.class.get_font_size(ctx, event, segment)
-                            )
-                        } else {
-                            "shape".to_owned()
-                        },
-                        Alignment::BottomRight,
-                        16.0,
-                        BGRA8::from_rgba32(0xFFFFFFFF),
-                        painter,
-                    );
+                        self.debug_text(
+                            paint_box.0 + shaped_segment.paint_rect.w as i32,
+                            paint_box.1,
+                            &if let Segment::Text(segment) = segment {
+                                format!(
+                                    "{:.0}pt",
+                                    self.subs.class.get_font_size(ctx, event, segment)
+                                )
+                            } else {
+                                "shape".to_owned()
+                            },
+                            Alignment::BottomRight,
+                            16.0,
+                            BGRA8::from_rgba32(0xFFFFFFFF),
+                            painter,
+                        );
 
-                    painter.stroke_whrect(
-                        paint_box.0,
-                        paint_box.1,
-                        shaped_segment.paint_rect.w,
-                        shaped_segment.paint_rect.h,
-                        BGRA8::from_rgba32(0x0000FFFF),
-                    );
+                        painter.stroke_whrect(
+                            paint_box.0,
+                            paint_box.1,
+                            shaped_segment.paint_rect.w,
+                            shaped_segment.paint_rect.h,
+                            BGRA8::from_rgba32(0x0000FFFF),
+                        );
 
-                    painter.horizontal_line(
-                        y + shaped_segment.baseline_offset.1,
-                        paint_box.0,
-                        paint_box.0 + shaped_segment.paint_rect.w as i32,
-                        BGRA8::from_rgba32(0x00FF00FF),
-                    );
+                        painter.horizontal_line(
+                            y + shaped_segment.baseline_offset.1,
+                            paint_box.0,
+                            paint_box.0 + shaped_segment.paint_rect.w as i32,
+                            BGRA8::from_rgba32(0x00FF00FF),
+                        );
+                    }
 
                     let x = x + shaped_segment.baseline_offset.0;
                     let y = y + shaped_segment.baseline_offset.1;

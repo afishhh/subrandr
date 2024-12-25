@@ -520,7 +520,17 @@ impl MonochromeImage {
                         }
                     }
                 }
-                BufferData::Color(vec) => todo!(),
+                BufferData::Color(source) => {
+                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
+                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
+                    for sy in 0..bitmap.height as usize {
+                        for sx in 0..bitmap.width as usize {
+                            let si = sy * bitmap.width as usize + sx;
+                            let di = (offy + sy) * result.width as usize + (offx + sx);
+                            result.data[di] = source[si].a;
+                        }
+                    }
+                }
             }
         }
 

@@ -14,6 +14,12 @@ fn calculate_gassian_kernel(sigma: f32) -> Vec<f32> {
             factor * std::f32::consts::E.powf((-x * x) as f32 * sigmasq2inv);
     }
 
+    // normalize the kernel to avoid darkening of the blurred image
+    let sum = kernel.iter().sum::<f32>();
+    for v in kernel.iter_mut() {
+        *v /= sum;
+    }
+
     kernel
 }
 
@@ -42,35 +48,38 @@ pub fn monochrome_gaussian_blit(
             let mut khere = 0.0;
             for iy in -pad..=pad {
                 let ky = kernel[(iy + pad) as usize];
-                for ix in -pad..=pad {
-                    let kx = kernel[(ix + pad) as usize];
-                    let sv = if let Some(cy) = sy
-                        .checked_add_signed(iy - pad)
-                        .filter(|&y| y < source_height)
-                    {
-                        if let Some(cx) = sx
-                            .checked_add_signed(ix - pad)
-                            .filter(|&x| x < source_width)
-                        {
-                            ky * kx * (source[cy * source_width + cx] as f32 / 255.)
-                        } else {
-                            0.0
-                        }
+                khere += if let Some(cy) = sy
+                    .checked_add_signed(iy - pad)
+                    .filter(|&y| y < source_height)
+                {
+                    if let Some(cx) = sx.checked_add_signed(-pad).filter(|&x| x < source_width) {
+                        ky * (source[cy * source_width + cx] as f32 / 255.)
                     } else {
                         0.0
-                    };
-                    khere += sv;
-                }
+                    }
+                } else {
+                    0.0
+                };
             }
-            buffer[(sy) * buffer_width + sx] = khere;
+
+            buffer[sy * buffer_width + sx] = khere;
         }
     }
 
     let nx = x - pad;
     let ny = y - pad;
-    for sy in 0..(source_height + kernel.len()) {
-        for sx in 0..(source_width + kernel.len()) {
-            let si = sy * buffer_width + sx;
+    for sy in 0..source_height + kernel.len() {
+        for sx in 0..source_width + kernel.len() {
+            let mut khere = 0.0;
+            for ix in -pad..=pad {
+                let kx = kernel[(ix + pad) as usize];
+                khere += if let Some(cx) = sx.checked_add_signed(ix).filter(|&x| x < buffer_width) {
+                    kx * buffer[sy * buffer_width + cx]
+                } else {
+                    0.0
+                };
+            }
+
             let dy = ny + sy as isize;
             let dx = nx + sx as isize;
             if dy < 0 || dy >= target_height as isize || dx < 0 || dx >= target_width as isize {
@@ -80,8 +89,8 @@ pub fn monochrome_gaussian_blit(
             let di = (dy as usize) * target_width + dx as usize;
             blend.blend_with_parts(
                 &mut target[di],
-                color.map(|c| (c as f32 * buffer[si]) as u8),
-                buffer[si],
+                color.map(|c| (c as f32 * khere) as u8),
+                khere,
             );
         }
     }

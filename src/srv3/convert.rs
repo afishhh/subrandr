@@ -51,7 +51,7 @@ const SRV3_FONTS: &[&[&str]] = &[
         "cursive",
     ],
     // if Qg is true
-    // Carrois Gothic SC", sans-serif-smallcaps
+    // "Carrois Gothic SC", sans-serif-smallcaps
     // otherwise
     // Arial, Helvetica, Verdana, "Marcellus SC", sans-serif
     // Qg seems to check whether the UA is "cobalt" or something
@@ -65,10 +65,13 @@ const SRV3_FONTS: &[&[&str]] = &[
 ];
 
 fn font_style_to_name(style: u32) -> &'static [&'static str] {
-    style
-        .checked_sub(1)
-        .and_then(|i| SRV3_FONTS.get(i as usize))
-        .map_or(SRV3_FONTS[3], |v| v)
+    match style {
+        ..=4 => style.checked_sub(1),
+        5 => Some(u32::MAX),
+        6.. => Some(style),
+    }
+    .and_then(|i| SRV3_FONTS.get(i as usize))
+    .map_or(SRV3_FONTS[3], |v| v)
 }
 
 fn convert_coordinate(coord: f32) -> f32 {

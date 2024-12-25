@@ -1026,6 +1026,7 @@ impl<'a> Renderer<'a> {
             end_x.round_to_i32()
         };
 
+        // TODO: This is actually in TT_Postscript table
         if decoration.underline {
             painter.horizontal_line(
                 y.trunc_to_i32(),
@@ -1035,6 +1036,7 @@ impl<'a> Renderer<'a> {
             );
         }
 
+        // TODO: This is actually in TT_OS2 table
         if decoration.strike_out {
             let metrics = fonts[0].metrics();
             let strike_y =

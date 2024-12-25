@@ -9,21 +9,66 @@ use crate::{
 
 use super::{Document, EdgeType};
 
-const SRV3_FONTS: &[&str] = &[
-    "Roboto",          // also the default
-    "Courier New",     // '"Courier New", Courier, "Nimbus Mono L", "Cutive Mono", monospace'
-    "Times New Roman", // '"Times New Roman", Times, Georgia, Cambria, "PT Serif Caption", serif
-    // "Deja Vu Sans Mono" is not a real font so browsers fall back to Lucida Console
-    "Lucida Console", // '"Deja Vu Sans Mono", "Lucida Console", Monaco, Consolas, "PT Mono", monospace'
-    "Roboto", // '"YouTube Noto", Roboto, Arial, Helvetica, Verdana, "PT San     s Caption", sans-serif'
-    "Comis Sans Ms", // '"Comic Sans MS", Impact, Handlee, fantasy'
-    "Monotype Corsiva", // '"Monotype Corsiva", "URW Chancery L", "Apple Chancery", "D     ancing Script", cursive'
-    // TODO: This should also select the "small-caps" font variant
-    "Carrois Gothic Sc", // '"Carrois Gothic SC", sans-serif-smallcaps' : 'Arial, Helvetica     , Verdana, "Marcellus SC", sans-serif'
+const SRV3_FONTS: &[&[&str]] = &[
+    &[
+        "Courier New",
+        "Courier",
+        "Nimbus Mono L",
+        "Cutive Mono",
+        "monosopace",
+    ],
+    &[
+        "Times New Roman",
+        "Times",
+        "Georgia",
+        "Cambria",
+        "PT Serif Caption",
+        "serif",
+    ],
+    // "Deja Vu Sans Mono" is not a real font :(
+    &[
+        "Lucida Console",
+        "Monaco",
+        "Consolas",
+        "PT Mono",
+        "monospace",
+    ],
+    &[
+        "YouTube Noto",
+        "Roboto",
+        "Arial",
+        "Helvetica",
+        "Verdana",
+        "PT Sans Caption",
+        "sans-serif",
+    ],
+    &["Comis Sans Ms", "Impact", "Handlee", "fantasy"],
+    &[
+        "Monotype Corsiva",
+        "URW Chancery L",
+        "Apple Chancery",
+        "Dancing Script",
+        "cursive",
+    ],
+    // if Qg is true
+    // Carrois Gothic SC", sans-serif-smallcaps
+    // otherwise
+    // Arial, Helvetica, Verdana, "Marcellus SC", sans-serif
+    // Qg seems to check whether the UA is "cobalt" or something
+    &[
+        "Arial",
+        "Helvetica",
+        "Verdana",
+        "Marcellus SC",
+        "sans-serif",
+    ],
 ];
 
-fn font_style_to_name(style: u32) -> &'static str {
-    SRV3_FONTS.get(style as usize).map_or(SRV3_FONTS[0], |v| v)
+fn font_style_to_name(style: u32) -> &'static [&'static str] {
+    style
+        .checked_sub(1)
+        .and_then(|i| SRV3_FONTS.get(i as usize))
+        .map_or(SRV3_FONTS[3], |v| v)
 }
 
 fn convert_coordinate(coord: f32) -> f32 {
@@ -195,7 +240,11 @@ pub fn convert(document: Document) -> Subtitles {
                 }));
             }
             segments.push(crate::Segment::Text(TextSegment {
-                font: font_style_to_name(segment.pen().font_style).to_owned(),
+                font: font_style_to_name(segment.pen().font_style)
+                    .iter()
+                    .copied()
+                    .map(str::to_owned)
+                    .collect(),
                 font_size: pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75),
                 font_weight: if segment.pen().bold { 700 } else { 400 },
                 italic: segment.pen().italic,

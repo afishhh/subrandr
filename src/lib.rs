@@ -11,7 +11,7 @@ use math::{Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::Srv3TextShadow;
-use text::{FontSelect, TextExtents};
+use text::{FontRequest, FontSelect, TextExtents};
 
 pub mod ass;
 mod capi;
@@ -101,9 +101,7 @@ enum Segment {
 
 #[derive(Debug, Clone)]
 struct TextSegment {
-    // TODO: allow specifying multiple fonts here
-    //       not for fallback, but for selection of primary font is not available
-    font: String,
+    font: Vec<String>,
     font_size: f32,
     font_weight: u32,
     italic: bool,
@@ -282,7 +280,7 @@ impl Subtitles {
                     text_wrap: TextWrappingMode::None,
                     segments: vec![
                         Segment::Text(TextSegment {
-                            font: "monospace".to_string(),
+                            font: vec!["monospace".to_string()],
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -292,7 +290,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: "monospace".to_string(),
+                            font: vec!["monospace".to_string()],
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -302,7 +300,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: "monospace".to_string(),
+                            font: vec!["monospace".to_string()],
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -312,7 +310,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: "monospace".to_string(),
+                            font: vec!["monospace".to_string()],
                             font_size: 48.0,
                             font_weight: 700,
                             italic: false,
@@ -322,7 +320,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: "Arial".to_string(),
+                            font: vec!["Arial".to_string()],
                             font_size: 80.0,
                             font_weight: 400,
                             italic: false,
@@ -358,7 +356,7 @@ impl Subtitles {
                     alignment: Alignment::Top,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment::Text(TextSegment {
-                        font: "monospace".to_string(),
+                        font: vec!["monospace".to_string()],
                         font_size: 64.0,
                         font_weight: 400,
                         italic: false,
@@ -383,7 +381,7 @@ impl Subtitles {
                     alignment: Alignment::BottomLeft,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment::Text(TextSegment {
-                        font: "sans-serif".to_string(),
+                        font: vec!["sans-serif".to_string()],
                         font_size: 64.0,
                         font_weight: 400,
                         italic: false,
@@ -412,7 +410,7 @@ impl Subtitles {
                     alignment: Alignment::Bottom,
                     text_wrap: TextWrappingMode::None,
                     segments: vec![Segment::Text(TextSegment {
-                        font: "monospace".to_string(),
+                        font: vec!["monospace".to_string()],
                         font_size: 64.0,
                         font_weight: 700,
                         italic: false,
@@ -431,7 +429,7 @@ impl Subtitles {
                     text_wrap: TextWrappingMode::None,
                     segments: vec![
                         Segment::Text(TextSegment {
-                            font: "emoji".to_string(),
+                            font: vec!["emoji".to_string()],
                             font_size: 32.,
                             font_weight: 400,
                             italic: false,
@@ -441,7 +439,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: "emoji".to_string(),
+                            font: vec!["emoji".to_string()],
                             font_size: 64.,
                             font_weight: 400,
                             italic: false,
@@ -1089,18 +1087,16 @@ impl<'a> Renderer<'a> {
                 for segment in event.segments.iter() {
                     match segment {
                         Segment::Text(segment) => {
-                            let font = self
-                                .fonts
-                                .select_simple(
-                                    &segment.font,
-                                    segment.font_weight as f32,
-                                    segment.italic,
-                                )
-                                .unwrap()
-                                .with_size(
-                                    self.subs.class.get_font_size(ctx, event, segment),
-                                    ctx.dpi,
-                                );
+                            let font_request = FontRequest {
+                                families: segment.font.clone(),
+                                weight: util::OrderedF32(segment.font_weight as f32),
+                                italic: segment.italic,
+                                codepoint: None,
+                            };
+                            let font = self.fonts.select(&font_request).unwrap().with_size(
+                                self.subs.class.get_font_size(ctx, event, segment),
+                                ctx.dpi,
+                            );
 
                             shaper.add_text(&segment.text, &font);
                         }

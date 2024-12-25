@@ -363,7 +363,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                         }
 
                         segments.push(Segment::Text(TextSegment {
-                            font: current_style.fontname.to_string(),
+                            font: vec![current_style.fontname.to_string()],
                             font_size: current_style.fontsize,
                             font_weight: current_style.weight,
                             italic: current_style.italic,

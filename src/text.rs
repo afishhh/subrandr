@@ -95,50 +95,42 @@ impl Glyph {
 pub fn compute_extents_ex(
     horizontal: bool,
     fonts: &[Font],
-    mut glyphs: &[Glyph],
+    glyphs: &[Glyph],
 ) -> (TextExtents, (i32, i32)) {
-    unsafe {
-        let mut results = TextExtents {
-            paint_height: 0,
-            paint_width: 0,
-        };
+    let mut results = TextExtents {
+        paint_height: 0,
+        paint_width: 0,
+    };
 
-        let trailing_advance;
+    let trailing_advance;
 
-        if let Some(glyph) = {
-            if !glyphs.is_empty() {
-                let glyph = glyphs.last().unwrap_unchecked();
-                glyphs = &glyphs[..glyphs.len() - 1];
-                Some(glyph)
-            } else {
-                None
-            }
-        } {
-            let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
-            results.paint_height += extents.height.abs() as i32;
-            results.paint_width += extents.width as i32;
-            if horizontal {
-                trailing_advance = ((glyph.x_advance - extents.width as i32), 0);
-            } else {
-                trailing_advance = (0, (glyph.y_advance - extents.height as i32));
-            }
+    let mut glyphs = glyphs.iter();
+
+    if let Some(glyph) = glyphs.next_back() {
+        let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
+        results.paint_height += extents.height.abs() as i32;
+        results.paint_width += extents.width as i32;
+        if horizontal {
+            trailing_advance = ((glyph.x_advance - extents.width as i32), 0);
         } else {
-            trailing_advance = (0, 0);
+            trailing_advance = (0, (glyph.y_advance - extents.height as i32));
         }
-
-        for glyph in glyphs {
-            let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
-            if horizontal {
-                results.paint_height = results.paint_height.max(extents.height.abs() as i32);
-                results.paint_width += glyph.x_advance;
-            } else {
-                results.paint_width = results.paint_width.max(extents.width.abs() as i32);
-                results.paint_height += glyph.y_advance;
-            }
-        }
-
-        (results, trailing_advance)
+    } else {
+        trailing_advance = (0, 0);
     }
+
+    for glyph in glyphs {
+        let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
+        if horizontal {
+            results.paint_height = results.paint_height.max(extents.height.abs() as i32);
+            results.paint_width += glyph.x_advance;
+        } else {
+            results.paint_width = results.paint_width.max(extents.width.abs() as i32);
+            results.paint_height += glyph.y_advance;
+        }
+    }
+
+    (results, trailing_advance)
 }
 
 pub fn compute_extents(horizontal: bool, fonts: &[Font], glyphs: &[Glyph]) -> TextExtents {
@@ -637,7 +629,7 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
 
             let n_pixels = scaled_width as usize * scaled_height as usize;
             let mut glyph_result = GlyphBitmap {
-                offset: (x + ox, y + oy),
+                offset: ((x >> 6) + ox, (y >> 6) + oy),
                 width: scaled_width,
                 height: scaled_height,
                 data: if pixel_width == 1 {
@@ -735,8 +727,8 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
 
             result.glyphs.push(glyph_result);
 
-            x += shaped_glyph.x_advance >> 6;
-            y += shaped_glyph.y_advance >> 6;
+            x += shaped_glyph.x_advance;
+            y += shaped_glyph.y_advance;
         }
     }
 

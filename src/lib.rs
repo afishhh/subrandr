@@ -997,30 +997,27 @@ impl<'a> Renderer<'a> {
 
                     rasterizer.reset();
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
-                        rasterizer.append_polyline((x, y), &one.flatten_contour(a), false);
-                        rasterizer.append_polyline((x, y), &two.flatten_contour(b), true);
+                        rasterizer.append_polyline((x >> 6, y), &one.flatten_contour(a), false);
+                        rasterizer.append_polyline((x >> 6, y), &two.flatten_contour(b), true);
                     }
                     rasterizer.render_fill(painter, decoration.border_color);
                 }
 
-                x += glyph.x_advance >> 6;
+                x += glyph.x_advance;
             }
         }
 
         let text_end_x = {
             let mut end_x = x;
             let mut it = glyphs.iter();
-            _ = it.next_back();
-            for glyph in it {
-                end_x += glyph.x_advance >> 6;
+            if let Some(last) = it.next_back() {
+                end_x += fonts[last.font_index].glyph_extents(last.index).width as i32;
             }
-            end_x += (glyphs
-                .last()
-                .map(|g| fonts[g.font_index].glyph_extents(g.index).width)
-                .unwrap_or(0)
-                >> 6) as i32;
+            for glyph in it {
+                end_x += glyph.x_advance;
+            }
 
-            end_x
+            end_x >> 6
         };
 
         if decoration.underline {

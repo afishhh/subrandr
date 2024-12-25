@@ -326,18 +326,20 @@ impl<'a> Painter<'a> {
         x: i32,
         y: i32,
         fonts: &[text::Font],
-        text: &[text::Glyph],
+        glyphs: &[text::Glyph],
         color: BGRA8,
-    ) -> (i32, i32) {
-        text::paint(
-            self.buffer,
+    ) {
+        self.blit_text_image(x, y, &text::render(fonts, glyphs), color);
+    }
+
+    pub fn blit_text_image(&mut self, x: i32, y: i32, image: &text::Image, color: BGRA8) {
+        image.blit(
             x,
             y,
-            self.width as usize,
-            self.height as usize,
-            self.width as usize,
-            fonts,
-            text,
+            self.buffer,
+            self.width,
+            self.width,
+            self.height,
             color.to_bgr_bytes(),
             color.a as f32 / 255.0,
         )

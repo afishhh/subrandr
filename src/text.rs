@@ -10,7 +10,7 @@ pub mod font_select;
 pub use font_select::*;
 
 use crate::{
-    color::{BlendMode, BGRA8},
+    color::{BGRA8Slice, BlendMode, BGRA8},
     util::{AnyError, OrderedF32},
 };
 
@@ -469,23 +469,87 @@ pub struct TextExtents {
     pub paint_width: i32,
 }
 
+struct GlyphBitmap {
+    offset: (i32, i32),
+    width: u32,
+    height: u32,
+    data: BufferData,
+}
+
+enum BufferData {
+    Monochrome(Vec<u8>),
+    Color(Vec<BGRA8>),
+}
+
+pub struct Image {
+    // TODO: Test whether combining bitmaps of the same type helps with performance
+    //       Probably will but combining is non-trivial, switching to a column-major order
+    //       would likely hurt as cache locality will be terrible while blitting.
+    glyphs: Vec<GlyphBitmap>,
+
+    // TODO:
+    // Merged monochrome bitmap of the whole text string, useful for shadows.
+    offset: (i32, i32),
+    width: u32,
+    height: u32,
+    monochrome: Vec<u8>,
+}
+
+impl Image {
+    pub fn blit(
+        &self,
+        dx: i32,
+        dy: i32,
+        buffer: &mut [BGRA8],
+        width: u32,
+        stride: u32,
+        height: u32,
+        color: [u8; 3],
+        alpha: f32,
+    ) {
+        for glyph in &self.glyphs {
+            // TODO: delegate to specialized blit functions
+            for y in 0..glyph.height as usize {
+                for x in 0..glyph.width as usize {
+                    let fx = dx + glyph.offset.0 + x as i32;
+                    let fy = dy + glyph.offset.1 + y as i32;
+                    if fx < 0 || fy < 0 || fx as u32 >= width || fy as u32 >= height {
+                        continue;
+                    }
+
+                    let si = y * glyph.width as usize + x;
+                    let ([b, g, r], a) = match &glyph.data {
+                        BufferData::Monochrome(pixels) => (
+                            [color[0], color[1], color[2]],
+                            (pixels[si] as f32) / 255.0 * alpha,
+                        ),
+                        BufferData::Color(pixels) => (
+                            pixels[si].to_bgr_bytes(),
+                            (pixels[si].a as f32) / 255.0 * alpha,
+                        ),
+                    };
+
+                    let di = (fx as usize) + (fy as usize) * stride as usize;
+                    BlendMode::Over.blend_with_parts(&mut buffer[di], [b, g, r], a);
+                }
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub fn paint(
-    buffer: &mut [BGRA8],
-    baseline_x: i32,
-    baseline_y: i32,
-    width: usize,
-    height: usize,
-    stride: usize,
-    fonts: &[Font],
-    glyphs: &[Glyph],
-    // RGB color components
-    color: [u8; 3],
-    alpha: f32,
-) -> (i32, i32) {
+pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
+    let mut result = Image {
+        glyphs: Vec::new(),
+        offset: (0, 0),
+        width: 0,
+        height: 0,
+        monochrome: Vec::new(),
+    };
+
     unsafe {
-        let mut x = baseline_x;
-        let mut y = baseline_y;
+        let mut x = 0;
+        let mut y = 0;
         for shaped_glyph in glyphs {
             let font = &fonts[shaped_glyph.font_index];
             let face = font.with_applied_size();
@@ -518,21 +582,25 @@ pub fn paint(
                 _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
             };
 
+            let n_pixels = scaled_width as usize * scaled_height as usize;
+            let mut glyph_result = GlyphBitmap {
+                offset: (x + ox, y + oy),
+                width: scaled_width,
+                height: scaled_height,
+                data: if pixel_width == 1 {
+                    BufferData::Monochrome(Vec::with_capacity(n_pixels))
+                } else {
+                    BufferData::Color(Vec::with_capacity(n_pixels))
+                },
+            };
+
+            let buffer_data = match &mut glyph_result.data {
+                BufferData::Monochrome(vec) => vec.spare_capacity_mut(),
+                BufferData::Color(vec) => std::mem::transmute(vec.spare_capacity_mut()),
+            };
+
             for biy in 0..scaled_height {
                 for bix in 0..scaled_width {
-                    let fx = x + ox + bix as i32;
-                    let fy = y + oy + biy as i32;
-
-                    if fx < 0 || fy < 0 {
-                        continue;
-                    }
-
-                    let fx = fx as usize;
-                    let fy = fy as usize;
-                    if fx >= width || fy >= height {
-                        continue;
-                    }
-
                     let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
                         let bpos = (y as i32 * bitmap.pitch) + (x * pixel_width) as i32;
                         let bslice = std::slice::from_raw_parts(
@@ -597,31 +665,24 @@ pub fn paint(
                         }
                     };
 
-                    let (b, g, r, a) = match bitmap.pixel_mode.into() {
-                        FT_PIXEL_MODE_GRAY => (
-                            color[0],
-                            color[1],
-                            color[2],
-                            (pixel_data[0] as f32) / 255.0 * alpha,
-                        ),
-                        FT_PIXEL_MODE_BGRA => (
-                            pixel_data[0],
-                            pixel_data[1],
-                            pixel_data[2],
-                            (pixel_data[3] as f32) / 255.0 * alpha,
-                        ),
-                        _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
-                    };
-
-                    let i = fy * stride + fx;
-                    BlendMode::Over.blend_with_parts(&mut buffer[i], [b, g, r], a);
+                    let i = (bix as usize + biy as usize * scaled_width as usize)
+                        * pixel_width as usize;
+                    buffer_data[i..i + pixel_width as usize]
+                        .copy_from_slice(std::mem::transmute(&pixel_data[..pixel_width as usize]));
                 }
             }
+
+            match &mut glyph_result.data {
+                BufferData::Monochrome(vec) => vec.set_len(n_pixels),
+                BufferData::Color(vec) => vec.set_len(n_pixels),
+            }
+
+            result.glyphs.push(glyph_result);
 
             x += shaped_glyph.x_advance / 64;
             y += shaped_glyph.y_advance / 64;
         }
-
-        (x, y)
     }
+
+    result
 }

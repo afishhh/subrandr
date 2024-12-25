@@ -932,15 +932,15 @@ impl<'a> Renderer<'a> {
         scale: f32,
         ctx: &SubtitleContext,
     ) {
+        let image = text::render(fonts, glyphs);
         let border = decoration.border * scale;
 
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
-            painter.text(
+            painter.blit_text_image(
                 x + shadow.offset.x as i32,
                 y + shadow.offset.y as i32,
-                fonts,
-                glyphs,
+                &image,
                 shadow.color,
             );
         };
@@ -1009,7 +1009,7 @@ impl<'a> Renderer<'a> {
             painter.horizontal_line(strike_y, x, text_end_x, decoration.strike_out_color);
         }
 
-        painter.text(x, y, fonts, glyphs, color);
+        painter.blit_text_image(x, y, &image, color);
     }
 
     pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {

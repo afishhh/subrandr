@@ -6,7 +6,7 @@
 
 use std::{fmt::Debug, rc::Rc};
 
-use color::BGRA8;
+use color::{BlendMode, BGRA8};
 use math::{Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
@@ -937,11 +937,12 @@ impl<'a> Renderer<'a> {
 
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
-            painter.blit_text_image(
+            painter.blit_monochrome_text(
                 x + shadow.offset.x as i32,
                 y + shadow.offset.y as i32,
-                &image,
+                image.monochrome(),
                 shadow.color,
+                BlendMode::Over,
             );
         };
 

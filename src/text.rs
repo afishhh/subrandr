@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, ops::Range};
+use std::{cell::OnceCell, mem::MaybeUninit, ops::Range};
 
 use text_sys::*;
 
@@ -10,7 +10,7 @@ pub mod font_select;
 pub use font_select::*;
 
 use crate::{
-    color::{BGRA8Slice, BlendMode, BGRA8},
+    color::{BlendMode, BGRA8},
     util::{AnyError, OrderedF32},
 };
 
@@ -481,18 +481,74 @@ enum BufferData {
     Color(Vec<BGRA8>),
 }
 
+/// Merged monochrome bitmap of the whole text string, useful for shadows.
+pub struct MonochromeImage {
+    pub offset: (i32, i32),
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
+impl MonochromeImage {
+    pub fn from_image(image: &Image) -> Self {
+        let mut result = MonochromeImage {
+            offset: (0, 0),
+            width: 0,
+            height: 0,
+            data: Vec::new(),
+        };
+
+        for glyph in &image.glyphs {
+            result.offset.0 = result.offset.0.min(glyph.offset.0);
+            result.offset.1 = result.offset.1.min(glyph.offset.1);
+
+            result.width = result.width.max(glyph.offset.0.max(0) as u32 + glyph.width);
+            result.height = result
+                .height
+                .max(glyph.offset.1.max(0) as u32 + glyph.height);
+        }
+
+        result.width += (-result.offset.0).max(0) as u32;
+        result.height += (-result.offset.1).max(0) as u32;
+
+        // NOTE: We cannot MaybeUninit here because the glyphs may have gaps
+        //       between them that will be left uninitialized
+        result.data = vec![0; result.width as usize * result.height as usize];
+
+        for bitmap in &image.glyphs {
+            match &bitmap.data {
+                BufferData::Monochrome(source) => {
+                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
+                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
+                    for sy in 0..bitmap.height as usize {
+                        for sx in 0..bitmap.width as usize {
+                            let si = sy * bitmap.width as usize + sx;
+                            let di = (offy + sy) * result.width as usize + (offx + sx);
+                            result.data[di] = source[si];
+                        }
+                    }
+                }
+                BufferData::Color(vec) => todo!(),
+            }
+        }
+
+        result
+    }
+}
+
 pub struct Image {
     // TODO: Test whether combining bitmaps of the same type helps with performance
     //       Probably will but combining is non-trivial, switching to a column-major order
     //       would likely hurt as cache locality will be terrible while blitting.
     glyphs: Vec<GlyphBitmap>,
+    monochrome: OnceCell<MonochromeImage>,
+}
 
-    // TODO:
-    // Merged monochrome bitmap of the whole text string, useful for shadows.
-    offset: (i32, i32),
-    width: u32,
-    height: u32,
-    monochrome: Vec<u8>,
+impl Image {
+    pub fn monochrome(&self) -> &MonochromeImage {
+        self.monochrome
+            .get_or_init(|| MonochromeImage::from_image(self))
+    }
 }
 
 impl Image {
@@ -541,10 +597,7 @@ impl Image {
 pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
     let mut result = Image {
         glyphs: Vec::new(),
-        offset: (0, 0),
-        width: 0,
-        height: 0,
-        monochrome: Vec::new(),
+        monochrome: OnceCell::new(),
     };
 
     unsafe {
@@ -565,8 +618,8 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
             let scale6 = font.scale.into_raw();
 
             let (ox, oy) = (
-                ((*glyph).bitmap_left * scale6 + shaped_glyph.x_offset) / 64,
-                (-(*glyph).bitmap_top * scale6 + shaped_glyph.y_offset) / 64,
+                ((*glyph).bitmap_left * scale6 + shaped_glyph.x_offset) >> 6,
+                (-(*glyph).bitmap_top * scale6 + shaped_glyph.y_offset) >> 6,
             );
 
             let bitmap = &(*glyph).bitmap;
@@ -679,8 +732,8 @@ pub fn render(fonts: &[Font], glyphs: &[Glyph]) -> Image {
 
             result.glyphs.push(glyph_result);
 
-            x += shaped_glyph.x_advance / 64;
-            y += shaped_glyph.y_advance / 64;
+            x += shaped_glyph.x_advance >> 6;
+            y += shaped_glyph.y_advance >> 6;
         }
     }
 

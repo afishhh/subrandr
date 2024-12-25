@@ -1,5 +1,5 @@
 use crate::{
-    color::{BGRA8Slice, BGRA8},
+    color::{BGRA8Slice, BlendMode, BGRA8},
     math::*,
     outline::{self, Outline},
     rasterize, text,
@@ -343,5 +343,56 @@ impl<'a> Painter<'a> {
             color.to_bgr_bytes(),
             color.a as f32 / 255.0,
         )
+    }
+
+    pub fn blit_monochrome(
+        &mut self,
+        x: i32,
+        y: i32,
+        buffer: &[u8],
+        width: u32,
+        height: u32,
+        color: BGRA8,
+        blend: BlendMode,
+    ) {
+        // TODO: Extract these calculations to a "safe_blit_rectangle" function
+        let isx = if x < 0 { (-x) as usize } else { 0 };
+        let isy = if y < 0 { (-y) as usize } else { 0 };
+        let msx = (width as i32).min(self.width as i32 - x);
+        let msy = (height as i32).min(self.height as i32 - y);
+        if msx <= 0 || msy <= 0 {
+            return;
+        }
+        let msx = msx as usize;
+        let msy = msy as usize;
+
+        for sy in isy..msy {
+            for sx in isx..msx {
+                let si = sy * width as usize + sx;
+                let di = (y + sy as i32) as usize * self.width as usize + (x + sx as i32) as usize;
+                // TODO: is better accuracy then a simple u8*u8 mul for alpha required?
+                //       if not then this could also be done instead of blend_with_parts...
+                blend.blend(&mut self.buffer[di], color.mul_alpha(buffer[si]));
+            }
+        }
+    }
+
+    pub fn blit_monochrome_text(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &text::MonochromeImage,
+        color: BGRA8,
+        blend: BlendMode,
+    ) {
+        self.blit_monochrome(
+            x + text.offset.0,
+            y + text.offset.1,
+            &text.data,
+            text.width,
+            text.height,
+            color,
+            blend,
+        );
     }
 }

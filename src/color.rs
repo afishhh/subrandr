@@ -50,6 +50,13 @@ impl BGRA8 {
         let argb = self.to_argb32();
         argb.rotate_left(8)
     }
+
+    pub const fn mul_alpha(self, other: u8) -> Self {
+        Self {
+            a: ((self.a as u16 * other as u16) / 255) as u8,
+            ..self
+        }
+    }
 }
 
 pub trait BGRA8Slice {

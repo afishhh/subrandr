@@ -516,9 +516,6 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
             }))?
         };
 
-        // s_width = 1280;
-        // s_height = 720;
-
         let mut ctx = SubtitleContext {
             dpi: args.dpi,
             video_width: geometry.width() as f32,

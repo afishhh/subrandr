@@ -85,7 +85,6 @@ impl BGRA8Slice for [BGRA8] {
 
 pub trait Premultiply: Debug + Clone + Copy {
     fn premultiply(self) -> Premultiplied<Self>;
-    fn unpremultiply(premultiplied: Premultiplied<Self>) -> Self;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,21 +93,13 @@ pub struct Premultiplied<T: Premultiply>(pub T);
 
 impl Premultiply for BGRA8 {
     fn premultiply(self) -> Premultiplied<Self> {
+        let a = self.a as f32 / 255.0;
         Premultiplied(Self {
-            b: ((self.b as u16 * self.a as u16) / 255) as u8,
-            g: ((self.g as u16 * self.a as u16) / 255) as u8,
-            r: ((self.r as u16 * self.a as u16) / 255) as u8,
+            b: linear_to_srgb(srgb_to_linear(self.b) * a),
+            g: linear_to_srgb(srgb_to_linear(self.g) * a),
+            r: linear_to_srgb(srgb_to_linear(self.r) * a),
             a: self.a,
         })
-    }
-
-    fn unpremultiply(premultiplied: Premultiplied<Self>) -> Self {
-        Self {
-            b: (premultiplied.0.b as u16 * 255 / premultiplied.0.a as u16) as u8,
-            g: (premultiplied.0.g as u16 * 255 / premultiplied.0.a as u16) as u8,
-            r: (premultiplied.0.r as u16 * 255 / premultiplied.0.a as u16) as u8,
-            a: premultiplied.0.a,
-        }
     }
 }
 

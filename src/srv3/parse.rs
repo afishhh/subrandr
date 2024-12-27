@@ -473,9 +473,18 @@ fn parse_body(
                                 result.duration = duration;
                                 has_duration = true;
                             },
+                            "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
+                                if let Some(pen) = pens.get(&id) {
+                                    current_event_pen = pen;
+                                } else {
+                                    warning!(
+                                        sbr,
+                                        "Pen with ID {id} does not exist but was referenced"
+                                    )
+                                }
+                            },
                             "wp"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
                                 result.position = wps.get(&id).ok_or_else(|| Error::MissingWp(id))?;
-                                has_duration = true;
                             },
                             else other => {
                                 warning!(sbr,

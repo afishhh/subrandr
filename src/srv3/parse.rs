@@ -160,10 +160,6 @@ pub enum Error {
     InvalidStructure(&'static str),
     #[error("There exist two '{0}' elements with the same 'id' of '{1}'")]
     DuplicateId(&'static str, i32),
-    #[error("Pen with id '{0}' is referenced but not declared")]
-    MissingPen(i32),
-    #[error("Window position with id '{0}' is referenced but not declared")]
-    MissingWp(i32),
     #[error("'{0}' element is missing an '{1}' attribute")]
     MissingAttribute(&'static str, &'static str),
     #[error("Attribute {0} has an invalid value {1:?}: {2}")]
@@ -439,8 +435,25 @@ fn parse_body(
         unknown_body_elements: set,
         unknown_event_elements: set,
         unknown_segment_attrs: set,
-        unknown_segment_elements: set
+        unknown_segment_elements: set,
+        non_existant_pen: set,
+        non_existant_wp: set
     );
+
+    macro_rules! set_or_log {
+        ($dst: expr, $map: expr, $id: expr, $log_id: expr, $what: literal) => {
+            if let Some(value) = $map.get(&$id) {
+                $dst = value;
+            } else {
+                warning!(
+                    sbr,
+                    once_set($log_id, $id),
+                    concat!($what, " with ID {} does not exist but was referenced"),
+                    $id
+                )
+            }
+        };
+    }
 
     let mut current_event_pen = &DEFAULT_PEN;
     let mut current_segment_pen = current_event_pen;
@@ -474,23 +487,16 @@ fn parse_body(
                                 has_duration = true;
                             },
                             "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
-                                if let Some(pen) = pens.get(&id) {
-                                    current_event_pen = pen;
-                                } else {
-                                    warning!(
-                                        sbr,
-                                        "Pen with ID {id} does not exist but was referenced"
-                                    )
-                                }
+                                set_or_log!(current_event_pen, pens, id, non_existant_pen, "Pen");
                             },
                             "wp"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
-                                result.position = wps.get(&id).ok_or_else(|| Error::MissingWp(id))?;
+                                set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
                             },
                             else other => {
-                                warning!(sbr,
-                                    once_set(unknown_attrs, other),
+                                warning!(
+                                    sbr, once_set(unknown_attrs, other),
                                     "Unknown event attribute {other}"
-                                );
+                                )
                             }
                         }
 
@@ -530,7 +536,7 @@ fn parse_body(
                         match_attributes! {
                             element.attributes(),
                             "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
-                                current_segment_pen = pens.get(&id).ok_or_else(|| Error::MissingPen(id))?;
+                                set_or_log!(current_segment_pen, pens, id, non_existant_pen, "Pen");
                             },
                             else other => {
                                 warning!(

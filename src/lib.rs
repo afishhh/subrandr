@@ -4,7 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, fmt::Debug, rc::Rc};
+use std::{cell::Cell, collections::VecDeque, fmt::Debug, rc::Rc};
 
 use color::{BlendMode, BGRA8};
 use log::{info, trace, Logger};
@@ -922,7 +922,8 @@ impl MultilineTextShaper {
     }
 }
 
-const DRAW_LAYOUT_DEBUG_INFO: bool = true;
+const DRAW_PERF_DEBUG_INFO: bool = true;
+const DRAW_LAYOUT_DEBUG_INFO: bool = false;
 
 pub struct Subrandr {
     logger: log::Logger,
@@ -945,11 +946,58 @@ impl log::AsLogger for Subrandr {
     }
 }
 
+struct PerfStats {
+    start: std::time::Instant,
+    times: VecDeque<f32>,
+    times_sum: f32,
+}
+
+impl PerfStats {
+    fn new() -> Self {
+        Self {
+            start: std::time::Instant::now(),
+            times: VecDeque::new(),
+            times_sum: 0.0,
+        }
+    }
+
+    fn start_frame(&mut self) {
+        self.start = std::time::Instant::now();
+    }
+
+    fn avg_frame_time(&self) -> f32 {
+        self.times_sum / self.times.len() as f32
+    }
+
+    fn minmax_frame_times(&self) -> (f32, f32) {
+        let mut min = f32::MAX;
+        let mut max = f32::MIN;
+
+        for time in self.times.iter() {
+            min = min.min(*time);
+            max = max.max(*time);
+        }
+
+        (min, max)
+    }
+
+    fn end_frame(&mut self) {
+        let end = std::time::Instant::now();
+        let time = (end - self.start).as_secs_f32() * 1000.;
+        if self.times.len() >= 100 {
+            self.times_sum -= self.times.pop_front().unwrap();
+        }
+        self.times.push_back(time);
+        self.times_sum += time;
+    }
+}
+
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     fonts: text::FontSelect,
     dpi: u32,
     subs: &'a Subtitles,
+    perf: PerfStats,
 }
 
 impl<'a> Renderer<'a> {
@@ -970,6 +1018,7 @@ impl<'a> Renderer<'a> {
             fonts: text::FontSelect::new().unwrap(),
             dpi: 0,
             subs,
+            perf: PerfStats::new(),
         }
     }
 
@@ -1162,6 +1211,8 @@ impl<'a> Renderer<'a> {
             return;
         }
 
+        self.perf.start_frame();
+
         painter.clear(BGRA8::ZERO);
         self.dpi = ctx.dpi;
 
@@ -1171,7 +1222,7 @@ impl<'a> Renderer<'a> {
             self.subs.class.get_name()
         );
 
-        if DRAW_LAYOUT_DEBUG_INFO {
+        if DRAW_PERF_DEBUG_INFO {
             self.debug_text(
                 (ctx.padding_left + ctx.video_width) as i32,
                 0,
@@ -1197,6 +1248,44 @@ impl<'a> Renderer<'a> {
                 BGRA8::from_rgba32(0xFFFFFFFF),
                 painter,
             );
+
+            if !self.perf.times.is_empty() {
+                let (min, max) = self.perf.minmax_frame_times();
+                let avg = self.perf.avg_frame_time();
+
+                self.debug_text(
+                    (ctx.padding_left + ctx.video_width) as i32,
+                    (40.0 * ctx.pixel_scale()) as i32,
+                    &format!(
+                        "min={:.1}ms avg={:.1}ms ({:.1}fps) max={:.1}ms ({:.1}fps)",
+                        min,
+                        avg,
+                        1000.0 / avg,
+                        max,
+                        1000.0 / max
+                    ),
+                    Alignment::TopRight,
+                    16.0,
+                    BGRA8::from_rgba32(0xFFFFFFFF),
+                    painter,
+                );
+
+                let graph_width = 300.0 * ctx.pixel_scale();
+                let graph_height = 50.0 * ctx.pixel_scale();
+                let offx = (ctx.padding_left + ctx.video_width - graph_width) as i32;
+                let mut polyline = vec![];
+                for (i, time) in self.perf.times.iter().copied().enumerate() {
+                    let x = (i as f32 / self.perf.times.len() as f32) * graph_width;
+                    polyline.push(Point2::new(x, -(time / max) * graph_height));
+                }
+
+                painter.stroke_polyline(
+                    offx,
+                    (60.0 * ctx.pixel_scale() + graph_height) as i32,
+                    &polyline,
+                    BGRA8::new(255, 255, 0, 255),
+                );
+            }
         }
 
         let shape_scale = ctx.pixel_scale();
@@ -1452,5 +1541,7 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
+
+        self.perf.end_frame();
     }
 }

@@ -1,5 +1,9 @@
 use std::{
+    cell::UnsafeCell,
+    collections::HashSet,
     ffi::{c_char, c_void},
+    hash::{Hash, Hasher},
+    marker::PhantomData,
     panic::Location,
     str::FromStr,
     sync::OnceLock,
@@ -155,15 +159,50 @@ fn log_default(
     eprintln!("[sbr {level_str}{module_space}{module_rel}] {fmt}");
 }
 
-macro_rules! log {
-    ($logger: expr, $level: expr, once_set($set: expr, $value: expr), $($fmt: tt)*) => {
-        let set = &mut $set;
-        let value = $value;
-        if !set.contains(value) {
-            $crate::log::log!($logger, $level, $($fmt)*);
-            set.insert(value.to_owned());
+#[doc(hidden)]
+pub trait LogOnceKey: Sized + 'static {}
+
+// Allows us to use one hashset instead of many
+// hashsets for each type of event
+#[doc(hidden)]
+pub struct LogOnceSet {
+    items: UnsafeCell<HashSet<(std::any::TypeId, u64)>>,
+}
+
+impl LogOnceSet {
+    pub fn new() -> Self {
+        Self {
+            items: UnsafeCell::new(HashSet::new()),
         }
-    };
+    }
+
+    fn hash<V: Hash>(&self, value: V) -> u64 {
+        let mut hasher = std::hash::DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn insert<K: LogOnceKey, V: Hash>(&self, _key: K, value: V) {
+        unsafe { &mut *self.items.get() }.insert((std::any::TypeId::of::<K>(), self.hash(value)));
+    }
+
+    pub fn contains<K: LogOnceKey, V: Hash>(&self, _key: K, value: V) -> bool {
+        unsafe { &*self.items.get() }.contains(&(std::any::TypeId::of::<K>(), self.hash(value)))
+    }
+}
+
+#[doc(hidden)]
+pub struct LogOnceRef<'a, K: LogOnceKey>(pub &'a LogOnceSet, pub K);
+
+macro_rules! log {
+    ($logger: expr, $level: expr, once_set($set: expr, $value: expr), $($fmt: tt)*) => {{
+        let set = &$set;
+        let value = $value;
+        if !set.0.contains(set.1, value) {
+            $crate::log::log!($logger, $level, $($fmt)*);
+            set.0.insert(set.1, value);
+        }
+    }};
     ($logger: expr, $level: expr, $($fmt: tt)*) => {
         $crate::log::AsLogger::as_logger(&$logger).log($level, format_args!($($fmt)*), module_path!())
     };
@@ -177,9 +216,23 @@ macro_rules! log {
 }
 
 macro_rules! log_once_state {
-    ($ident: ident: set $(, $($rest: tt)*)?) => {
-        let mut $ident = std::collections::HashSet::new();
-        $($crate::log::log_once_state!($($rest)*))?
+    (@mkkey $set: ident $ident: ident: set $(, $($rest: tt)*)?) => {
+        let $ident = {
+            #[derive(Clone, Copy)]
+            struct K; impl $crate::log::LogOnceKey for K {}
+            $crate::log::LogOnceRef(
+                &$set,
+                K,
+            )
+        };
+        $($crate::log::log_once_state!(@mkkey $set $($rest)*))?
+    };
+    (@mkkey $($rest: tt)*) => {
+        compile_error!("log_once_state: invalid syntax")
+    };
+    ($($tokens: tt)*) => {
+        let set = $crate::log::LogOnceSet::new();
+        $crate::log::log_once_state!(@mkkey set $($tokens)*)
     };
 }
 

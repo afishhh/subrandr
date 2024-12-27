@@ -7,6 +7,11 @@ use quick_xml::{
 };
 use thiserror::Error;
 
+use crate::{
+    log::{log_once_state, warning},
+    Subrandr,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
     None = 0,
@@ -362,12 +367,16 @@ fn parse_wp(attributes: Attributes) -> Result<WindowPos, Error> {
     Ok(result)
 }
 
-fn parse_head(reader: &mut quick_xml::Reader<&[u8]>) -> Result<(Vec<Pen>, Vec<WindowPos>), Error> {
+fn parse_head(
+    sbr: &Subrandr,
+    reader: &mut quick_xml::Reader<&[u8]>,
+) -> Result<(Vec<Pen>, Vec<WindowPos>), Error> {
     let (mut pens, mut wps) = (vec![], vec![]);
 
+    log_once_state!(unknown_elements_head: set);
     let mut depth = 0;
     loop {
-        match dbg!(reader.read_event()?) {
+        match reader.read_event()? {
             XmlEvent::Start(element) if depth == 0 => {
                 match element.local_name().into_inner() {
                     // TODO: Warn on text content in pen or wp
@@ -377,10 +386,13 @@ fn parse_head(reader: &mut quick_xml::Reader<&[u8]>) -> Result<(Vec<Pen>, Vec<Wi
                     b"wp" => {
                         wps.push(parse_wp(element.attributes())?);
                     }
-                    _ => {
-                        println!("Unknown element encountered in head: {}", unsafe {
-                            std::str::from_utf8_unchecked(element.local_name().into_inner())
-                        });
+                    name => {
+                        warning!(
+                            sbr,
+                            once_set(unknown_elements_head, name),
+                            "Unknown element encountered in head: {}",
+                            unsafe { std::str::from_utf8_unchecked(name) }
+                        );
                     }
                 }
                 depth += 1;
@@ -414,11 +426,21 @@ fn clean_segment_text(output: &mut String, text: &str) {
 }
 
 fn parse_body(
+    sbr: &Subrandr,
     pens: &HashMap<i32, &'static Pen>,
     wps: &HashMap<i32, &'static WindowPos>,
     reader: &mut quick_xml::Reader<&[u8]>,
 ) -> Result<Vec<Event>, Error> {
     let mut events = vec![];
+
+    // TODO: maybe make a logstatemap instead that would take an additional key?
+    log_once_state!(
+        unknown_attrs: set,
+        unknown_body_elements: set,
+        unknown_event_elements: set,
+        unknown_segment_attrs: set,
+        unknown_segment_elements: set
+    );
 
     let mut current_event_pen = &DEFAULT_PEN;
     let mut current_segment_pen = current_event_pen;
@@ -456,7 +478,10 @@ fn parse_body(
                                 has_duration = true;
                             },
                             else other => {
-                                println!("Unknown event attribute {other}")
+                                warning!(sbr,
+                                    once_set(unknown_attrs, other),
+                                    "Unknown event attribute {other}"
+                                );
                             }
                         }
 
@@ -470,10 +495,13 @@ fn parse_body(
 
                         current = Some(result);
                     }
-                    _ => {
-                        println!("Unknown element encountered in body: {}", unsafe {
-                            std::str::from_utf8_unchecked(element.local_name().into_inner())
-                        });
+                    name => {
+                        warning!(
+                            sbr,
+                            once_set(unknown_body_elements, name),
+                            "Unknown element encountered in body: {}",
+                            unsafe { std::str::from_utf8_unchecked(name) }
+                        );
                     }
                 }
                 depth += 1;
@@ -496,14 +524,23 @@ fn parse_body(
                                 current_segment_pen = pens.get(&id).ok_or_else(|| Error::MissingPen(id))?;
                             },
                             else other => {
-                                println!("Unknown segment attribute {other}")
+                                warning!(
+                                    sbr,
+                                    once_set(unknown_segment_attrs, other),
+                                    "Unknown segment attribute {other}"
+                                );
                             }
                         }
                     }
                     _ if current.is_some() => {
-                        println!("Unknown element encountered in event: {}", unsafe {
-                            std::str::from_utf8_unchecked(element.local_name().into_inner())
-                        });
+                        warning!(
+                            sbr,
+                            once_set(unknown_event_elements, element.local_name().into_inner()),
+                            "Unknown element encountered in event: {}",
+                            unsafe {
+                                std::str::from_utf8_unchecked(element.local_name().into_inner())
+                            }
+                        );
                     }
                     _ => (),
                 }
@@ -511,9 +548,12 @@ fn parse_body(
             }
             XmlEvent::Start(element) => {
                 if current.is_some() {
-                    println!("Unknown element encountered in segment: {}", unsafe {
-                        std::str::from_utf8_unchecked(element.local_name().into_inner())
-                    });
+                    warning!(
+                        sbr,
+                        once_set(unknown_segment_elements, element.local_name().into_inner()),
+                        "Unknown element encountered in segment: {}",
+                        unsafe { std::str::from_utf8_unchecked(element.local_name().into_inner()) }
+                    );
                 }
                 depth += 1;
             }
@@ -563,13 +603,15 @@ fn parse_body(
     Ok(events)
 }
 
-pub fn parse(text: &str) -> Result<Document, Error> {
+pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().check_comments = false;
     reader.config_mut().expand_empty_elements = true;
 
+    log_once_state!(unknown_toplevel_elements: set);
+
     loop {
-        match dbg!(reader.read_event()?) {
+        match reader.read_event()? {
             XmlEvent::Start(root) => {
                 if root.local_name().into_inner() == b"timedtext" {
                     let format = root
@@ -622,7 +664,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
     let mut has_head = true;
     let mut depth = 0;
     loop {
-        match dbg!(reader.read_event()?) {
+        match reader.read_event()? {
             XmlEvent::Start(element) if depth == 0 => {
                 match element.local_name().into_inner() {
                     b"head" => break,
@@ -630,10 +672,13 @@ pub fn parse(text: &str) -> Result<Document, Error> {
                         has_head = false;
                         break;
                     }
-                    _ => {
-                        println!("Non-head element encountered: {}", unsafe {
-                            std::str::from_utf8_unchecked(element.local_name().into_inner())
-                        })
+                    name => {
+                        warning!(
+                            sbr,
+                            once_set(unknown_toplevel_elements, name),
+                            "Non-head element encountered: {}",
+                            unsafe { std::str::from_utf8_unchecked(name) }
+                        );
                     }
                 }
                 depth += 1;
@@ -659,7 +704,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
     }
 
     let (pens, wps) = if has_head {
-        parse_head(&mut reader)?
+        parse_head(sbr, &mut reader)?
     } else {
         (vec![], vec![])
     };
@@ -691,17 +736,20 @@ pub fn parse(text: &str) -> Result<Document, Error> {
     if has_head {
         let mut depth = 0;
         loop {
-            match dbg!(reader.read_event()?) {
+            match reader.read_event()? {
                 XmlEvent::Start(element) if depth == 0 => {
                     match element.local_name().into_inner() {
                         b"head" => {
                             return Err(Error::InvalidStructure("Head element encountered twice"))
                         }
                         b"body" => break,
-                        _ => {
-                            println!("Non-body element encountered: {}", unsafe {
-                                std::str::from_utf8_unchecked(element.local_name().into_inner())
-                            })
+                        name => {
+                            warning!(
+                                sbr,
+                                once_set(unknown_toplevel_elements, name),
+                                "Non-body element encountered: {}",
+                                unsafe { std::str::from_utf8_unchecked(name) }
+                            );
                         }
                     }
                     depth += 1;
@@ -731,7 +779,7 @@ pub fn parse(text: &str) -> Result<Document, Error> {
         }
     }
 
-    doc.events = parse_body(&pens_by_id, &wps_by_id, &mut reader)?;
+    doc.events = parse_body(sbr, &pens_by_id, &wps_by_id, &mut reader)?;
 
     Ok(doc)
 }

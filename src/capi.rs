@@ -206,6 +206,7 @@ unsafe extern "C" fn sbr_load_file(path: *const i8) -> *mut Subtitles {
     } else if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
         Box::into_raw(Box::new(crate::srv3::convert(ctry!(crate::srv3::parse(
+            todo!(),
             &text
         )))))
     } else {
@@ -239,7 +240,7 @@ unsafe extern "C" fn sbr_get_last_error_code() -> u32 {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_create(subs: *mut Subtitles) -> *mut Renderer<'static> {
-    Box::into_raw(Box::new(Renderer::new(unsafe { &*subs })))
+    Box::into_raw(Box::new(Renderer::new(todo!(), unsafe { &*subs })))
 }
 
 #[unsafe(no_mangle)]

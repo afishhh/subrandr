@@ -4,9 +4,10 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{fmt::Debug, rc::Rc};
+use std::{cell::Cell, fmt::Debug, rc::Rc};
 
 use color::{BlendMode, BGRA8};
+use log::{info, trace, Logger};
 use math::{Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
@@ -16,6 +17,7 @@ use text::{FontRequest, FontSelect, TextExtents};
 pub mod ass;
 mod capi;
 mod color;
+mod log;
 mod math;
 mod outline;
 mod painter;
@@ -852,17 +854,51 @@ impl MultilineTextShaper {
     }
 }
 
-const DRAW_LAYOUT_DEBUG_INFO: bool = false;
+const DRAW_LAYOUT_DEBUG_INFO: bool = true;
+
+pub struct Subrandr {
+    logger: log::Logger,
+    did_log_version: Cell<bool>,
+}
+
+impl Subrandr {
+    pub fn init() -> Self {
+        Self {
+            logger: log::Logger::Default,
+            did_log_version: Cell::new(false),
+        }
+    }
+}
+
+// allows for convenient logging with log!(sbr, ...)
+impl log::AsLogger for Subrandr {
+    fn as_logger(&self) -> &Logger {
+        &self.logger
+    }
+}
 
 pub struct Renderer<'a> {
+    sbr: &'a Subrandr,
     fonts: text::FontSelect,
     dpi: u32,
     subs: &'a Subtitles,
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(subs: &'a Subtitles) -> Self {
+    pub fn new(sbr: &'a Subrandr, subs: &'a Subtitles) -> Self {
+        if !sbr.did_log_version.get() {
+            sbr.did_log_version.set(true);
+            info!(
+                sbr,
+                "subrandr version {} rev {}{}",
+                env!("CARGO_PKG_VERSION"),
+                env!("BUILD_REV"),
+                env!("BUILD_DIRTY")
+            );
+        }
+
         Self {
+            sbr,
             fonts: text::FontSelect::new().unwrap(),
             dpi: 0,
             subs,
@@ -1060,6 +1096,12 @@ impl<'a> Renderer<'a> {
 
         painter.clear(BGRA8::ZERO);
         self.dpi = ctx.dpi;
+
+        trace!(
+            self.sbr,
+            "rendering frame class={} ctx={ctx:?} t={t}ms",
+            self.subs.class.get_name()
+        );
 
         if DRAW_LAYOUT_DEBUG_INFO {
             self.debug_text(

@@ -12,7 +12,7 @@ use std::{
 use clap::Parser;
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::json;
-use subrandr::{Painter, Renderer, SubtitleContext, Subtitles};
+use subrandr::{Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 use xcb::XidNew;
 
@@ -374,11 +374,12 @@ fn large_zpixmap32_putimage(
 fn main() -> Result<(), Box<dyn Error + 'static>> {
     let args = Args::parse();
 
+    let sbr = Subrandr::init();
     let subs = if let Some(file) = args.file {
         match file.extension().map(|x| x.as_bytes()) {
             Some(b"srv3" | b"ytt") => {
                 let document =
-                    subrandr::srv3::parse(&std::fs::read_to_string(file).unwrap()).unwrap();
+                    subrandr::srv3::parse(&sbr, &std::fs::read_to_string(file).unwrap()).unwrap();
                 subrandr::srv3::convert(document)
             }
             Some(b"ass") => {
@@ -486,7 +487,7 @@ fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     // TODO: get and scale by dpi
 
-    let mut render = Renderer::new(&subs);
+    let mut render = Renderer::new(&sbr, &subs);
     let mut buffer = Vec::<u32>::new();
 
     let start = Instant::now();

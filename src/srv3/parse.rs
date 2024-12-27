@@ -83,6 +83,12 @@ pub enum Point {
     BottomRight = 8,
 }
 
+// NOTE: This is not complete there's additional properties here
+//       like cc - column count and rc - row count that I've never seen in the wild.
+//       I wonder if anyone ever used them???
+//
+//       I think one of the effects of rc and cc is that they change sizing so that
+//       a min width is computed that's equal to "-" * cc. Wild stuff.
 #[derive(Debug, Clone)]
 pub struct WindowPos {
     id: i32,

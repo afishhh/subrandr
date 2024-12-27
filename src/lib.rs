@@ -11,7 +11,7 @@ use log::{info, trace, Logger};
 use math::{Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
-use srv3::Srv3TextShadow;
+use srv3::{Srv3Event, Srv3TextShadow};
 use text::{FontRequest, FontSelect, TextExtents};
 
 pub mod ass;
@@ -80,19 +80,46 @@ enum HorizontalAlignment {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextWrappingMode {
+enum TextWrapMode {
+    Normal, // the css one? greedy I think
     None,
+}
+
+#[derive(Debug, Clone)]
+enum EventExtra {
+    Srv3(Srv3Event),
+    Test { x: f32, y: f32 },
+}
+
+impl EventExtra {
+    fn compute_layout(&self, ctx: &SubtitleContext, event: &Event) -> EventLayout {
+        match self {
+            EventExtra::Srv3(srv3) => srv3.compute_layout(ctx, event),
+            &Self::Test { x, y } => EventLayout {
+                x: ctx.padding_left + (x * ctx.video_width),
+                y: ctx.padding_top + (y * ctx.video_height),
+                max_width: f32::INFINITY,
+                max_height: f32::INFINITY,
+            },
+        }
+    }
+}
+
+struct EventLayout {
+    x: f32,
+    y: f32,
+    max_width: f32,
+    max_height: f32,
 }
 
 #[derive(Debug, Clone)]
 struct Event {
     start: u32,
     end: u32,
-    x: f32,
-    y: f32,
     alignment: Alignment,
-    text_wrap: TextWrappingMode,
+    text_wrap: TextWrapMode,
     segments: Vec<Segment>,
+    extra: EventExtra,
 }
 
 #[derive(Debug, Clone)]
@@ -230,7 +257,6 @@ impl SubtitleContext {
 trait SubtitleClass: Debug {
     fn get_name(&self) -> &'static str;
     fn get_font_size(&self, ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32;
-    fn get_position(&self, ctx: &SubtitleContext, event: &Event) -> Point2;
 }
 
 // Font size passed through directly.
@@ -244,13 +270,6 @@ impl SubtitleClass for TestSubtitleClass {
 
     fn get_font_size(&self, _ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
         segment.font_size
-    }
-
-    fn get_position(&self, ctx: &SubtitleContext, event: &Event) -> Point2 {
-        Point2::new(
-            ctx.padding_left + (event.x * ctx.video_width),
-            ctx.padding_top + (event.y * ctx.video_height),
-        )
     }
 }
 
@@ -276,10 +295,9 @@ impl Subtitles {
                 Event {
                     start: 0,
                     end: 600000,
-                    x: 0.5,
-                    y: 0.2,
+                    extra: EventExtra::Test { x: 0.5, y: 0.2 },
                     alignment: Alignment::Top,
-                    text_wrap: TextWrappingMode::None,
+                    text_wrap: TextWrapMode::None,
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
@@ -353,10 +371,9 @@ impl Subtitles {
                 Event {
                     start: 0,
                     end: 600000,
-                    x: 0.5,
-                    y: 0.1,
+                    extra: EventExtra::Test { x: 0.5, y: 0.1 },
                     alignment: Alignment::Top,
-                    text_wrap: TextWrappingMode::None,
+                    text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["monospace".to_string()],
                         font_size: 64.0,
@@ -378,10 +395,55 @@ impl Subtitles {
                 Event {
                     start: 0,
                     end: 600000,
-                    x: 0.2,
-                    y: 0.9,
+                    extra: EventExtra::Test { x: 0.8, y: 0.9 },
+                    alignment: Alignment::Top,
+                    text_wrap: TextWrapMode::None,
+                    segments: vec![
+                        Segment::Text(TextSegment {
+                            font: vec!["sans-serif".to_string()],
+                            font_size: 26.6,
+                            font_weight: 400,
+                            italic: false,
+                            decorations: TextDecorations::none(),
+                            color: BGRA8::from_rgba32(0x00FF00AA),
+                            text: "mo".to_string(),
+                            shadows: Vec::new(),
+                        }),
+                        Segment::Text(TextSegment {
+                            font: vec!["sans-serif".to_string()],
+                            font_size: 26.6,
+                            font_weight: 400,
+                            italic: false,
+                            decorations: TextDecorations::none(),
+                            color: BGRA8::from_rgba32(0xFFFF00AA),
+                            text: "ment".to_string(),
+                            shadows: Vec::new(),
+                        }),
+                    ],
+                },
+                Event {
+                    start: 0,
+                    end: 600000,
+                    extra: EventExtra::Test { x: 0.8, y: 0.8 },
+                    alignment: Alignment::Top,
+                    text_wrap: TextWrapMode::None,
+                    segments: vec![Segment::Text(TextSegment {
+                        font: vec!["sans-serif".to_string()],
+                        font_size: 26.6,
+                        font_weight: 400,
+                        italic: false,
+                        decorations: TextDecorations::none(),
+                        color: BGRA8::from_rgba32(0x0000FFAA),
+                        text: "moment".to_string(),
+                        shadows: Vec::new(),
+                    })],
+                },
+                Event {
+                    start: 0,
+                    end: 600000,
+                    extra: EventExtra::Test { x: 0.2, y: 0.9 },
                     alignment: Alignment::BottomLeft,
-                    text_wrap: TextWrappingMode::None,
+                    text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["sans-serif".to_string()],
                         font_size: 64.0,
@@ -392,14 +454,14 @@ impl Subtitles {
                         text: "with shadows".to_string(),
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
+                                offset: Vec2::new(80.0, 80.0),
+                                blur_radius: 0.0,
+                                color: BGRA8::new(0, 0, 255, 40),
+                            }),
+                            TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(48.0, 48.0),
                                 blur_radius: 20.0,
                                 color: BGRA8::new(255, 0, 0, 255),
-                            }),
-                            TextShadow::Css(CssTextShadow {
-                                offset: Vec2::new(96.0, 96.0),
-                                blur_radius: 20.0,
-                                color: BGRA8::new(0, 0, 255, 255),
                             }),
                         ],
                     })],
@@ -407,10 +469,9 @@ impl Subtitles {
                 Event {
                     start: 0,
                     end: 600000,
-                    x: 0.5,
-                    y: 0.8,
+                    extra: EventExtra::Test { x: 0.5, y: 0.8 },
                     alignment: Alignment::Bottom,
-                    text_wrap: TextWrappingMode::None,
+                    text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["monospace".to_string()],
                         font_size: 64.0,
@@ -425,10 +486,9 @@ impl Subtitles {
                 Event {
                     start: 0,
                     end: 600000,
-                    x: 0.5,
-                    y: 0.6,
+                    extra: EventExtra::Test { x: 0.5, y: 0.6 },
                     alignment: Alignment::Bottom,
-                    text_wrap: TextWrappingMode::None,
+                    text_wrap: TextWrapMode::None,
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["emoji".to_string()],
@@ -502,6 +562,14 @@ struct ShapedLine {
     paint_size: Size2,
 }
 
+#[derive(Debug, Clone)]
+struct TextWrapParams {
+    mode: TextWrapMode,
+    max_width: f32,
+    // will be used later for vertical text I guess
+    max_height: f32,
+}
+
 impl MultilineTextShaper {
     const fn new() -> Self {
         Self {
@@ -551,10 +619,10 @@ impl MultilineTextShaper {
     fn shape(
         &self,
         line_alignment: HorizontalAlignment,
-        wrapping: TextWrappingMode,
+        _wrap: TextWrapParams,
         font_select: &mut FontSelect,
     ) -> (Vec<ShapedLine>, PixelRect) {
-        assert_eq!(wrapping, TextWrappingMode::None);
+        // assert_eq!(wrap.mode, TextWrapMode::None);
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
@@ -1140,7 +1208,12 @@ impl<'a> Renderer<'a> {
                 .iter()
                 .filter(|ev| ev.start <= t && ev.end > t)
             {
-                let Point2 { x, y } = self.subs.class.get_position(ctx, event);
+                let EventLayout {
+                    x,
+                    y,
+                    max_width,
+                    max_height,
+                } = event.extra.compute_layout(ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
                 for segment in event.segments.iter() {
@@ -1177,7 +1250,11 @@ impl<'a> Renderer<'a> {
                 let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
                 let (lines, total_rect) = shaper.shape(
                     horizontal_alignment,
-                    TextWrappingMode::None,
+                    TextWrapParams {
+                        mode: event.text_wrap,
+                        max_width,
+                        max_height,
+                    },
                     &mut self.fonts,
                 );
 

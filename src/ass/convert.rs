@@ -4,7 +4,7 @@ use crate::{
     color::BGRA8,
     math::{CubicBezier, Point2},
     outline::{Outline, OutlineBuilder, SegmentDegree},
-    Segment, ShapeSegment, TextDecorations, TextSegment, TextWrappingMode,
+    Segment, ShapeSegment, TextDecorations, TextSegment,
 };
 
 use super::*;
@@ -406,15 +406,16 @@ pub fn convert(ass: Script) -> crate::Subtitles {
             }
         }
 
-        subs.events.push(crate::Event {
-            start: event.start,
-            end: event.end,
-            x,
-            y,
-            alignment: alignment.into(),
-            text_wrap: TextWrappingMode::None,
-            segments,
-        })
+        todo!("redo event construction for ass")
+        // subs.events.push(crate::Event {
+        //     start: event.start,
+        //     end: event.end,
+        //     x,
+        //     y,
+        //     alignment: alignment.into(),
+        //     text_wrap: TextWrappingMode::None,
+        //     segments,
+        // })
     }
 
     subs

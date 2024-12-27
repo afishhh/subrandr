@@ -2,9 +2,8 @@
 ///
 /// Was initially based on YTSubConverter, now mostly reverse engineered straight from YouTube's captions.js.
 use crate::{
-    color::BGRA8,
-    math::{Point2, Vec2},
-    CssTextShadow, Event, SubtitleClass, SubtitleContext, Subtitles, TextDecorations, TextSegment,
+    color::BGRA8, math::Vec2, CssTextShadow, Event, EventExtra, EventLayout, SubtitleClass,
+    SubtitleContext, Subtitles, TextDecorations, TextSegment,
 };
 
 use super::{Document, EdgeType};
@@ -124,6 +123,9 @@ fn font_size_to_pixels(size: u16) -> f32 {
     c
 }
 
+// this.maxWidth = playerWidth * 0.96
+// this.maxHeight = playerHeight * 0.96
+
 // 1px = 1/96in
 fn to_css_pixels(real_pixels: f32, ppi: u32) -> f32 {
     real_pixels * 96.0 / ppi as f32
@@ -208,6 +210,23 @@ impl Srv3TextShadow {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Srv3Event {
+    x: f32,
+    y: f32,
+}
+
+impl Srv3Event {
+    pub(crate) fn compute_layout(&self, ctx: &SubtitleContext, _event: &Event) -> EventLayout {
+        EventLayout {
+            x: self.x * ctx.player_width(),
+            y: self.y * ctx.player_height(),
+            max_width: ctx.player_width() * 0.96,
+            max_height: ctx.player_height() * 0.96,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Srv3SubtitleClass;
 impl SubtitleClass for Srv3SubtitleClass {
@@ -217,10 +236,6 @@ impl SubtitleClass for Srv3SubtitleClass {
 
     fn get_font_size(&self, ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
         font_scale_from_ctx(ctx) * segment.font_size
-    }
-
-    fn get_position(&self, ctx: &SubtitleContext, event: &Event) -> Point2 {
-        Point2::new(event.x * ctx.player_width(), event.y * ctx.player_height())
     }
 }
 
@@ -263,8 +278,10 @@ pub fn convert(document: Document) -> Subtitles {
         result.events.push(Event {
             start: event.time,
             end: event.time + event.duration,
-            x: convert_coordinate(event.position().x as f32),
-            y: convert_coordinate(event.position().y as f32),
+            extra: EventExtra::Srv3(Srv3Event {
+                x: convert_coordinate(event.position().x as f32),
+                y: convert_coordinate(event.position().y as f32),
+            }),
             alignment: match event.position().point {
                 super::Point::TopLeft => crate::Alignment::TopLeft,
                 super::Point::TopCenter => crate::Alignment::Top,
@@ -276,7 +293,7 @@ pub fn convert(document: Document) -> Subtitles {
                 super::Point::BottomCenter => crate::Alignment::Bottom,
                 super::Point::BottomRight => crate::Alignment::BottomRight,
             },
-            text_wrap: crate::TextWrappingMode::None,
+            text_wrap: crate::TextWrapMode::None,
             segments,
         })
     }

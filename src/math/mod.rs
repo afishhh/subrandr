@@ -351,3 +351,14 @@ fn lerp<S: Mul<f32, Output = S>, T: Clone + Add<S, Output = T> + Sub<T, Output =
 ) -> T {
     a.clone() + (b - a) * t
 }
+
+pub fn fast_mul_add(a: f32, b: f32, c: f32) -> f32 {
+    #[cfg(target_feature = "fma")]
+    {
+        a.mul_add(b, c)
+    }
+    #[cfg(not(target_feature = "fma"))]
+    {
+        a * b + c
+    }
+}

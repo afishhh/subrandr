@@ -103,9 +103,11 @@ impl Premultiply for BGRA8 {
     }
 }
 
+mod lut;
+
 #[inline(always)]
-fn srgb_to_linear(color: u8) -> f32 {
-    (color as f32 / 255.0).powf(1.0 / 2.2)
+pub fn srgb_to_linear(color: u8) -> f32 {
+    lut::SRGB_TO_LINEAR_LUT[color as usize]
 }
 
 #[inline(always)]
@@ -114,8 +116,11 @@ fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
 }
 
 #[inline(always)]
-fn linear_to_srgb(color: f32) -> u8 {
-    (color.powf(2.2 / 1.0) * 255.0).round() as u8
+// TODO: This can be improved
+pub fn linear_to_srgb(color: f32) -> u8 {
+    // An approximation of (color.powf(2.2) * 255.0) as u8
+    // see: https://www.shadertoy.com/view/WlG3zG
+    (color * color * crate::math::fast_mul_add(color, 63.75, 191.25)) as u8
 }
 
 fn color_to_linear(color: BGRA8) -> ([f32; 3], f32) {
@@ -141,11 +146,10 @@ pub enum BlendMode {
 }
 
 impl BlendMode {
-    pub fn blend_with_parts(self, b: &mut BGRA8, ac: [u8; 3], aa: f32) {
+    pub fn blend_with_linear_parts(self, b: &mut BGRA8, [ab, ag, ar]: [f32; 3], aa: f32) {
         match self {
             Self::Over => {
                 let ([bb, bg, br], ba) = color_to_linear(*b);
-                let [ab, ag, ar] = ac.map(srgb_to_linear);
                 *b = linear_to_color(
                     [
                         blend_over(bb, ab, aa),
@@ -156,6 +160,10 @@ impl BlendMode {
                 );
             }
         }
+    }
+
+    pub fn blend_with_parts(self, b: &mut BGRA8, ac: [u8; 3], aa: f32) {
+        self.blend_with_linear_parts(b, ac.map(srgb_to_linear), aa);
     }
 
     // FIXME: b should also be Premultiplied<BGRA8> but for **legacy reasons**

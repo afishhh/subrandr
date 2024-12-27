@@ -12,7 +12,7 @@ pub use font_select::*;
 use crate::{
     color::{BlendMode, BGRA8},
     math::Fixed,
-    util::{AnyError, OrderedF32},
+    util::{calculate_blit_rectangle, AnyError, BlitRectangle, OrderedF32},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,6 +563,102 @@ pub struct Image {
     monochrome: OnceCell<MonochromeImage>,
 }
 
+impl GlyphBitmap {
+    fn blit_monochrome(
+        &self,
+        dx: i32,
+        dy: i32,
+        buffer: &mut [BGRA8],
+        stride: u32,
+        color: [u8; 3],
+        alpha: f32,
+        ys: Range<usize>,
+        xs: Range<usize>,
+        source: &[u8],
+    ) {
+        for y in ys {
+            let fy = dy + self.offset.1 + y as i32;
+            for x in xs.clone() {
+                let fx = dx + self.offset.0 + x as i32;
+
+                let si = y * self.width as usize + x;
+                let sv = *unsafe { source.get_unchecked(si) };
+                let na = sv as f32 / 255.0 * alpha;
+                let bgr = color.map(|c| srgb_to_linear(c) * na);
+
+                let di = (fx as usize) + (fy as usize) * stride as usize;
+                BlendMode::Over.blend_with_linear_parts(
+                    unsafe { buffer.get_unchecked_mut(di) },
+                    bgr,
+                    na,
+                );
+            }
+        }
+    }
+
+    fn blit_bgra(
+        &self,
+        dx: i32,
+        dy: i32,
+        buffer: &mut [BGRA8],
+        stride: u32,
+        alpha: f32,
+        ys: Range<usize>,
+        xs: Range<usize>,
+        source: &[BGRA8],
+    ) {
+        for y in ys {
+            let fy = dy + self.offset.1 + y as i32;
+            for x in xs.clone() {
+                let fx = dx + self.offset.0 + x as i32;
+
+                let si = y * self.width as usize + x;
+                let nbgr = source[si].to_bgr_bytes().map(|v| srgb_to_linear(v) * alpha);
+                let na = source[si].a as f32 / 255.0 * alpha;
+
+                let di = (fx as usize) + (fy as usize) * stride as usize;
+                BlendMode::Over.blend_with_linear_parts(
+                    unsafe { buffer.get_unchecked_mut(di) },
+                    nbgr,
+                    na,
+                );
+            }
+        }
+    }
+
+    fn blit(
+        &self,
+        dx: i32,
+        dy: i32,
+        buffer: &mut [BGRA8],
+        width: u32,
+        stride: u32,
+        height: u32,
+        color: [u8; 3],
+        alpha: f32,
+    ) {
+        let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
+            dx,
+            dy,
+            width as usize,
+            height as usize,
+            self.width as usize,
+            self.height as usize,
+        ) else {
+            return;
+        };
+
+        match &*self.data {
+            BufferData::Monochrome(pixels) => {
+                self.blit_monochrome(dx, dy, buffer, stride, color, alpha, ys, xs, pixels);
+            }
+            BufferData::Color(pixels) => {
+                self.blit_bgra(dx, dy, buffer, stride, alpha, ys, xs, pixels);
+            }
+        }
+    }
+}
+
 impl Image {
     pub fn monochrome(&self) -> &MonochromeImage {
         self.monochrome
@@ -583,31 +679,7 @@ impl Image {
         alpha: f32,
     ) {
         for glyph in &self.glyphs {
-            // TODO: delegate to specialized blit functions
-            for y in 0..glyph.height as usize {
-                for x in 0..glyph.width as usize {
-                    let fx = dx + glyph.offset.0 + x as i32;
-                    let fy = dy + glyph.offset.1 + y as i32;
-                    if fx < 0 || fy < 0 || fx as u32 >= width || fy as u32 >= height {
-                        continue;
-                    }
-
-                    let si = y * glyph.width as usize + x;
-                    let ([b, g, r], a) = match &*glyph.data {
-                        BufferData::Monochrome(pixels) => {
-                            let na = (pixels[si] as f32) / 255.0 * alpha;
-                            (color.map(|c| (c as f32 * na) as u8), na)
-                        }
-                        BufferData::Color(pixels) => (
-                            pixels[si].to_bgr_bytes(),
-                            (pixels[si].a as f32) / 255.0 * alpha,
-                        ),
-                    };
-
-                    let di = (fx as usize) + (fy as usize) * stride as usize;
-                    BlendMode::Over.blend_with_parts(&mut buffer[di], [b, g, r], a);
-                }
-            }
+            glyph.blit(dx, dy, buffer, width, stride, height, color, alpha);
         }
     }
 }

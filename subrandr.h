@@ -20,6 +20,7 @@ extern "C" {
   ))
 #endif
 
+typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
 typedef struct sbr_renderer sbr_renderer;
 typedef struct sbr_subtitle_context {
@@ -28,14 +29,17 @@ typedef struct sbr_subtitle_context {
   float padding_left, padding_right, padding_top, padding_bottom;
 } sbr_subtitle_context;
 
+sbr_library *sbr_library_init();
+void sbr_library_fini(sbr_library *);
+
 typedef uint16_t SBR_UNSTABLE sbr_subtitle_format;
 #define SBR_SUBTITLE_FORMAT_ASS (sbr_subtitle_format)1
 #define SBR_SUBTITLE_FORMAT_SRV3 (sbr_subtitle_format)2
 
-sbr_subtitles *sbr_load_file(char const *path);
+sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
 void sbr_subtitles_destroy(sbr_subtitles *subs);
 
-sbr_renderer *sbr_renderer_create(sbr_subtitles *subs);
+sbr_renderer *sbr_renderer_create(sbr_library *, sbr_subtitles *subs);
 int sbr_renderer_render(
     sbr_renderer *renderer, sbr_subtitle_context const *ctx,
     // current time value in milliseconds

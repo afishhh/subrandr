@@ -26,13 +26,17 @@ The library performs all rendering on the CPU and renders to a BGRA8888 bitmap t
 #include "subrandr.h"
 
 int main() {
-  sbr_subtitles *subs = sbr_load_file("./my/subtitle/file.srv3");
+  sbr_library *sbr = sbr_library_init();
+  if(!sbr)
   // use sbr_get_last_error_string to get a string representation
   // of the last error that occurred in a subrandr function
+    exit(1);
+
+  sbr_subtitles *subs = sbr_load_file(sbr, "./my/subtitle/file.srv3");
   if(!subs)
     exit(1);
   
-  sbr_renderer *renderer = sbr_renderer_create(subs);
+  sbr_renderer *renderer = sbr_renderer_create(sbr, subs);
   if(!renderer)
     exit(1);
 
@@ -73,9 +77,14 @@ int main() {
     /* note: bitmap is already premultiplied, use premultiplied blending function */
 
     // some time later
+
+    // you own the bitmap at all times and can free it whenever you want
+    free(pixel_buffer);
     sbr_renderer_destroy(renderer);
     // destroying subtitles before the renderer is undefined behaviour
     // (dangling Rust reference)
     sbr_subtitles_destroy(renderer);
+    // same here, destroy the library last
+    sbr_library_fini(sbr);
 }
 ```

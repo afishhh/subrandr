@@ -5,7 +5,7 @@ use std::{
     fmt::Formatter,
 };
 
-use crate::{color::BGRA8, Painter, Renderer, SubtitleContext, Subtitles};
+use crate::{color::BGRA8, Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -195,7 +195,17 @@ c_enum! {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_load_file(path: *const i8) -> *mut Subtitles {
+unsafe extern "C" fn sbr_library_init() -> *mut Subrandr {
+    Box::into_raw(Box::new(Subrandr::init()))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_library_fini(sbr: *mut Subrandr) {
+    drop(Box::from_raw(sbr));
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_load_file(sbr: *mut Subrandr, path: *const i8) -> *mut Subtitles {
     let str = CStr::from_ptr(path);
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
     if bytes.ends_with(".ass") {
@@ -206,8 +216,7 @@ unsafe extern "C" fn sbr_load_file(path: *const i8) -> *mut Subtitles {
     } else if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
         Box::into_raw(Box::new(crate::srv3::convert(ctry!(crate::srv3::parse(
-            todo!(),
-            &text
+            &*sbr, &text
         )))))
     } else {
         cthrow!(UnrecognizedFile, "Unrecognized file format")
@@ -239,8 +248,11 @@ unsafe extern "C" fn sbr_get_last_error_code() -> u32 {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_create(subs: *mut Subtitles) -> *mut Renderer<'static> {
-    Box::into_raw(Box::new(Renderer::new(todo!(), unsafe { &*subs })))
+unsafe extern "C" fn sbr_renderer_create(
+    sbr: *mut Subrandr,
+    subs: *mut Subtitles,
+) -> *mut Renderer<'static> {
+    Box::into_raw(Box::new(Renderer::new(&*sbr, unsafe { &*subs })))
 }
 
 #[unsafe(no_mangle)]

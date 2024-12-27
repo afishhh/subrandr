@@ -638,8 +638,8 @@ impl GlyphBitmap {
         alpha: f32,
     ) {
         let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
-            dx,
-            dy,
+            self.offset.0 + dx,
+            self.offset.1 + dy,
             width as usize,
             height as usize,
             self.width as usize,

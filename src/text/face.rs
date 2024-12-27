@@ -445,6 +445,7 @@ impl Font {
                     metrics.$name = (metrics.$name * scale.into_raw() as i64) >> 6;
                 };
             }
+
             scale_field!(width);
             scale_field!(height);
             scale_field!(horiBearingX);

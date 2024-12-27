@@ -71,10 +71,11 @@ pub struct Glyph {
     pub x_offset: hb_position_t,
     pub y_offset: hb_position_t,
     pub font_index: usize,
+    flags: hb_glyph_flags_t,
 }
 
 impl Glyph {
-    const fn from_info_and_position(
+    fn from_info_and_position(
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
         original_cluster: usize,
@@ -88,7 +89,16 @@ impl Glyph {
             x_offset: position.x_offset,
             y_offset: position.y_offset,
             font_index,
+            flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }
+    }
+
+    pub fn unsafe_to_break(&self) -> bool {
+        (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_BREAK) != 0
+    }
+
+    pub fn unsafe_to_concat(&self) -> bool {
+        (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_CONCAT) != 0
     }
 }
 
@@ -226,6 +236,18 @@ impl ShapingBuffer {
                 text.len() as i32,
                 0,
                 -1,
+            );
+        }
+    }
+
+    pub fn add_with_context(&mut self, text: &str, range: Range<usize>) {
+        unsafe {
+            hb_buffer_add_utf8(
+                self.buffer,
+                text.as_ptr() as *const _,
+                text.len() as i32,
+                range.start as u32,
+                range.len() as i32,
             );
         }
     }

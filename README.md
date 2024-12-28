@@ -3,8 +3,12 @@
 ### An experimental subtitle rendering library
 
 #### Supported subtitle formats:
-- ASS (very incomplete)
+- ASS (very incomplete, **currently disabled and on hold**)
 - SRV3 (less incomplete, still very incomplete)
+
+TODO: ttml is what netflix uses, probably not too difficult to support
+TODO: experiment with using fixed point arithmetic for linear RGBA calculations
+      and gaussian blur
 
 #### x11-transparent-window example
 

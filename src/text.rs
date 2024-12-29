@@ -2,9 +2,8 @@ use std::{cell::OnceCell, mem::MaybeUninit, ops::Range, rc::Rc};
 
 use text_sys::*;
 
-mod ft_utils;
-use ft_utils::*;
 mod face;
+mod ft_utils;
 pub use face::*;
 pub mod font_select;
 pub use font_select::*;

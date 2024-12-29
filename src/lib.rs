@@ -1213,6 +1213,8 @@ impl<'a> Renderer<'a> {
 
         self.perf.start_frame();
 
+        self.fonts.advance_cache_generation();
+
         painter.clear(BGRA8::ZERO);
         self.dpi = ctx.dpi;
 

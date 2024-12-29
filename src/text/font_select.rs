@@ -127,6 +127,12 @@ impl FontSelect {
         })
     }
 
+    pub fn advance_cache_generation(&mut self) {
+        for face in self.cache.values().filter_map(Option::as_ref) {
+            face.glyph_cache().advance_generation();
+        }
+    }
+
     pub fn select(&mut self, request: &FontRequest) -> Result<Face, Error> {
         if let Some(cached) = self.cache.get(request) {
             cached.as_ref().cloned()

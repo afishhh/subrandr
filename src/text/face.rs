@@ -1,5 +1,5 @@
 use std::{
-    cell::UnsafeCell,
+    cell::{Cell, UnsafeCell},
     collections::HashMap,
     ffi::{CStr, CString},
     mem::MaybeUninit,
@@ -316,6 +316,7 @@ impl Drop for Face {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct GlyphMetrics {
     pub width: Fixed<6>,
     pub height: Fixed<6>,
@@ -442,42 +443,6 @@ impl Font {
         (ft_face, self.hb_font)
     }
 
-    pub fn glyph_extents(&self, index: u32) -> GlyphMetrics {
-        let face = self.with_applied_size();
-        let mut metrics = unsafe {
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
-            (*(*face).glyph).metrics
-        };
-
-        if let Some(scale) = Some(self.scale).filter(|s| *s != 1) {
-            macro_rules! scale_field {
-                ($name: ident) => {
-                    metrics.$name = (metrics.$name * scale.into_raw() as i64) >> 6;
-                };
-            }
-
-            scale_field!(width);
-            scale_field!(height);
-            scale_field!(horiBearingX);
-            scale_field!(horiBearingY);
-            scale_field!(horiAdvance);
-            scale_field!(vertBearingX);
-            scale_field!(vertBearingY);
-            scale_field!(vertAdvance);
-        }
-
-        GlyphMetrics {
-            width: Fixed::from_raw(metrics.width as i32),
-            height: Fixed::from_raw(metrics.height as i32),
-            hori_bearing_x: Fixed::from_raw(metrics.horiBearingX as i32),
-            hori_bearing_y: Fixed::from_raw(metrics.horiBearingY as i32),
-            hori_advance: Fixed::from_raw(metrics.horiAdvance as i32),
-            vert_bearing_x: Fixed::from_raw(metrics.vertBearingX as i32),
-            vert_bearing_y: Fixed::from_raw(metrics.vertBearingY as i32),
-            vert_advance: Fixed::from_raw(metrics.vertAdvance as i32),
-        }
-    }
-
     /// Gets the Outline associated with the glyph at `index`.
     ///
     /// Returns [`None`] if the glyph does not exist in this font, or it is not
@@ -581,28 +546,69 @@ struct SizeInfo {
     dpi: u32,
 }
 
+struct CacheSlot {
+    generation: u64,
+    metrics: Option<GlyphMetrics>,
+    bitmap: Option<SingleGlyphBitmap>,
+}
+
+impl CacheSlot {
+    fn new() -> Self {
+        Self {
+            generation: 0,
+            metrics: None,
+            bitmap: None,
+        }
+    }
+}
+
 pub(super) struct GlyphCache {
-    glyphs: UnsafeCell<HashMap<(u32, SizeInfo), SingleGlyphBitmap>>,
+    generation: Cell<u64>,
+    glyphs: UnsafeCell<HashMap<(u32, SizeInfo), CacheSlot>>,
 }
 
 impl GlyphCache {
     fn new() -> Self {
         Self {
+            generation: Cell::new(0),
             glyphs: UnsafeCell::new(HashMap::new()),
         }
     }
 
-    pub fn get_or_render(&self, font: &Font, index: u32) -> SingleGlyphBitmap {
+    pub(in crate::text) fn advance_generation(&self) {
+        let glyphs = unsafe { &mut *self.glyphs.get() };
+
+        let keep_after = self.generation.get().saturating_sub(2);
+        glyphs.retain(|_, slot| slot.generation > keep_after);
+        self.generation.set(self.generation.get() + 1);
+    }
+
+    #[allow(clippy::mut_from_ref)] // This is why it's unsafe
+    unsafe fn slot(&self, font: &Font, index: u32) -> &mut CacheSlot {
         let glyphs = unsafe { &mut *self.glyphs.get() };
         let size_info = SizeInfo {
             coords: font.coords,
             point_size: font.point_size,
             dpi: font.dpi,
         };
-        glyphs
+
+        let slot = glyphs
             .entry((index, size_info))
-            .or_insert_with(|| font.render_glyph_uncached(index))
-            .clone()
+            .or_insert_with(CacheSlot::new);
+        slot.generation = self.generation.get();
+        slot
+    }
+
+    pub fn get_or_measure(&self, font: &Font, index: u32) -> &GlyphMetrics {
+        unsafe { self.slot(font, index) }
+            .metrics
+            .get_or_insert_with(|| font.glyph_extents_uncached(index))
+    }
+
+    pub fn get_or_render(&self, font: &Font, index: u32) -> &SingleGlyphBitmap {
+        unsafe { self.slot(font, index) }
+            .bitmap
+            .get_or_insert_with(|| font.render_glyph_uncached(index))
     }
 }
 
@@ -620,6 +626,46 @@ pub enum BufferData {
 }
 
 impl Font {
+    fn glyph_extents_uncached(&self, index: u32) -> GlyphMetrics {
+        let face = self.with_applied_size();
+        let mut metrics = unsafe {
+            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
+            (*(*face).glyph).metrics
+        };
+
+        if let Some(scale) = Some(self.scale).filter(|s| *s != 1) {
+            macro_rules! scale_field {
+                ($name: ident) => {
+                    metrics.$name = (metrics.$name * scale.into_raw() as i64) >> 6;
+                };
+            }
+
+            scale_field!(width);
+            scale_field!(height);
+            scale_field!(horiBearingX);
+            scale_field!(horiBearingY);
+            scale_field!(horiAdvance);
+            scale_field!(vertBearingX);
+            scale_field!(vertBearingY);
+            scale_field!(vertAdvance);
+        }
+
+        GlyphMetrics {
+            width: Fixed::from_raw(metrics.width as i32),
+            height: Fixed::from_raw(metrics.height as i32),
+            hori_bearing_x: Fixed::from_raw(metrics.horiBearingX as i32),
+            hori_bearing_y: Fixed::from_raw(metrics.horiBearingY as i32),
+            hori_advance: Fixed::from_raw(metrics.horiAdvance as i32),
+            vert_bearing_x: Fixed::from_raw(metrics.vertBearingX as i32),
+            vert_bearing_y: Fixed::from_raw(metrics.vertBearingY as i32),
+            vert_advance: Fixed::from_raw(metrics.vertAdvance as i32),
+        }
+    }
+
+    pub fn glyph_extents(&self, index: u32) -> GlyphMetrics {
+        *self.face().glyph_cache().get_or_measure(self, index)
+    }
+
     fn render_glyph_uncached(&self, index: u32) -> SingleGlyphBitmap {
         unsafe {
             let face = self.with_applied_size();
@@ -751,6 +797,6 @@ impl Font {
     }
 
     pub fn render_glyph(&self, index: u32) -> SingleGlyphBitmap {
-        self.face().glyph_cache().get_or_render(self, index)
+        self.face().glyph_cache().get_or_render(self, index).clone()
     }
 }

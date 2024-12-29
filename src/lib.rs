@@ -4,7 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, collections::VecDeque, fmt::Debug, rc::Rc};
+use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range, rc::Rc};
 
 use color::{BlendMode, BGRA8};
 use log::{info, trace, Logger};
@@ -215,7 +215,7 @@ impl ShapeSegment {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 // TODO: Maybe call this a viewport or have a field called "viewport"
 pub struct SubtitleContext {
@@ -998,6 +998,10 @@ pub struct Renderer<'a> {
     dpi: u32,
     subs: &'a Subtitles,
     perf: PerfStats,
+
+    unchanged_range: Range<u32>,
+    previous_context: SubtitleContext,
+    previous_painter_size: (u32, u32),
 }
 
 impl<'a> Renderer<'a> {
@@ -1019,6 +1023,17 @@ impl<'a> Renderer<'a> {
             dpi: 0,
             subs,
             perf: PerfStats::new(),
+            unchanged_range: 0..0,
+            previous_context: SubtitleContext {
+                dpi: 0,
+                video_width: 0.0,
+                video_height: 0.0,
+                padding_left: 0.0,
+                padding_right: 0.0,
+                padding_top: 0.0,
+                padding_bottom: 0.0,
+            },
+            previous_painter_size: (0, 0),
         }
     }
 
@@ -1213,6 +1228,17 @@ impl<'a> Renderer<'a> {
 
         self.perf.start_frame();
 
+        let painter_size = (painter.width(), painter.height());
+        if self.unchanged_range.contains(&t)
+            && self.previous_painter_size == painter_size
+            && self.previous_context == *ctx
+        {
+            self.perf.end_frame();
+            return;
+        }
+
+        self.previous_context = *ctx;
+        self.previous_painter_size = painter_size;
         self.fonts.advance_cache_generation();
 
         painter.clear(BGRA8::ZERO);
@@ -1292,13 +1318,21 @@ impl<'a> Renderer<'a> {
 
         let shape_scale = ctx.pixel_scale();
 
+        let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
-            for event in self
-                .subs
-                .events
-                .iter()
-                .filter(|ev| ev.start <= t && ev.end > t)
-            {
+            for event in self.subs.events.iter() {
+                let r = unchanged_range.clone();
+                if (event.start..event.end).contains(&t) {
+                    unchanged_range = r.start.max(event.start)..r.end.min(event.end);
+                } else {
+                    if event.start > t {
+                        unchanged_range = r.start..r.end.min(event.start);
+                    } else {
+                        unchanged_range = r.start.max(event.end)..r.end;
+                    }
+                    continue;
+                }
+
                 let EventLayout {
                     x,
                     y,
@@ -1543,6 +1577,8 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
+
+        self.unchanged_range = unchanged_range;
 
         self.perf.end_frame();
     }

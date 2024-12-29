@@ -538,7 +538,6 @@ impl Drop for Font {
     }
 }
 
-// TODO: generational cache (if unused for x frames then drop from cache)
 #[derive(PartialEq, Eq, Hash)]
 struct SizeInfo {
     coords: MmCoords,

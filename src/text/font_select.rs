@@ -28,14 +28,14 @@ enum FontWeight {
     Variable,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FontSource {
     File(PathBuf),
     // DirectWrite will have to get it from memory
 }
 
 impl FontSource {
-    pub fn load(&self) -> Result<Face, Error> {
+    pub fn load(&self) -> Result<Face, AnyError> {
         match self {
             FontSource::File(file) => Ok(Face::load_from_file(file)),
         }
@@ -105,7 +105,8 @@ pub enum Error {
 
 #[derive(Debug)]
 pub struct FontSelect {
-    cache: HashMap<FontRequest, Option<Face>>,
+    source_cache: HashMap<FontSource, Face>,
+    request_cache: HashMap<FontRequest, Option<Face>>,
     provider: Box<dyn FontProvider>,
 }
 
@@ -122,33 +123,42 @@ impl FontSelect {
             provider::platform_default().map_err(Error::Provider)?;
 
         Ok(Self {
-            cache: HashMap::new(),
+            source_cache: HashMap::new(),
+            request_cache: HashMap::new(),
             provider,
         })
     }
 
     pub fn advance_cache_generation(&mut self) {
-        for face in self.cache.values().filter_map(Option::as_ref) {
+        for face in self.request_cache.values().filter_map(Option::as_ref) {
             face.glyph_cache().advance_generation();
         }
     }
 
     pub fn select(&mut self, request: &FontRequest) -> Result<Face, Error> {
-        if let Some(cached) = self.cache.get(request) {
+        if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
             let mut result = choose(
                 &self.provider.query(request).map_err(Error::Provider)?,
                 request,
             )
-            .map(|x| x.source.load())
+            .map(|x| {
+                if let Some(cached) = self.source_cache.get(&x.source) {
+                    Ok(cached.clone())
+                } else {
+                    let loaded = x.source.load().map_err(Error::FailedToLoadFont)?;
+                    self.source_cache.insert(x.source.clone(), loaded.clone());
+                    Ok(loaded)
+                }
+            })
             .transpose()?;
 
             if let Some(ref mut face) = result {
                 set_weight_if_variable(face, request.weight.0);
             }
 
-            self.cache.insert(request.clone(), result.clone());
+            self.request_cache.insert(request.clone(), result.clone());
             result
         }
         .ok_or(Error::NotFound)

@@ -1,6 +1,6 @@
 use crate::{
     color::BGRA8,
-    math::{Fixed, Point2},
+    math::{I32Fixed, Point2},
     Painter,
 };
 
@@ -494,13 +494,12 @@ pub fn fill_triangle(
 
 const POLYGON_RASTERIZER_DEBUG_PRINT: bool = false;
 
-// 18.14 signed fixed point value
-type Fixed18 = Fixed<14>;
+type IFixed18Dot14 = I32Fixed<14>;
 
 #[derive(Debug)]
 struct Profile {
-    current: Fixed18,
-    step: Fixed18,
+    current: IFixed18Dot14,
+    step: IFixed18Dot14,
     end_y: u32,
 }
 
@@ -528,12 +527,12 @@ impl NonZeroPolygonRasterizer {
 
     fn add_line(&mut self, offset: (i32, i32), start: &Point2, end: &Point2, invert_winding: bool) {
         let istart = (
-            Fixed18::from_f32(start.x) + offset.0,
-            Fixed18::from_f32(start.y) + offset.1,
+            IFixed18Dot14::from_f32(start.x) + offset.0,
+            IFixed18Dot14::from_f32(start.y) + offset.1,
         );
         let iend = (
-            Fixed18::from_f32(end.x) + offset.0,
-            Fixed18::from_f32(end.y) + offset.1,
+            IFixed18Dot14::from_f32(end.x) + offset.0,
+            IFixed18Dot14::from_f32(end.y) + offset.1,
         );
 
         let direction = match iend.1.cmp(&istart.1) {
@@ -546,16 +545,16 @@ impl NonZeroPolygonRasterizer {
         };
 
         let step = if istart.0 == iend.0 {
-            Fixed18::ZERO
+            IFixed18Dot14::ZERO
         } else {
             (iend.0 - istart.0) / (iend.1 - istart.1)
         };
 
-        let start_y = istart.1.round_to_i32();
+        let start_y = istart.1.round_to_inner();
         let mut start_x = istart.0;
         start_x -= (istart.1 - start_y) * step;
 
-        let end_y = iend.1.round_to_i32();
+        let end_y = iend.1.round_to_inner();
         let mut end_x = iend.0;
         end_x -= (iend.1 - end_y) * step;
 
@@ -684,7 +683,7 @@ impl NonZeroPolygonRasterizer {
             for i in 0..self.left.len() {
                 let (left, right) = (&self.left[i], &self.right[i]);
 
-                let round_clamp = |f: Fixed18| (f.round_to_i32().max(0) as u32).min(width);
+                let round_clamp = |f: IFixed18Dot14| (f.round_to_inner().max(0) as u32).min(width);
                 let mut x0 = round_clamp(left.current);
                 let mut x1 = round_clamp(right.current);
                 // TODO: is this necessary? can this be removed?

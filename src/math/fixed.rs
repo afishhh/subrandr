@@ -3,334 +3,426 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-// signed 32bit fixed point number
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Fixed<const P: u32>(i32);
-
-impl<const P: u32> Fixed<P> {
-    pub const fn new(value: i32) -> Self {
-        Self(value << P)
-    }
-
-    pub const fn from_quotient(numerator: i32, denominator: i32) -> Self {
-        Self::from_quotient64(numerator as i64, denominator as i64)
-    }
-
-    pub const fn from_quotient64(numerator: i64, denominator: i64) -> Self {
-        Self(((numerator << P) / denominator) as i32)
-    }
-
-    pub const fn from_raw(value: i32) -> Self {
-        Self(value)
-    }
-
-    pub const fn into_raw(self) -> i32 {
-        self.0
-    }
-
-    pub const fn from_f32(value: f32) -> Self {
-        Self((value * (1 << P) as f32) as i32)
-    }
-
-    pub const fn into_f32(self) -> f32 {
-        self.0 as f32 / (1 << P) as f32
-    }
-
-    pub const fn trunc_to_i32(self) -> i32 {
-        self.0 >> P
-    }
-
-    pub const fn trunc(self) -> Self {
-        let signed_floor = (self.0 >> P) << P;
-        let was_negative_with_fract =
-            (self.0 & (Self::FRACTIONAL_MASK | Self::SIGN_MASK)) as u32 > Self::SIGN_MASK as u32;
-        Self(signed_floor + Self::ONE.0 * (was_negative_with_fract as i32))
-    }
-
-    pub const fn fract(self) -> Self {
-        let unsigned = self.0 & Self::FRACTIONAL_MASK;
-        let mut extension = (self.0 & Self::SIGN_MASK) >> (i32::BITS - P - 1);
-        extension *= (unsigned > 0) as i32;
-        Self(unsigned | extension)
-    }
-
-    pub const fn round(self) -> Self {
-        let fract = self.fract();
-        if fract.0 >= Self::HALF.0 {
-            Self((self.0 & Self::WHOLE_MASK) + Self::ONE.0)
-        } else if fract.0 <= -Self::HALF.0 {
-            Self(self.0 & Self::WHOLE_MASK)
-        } else {
-            self.trunc()
-        }
-    }
-
-    pub const fn round_to_i32(self) -> i32 {
-        self.round().trunc_to_i32()
-    }
-
-    pub const fn abs(self) -> Self {
-        Self(self.0.abs())
-    }
-
-    pub const fn signum(&self) -> i32 {
-        // sign bit is at 1 << i32::BITS
-        self.0 >> (i32::BITS - 1 - P)
-    }
-
-    pub const ONE: Self = Self(1 << P);
-    pub const ZERO: Self = Self(0);
-    const HALF: Self = Self(1 << (P - 1));
-    const EPS: Self = Self(1);
-
-    const SIGN_MASK: i32 = 1 << (i32::BITS - 1);
-    const FRACTIONAL_MASK: i32 = (1 << P) - 1;
-    const WHOLE_MASK: i32 = !Self::FRACTIONAL_MASK;
-}
+pub struct Fixed<const P: u32, T>(T);
 
 macro_rules! define_simple_fixed_operator {
-    (@all $($tt: tt)*) => {
-        define_simple_fixed_operator!(
-            [Self [Self] [.0]],
-            $($tt)*
-        );
-        define_simple_fixed_operator!(
-            @conversions
-            $($tt)*
-        );
-    };
-    (@conversions $($tt: tt)*) => {
-        define_simple_fixed_operator!(
-            [i32 [] [] Self::new],
-            $($tt)*
-        );
-        define_simple_fixed_operator!(
-            [f32 [] [] Self::from_f32],
-            $($tt)*
-        );
-    };
+            ($ftype: ty, @all $($tt: tt)*) => {
+                define_simple_fixed_operator!(
+                    $ftype,
+                    [Self [Self] [.0]],
+                    $($tt)*
+                );
+                define_simple_fixed_operator!(
+                    $ftype,
+                    @conversions
+                    $($tt)*
+                );
+            };
+            ($ftype: ty, @conversions $($tt: tt)*) => {
+                define_simple_fixed_operator!(
+                    $ftype,
+                    [$ftype [] [] Self::new],
+                    $($tt)*
+                );
+                define_simple_fixed_operator!(
+                    $ftype,
+                    [f32 [] [] Self::from_f32],
+                    $($tt)*
+                );
+            };
+            (
+                $ftype: ty,
+                [$type: ty [$($ctor: tt)?] [$($dot: tt)*] $($construct: tt)*],
+                $trait: ident,
+                $f: ident,
+                $op: tt,
+                $trait_assign: ident,
+                $f_assign: ident,
+                $op_assign: tt
+            ) => {
+                impl<const P: u32> $trait<$type> for Fixed<P, $ftype> {
+                    type Output = Self;
+
+                    fn $f(self, rhs: $type) -> Self::Output {
+                        $($ctor)? (self$($dot)* $op $($construct)*(rhs)$($dot)*)
+                    }
+                }
+
+                impl<const P: u32> $trait_assign<$type> for Fixed<P, $ftype> {
+                    fn $f_assign(&mut self, rhs: $type) {
+                        (*self)$($dot)* $op_assign $($construct)*(rhs)$($dot)*
+                    }
+                }
+            };
+        }
+
+// TODO: Once a way to have const functions in traits is stabilised
+//       rewrite this to use a trait instead, as that will allow for
+//       better inference and thus ergonomics.
+macro_rules! define_fixed_for_type {
     (
-        [$type: ident [$($ctor: tt)?] [$($dot: tt)*] $($construct: tt)*],
-        $trait: ident,
-        $f: ident,
-        $op: tt,
-        $trait_assign: ident,
-        $f_assign: ident,
-        $op_assign: tt
+        signedness = $signedness: tt,
+        inner = $type: ty,
+        widen = $wide: ty
     ) => {
-        impl<const P: u32> $trait<$type> for Fixed<P> {
+        impl<const P: u32> Fixed<P, $type> {
+            pub const fn new(value: $type) -> Self {
+                Self(value << P)
+            }
+
+            pub const fn from_quotient(numerator: $type, denominator: $type) -> Self {
+                Self::from_wide_quotient(numerator as $wide, denominator as $wide)
+            }
+
+            pub const fn from_wide_quotient(numerator: $wide, denominator: $wide) -> Self {
+                Self(((numerator << P) / denominator) as $type)
+            }
+
+            pub const fn from_raw(value: $type) -> Self {
+                Self(value)
+            }
+
+            pub const fn into_raw(self) -> $type {
+                self.0
+            }
+
+            pub const fn from_f32(value: f32) -> Self {
+                Self((value * (1 << P) as f32) as $type)
+            }
+
+            pub const fn into_f32(self) -> f32 {
+                self.0 as f32 / (1 << P) as f32
+            }
+
+            pub const fn trunc_to_inner(self) -> $type {
+                self.0 >> P
+            }
+
+            pub const fn round_to_inner(self) -> $type {
+                self.round().trunc_to_inner()
+            }
+
+            pub const ONE: Self = Self(1 << P);
+            pub const ZERO: Self = Self(0);
+            const HALF: Self = Self(1 << (P - 1));
+            const EPS: Self = Self(1);
+
+            const FRACTIONAL_MASK: $type = (1 << P) - 1;
+            const WHOLE_MASK: $type = !Self::FRACTIONAL_MASK;
+        }
+
+        define_fixed_for_type!(@$signedness $type, $wide);
+
+        impl<const P: u32> Mul for Fixed<P, $type> {
             type Output = Self;
 
-            fn $f(self, rhs: $type) -> Self::Output {
-                $($ctor)? (self$($dot)* $op $($construct)*(rhs)$($dot)*)
+            fn mul(self, rhs: Self) -> Self::Output {
+                Self(((self.0 as $wide * rhs.0 as $wide) >> P) as $type)
             }
         }
 
-        impl<const P: u32> $trait_assign<$type> for Fixed<P> {
-            fn $f_assign(&mut self, rhs: $type) {
-                (*self)$($dot)* $op_assign $($construct)*(rhs)$($dot)*
+        impl<const P: u32> MulAssign for Fixed<P, $type> {
+            fn mul_assign(&mut self, rhs: Self) {
+                *self = *self * rhs;
+            }
+        }
+
+        impl<const P: u32> Div for Fixed<P, $type> {
+            type Output = Self;
+
+            fn div(self, rhs: Self) -> Self::Output {
+                let wide_result = ((self.0 as $wide) << P) / rhs.0 as $wide;
+                Self(wide_result as $type)
+            }
+        }
+
+        impl<const P: u32> DivAssign for Fixed<P, $type> {
+            fn div_assign(&mut self, rhs: Self) {
+                *self = *self / rhs;
+            }
+        }
+
+        impl<const P: u32> PartialEq<$type> for Fixed<P, $type> {
+            fn eq(&self, other: &$type) -> bool {
+                (self.0 & Self::FRACTIONAL_MASK) == 0 && (self.0 >> P) == *other
+            }
+        }
+
+        impl<const P: u32> From<Fixed<P, $type>> for f32 {
+            fn from(value: Fixed<P, $type>) -> Self {
+                value.into_f32()
+            }
+        }
+
+        impl<const P: u32> From<f32> for Fixed<P, $type> {
+            fn from(value: f32) -> Self {
+                Self::from_f32(value)
+            }
+        }
+
+        impl<const P: u32> Display for Fixed<P, $type> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                Display::fmt(&f32::from(*self), f)
+            }
+        }
+
+        impl<const P: u32> Debug for Fixed<P, $type> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                Display::fmt(self, f)
+            }
+        }
+
+
+        define_simple_fixed_operator!(
+            $type, @all Add, add, +, AddAssign, add_assign, +=
+        );
+
+        define_simple_fixed_operator!(
+            $type, @all Sub, sub, -, SubAssign, sub_assign, -=
+        );
+
+        // TODO: Both Div and Mul can be implemented more efficiently when
+        //       multiplying by integers
+        define_simple_fixed_operator!(
+            $type, @conversions Div, div, /, DivAssign, div_assign, /=
+        );
+
+        define_simple_fixed_operator!(
+            $type, @conversions Mul, mul, *, MulAssign, mul_assign, *=
+        );
+
+        impl<const P: u32> PartialOrd<$type> for Fixed<P, $type> {
+            // TODO: Full precision
+            fn partial_cmp(&self, other: &$type) -> Option<std::cmp::Ordering> {
+                self.0.partial_cmp(&(other << P))
+            }
+        }
+    };
+    (@signed $type: ty, $wide: ty) => {
+        impl<const P: u32> Fixed<P, $type> {
+            const SIGN_MASK: $type = 1 << (<$type>::BITS - 1);
+
+            pub const fn trunc(self) -> Self {
+                let signed_floor = (self.0 >> P) << P;
+                let was_negative_with_fract = (self.0 & (Self::FRACTIONAL_MASK | Self::SIGN_MASK))
+                    as u32
+                    > Self::SIGN_MASK as u32;
+                Self(signed_floor + Self::ONE.0 * (was_negative_with_fract as $type))
+            }
+
+            pub const fn fract(self) -> Self {
+                let unsigned = self.0 & Self::FRACTIONAL_MASK;
+                let mut extension = (self.0 & Self::SIGN_MASK) >> (i32::BITS - P - 1);
+                extension *= (unsigned > 0) as i32;
+                Self(unsigned | extension)
+            }
+
+            pub const fn round(self) -> Self {
+                let fract = self.fract();
+                if fract.0 >= Self::HALF.0 {
+                    Self((self.0 & Self::WHOLE_MASK) + Self::ONE.0)
+                } else if fract.0 <= -Self::HALF.0 {
+                    Self(self.0 & Self::WHOLE_MASK)
+                } else {
+                    self.trunc()
+                }
+            }
+
+            pub const fn signum(&self) -> $type {
+                // sign bit is at 1 << i32::BITS
+                self.0 >> (<$type>::BITS - 1 - P)
+            }
+
+            pub const fn abs(self) -> Self {
+                Self(self.0.abs())
+            }
+        }
+
+        impl<const P: u32> Neg for Fixed<P, $type> {
+            type Output = Self;
+
+            fn neg(self) -> Self::Output {
+                Self(-self.0)
+            }
+        }
+    };
+    (@unsigned $type: ty, $wide: ty) => {
+        impl<const P: u32> Fixed<P, $type> {
+            const SIGN_MASK: i32 = 1 << (i32::BITS - 1);
+
+            pub const fn trunc(self) -> Self {
+                Self((self.0 >> P) << P)
+            }
+
+            pub const fn fract(self) -> Self {
+                Self(self.0 & Self::FRACTIONAL_MASK)
+            }
+
+            pub const fn round(self) -> Self {
+                let fract = self.fract();
+                if fract.0 >= Self::HALF.0 {
+                    Self((self.0 & Self::WHOLE_MASK) + Self::ONE.0)
+                }  else {
+                    self.trunc()
+                }
+            }
+
+            pub const fn signum(&self) -> $type {
+                // sign bit is at 1 << <$type>::BITS
+                self.0 >> (<$type>::BITS - 1 - P)
             }
         }
     };
 }
 
-define_simple_fixed_operator!(
-    @all Add, add, +, AddAssign, add_assign, +=
-);
+define_fixed_for_type!(signedness = signed, inner = i32, widen = i64);
+define_fixed_for_type!(signedness = unsigned, inner = u32, widen = u64);
+define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 
-define_simple_fixed_operator!(
-    @all Sub, sub, -, SubAssign, sub_assign, -=
-);
+pub type I32Fixed<const P: u32> = Fixed<P, i32>;
+pub type U32Fixed<const P: u32> = Fixed<P, u32>;
 
-// TODO: Both Div and Mul can be implemented more efficiently when
-//       multiplying by integers
-define_simple_fixed_operator!(
-    @conversions Div, div, /, DivAssign, div_assign, /=
-);
+#[cfg(test)]
+macro_rules! test_module {
+    ($fixed_type: ty, signed = $signed: literal) => {
+        use super::*;
+        use crate::util::ArrayVec;
 
-define_simple_fixed_operator!(
-    @conversions Mul, mul, *, MulAssign, mul_assign, *=
-);
+        type TestFixed = $fixed_type;
 
-impl<const P: u32> Mul for Fixed<P> {
-    type Output = Self;
+        const EPS: f32 = TestFixed::EPS.into_f32();
 
-    fn mul(self, rhs: Self) -> Self::Output {
-        Self(((self.0 as i64 * rhs.0 as i64) >> P) as i32)
-    }
-}
+        const SMALL_DATA: &[(f32, f32)] = &[
+            (2.5, 1.0),
+            (60.0, 20.0),
+            (2353.0, 3102.0),
+            (EPS, EPS),
+            (1.0 + EPS, EPS),
+            (1.0 - EPS, EPS),
+        ];
 
-impl<const P: u32> MulAssign for Fixed<P> {
-    fn mul_assign(&mut self, rhs: Self) {
-        *self = *self * rhs;
-    }
-}
+        const SIGNED_DATA: &[(f32, f32)] = &[
+            (3353.0, -1102.0),
+            (-200.0, -500.0),
+            (-500.0, -200.0),
+            (-2.0005, 4.0005),
+            (0.0, -34031.0),
+            (1.0 + EPS, -EPS),
+        ];
 
-impl<const P: u32> Div for Fixed<P> {
-    type Output = Self;
+        const EXTREME_DATA: &[(f32, f32)] = &[
+            (2620388.0, 4019.0),
+            (2620387.0, 34031.0),
+            (1.0, EPS),
+            (26.0, EPS),
+        ];
 
-    fn div(self, rhs: Self) -> Self::Output {
-        let wide_result = ((self.0 as i64) << P) / rhs.0 as i64;
-        Self(wide_result as i32)
-    }
-}
+        #[test]
+        fn addsub() {
+            for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()).chain(
+                const {
+                    if $signed {
+                        SIGNED_DATA
+                    } else {
+                        &[]
+                    }
+                },
+            ) {
+                let ra = f32::from(TestFixed::from(a) + TestFixed::from(b));
+                let ea = a + b;
+                println!("{a} + {b} = {ra}");
+                assert!((ra - ea).abs() < EPS);
+                if $signed {
+                    let rs = f32::from(TestFixed::from(a) - TestFixed::from(b));
+                    let es = a - b;
+                    println!("{a} - {b} = {rs}");
+                    assert!((rs - es).abs() < EPS);
+                }
+            }
+        }
 
-impl<const P: u32> DivAssign for Fixed<P> {
-    fn div_assign(&mut self, rhs: Self) {
-        *self = *self / rhs;
-    }
-}
+        #[test]
+        fn mul() {
+            for &(a, b) in SMALL_DATA {
+                let r = f32::from(TestFixed::from(a) * TestFixed::from(b));
+                let e = a * b;
+                println!("{a} * {b} = {r}");
+                assert!((r - e).abs() < EPS);
+            }
+        }
 
-impl<const P: u32> Neg for Fixed<P> {
-    type Output = Self;
+        #[test]
+        fn div() {
+            for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()) {
+                let r = f32::from(TestFixed::from(a) / TestFixed::from(b));
+                let e = a / b;
+                println!("{a} / {b} = {r}");
+                assert!((r - e).abs() < EPS);
+            }
+        }
 
-    fn neg(self) -> Self::Output {
-        Self(-self.0)
-    }
-}
+        const TRUNC_FRACT_DATA: &[(f32, f32, f32)] = &[
+            (0.0, 0.0, 0.0),
+            (0.5, 0.0, 0.5),
+            (1.0, 1.0, 0.0),
+            (0.59765625, 0.0, 0.59765625),
+            (230.115, 230.0, 0.115),
+            (1.0 + 2.0 * EPS, 1.0, 2.0 * EPS),
+            (1.0 + EPS, 1.0, EPS),
+            (2.0 * EPS, 0.0, 2.0 * EPS),
+            (EPS, 0.0, EPS),
+        ];
 
-impl<const P: u32> PartialEq<i32> for Fixed<P> {
-    fn eq(&self, other: &i32) -> bool {
-        (self.0 & Self::FRACTIONAL_MASK) == 0 && (self.0 >> P) == *other
-    }
-}
+        #[test]
+        fn trunc_fract() {
+            for (n, w, f) in TRUNC_FRACT_DATA
+                .iter()
+                .flat_map(|&(n, w, f)| {
+                    let mut result = ArrayVec::<2, _>::from_array([(n, w, f)]);
+                    if $signed {
+                        result.push((-n, -w, -f));
+                    }
+                    result.into_iter()
+                })
+                .map(|(a, b, c)| (TestFixed::from_f32(a), b, c))
+            {
+                let rw = n.trunc().into_f32();
+                let rf = n.fract().into_f32();
+                println!("{n}.trunc() = {rw}");
+                println!("{n}.fract() = {rf}");
+                assert!((rw - w).abs() < EPS);
+                assert!((rf - f).abs() < EPS);
+            }
+        }
 
-impl<const P: u32> PartialOrd<i32> for Fixed<P> {
-    // TODO: Full precision
-    fn partial_cmp(&self, other: &i32) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&(other << P))
-    }
-}
+        const ROUND_DATA: &[f32] = &[0.0, 0.5, 0.6, 0.495, 0.499, 1.0];
 
-impl<const P: u32> From<Fixed<P>> for f32 {
-    fn from(value: Fixed<P>) -> Self {
-        value.into_f32()
-    }
-}
-
-impl<const P: u32> From<f32> for Fixed<P> {
-    fn from(value: f32) -> Self {
-        Self::from_f32(value)
-    }
-}
-
-impl<const P: u32> Display for Fixed<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&f32::from(*self), f)
-    }
-}
-
-impl<const P: u32> Debug for Fixed<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(self, f)
-    }
+        #[test]
+        fn round() {
+            for &d in ROUND_DATA {
+                let ep = d.round();
+                let rp = TestFixed::from_f32(d).round().into_f32();
+                println!("{d}.round() = {rp}");
+                assert!((ep - rp).abs() < EPS);
+                if $signed {
+                    let en = (-d).round();
+                    let rn = TestFixed::from_f32(-d).round().into_f32();
+                    println!("{}.round() = {rn}", -d);
+                    assert!((rn - en).abs() < EPS);
+                }
+            }
+        }
+    };
 }
 
 #[cfg(test)]
-mod test_24_8 {
-    use super::*;
+mod test_signed_24_dot_8 {
+    test_module!(I32Fixed<8>, signed = true);
+}
 
-    type TestFixed = Fixed<8>;
-
-    const EPS: f32 = TestFixed::EPS.into_f32();
-
-    const SMALL_DATA: &[(f32, f32)] = &[
-        (2.5, 1.0),
-        (60.0, 20.0),
-        (2353.0, 3102.0),
-        (3353.0, -1102.0),
-        (-200.0, -500.0),
-        (-500.0, -200.0),
-        (-2.0005, 4.0005),
-        (0.0, -34031.0),
-        (EPS, EPS),
-        (1.0 + EPS, -EPS),
-    ];
-
-    const EXTREME_DATA: &[(f32, f32)] = &[
-        (2620388.0, 4019.0),
-        (2620387.0, 34031.0),
-        (1.0, EPS),
-        (26.0, EPS),
-    ];
-
-    #[test]
-    fn addsub() {
-        for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()) {
-            let ra = f32::from(TestFixed::from(a) + TestFixed::from(b));
-            let rs = f32::from(TestFixed::from(a) - TestFixed::from(b));
-            let ea = a + b;
-            let es = a - b;
-            println!("{a} + {b} = {ra}");
-            assert!((ra - ea).abs() < EPS);
-            println!("{a} - {b} = {rs}");
-            assert!((rs - es).abs() < EPS);
-        }
-    }
-
-    #[test]
-    fn mul() {
-        for &(a, b) in SMALL_DATA {
-            let r = f32::from(TestFixed::from(a) * TestFixed::from(b));
-            let e = a * b;
-            println!("{a} * {b} = {r}");
-            assert!((r - e).abs() < EPS);
-        }
-    }
-
-    #[test]
-    fn div() {
-        for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()) {
-            let r = f32::from(TestFixed::from(a) / TestFixed::from(b));
-            let e = a / b;
-            println!("{a} / {b} = {r}");
-            assert!((r - e).abs() < EPS);
-        }
-    }
-
-    const TRUNC_FRACT_DATA: &[(f32, f32, f32)] = &[
-        (0.0, 0.0, 0.0),
-        (0.5, 0.0, 0.5),
-        (1.0, 1.0, 0.0),
-        (0.59765625, 0.0, 0.59765625),
-        (230.115, 230.0, 0.115),
-        (1.0 + 2.0 * EPS, 1.0, 2.0 * EPS),
-        (1.0 + EPS, 1.0, EPS),
-        (2.0 * EPS, 0.0, 2.0 * EPS),
-        (EPS, 0.0, EPS),
-    ];
-
-    #[test]
-    fn trunc_fract() {
-        for (n, w, f) in TRUNC_FRACT_DATA
-            .iter()
-            .flat_map(|&(n, w, f)| [(n, w, f), (-n, -w, -f)])
-            .map(|(a, b, c)| (TestFixed::from_f32(a), b, c))
-        {
-            let rw = n.trunc().into_f32();
-            let rf = n.fract().into_f32();
-            println!("{n}.trunc() = {rw}");
-            println!("{n}.fract() = {rf}");
-            assert!((rw - w).abs() < EPS);
-            assert!((rf - f).abs() < EPS);
-        }
-    }
-
-    const ROUND_DATA: &[f32] = &[0.0, 0.5, 0.6, 0.495, 0.499, 1.0];
-
-    #[test]
-    fn round() {
-        for &d in ROUND_DATA {
-            let ep = d.round();
-            let en = (-d).round();
-            let rp = TestFixed::from_f32(d).round().into_f32();
-            let rn = TestFixed::from_f32(-d).round().into_f32();
-            println!("{d}.round() = {rp}");
-            println!("{}.round() = {rn}", -d);
-            println!("{ep} {en}");
-            assert!((ep - rp).abs() < EPS);
-            assert!((rn - en).abs() < EPS);
-        }
-    }
+#[cfg(test)]
+mod test_unsigned_24_dot_8 {
+    test_module!(U32Fixed<8>, signed = false);
 }

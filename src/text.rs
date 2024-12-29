@@ -1,5 +1,6 @@
 use std::{cell::OnceCell, mem::MaybeUninit, ops::Range, rc::Rc};
 
+use ft_utils::IFixed26Dot6;
 use text_sys::*;
 
 mod face;
@@ -10,7 +11,6 @@ pub use font_select::*;
 
 use crate::{
     color::{BlendMode, BGRA8},
-    math::Fixed,
     util::{calculate_blit_rectangle, AnyError, BlitRectangle, OrderedF32},
 };
 
@@ -65,10 +65,10 @@ pub struct Glyph {
     pub index: hb_codepoint_t,
     /// Byte position where this glyph started in the original UTF-8 string
     pub cluster: usize,
-    pub x_advance: Fixed<6>,
-    pub y_advance: Fixed<6>,
-    pub x_offset: Fixed<6>,
-    pub y_offset: Fixed<6>,
+    pub x_advance: IFixed26Dot6,
+    pub y_advance: IFixed26Dot6,
+    pub x_offset: IFixed26Dot6,
+    pub y_offset: IFixed26Dot6,
     pub font_index: usize,
     flags: hb_glyph_flags_t,
 }
@@ -83,10 +83,10 @@ impl Glyph {
         Self {
             index: info.codepoint,
             cluster: original_cluster,
-            x_advance: Fixed::from_raw(position.x_advance),
-            y_advance: Fixed::from_raw(position.y_advance),
-            x_offset: Fixed::from_raw(position.x_offset),
-            y_offset: Fixed::from_raw(position.y_offset),
+            x_advance: IFixed26Dot6::from_raw(position.x_advance),
+            y_advance: IFixed26Dot6::from_raw(position.y_advance),
+            x_offset: IFixed26Dot6::from_raw(position.x_offset),
+            y_offset: IFixed26Dot6::from_raw(position.y_offset),
             font_index,
             flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }
@@ -105,10 +105,10 @@ pub fn compute_extents_ex(
     horizontal: bool,
     fonts: &[Font],
     glyphs: &[Glyph],
-) -> (TextExtents, (Fixed<6>, Fixed<6>)) {
+) -> (TextExtents, (IFixed26Dot6, IFixed26Dot6)) {
     let mut results = TextExtents {
-        paint_height: Fixed::ZERO,
-        paint_width: Fixed::ZERO,
+        paint_height: IFixed26Dot6::ZERO,
+        paint_width: IFixed26Dot6::ZERO,
     };
 
     let trailing_advance;
@@ -120,12 +120,12 @@ pub fn compute_extents_ex(
         results.paint_height += extents.height.abs();
         results.paint_width += extents.width;
         if horizontal {
-            trailing_advance = ((glyph.x_advance - extents.width), Fixed::ZERO);
+            trailing_advance = ((glyph.x_advance - extents.width), IFixed26Dot6::ZERO);
         } else {
-            trailing_advance = (Fixed::ZERO, (glyph.y_advance - extents.height));
+            trailing_advance = (IFixed26Dot6::ZERO, (glyph.y_advance - extents.height));
         }
     } else {
-        trailing_advance = (Fixed::ZERO, Fixed::ZERO);
+        trailing_advance = (IFixed26Dot6::ZERO, IFixed26Dot6::ZERO);
     }
 
     for glyph in glyphs {
@@ -478,8 +478,8 @@ pub fn shape_text(font: &Font, text: &str) -> ShapedText {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextExtents {
-    pub paint_height: Fixed<6>,
-    pub paint_width: Fixed<6>,
+    pub paint_height: IFixed26Dot6,
+    pub paint_width: IFixed26Dot6,
 }
 
 struct GlyphBitmap {
@@ -684,14 +684,14 @@ impl Image {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn render(xf: Fixed<6>, yf: Fixed<6>, fonts: &[Font], glyphs: &[Glyph]) -> Image {
+pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyph]) -> Image {
     let mut result = Image {
         glyphs: Vec::new(),
         monochrome: OnceCell::new(),
     };
 
-    assert!((-Fixed::ONE..Fixed::ONE).contains(&xf));
-    assert!((-Fixed::ONE..Fixed::ONE).contains(&yf));
+    assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&xf));
+    assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&yf));
 
     let mut x = xf;
     let mut y = yf;
@@ -701,8 +701,8 @@ pub fn render(xf: Fixed<6>, yf: Fixed<6>, fonts: &[Font], glyphs: &[Glyph]) -> I
 
         result.glyphs.push(GlyphBitmap {
             offset: (
-                (x + cached.offset.0 + shaped_glyph.x_offset).trunc_to_i32(),
-                (y + cached.offset.1 + shaped_glyph.y_offset).trunc_to_i32(),
+                (x + cached.offset.0 + shaped_glyph.x_offset).trunc_to_inner(),
+                (y + cached.offset.1 + shaped_glyph.y_offset).trunc_to_inner(),
             ),
             width: cached.width,
             height: cached.height,

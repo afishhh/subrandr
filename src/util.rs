@@ -199,6 +199,23 @@ impl<const CAP: usize, T: Clone> ArrayVec<CAP, T> {
     }
 }
 
+impl<const CAP: usize, T> IntoIterator for ArrayVec<CAP, T> {
+    type Item = T;
+    type IntoIter = std::iter::Map<
+        std::iter::Take<<[MaybeUninit<T>; CAP] as IntoIterator>::IntoIter>,
+        // sadly this requires a function pointer :(((
+        // I wonder whether this can be optimised out...
+        fn(MaybeUninit<T>) -> T,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data
+            .into_iter()
+            .take(self.length)
+            .map(|x| unsafe { MaybeUninit::assume_init(x) })
+    }
+}
+
 impl<const CAP: usize, T: Clone> Clone for ArrayVec<CAP, T> {
     fn clone(&self) -> Self {
         let mut result = Self {

@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::{color::BGRA8, math::Fixed, outline::Outline, util::fmt_from_fn};
+use crate::{color::BGRA8, outline::Outline, util::fmt_from_fn};
 
 use super::ft_utils::*;
 use text_sys::*;
@@ -318,14 +318,14 @@ impl Drop for Face {
 
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphMetrics {
-    pub width: Fixed<6>,
-    pub height: Fixed<6>,
-    pub hori_bearing_x: Fixed<6>,
-    pub hori_bearing_y: Fixed<6>,
-    pub hori_advance: Fixed<6>,
-    pub vert_bearing_x: Fixed<6>,
-    pub vert_bearing_y: Fixed<6>,
-    pub vert_advance: Fixed<6>,
+    pub width: IFixed26Dot6,
+    pub height: IFixed26Dot6,
+    pub hori_bearing_x: IFixed26Dot6,
+    pub hori_bearing_y: IFixed26Dot6,
+    pub hori_advance: IFixed26Dot6,
+    pub vert_bearing_x: IFixed26Dot6,
+    pub vert_bearing_y: IFixed26Dot6,
+    pub vert_advance: IFixed26Dot6,
 }
 
 #[repr(C)]
@@ -339,7 +339,7 @@ pub struct Font {
 
     /// -1 = not fixed size
     fixed_size_index: i32,
-    pub(super) scale: Fixed<6>,
+    pub(super) scale: IFixed26Dot6,
 }
 
 impl Font {
@@ -351,7 +351,7 @@ impl Font {
                 fttry!(FT_Set_Char_Size(face, point_size, point_size, dpi, dpi));
             }
 
-            (-1, Fixed::ONE)
+            (-1, IFixed26Dot6::ONE)
         } else {
             let sizes = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -372,7 +372,7 @@ impl Font {
                 }
             }
 
-            let scale = Fixed::<6>::from_quotient64(ppem, sizes[picked_size_index].x_ppem);
+            let scale = IFixed26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem);
 
             unsafe {
                 fttry!(FT_Select_Size(face, picked_size_index as i32));
@@ -501,7 +501,10 @@ impl std::fmt::Debug for Font {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Font")
             .field("face", self.face())
-            .field("point_size", &Fixed::<6>::from_raw(self.point_size as i32))
+            .field(
+                "point_size",
+                &IFixed26Dot6::from_raw(self.point_size as i32),
+            )
             .field("dpi", &self.dpi)
             .finish()
     }
@@ -613,7 +616,7 @@ impl GlyphCache {
 
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
-    pub offset: (Fixed<6>, Fixed<6>),
+    pub offset: (IFixed26Dot6, IFixed26Dot6),
     pub width: u32,
     pub height: u32,
     pub data: Rc<BufferData>,
@@ -650,14 +653,14 @@ impl Font {
         }
 
         GlyphMetrics {
-            width: Fixed::from_raw(metrics.width as i32),
-            height: Fixed::from_raw(metrics.height as i32),
-            hori_bearing_x: Fixed::from_raw(metrics.horiBearingX as i32),
-            hori_bearing_y: Fixed::from_raw(metrics.horiBearingY as i32),
-            hori_advance: Fixed::from_raw(metrics.horiAdvance as i32),
-            vert_bearing_x: Fixed::from_raw(metrics.vertBearingX as i32),
-            vert_bearing_y: Fixed::from_raw(metrics.vertBearingY as i32),
-            vert_advance: Fixed::from_raw(metrics.vertAdvance as i32),
+            width: IFixed26Dot6::from_raw(metrics.width as i32),
+            height: IFixed26Dot6::from_raw(metrics.height as i32),
+            hori_bearing_x: IFixed26Dot6::from_raw(metrics.horiBearingX as i32),
+            hori_bearing_y: IFixed26Dot6::from_raw(metrics.horiBearingY as i32),
+            hori_advance: IFixed26Dot6::from_raw(metrics.horiAdvance as i32),
+            vert_bearing_x: IFixed26Dot6::from_raw(metrics.vertBearingX as i32),
+            vert_bearing_y: IFixed26Dot6::from_raw(metrics.vertBearingY as i32),
+            vert_advance: IFixed26Dot6::from_raw(metrics.vertAdvance as i32),
         }
     }
 
@@ -676,8 +679,8 @@ impl Font {
             let scale6 = self.scale.into_raw();
 
             let (ox, oy) = (
-                Fixed::from_raw((*slot).bitmap_left * scale6),
-                Fixed::from_raw(-(*slot).bitmap_top * scale6),
+                IFixed26Dot6::from_raw((*slot).bitmap_left * scale6),
+                IFixed26Dot6::from_raw(-(*slot).bitmap_top * scale6),
             );
 
             let bitmap = &(*slot).bitmap;

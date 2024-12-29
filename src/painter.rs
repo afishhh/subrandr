@@ -332,7 +332,7 @@ impl<'a> Painter<'a> {
         self.blit_text_image(
             x,
             y,
-            &text::render(Fixed::ZERO, Fixed::ZERO, fonts, glyphs),
+            &text::render(I32Fixed::ZERO, I32Fixed::ZERO, fonts, glyphs),
             color,
         );
     }

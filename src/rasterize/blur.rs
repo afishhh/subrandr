@@ -44,7 +44,7 @@ pub fn monochrome_gaussian_blit(
     let pad = (kernel.len() >> 1) as isize;
 
     for sy in 0..source_height + kernel.len() {
-        for sx in 0..source_width + kernel.len() {
+        for sx in 0..source_width {
             let mut khere = 0.0;
             for iy in -pad..=pad {
                 let ky = kernel[(iy + pad) as usize];
@@ -52,17 +52,13 @@ pub fn monochrome_gaussian_blit(
                     .checked_add_signed(iy - pad)
                     .filter(|&y| y < source_height)
                 {
-                    if let Some(cx) = sx.checked_add_signed(-pad).filter(|&x| x < source_width) {
-                        ky * (source[cy * source_width + cx] as f32 / 255.)
-                    } else {
-                        0.0
-                    }
+                    ky * (source[cy * source_width + sx] as f32 / 255.)
                 } else {
                     0.0
                 };
             }
 
-            buffer[sy * buffer_width + sx] = khere;
+            buffer[sy * buffer_width + sx + pad as usize] = khere;
         }
     }
 

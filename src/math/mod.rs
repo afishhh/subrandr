@@ -107,20 +107,7 @@ impl Vec2 {
     }
 
     pub fn normalize(self) -> Self {
-        #[cfg(target_feature = "sse")]
-        unsafe {
-            let length_sq = self.length_sq();
-            let mut invlength: f32;
-            asm!("rsqrtss {}, {}", out(xmm_reg) invlength, in(xmm_reg) length_sq);
-            // rsqrtss + one newton-raphson step = 22-bits of accuracy
-            // still faster than sqrt
-            invlength *= 1.5 - (length_sq * 0.5 * invlength * invlength);
-            self * invlength
-        }
-        #[cfg(not(target_feature = "sse"))]
-        {
-            self / self.length()
-        }
+        fast_divide_by_sqrt(self, self.length_sq())
     }
 
     pub const ZERO: Self = Self::new(0., 0.);
@@ -350,6 +337,24 @@ fn lerp<S: Mul<f32, Output = S>, T: Clone + Add<S, Output = T> + Sub<T, Output =
     t: f32,
 ) -> T {
     a.clone() + (b - a) * t
+}
+
+pub fn fast_divide_by_sqrt<O, T>(numerator: T, squared_denominator: f32) -> O
+where
+    T: Div<f32, Output = O> + Mul<f32, Output = O>,
+{
+    #[cfg(target_feature = "sse")]
+    unsafe {
+        let mut result: f32;
+        asm!("rsqrtss {}, {}", out(xmm_reg) result, in(xmm_reg) squared_denominator);
+        // rsqrtss + one newton-raphson step = 22-bits of accuracy
+        result *= 1.5 - (squared_denominator * 0.5 * result * result);
+        numerator * result
+    }
+    #[cfg(not(target_feature = "sse"))]
+    {
+        numerator / value.sqrt()
+    }
 }
 
 pub fn fast_mul_add(a: f32, b: f32, c: f32) -> f32 {

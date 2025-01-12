@@ -435,7 +435,6 @@ fn parse_body(
 ) -> Result<Vec<Event>, Error> {
     let mut events = vec![];
 
-    // TODO: maybe make a logstatemap instead that would take an additional key?
     log_once_state!(
         unknown_attrs: set,
         unknown_body_elements: set,

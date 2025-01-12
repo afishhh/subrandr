@@ -71,12 +71,7 @@ impl<'a> Painter<'a> {
     }
 
     pub fn clear(&mut self, color: BGRA8) {
-        let end = self.width as usize * self.height as usize;
-        let mut current = 0;
-        while current < end {
-            self.buffer[current] = color;
-            current += 1;
-        }
+        self.buffer.fill(color);
     }
 
     #[inline(always)]

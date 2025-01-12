@@ -102,10 +102,10 @@ fn calculate_font_scale(
 
 fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     calculate_font_scale(
-        to_css_pixels(ctx.video_width, ctx.ppi()),
-        to_css_pixels(ctx.video_height, ctx.ppi()),
-        to_css_pixels(ctx.player_width(), ctx.ppi()),
-        to_css_pixels(ctx.player_height(), ctx.ppi()),
+        ctx.pixels_to_css(ctx.video_width),
+        ctx.pixels_to_css(ctx.video_height),
+        ctx.pixels_to_css(ctx.player_width()),
+        ctx.pixels_to_css(ctx.player_height()),
     )
 }
 
@@ -126,13 +126,20 @@ fn font_size_to_pixels(size: u16) -> f32 {
 // this.maxWidth = playerWidth * 0.96
 // this.maxHeight = playerHeight * 0.96
 
-// 1px = 1/96in
-fn to_css_pixels(real_pixels: f32, ppi: u32) -> f32 {
-    real_pixels * 96.0 / ppi as f32
+trait SubtitleContextCssExt {
+    // 1px = 1/96in
+    fn pixels_to_css(&self, physical_pixels: f32) -> f32;
+    fn pixels_from_css(&self, css_pixels: f32) -> f32;
 }
 
-fn to_real_pixels(css_pixels: f32, ppi: u32) -> f32 {
-    css_pixels * ppi as f32 / 96.0
+impl SubtitleContextCssExt for SubtitleContext {
+    fn pixels_to_css(&self, physical_pixels: f32) -> f32 {
+        physical_pixels * 96.0 / self.ppi() as f32
+    }
+
+    fn pixels_from_css(&self, css_pixels: f32) -> f32 {
+        css_pixels * self.ppi() as f32 / 96.0
+    }
 }
 
 fn pixels_to_points(pixels: f32) -> f32 {
@@ -166,7 +173,7 @@ impl Srv3TextShadow {
                 let mut x = e;
                 while x <= t {
                     out.push(CssTextShadow {
-                        offset: Vec2::new(to_real_pixels(x, ctx.dpi), to_real_pixels(x, ctx.dpi)),
+                        offset: Vec2::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
                         blur_radius: 0.0,
                         color: self.color,
                     });
@@ -174,7 +181,7 @@ impl Srv3TextShadow {
                 }
             }
             EdgeType::Bevel => {
-                let offset = Vec2::new(to_real_pixels(e, ctx.dpi), to_real_pixels(e, ctx.dpi));
+                let offset = Vec2::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
                 out.push(CssTextShadow {
                     offset,
                     blur_radius: 0.0,
@@ -196,7 +203,7 @@ impl Srv3TextShadow {
                 }
             }
             EdgeType::SoftShadow => {
-                let offset = Vec2::new(to_real_pixels(l, ctx.ppi()), to_real_pixels(l, ctx.ppi()));
+                let offset = Vec2::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
                 while t <= c {
                     out.push(CssTextShadow {
                         offset,

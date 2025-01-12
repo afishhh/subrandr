@@ -563,7 +563,7 @@ pub struct Image {
 }
 
 impl GlyphBitmap {
-    fn blit_monochrome(
+    unsafe fn blit_monochrome_unchecked(
         &self,
         dx: i32,
         dy: i32,
@@ -583,19 +583,18 @@ impl GlyphBitmap {
                 let si = y * self.width as usize + x;
                 let sv = *unsafe { source.get_unchecked(si) };
                 let na = sv as f32 / 255.0 * alpha;
-                let bgr = color.map(|c| srgb_to_linear(c) * na);
 
                 let di = (fx as usize) + (fy as usize) * stride as usize;
                 BlendMode::Over.blend_with_linear_parts(
                     unsafe { buffer.get_unchecked_mut(di) },
-                    bgr,
+                    color.map(srgb_to_linear).map(|x| x * na),
                     na,
                 );
             }
         }
     }
 
-    fn blit_bgra(
+    unsafe fn blit_bgra_unchecked(
         &self,
         dx: i32,
         dy: i32,
@@ -612,7 +611,10 @@ impl GlyphBitmap {
                 let fx = dx + self.offset.0 + x as i32;
 
                 let si = y * self.width as usize + x;
-                let nbgr = source[si].to_bgr_bytes().map(|v| srgb_to_linear(v) * alpha);
+                let nbgr = source[si]
+                    .to_bgr_bytes()
+                    .map(srgb_to_linear)
+                    .map(|v| v * alpha);
                 let na = source[si].a as f32 / 255.0 * alpha;
 
                 let di = (fx as usize) + (fy as usize) * stride as usize;
@@ -647,12 +649,16 @@ impl GlyphBitmap {
             return;
         };
 
-        match &*self.data {
-            BufferData::Monochrome(pixels) => {
-                self.blit_monochrome(dx, dy, buffer, stride, color, alpha, ys, xs, pixels);
-            }
-            BufferData::Color(pixels) => {
-                self.blit_bgra(dx, dy, buffer, stride, alpha, ys, xs, pixels);
+        unsafe {
+            match &*self.data {
+                BufferData::Monochrome(pixels) => {
+                    self.blit_monochrome_unchecked(
+                        dx, dy, buffer, stride, color, alpha, ys, xs, pixels,
+                    );
+                }
+                BufferData::Color(pixels) => {
+                    self.blit_bgra_unchecked(dx, dy, buffer, stride, alpha, ys, xs, pixels);
+                }
             }
         }
     }

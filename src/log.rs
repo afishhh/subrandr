@@ -3,7 +3,6 @@ use std::{
     collections::HashSet,
     ffi::{c_char, c_void},
     hash::{Hash, Hasher},
-    marker::PhantomData,
     panic::Location,
     str::FromStr,
     sync::OnceLock,

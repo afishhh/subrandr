@@ -353,7 +353,7 @@ where
     }
     #[cfg(not(target_feature = "sse"))]
     {
-        numerator / value.sqrt()
+        numerator / squared_denominator.sqrt()
     }
 }
 

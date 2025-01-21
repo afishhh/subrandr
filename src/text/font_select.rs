@@ -80,16 +80,19 @@ mod provider {
     #[cfg(target_family = "unix")]
     #[path = "font_provider/fontconfig.rs"]
     pub mod fontconfig;
-    pub use fontconfig::FontconfigFontProvider;
 
     use super::FontProvider;
     use crate::util::AnyError;
 
     pub fn platform_default() -> Result<Box<dyn FontProvider>, AnyError> {
         #[cfg(target_family = "unix")]
-        FontconfigFontProvider::new()
-            .map(|x| Box::new(x) as Box<dyn FontProvider>)
-            .map_err(Into::into)
+        {
+            fontconfig::FontconfigFontProvider::new()
+                .map(|x| Box::new(x) as Box<dyn FontProvider>)
+                .map_err(Into::into)
+        }
+        #[cfg(not(target_family = "unix"))]
+        todo!("no fontprovider available for current platform")
     }
 }
 
@@ -118,7 +121,6 @@ fn set_weight_if_variable(face: &mut Face, weight: f32) {
 
 impl FontSelect {
     pub fn new() -> Result<FontSelect, Error> {
-        #[cfg(target_os = "linux")]
         let provider: Box<dyn FontProvider> =
             provider::platform_default().map_err(Error::Provider)?;
 

@@ -18,7 +18,7 @@ struct FaceMmVar(*mut FT_MM_Var);
 impl FaceMmVar {
     #[inline(always)]
     fn has(face: FT_Face) -> bool {
-        unsafe { ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as i64) != 0 }
+        unsafe { ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as FT_Long) != 0 }
     }
 
     fn get(face: FT_Face) -> Option<Self> {
@@ -82,17 +82,14 @@ pub struct Face {
     coords: MmCoords,
 }
 
-const fn create_freetype_tag(text: [u8; 4]) -> u64 {
-    (((text[0] as u32) << 24)
-        + ((text[1] as u32) << 16)
-        + ((text[2] as u32) << 8)
-        + (text[3] as u32)) as u64
+const fn create_freetype_tag(text: [u8; 4]) -> u32 {
+    ((text[0] as u32) << 24) + ((text[1] as u32) << 16) + ((text[2] as u32) << 8) + (text[3] as u32)
 }
 
-pub const WEIGHT_AXIS: u64 = create_freetype_tag(*b"wght");
+pub const WEIGHT_AXIS: u32 = create_freetype_tag(*b"wght");
 #[expect(dead_code)]
-pub const WIDTH_AXIS: u64 = create_freetype_tag(*b"wdth");
-pub const ITALIC_AXIS: u64 = create_freetype_tag(*b"ital");
+pub const WIDTH_AXIS: u32 = create_freetype_tag(*b"wdth");
+pub const ITALIC_AXIS: u32 = create_freetype_tag(*b"ital");
 
 impl Face {
     pub fn load_from_file(path: impl AsRef<Path>) -> Self {
@@ -111,7 +108,7 @@ impl Face {
         if let Some(mm) = FaceMmVar::get(face) {
             for (index, ft_axis) in mm.axes().iter().enumerate() {
                 axes.push(Axis {
-                    tag: ft_axis.tag,
+                    tag: ft_axis.tag as u32,
                     index,
                     minimum: ft_axis.minimum,
                     maximum: ft_axis.maximum,
@@ -161,7 +158,7 @@ impl Face {
         &self.shared_data().axes
     }
 
-    pub fn axis(&self, tag: u64) -> Option<Axis> {
+    pub fn axis(&self, tag: u32) -> Option<Axis> {
         self.axes().iter().find(|x| x.tag == tag).copied()
     }
 
@@ -236,13 +233,13 @@ impl std::fmt::Debug for Face {
 
 #[derive(Clone, Copy)]
 pub struct Axis {
-    pub tag: u64,
+    pub tag: u32,
     pub index: usize,
     minimum: FT_Fixed,
     maximum: FT_Fixed,
 }
 
-fn debug_tag(tag: u64) -> impl std::fmt::Debug {
+fn debug_tag(tag: u32) -> impl std::fmt::Debug {
     fmt_from_fn(move |fmt| {
         let bytes = tag.to_be_bytes();
         let end = 'f: {
@@ -274,7 +271,7 @@ impl Axis {
     }
 
     #[inline(always)]
-    const fn is_fixed_value_in_range(&self, fixed: i64) -> bool {
+    const fn is_fixed_value_in_range(&self, fixed: FT_Fixed) -> bool {
         self.minimum <= fixed && fixed <= self.maximum
     }
 
@@ -362,17 +359,18 @@ impl Font {
 
             // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
             let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
-            let ppem = map_to_ppem(point_size, dpi.into());
+            let ppem = map_to_ppem(point_size.into(), dpi.into());
 
             // First size larger than requested, or the largest size if not found
             let mut picked_size_index = 0usize;
             for (i, size) in sizes.iter().enumerate() {
-                if size.x_ppem > ppem && size.x_ppem < sizes[picked_size_index].x_ppem {
+                if i64::from(size.x_ppem) > ppem && size.x_ppem < sizes[picked_size_index].x_ppem {
                     picked_size_index = i;
                 }
             }
 
-            let scale = IFixed26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem);
+            let scale =
+                IFixed26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
 
             unsafe {
                 fttry!(FT_Select_Size(face, picked_size_index as i32));
@@ -408,12 +406,12 @@ impl Font {
 
                 scale_field!(x_ppem, u32, u16);
                 scale_field!(y_ppem, u32, u16);
-                scale_field!(x_scale, i64, i64);
-                scale_field!(y_scale, i64, i64);
-                scale_field!(ascender, i64, i64);
-                scale_field!(descender, i64, i64);
-                scale_field!(height, i64, i64);
-                scale_field!(max_advance, i64, i64);
+                scale_field!(x_scale, i64, FT_Long);
+                scale_field!(y_scale, i64, FT_Long);
+                scale_field!(ascender, i64, FT_Long);
+                scale_field!(descender, i64, FT_Long);
+                scale_field!(height, i64, FT_Long);
+                scale_field!(max_advance, i64, FT_Long);
             } else {
                 fttry!(FT_Set_Char_Size(
                     self.ft_face,
@@ -452,7 +450,7 @@ impl Font {
         unsafe {
             // According to FreeType documentation, bitmap-only fonts ignore
             // FT_LOAD_NO_BITMAP.
-            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as i64) == 0 {
+            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
                 return None;
             }
 
@@ -638,7 +636,7 @@ impl Font {
         if let Some(scale) = Some(self.scale).filter(|s| *s != 1) {
             macro_rules! scale_field {
                 ($name: ident) => {
-                    metrics.$name = (metrics.$name * scale.into_raw() as i64) >> 6;
+                    metrics.$name = (metrics.$name * scale.into_raw() as FT_Long) >> 6;
                 };
             }
 

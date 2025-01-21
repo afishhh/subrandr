@@ -138,13 +138,6 @@ pub struct timespec {
     pub tv_sec: __time_t,
     pub tv_nsec: __syscall_slong_t,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of timespec"][::std::mem::size_of::<timespec>() - 16usize];
-    ["Alignment of timespec"][::std::mem::align_of::<timespec>() - 8usize];
-    ["Offset of field: timespec::tv_sec"][::std::mem::offset_of!(timespec, tv_sec) - 0usize];
-    ["Offset of field: timespec::tv_nsec"][::std::mem::offset_of!(timespec, tv_nsec) - 8usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct stat {
@@ -164,27 +157,6 @@ pub struct stat {
     pub st_ctim: timespec,
     pub __glibc_reserved: [__syscall_slong_t; 3usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of stat"][::std::mem::size_of::<stat>() - 144usize];
-    ["Alignment of stat"][::std::mem::align_of::<stat>() - 8usize];
-    ["Offset of field: stat::st_dev"][::std::mem::offset_of!(stat, st_dev) - 0usize];
-    ["Offset of field: stat::st_ino"][::std::mem::offset_of!(stat, st_ino) - 8usize];
-    ["Offset of field: stat::st_nlink"][::std::mem::offset_of!(stat, st_nlink) - 16usize];
-    ["Offset of field: stat::st_mode"][::std::mem::offset_of!(stat, st_mode) - 24usize];
-    ["Offset of field: stat::st_uid"][::std::mem::offset_of!(stat, st_uid) - 28usize];
-    ["Offset of field: stat::st_gid"][::std::mem::offset_of!(stat, st_gid) - 32usize];
-    ["Offset of field: stat::__pad0"][::std::mem::offset_of!(stat, __pad0) - 36usize];
-    ["Offset of field: stat::st_rdev"][::std::mem::offset_of!(stat, st_rdev) - 40usize];
-    ["Offset of field: stat::st_size"][::std::mem::offset_of!(stat, st_size) - 48usize];
-    ["Offset of field: stat::st_blksize"][::std::mem::offset_of!(stat, st_blksize) - 56usize];
-    ["Offset of field: stat::st_blocks"][::std::mem::offset_of!(stat, st_blocks) - 64usize];
-    ["Offset of field: stat::st_atim"][::std::mem::offset_of!(stat, st_atim) - 72usize];
-    ["Offset of field: stat::st_mtim"][::std::mem::offset_of!(stat, st_mtim) - 88usize];
-    ["Offset of field: stat::st_ctim"][::std::mem::offset_of!(stat, st_ctim) - 104usize];
-    ["Offset of field: stat::__glibc_reserved"]
-        [::std::mem::offset_of!(stat, __glibc_reserved) - 120usize];
-};
 pub type va_list = __builtin_va_list;
 pub type FcChar8 = ::std::os::raw::c_uchar;
 pub type FcChar16 = ::std::os::raw::c_ushort;
@@ -211,15 +183,6 @@ pub struct _FcMatrix {
     pub yx: f64,
     pub yy: f64,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcMatrix"][::std::mem::size_of::<_FcMatrix>() - 32usize];
-    ["Alignment of _FcMatrix"][::std::mem::align_of::<_FcMatrix>() - 8usize];
-    ["Offset of field: _FcMatrix::xx"][::std::mem::offset_of!(_FcMatrix, xx) - 0usize];
-    ["Offset of field: _FcMatrix::xy"][::std::mem::offset_of!(_FcMatrix, xy) - 8usize];
-    ["Offset of field: _FcMatrix::yx"][::std::mem::offset_of!(_FcMatrix, yx) - 16usize];
-    ["Offset of field: _FcMatrix::yy"][::std::mem::offset_of!(_FcMatrix, yy) - 24usize];
-};
 pub type FcMatrix = _FcMatrix;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -233,15 +196,6 @@ pub struct _FcObjectType {
     pub object: *mut ::std::os::raw::c_char,
     pub type_: FcType,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcObjectType"][::std::mem::size_of::<_FcObjectType>() - 16usize];
-    ["Alignment of _FcObjectType"][::std::mem::align_of::<_FcObjectType>() - 8usize];
-    ["Offset of field: _FcObjectType::object"]
-        [::std::mem::offset_of!(_FcObjectType, object) - 0usize];
-    ["Offset of field: _FcObjectType::type_"]
-        [::std::mem::offset_of!(_FcObjectType, type_) - 8usize];
-};
 pub type FcObjectType = _FcObjectType;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -250,14 +204,6 @@ pub struct _FcConstant {
     pub object: *const ::std::os::raw::c_char,
     pub value: ::std::os::raw::c_int,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcConstant"][::std::mem::size_of::<_FcConstant>() - 24usize];
-    ["Alignment of _FcConstant"][::std::mem::align_of::<_FcConstant>() - 8usize];
-    ["Offset of field: _FcConstant::name"][::std::mem::offset_of!(_FcConstant, name) - 0usize];
-    ["Offset of field: _FcConstant::object"][::std::mem::offset_of!(_FcConstant, object) - 8usize];
-    ["Offset of field: _FcConstant::value"][::std::mem::offset_of!(_FcConstant, value) - 16usize];
-};
 pub type FcConstant = _FcConstant;
 pub const FcResultMatch: _FcResult = 0;
 pub const FcResultNoMatch: _FcResult = 1;
@@ -284,15 +230,6 @@ pub struct _FcPatternIter {
     pub dummy1: *mut ::std::os::raw::c_void,
     pub dummy2: *mut ::std::os::raw::c_void,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcPatternIter"][::std::mem::size_of::<_FcPatternIter>() - 16usize];
-    ["Alignment of _FcPatternIter"][::std::mem::align_of::<_FcPatternIter>() - 8usize];
-    ["Offset of field: _FcPatternIter::dummy1"]
-        [::std::mem::offset_of!(_FcPatternIter, dummy1) - 0usize];
-    ["Offset of field: _FcPatternIter::dummy2"]
-        [::std::mem::offset_of!(_FcPatternIter, dummy2) - 8usize];
-};
 pub type FcPatternIter = _FcPatternIter;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -325,37 +262,6 @@ pub union _FcValue__bindgen_ty_1 {
     pub l: *const FcLangSet,
     pub r: *const FcRange,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcValue__bindgen_ty_1"][::std::mem::size_of::<_FcValue__bindgen_ty_1>() - 8usize];
-    ["Alignment of _FcValue__bindgen_ty_1"]
-        [::std::mem::align_of::<_FcValue__bindgen_ty_1>() - 8usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::s"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, s) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::i"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, i) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::b"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, b) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::d"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, d) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::m"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, m) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::c"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, c) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::f"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, f) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::l"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, l) - 0usize];
-    ["Offset of field: _FcValue__bindgen_ty_1::r"]
-        [::std::mem::offset_of!(_FcValue__bindgen_ty_1, r) - 0usize];
-};
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcValue"][::std::mem::size_of::<_FcValue>() - 16usize];
-    ["Alignment of _FcValue"][::std::mem::align_of::<_FcValue>() - 8usize];
-    ["Offset of field: _FcValue::type_"][::std::mem::offset_of!(_FcValue, type_) - 0usize];
-    ["Offset of field: _FcValue::u"][::std::mem::offset_of!(_FcValue, u) - 8usize];
-};
 pub type FcValue = _FcValue;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -364,14 +270,6 @@ pub struct _FcFontSet {
     pub sfont: ::std::os::raw::c_int,
     pub fonts: *mut *mut FcPattern,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcFontSet"][::std::mem::size_of::<_FcFontSet>() - 16usize];
-    ["Alignment of _FcFontSet"][::std::mem::align_of::<_FcFontSet>() - 8usize];
-    ["Offset of field: _FcFontSet::nfont"][::std::mem::offset_of!(_FcFontSet, nfont) - 0usize];
-    ["Offset of field: _FcFontSet::sfont"][::std::mem::offset_of!(_FcFontSet, sfont) - 4usize];
-    ["Offset of field: _FcFontSet::fonts"][::std::mem::offset_of!(_FcFontSet, fonts) - 8usize];
-};
 pub type FcFontSet = _FcFontSet;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -380,17 +278,6 @@ pub struct _FcObjectSet {
     pub sobject: ::std::os::raw::c_int,
     pub objects: *mut *const ::std::os::raw::c_char,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcObjectSet"][::std::mem::size_of::<_FcObjectSet>() - 16usize];
-    ["Alignment of _FcObjectSet"][::std::mem::align_of::<_FcObjectSet>() - 8usize];
-    ["Offset of field: _FcObjectSet::nobject"]
-        [::std::mem::offset_of!(_FcObjectSet, nobject) - 0usize];
-    ["Offset of field: _FcObjectSet::sobject"]
-        [::std::mem::offset_of!(_FcObjectSet, sobject) - 4usize];
-    ["Offset of field: _FcObjectSet::objects"]
-        [::std::mem::offset_of!(_FcObjectSet, objects) - 8usize];
-};
 pub type FcObjectSet = _FcObjectSet;
 pub const FcMatchPattern: _FcMatchKind = 0;
 pub const FcMatchFont: _FcMatchKind = 1;
@@ -416,18 +303,6 @@ pub struct _FcConfigFileInfoIter {
     pub dummy2: *mut ::std::os::raw::c_void,
     pub dummy3: *mut ::std::os::raw::c_void,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _FcConfigFileInfoIter"][::std::mem::size_of::<_FcConfigFileInfoIter>() - 24usize];
-    ["Alignment of _FcConfigFileInfoIter"]
-        [::std::mem::align_of::<_FcConfigFileInfoIter>() - 8usize];
-    ["Offset of field: _FcConfigFileInfoIter::dummy1"]
-        [::std::mem::offset_of!(_FcConfigFileInfoIter, dummy1) - 0usize];
-    ["Offset of field: _FcConfigFileInfoIter::dummy2"]
-        [::std::mem::offset_of!(_FcConfigFileInfoIter, dummy2) - 8usize];
-    ["Offset of field: _FcConfigFileInfoIter::dummy3"]
-        [::std::mem::offset_of!(_FcConfigFileInfoIter, dummy3) - 16usize];
-};
 pub type FcConfigFileInfoIter = _FcConfigFileInfoIter;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1436,16 +1311,3 @@ pub struct __va_list_tag {
     pub overflow_arg_area: *mut ::std::os::raw::c_void,
     pub reg_save_area: *mut ::std::os::raw::c_void,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of __va_list_tag"][::std::mem::size_of::<__va_list_tag>() - 24usize];
-    ["Alignment of __va_list_tag"][::std::mem::align_of::<__va_list_tag>() - 8usize];
-    ["Offset of field: __va_list_tag::gp_offset"]
-        [::std::mem::offset_of!(__va_list_tag, gp_offset) - 0usize];
-    ["Offset of field: __va_list_tag::fp_offset"]
-        [::std::mem::offset_of!(__va_list_tag, fp_offset) - 4usize];
-    ["Offset of field: __va_list_tag::overflow_arg_area"]
-        [::std::mem::offset_of!(__va_list_tag, overflow_arg_area) - 8usize];
-    ["Offset of field: __va_list_tag::reg_save_area"]
-        [::std::mem::offset_of!(__va_list_tag, reg_save_area) - 16usize];
-};

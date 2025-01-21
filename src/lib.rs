@@ -25,6 +25,8 @@ mod rasterize;
 pub mod srv3;
 mod text;
 mod util;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
 pub use painter::*;
 use util::{ref_to_slice, RcArray};
@@ -1020,7 +1022,7 @@ impl<'a> Renderer<'a> {
 
         Self {
             sbr,
-            fonts: text::FontSelect::new().unwrap(),
+            fonts: text::FontSelect::new(sbr).unwrap(),
             dpi: 0,
             subs,
             perf: PerfStats::new(),

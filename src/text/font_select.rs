@@ -1,8 +1,11 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, hash::Hash, path::PathBuf};
 
 use thiserror::Error;
 
-use crate::util::{AnyError, OrderedF32, Sealed};
+use crate::{
+    util::{AnyError, OrderedF32, PtrEqArc, Sealed},
+    Subrandr,
+};
 
 use super::{Face, WEIGHT_AXIS};
 
@@ -15,29 +18,30 @@ pub struct FontRequest {
 }
 
 #[derive(Debug, Clone)]
-struct FontInfo {
-    family: String,
-    weight: FontWeight,
-    italic: bool,
-    source: FontSource,
+pub struct FontInfo {
+    pub family: String,
+    pub weight: FontWeight,
+    pub italic: bool,
+    pub source: FontSource,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum FontWeight {
+pub enum FontWeight {
     Static(f32),
     Variable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum FontSource {
+pub enum FontSource {
     File(PathBuf),
-    // DirectWrite will have to get it from memory
+    Memory(PtrEqArc<[u8]>),
 }
 
 impl FontSource {
     pub fn load(&self) -> Result<Face, AnyError> {
         match self {
-            FontSource::File(file) => Ok(Face::load_from_file(file)),
+            Self::File(file) => Ok(Face::load_from_file(file)),
+            Self::Memory(memory) => Ok(Face::load_from_bytes(memory.0.clone())),
         }
     }
 }
@@ -75,6 +79,17 @@ trait FontProvider: Sealed + std::fmt::Debug {
     fn query(&mut self, request: &FontRequest) -> Result<Vec<FontInfo>, AnyError>;
 }
 
+#[derive(Debug)]
+struct NullFontProvider;
+
+impl Sealed for NullFontProvider {}
+
+impl FontProvider for NullFontProvider {
+    fn query(&mut self, _request: &FontRequest) -> Result<Vec<FontInfo>, AnyError> {
+        Ok(Vec::new())
+    }
+}
+
 #[path = ""]
 mod provider {
     #[cfg(target_family = "unix")]
@@ -82,9 +97,13 @@ mod provider {
     pub mod fontconfig;
 
     use super::FontProvider;
-    use crate::util::AnyError;
+    use crate::{util::AnyError, Subrandr};
 
-    pub fn platform_default() -> Result<Box<dyn FontProvider>, AnyError> {
+    #[cfg(not(target_family = "unix"))]
+    static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
         #[cfg(target_family = "unix")]
         {
             fontconfig::FontconfigFontProvider::new()
@@ -92,7 +111,15 @@ mod provider {
                 .map_err(Into::into)
         }
         #[cfg(not(target_family = "unix"))]
-        todo!("no fontprovider available for current platform")
+        {
+            if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
+                crate::log::warning!(
+                    _sbr,
+                    "no default fontprovider available for current platform"
+                );
+            }
+            Ok(Box::new(super::NullFontProvider))
+        }
     }
 }
 
@@ -111,6 +138,7 @@ pub struct FontSelect {
     source_cache: HashMap<FontSource, Face>,
     request_cache: HashMap<FontRequest, Option<Face>>,
     provider: Box<dyn FontProvider>,
+    custom: Vec<FontInfo>,
 }
 
 fn set_weight_if_variable(face: &mut Face, weight: f32) {
@@ -120,15 +148,20 @@ fn set_weight_if_variable(face: &mut Face, weight: f32) {
 }
 
 impl FontSelect {
-    pub fn new() -> Result<FontSelect, Error> {
+    pub fn new(sbr: &Subrandr) -> Result<FontSelect, Error> {
         let provider: Box<dyn FontProvider> =
-            provider::platform_default().map_err(Error::Provider)?;
+            provider::platform_default(sbr).map_err(Error::Provider)?;
 
         Ok(Self {
             source_cache: HashMap::new(),
             request_cache: HashMap::new(),
             provider,
+            custom: Vec::new(),
         })
+    }
+
+    pub fn add(&mut self, font: FontInfo) {
+        self.custom.push(font);
     }
 
     pub fn advance_cache_generation(&mut self) {
@@ -141,20 +174,20 @@ impl FontSelect {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
-            let mut result = choose(
-                &self.provider.query(request).map_err(Error::Provider)?,
-                request,
-            )
-            .map(|x| {
-                if let Some(cached) = self.source_cache.get(&x.source) {
-                    Ok(cached.clone())
-                } else {
-                    let loaded = x.source.load().map_err(Error::FailedToLoadFont)?;
-                    self.source_cache.insert(x.source.clone(), loaded.clone());
-                    Ok(loaded)
-                }
-            })
-            .transpose()?;
+            let mut choices = self.provider.query(request).map_err(Error::Provider)?;
+            // TODO: sort these
+            choices.extend(self.custom.iter().cloned());
+            let mut result = choose(&choices, request)
+                .map(|x| {
+                    if let Some(cached) = self.source_cache.get(&x.source) {
+                        Ok(cached.clone())
+                    } else {
+                        let loaded = x.source.load().map_err(Error::FailedToLoadFont)?;
+                        self.source_cache.insert(x.source.clone(), loaded.clone());
+                        Ok(loaded)
+                    }
+                })
+                .transpose()?;
 
             if let Some(ref mut face) = result {
                 set_weight_if_variable(face, request.weight.0);

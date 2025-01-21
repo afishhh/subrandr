@@ -5,6 +5,7 @@ use std::{
     mem::MaybeUninit,
     path::Path,
     rc::Rc,
+    sync::Arc,
 };
 
 use crate::{color::BGRA8, outline::Outline, util::fmt_from_fn};
@@ -63,6 +64,7 @@ type MmCoords = [FT_Fixed; T1_MAX_MM_AXIS as usize];
 struct SharedFaceData {
     axes: Vec<Axis>,
     glyph_cache: GlyphCache,
+    memory: Option<Arc<[u8]>>,
 }
 
 impl SharedFaceData {
@@ -102,6 +104,28 @@ impl Face {
             fttry!(FT_New_Face(library.ptr, cstr.as_ptr(), 0, &mut face));
         }
 
+        Self::adopt_ft(face, None)
+    }
+
+    pub fn load_from_bytes(bytes: Arc<[u8]>) -> Self {
+        let library = Library::get_or_init();
+        let _guard = library.face_mutation_mutex.lock().unwrap();
+
+        let mut face = std::ptr::null_mut();
+        unsafe {
+            fttry!(FT_New_Memory_Face(
+                library.ptr,
+                bytes.as_ptr(),
+                bytes.len() as FT_Long,
+                0,
+                &mut face
+            ));
+        }
+
+        Self::adopt_ft(face, Some(bytes))
+    }
+
+    fn adopt_ft(face: FT_Face, memory: Option<Arc<[u8]>>) -> Self {
         let mut axes = Vec::new();
         let mut default_coords = MmCoords::default();
 
@@ -121,6 +145,7 @@ impl Face {
             (*face).generic.data = Box::into_raw(Box::new(SharedFaceData {
                 axes,
                 glyph_cache: GlyphCache::new(),
+                memory,
             })) as *mut std::ffi::c_void;
             (*face).generic.finalizer = Some(SharedFaceData::finalize);
         }

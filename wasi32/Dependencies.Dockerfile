@@ -35,3 +35,4 @@ FROM scratch
 COPY --from=freetype /build/freetype/objs/.libs /
 COPY --from=freetype /build/freetype/objs/libfreetype.la /
 COPY --from=harfbuzz /build/harfbuzz/libharfbuzz.a /
+COPY --from=build-env /opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasip1/libsetjmp.a /

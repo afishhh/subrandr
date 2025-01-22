@@ -4,4 +4,10 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_FAMILY").unwrap() == "unix" {
         println!("cargo:rustc-link-lib=fontconfig");
     }
+
+    if std::env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32"
+        && std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "wasi"
+    {
+        println!("cargo:rustc-link-lib=setjmp");
+    }
 }

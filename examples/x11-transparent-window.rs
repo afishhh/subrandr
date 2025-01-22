@@ -313,7 +313,7 @@ impl PlayerIpc for ChromeYoutubeIpc {
     fn get_state(&mut self) -> PlayerState {
         // whole player = #movie_player
         // video part only = #movie_player > div:nth-child(1) > video:nth-child(1)
-        serde_json::from_value(dbg!(self.run_js_in_lambda(
+        serde_json::from_value(self.run_js_in_lambda(
             r##"
             let movie_player = document.querySelector("#movie_player");
             let video_player = document.querySelector("#movie_player > div:nth-child(1) > video:nth-child(1)")
@@ -331,7 +331,7 @@ impl PlayerIpc for ChromeYoutubeIpc {
                 current_time: Math.floor(video_player.currentTime * 1000)
             };
         "##
-        ))).unwrap()
+        )).unwrap()
     }
 }
 

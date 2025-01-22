@@ -93,21 +93,14 @@ pub struct Premultiplied<T: Premultiply>(pub T);
 
 impl Premultiply for BGRA8 {
     fn premultiply(self) -> Premultiplied<Self> {
-        let a = self.a as f32 / 255.0;
+        let a = self.a as u16;
         Premultiplied(Self {
-            b: linear_to_srgb(srgb_to_linear(self.b) * a),
-            g: linear_to_srgb(srgb_to_linear(self.g) * a),
-            r: linear_to_srgb(srgb_to_linear(self.r) * a),
+            b: ((self.b as u16 * a) / 255) as u8,
+            g: ((self.g as u16 * a) / 255) as u8,
+            r: ((self.r as u16 * a) / 255) as u8,
             a: self.a,
         })
     }
-}
-
-mod lut;
-
-#[inline(always)]
-pub fn srgb_to_linear(color: u8) -> f32 {
-    lut::SRGB_TO_LINEAR_LUT[color as usize]
 }
 
 #[inline(always)]
@@ -115,61 +108,45 @@ fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
     src + (1.0 - alpha) * dst
 }
 
-#[inline(always)]
-// TODO: This can be improved
-pub fn linear_to_srgb(color: f32) -> u8 {
-    // An approximation of (color.powf(2.2) * 255.0) as u8
-    // see: https://www.shadertoy.com/view/WlG3zG
-    (color * color * crate::math::fast_mul_add(color, 63.75, 191.25)) as u8
-}
+// FIXME: RANT: The alpha compositing mess.
+//     Alpha compositing is ideally done in linear space, as suggested
+//     by FreeType docs. This allows more physically realistic blending
+//     of colors as opposed to blending gamma-encoded sRGB.
+//     Naturally, this is not what everyone does and thus to remain compatible
+//     we have to do it this way.
+//     See `ba3312f` for a commit that still has linear blending code if it
+//     ever needs to be brought back.
 
-fn color_to_linear(color: BGRA8) -> ([f32; 3], f32) {
-    (
-        color.to_bgr_bytes().map(srgb_to_linear),
-        color.a as f32 / 255.0,
-    )
-}
+// TODO: blend_over_mul_alpha
 
-fn linear_to_color([b, g, r]: [f32; 3], a: f32) -> BGRA8 {
-    BGRA8 {
-        b: linear_to_srgb(b),
-        g: linear_to_srgb(g),
-        r: linear_to_srgb(r),
-        a: (a * 255.0) as u8,
+impl BGRA8 {
+    pub fn blend_over(self, b: BGRA8) -> Premultiplied<BGRA8> {
+        self.premultiply().blend_over(b)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlendMode {
-    /// out = over(out, in)
-    Over,
-}
-
-impl BlendMode {
-    pub fn blend_with_linear_parts(self, b: &mut BGRA8, [ab, ag, ar]: [f32; 3], aa: f32) {
-        match self {
-            Self::Over => {
-                let ([bb, bg, br], ba) = color_to_linear(*b);
-                *b = linear_to_color(
-                    [
-                        blend_over(bb, ab, aa),
-                        blend_over(bg, ag, aa),
-                        blend_over(br, ar, aa),
-                    ],
-                    aa + ba * (1.0 - aa),
-                );
-            }
-        }
+impl Premultiplied<BGRA8> {
+    pub fn blend_over(
+        self,
+        b: /* TODO: Premultiplied< */ BGRA8, /* > */
+    ) -> Premultiplied<BGRA8> {
+        let a = self.0;
+        let inva = (255 - a.a) as u16;
+        let one = |a, b| a + (inva * b as u16 / 255) as u8;
+        Premultiplied(BGRA8 {
+            b: one(a.b, b.b),
+            g: one(a.g, b.g),
+            r: one(a.r, b.r),
+            a: one(a.a, b.a),
+        })
     }
 
-    pub fn blend_with_parts(self, b: &mut BGRA8, ac: [u8; 3], aa: f32) {
-        self.blend_with_linear_parts(b, ac.map(srgb_to_linear), aa);
-    }
-
-    // FIXME: b should also be Premultiplied<BGRA8> but for **legacy reasons**
-    //        &(mut?) [BGRA8] buffers are implicitly treated as premultiplied
-    //        (read: I don't want to change all that code again)
-    pub fn blend(self, b: &mut BGRA8, Premultiplied(a): Premultiplied<BGRA8>) {
-        self.blend_with_parts(b, [a.b, a.g, a.r], a.a as f32 / 255.0);
+    pub const fn mul_alpha(self, other: u8) -> Self {
+        Self(BGRA8 {
+            b: ((self.0.b as u16 * other as u16) / 255) as u8,
+            g: ((self.0.g as u16 * other as u16) / 255) as u8,
+            r: ((self.0.r as u16 * other as u16) / 255) as u8,
+            a: ((self.0.a as u16 * other as u16) / 255) as u8,
+        })
     }
 }

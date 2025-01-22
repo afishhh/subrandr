@@ -6,7 +6,7 @@
 
 use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range, rc::Rc};
 
-use color::{BlendMode, BGRA8};
+use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I32Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
@@ -457,13 +457,13 @@ impl Subtitles {
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(80.0, 80.0),
-                                blur_radius: 0.0,
-                                color: BGRA8::new(0, 0, 255, 40),
+                                blur_radius: 7.5,
+                                color: BGRA8::new(0, 0, 255, 255),
                             }),
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(48.0, 48.0),
                                 blur_radius: 20.0,
-                                color: BGRA8::new(255, 0, 0, 255),
+                                color: BGRA8::new(255, 255, 255, 255),
                             }),
                         ],
                     })],
@@ -484,6 +484,43 @@ impl Subtitles {
                         text: "this is bold..".to_string(),
                         shadows: Vec::new(),
                     })],
+                },
+                Event {
+                    start: 0,
+                    end: 600000,
+                    extra: EventExtra::Test { x: 0.5, y: 0.5 },
+                    alignment: Alignment::Center,
+                    text_wrap: TextWrapMode::None,
+                    segments: vec![
+                        Segment::Text(TextSegment {
+                            font: vec!["sans-serif".to_string()],
+                            font_size: 64. * 96. / 72.,
+                            font_weight: 400,
+                            italic: false,
+                            decorations: TextDecorations::none(),
+                            color: BGRA8::from_rgba32(0x00000000),
+                            text: "嗚呼ー".to_string(),
+                            shadows: vec![TextShadow::Css(CssTextShadow {
+                                offset: Vec2::ZERO,
+                                blur_radius: 15.0,
+                                color: BGRA8::new(0, 0, 255, 255),
+                            })],
+                        }),
+                        Segment::Text(TextSegment {
+                            font: vec!["sans-serif".to_string()],
+                            font_size: 64. * 96. / 72.,
+                            font_weight: 400,
+                            italic: false,
+                            decorations: TextDecorations::none(),
+                            color: BGRA8::from_rgba32(0xFF000099),
+                            text: "helloworld".to_string(),
+                            shadows: vec![TextShadow::Css(CssTextShadow {
+                                offset: Vec2::ZERO,
+                                blur_radius: 15.0,
+                                color: BGRA8::new(0, 0, 255, 255),
+                            })],
+                        }),
+                    ],
                 },
                 Event {
                     start: 0,
@@ -984,7 +1021,7 @@ impl PerfStats {
         (min, max)
     }
 
-    fn end_frame(&mut self) {
+    fn end_frame(&mut self) -> f32 {
         let end = std::time::Instant::now();
         let time = (end - self.start).as_secs_f32() * 1000.;
         if self.times.len() >= 100 {
@@ -992,6 +1029,7 @@ impl PerfStats {
         }
         self.times.push_back(time);
         self.times_sum += time;
+        time
     }
 }
 
@@ -1123,7 +1161,6 @@ impl<'a> Renderer<'a> {
                         (y + shadow.offset.y).trunc_to_inner(),
                         image.monochrome(),
                         shadow.color.to_bgr_bytes(),
-                        BlendMode::Over,
                     );
                 } else {
                     painter.blit_monochrome_text(
@@ -1131,7 +1168,6 @@ impl<'a> Renderer<'a> {
                         (y + shadow.offset.y).trunc_to_inner(),
                         image.monochrome(),
                         shadow.color,
-                        BlendMode::Over,
                     );
                 }
             }
@@ -1236,6 +1272,13 @@ impl<'a> Renderer<'a> {
             && self.previous_painter_size == painter_size
             && self.previous_context == *ctx
         {
+            trace!(
+                self.sbr,
+                "rendering skipped: frame hasn't changed {:?} (class={} ctx={ctx:?} t={t}ms)",
+                self.unchanged_range,
+                self.subs.class.get_name()
+            );
+
             self.perf.end_frame();
             return;
         }
@@ -1249,7 +1292,7 @@ impl<'a> Renderer<'a> {
 
         trace!(
             self.sbr,
-            "rendering frame class={} ctx={ctx:?} t={t}ms",
+            "rendering frame (class={} ctx={ctx:?} t={t}ms)",
             self.subs.class.get_name()
         );
 
@@ -1583,6 +1626,7 @@ impl<'a> Renderer<'a> {
 
         self.unchanged_range = unchanged_range;
 
-        self.perf.end_frame();
+        let time = self.perf.end_frame();
+        log::info!(self.sbr, "frame took {:.2}ms to render", time);
     }
 }

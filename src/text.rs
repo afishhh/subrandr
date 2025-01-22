@@ -10,7 +10,7 @@ pub mod font_select;
 pub use font_select::*;
 
 use crate::{
-    color::{BlendMode, BGRA8},
+    color::{Premultiplied, BGRA8},
     util::{calculate_blit_rectangle, AnyError, BlitRectangle, OrderedF32},
 };
 
@@ -569,8 +569,7 @@ impl GlyphBitmap {
         dy: i32,
         buffer: &mut [BGRA8],
         stride: u32,
-        color: [u8; 3],
-        alpha: f32,
+        color: BGRA8,
         ys: Range<usize>,
         xs: Range<usize>,
         source: &[u8],
@@ -582,14 +581,10 @@ impl GlyphBitmap {
 
                 let si = y * self.width as usize + x;
                 let sv = *unsafe { source.get_unchecked(si) };
-                let na = sv as f32 / 255.0 * alpha;
 
                 let di = (fx as usize) + (fy as usize) * stride as usize;
-                BlendMode::Over.blend_with_linear_parts(
-                    unsafe { buffer.get_unchecked_mut(di) },
-                    color.map(srgb_to_linear).map(|x| x * na),
-                    na,
-                );
+                let d = unsafe { buffer.get_unchecked_mut(di) };
+                *d = color.mul_alpha(sv).blend_over(*d).0;
             }
         }
     }
@@ -600,7 +595,7 @@ impl GlyphBitmap {
         dy: i32,
         buffer: &mut [BGRA8],
         stride: u32,
-        alpha: f32,
+        alpha: u8,
         ys: Range<usize>,
         xs: Range<usize>,
         source: &[BGRA8],
@@ -611,18 +606,14 @@ impl GlyphBitmap {
                 let fx = dx + self.offset.0 + x as i32;
 
                 let si = y * self.width as usize + x;
-                let nbgr = source[si]
-                    .to_bgr_bytes()
-                    .map(srgb_to_linear)
-                    .map(|v| v * alpha);
-                let na = source[si].a as f32 / 255.0 * alpha;
+                // NOTE: This is actually pre-multiplied in linear space...
+                //       But I think libass ignores this too.
+                //       See note in color.rs
+                let n = Premultiplied(source[si]);
 
                 let di = (fx as usize) + (fy as usize) * stride as usize;
-                BlendMode::Over.blend_with_linear_parts(
-                    unsafe { buffer.get_unchecked_mut(di) },
-                    nbgr,
-                    na,
-                );
+                let d = unsafe { buffer.get_unchecked_mut(di) };
+                *d = n.mul_alpha(alpha).blend_over(*d).0;
             }
         }
     }
@@ -635,8 +626,7 @@ impl GlyphBitmap {
         width: u32,
         stride: u32,
         height: u32,
-        color: [u8; 3],
-        alpha: f32,
+        color: BGRA8,
     ) {
         let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
             self.offset.0 + dx,
@@ -652,12 +642,10 @@ impl GlyphBitmap {
         unsafe {
             match &*self.data {
                 BufferData::Monochrome(pixels) => {
-                    self.blit_monochrome_unchecked(
-                        dx, dy, buffer, stride, color, alpha, ys, xs, pixels,
-                    );
+                    self.blit_monochrome_unchecked(dx, dy, buffer, stride, color, ys, xs, pixels);
                 }
                 BufferData::Color(pixels) => {
-                    self.blit_bgra_unchecked(dx, dy, buffer, stride, alpha, ys, xs, pixels);
+                    self.blit_bgra_unchecked(dx, dy, buffer, stride, color.a, ys, xs, pixels);
                 }
             }
         }
@@ -680,11 +668,10 @@ impl Image {
         width: u32,
         stride: u32,
         height: u32,
-        color: [u8; 3],
-        alpha: f32,
+        color: BGRA8,
     ) {
         for glyph in &self.glyphs {
-            glyph.blit(dx, dy, buffer, width, stride, height, color, alpha);
+            glyph.blit(dx, dy, buffer, width, stride, height, color);
         }
     }
 }

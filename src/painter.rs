@@ -1,5 +1,5 @@
 use crate::{
-    color::{BGRA8Slice, BlendMode, Premultiply, BGRA8},
+    color::{BGRA8Slice, BGRA8},
     math::*,
     outline::{self, Outline},
     rasterize, text,
@@ -358,8 +358,7 @@ impl<'a> Painter<'a> {
             self.width,
             self.width,
             self.height,
-            color.to_bgr_bytes(),
-            color.a as f32 / 255.0,
+            color,
         )
     }
 
@@ -371,7 +370,6 @@ impl<'a> Painter<'a> {
         width: u32,
         height: u32,
         color: BGRA8,
-        blend: BlendMode,
     ) {
         let Some(BlitRectangle { xs, ys }) = self.blit_rectangle_with(x, y, width, height) else {
             return;
@@ -381,12 +379,7 @@ impl<'a> Painter<'a> {
             for sx in xs.clone() {
                 let si = sy * width as usize + sx;
                 let di = (y + sy as i32) as usize * self.width as usize + (x + sx as i32) as usize;
-                // TODO: is better accuracy then a simple u8*u8 mul for alpha required?
-                //       if not then this could also be done instead of blend_with_parts...
-                blend.blend(
-                    &mut self.buffer[di],
-                    color.mul_alpha(buffer[si]).premultiply(),
-                );
+                self.buffer[di] = color.mul_alpha(buffer[si]).blend_over(self.buffer[di]).0;
             }
         }
     }
@@ -397,7 +390,6 @@ impl<'a> Painter<'a> {
         y: i32,
         text: &text::MonochromeImage,
         color: BGRA8,
-        blend: BlendMode,
     ) {
         self.blit_monochrome(
             x + text.offset.0,
@@ -406,7 +398,6 @@ impl<'a> Painter<'a> {
             text.width,
             text.height,
             color,
-            blend,
         );
     }
 
@@ -420,7 +411,6 @@ impl<'a> Painter<'a> {
         width: u32,
         height: u32,
         color: [u8; 3],
-        blend: BlendMode,
     ) {
         rasterize::monochrome_gaussian_blit(
             sigma,
@@ -433,7 +423,6 @@ impl<'a> Painter<'a> {
             width as usize,
             height as usize,
             color,
-            blend,
         );
     }
 
@@ -444,7 +433,6 @@ impl<'a> Painter<'a> {
         y: i32,
         text: &text::MonochromeImage,
         color: [u8; 3],
-        blend: BlendMode,
     ) {
         self.blit_blurred_monochrome(
             sigma,
@@ -454,7 +442,6 @@ impl<'a> Painter<'a> {
             text.width,
             text.height,
             color,
-            blend,
         );
     }
 }

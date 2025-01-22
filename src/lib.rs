@@ -1285,6 +1285,8 @@ impl<'a> Renderer<'a> {
         self.previous_painter_size = painter_size;
         self.fonts.advance_cache_generation();
 
+        // TODO: Implement a damage system?
+        //       Only clear required rectangles
         painter.clear(BGRA8::ZERO);
         self.dpi = ctx.dpi;
 
@@ -1342,6 +1344,18 @@ impl<'a> Renderer<'a> {
                     painter,
                 );
 
+                if let Some(&last) = self.perf.times.iter().last() {
+                    self.debug_text(
+                        (ctx.padding_left + ctx.video_width) as i32,
+                        (60.0 * ctx.pixel_scale()) as i32,
+                        &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
+                        Alignment::TopRight,
+                        16.0,
+                        BGRA8::from_rgba32(0xFFFFFFFF),
+                        painter,
+                    );
+                }
+
                 let graph_width = 300.0 * ctx.pixel_scale();
                 let graph_height = 50.0 * ctx.pixel_scale();
                 let offx = (ctx.padding_left + ctx.video_width - graph_width) as i32;
@@ -1353,7 +1367,7 @@ impl<'a> Renderer<'a> {
 
                 painter.stroke_polyline(
                     offx,
-                    (60.0 * ctx.pixel_scale() + graph_height) as i32,
+                    (80.0 * ctx.pixel_scale() + graph_height) as i32,
                     &polyline,
                     BGRA8::new(255, 255, 0, 255),
                 );
@@ -1625,6 +1639,8 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = unchanged_range;
 
         let time = self.perf.end_frame();
-        log::info!(self.sbr, "frame took {:.2}ms to render", time);
+        if DRAW_PERF_DEBUG_INFO {
+            log::info!(self.sbr, "frame took {:.2}ms to render", time);
+        }
     }
 }

@@ -1278,8 +1278,6 @@ impl<'a> Renderer<'a> {
                 self.unchanged_range,
                 self.subs.class.get_name()
             );
-
-            self.perf.end_frame();
             return;
         }
 

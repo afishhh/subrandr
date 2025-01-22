@@ -24,6 +24,13 @@ pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &m
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }
 
+pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
+    let ptr = v.as_mut_ptr();
+    let len = v.len();
+    let capacity = v.capacity();
+    (ptr, len, capacity)
+}
+
 pub const fn ref_to_slice<T>(reference: &T) -> &[T; 1] {
     unsafe { std::mem::transmute(reference) }
 }

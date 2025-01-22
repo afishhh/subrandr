@@ -414,8 +414,8 @@ impl<'a> Painter<'a> {
     ) {
         rasterize::monochrome_gaussian_blit(
             sigma,
-            x as isize,
-            y as isize,
+            x,
+            y,
             self.buffer,
             self.width as usize,
             self.height as usize,

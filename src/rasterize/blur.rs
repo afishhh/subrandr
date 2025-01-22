@@ -15,7 +15,7 @@ const PADDING_RADIUS: usize = 2;
 
 // FIXME: I wonder whether this gets as inlined as I want it to be
 #[inline(always)]
-fn sliding_sum(
+unsafe fn sliding_sum(
     front: &[f32],
     back: &mut [MaybeUninit<f32>],
     stride: usize,
@@ -26,25 +26,25 @@ fn sliding_sum(
     let mut sum = 0.0;
     let mut x = 0;
     for _ in 0..radius {
-        sum += front[x * stride];
+        sum += unsafe { *front.get_unchecked(x * stride) };
     }
 
     while x < 2 * radius {
-        back[x * stride].write(sum * iextent);
-        sum += front[(x + radius) * stride];
+        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
+        sum += unsafe { *front.get_unchecked((x + radius) * stride) };
         x += 1;
     }
 
     while x < length - radius {
-        sum += front[(x + radius) * stride];
-        back[x * stride].write(sum * iextent);
-        sum -= front[(x - radius) * stride];
+        sum += unsafe { *front.get_unchecked((x + radius) * stride) };
+        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
+        sum -= unsafe { *front.get_unchecked((x - radius) * stride) };
         x += 1;
     }
 
     while x < length {
-        back[x * stride].write(sum * iextent);
-        sum -= front[(x - radius) * stride];
+        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
+        sum -= unsafe { *front.get_unchecked((x - radius) * stride) };
         x += 1;
     }
 }
@@ -135,14 +135,16 @@ impl Blurer {
 
     fn box_blur_horizontal(&mut self) {
         for y in 0..self.height {
-            sliding_sum(
-                &self.front[y * self.width..(y + 1) * self.width],
-                &mut self.back[y * self.width..(y + 1) * self.width],
-                1,
-                self.width,
-                self.radius,
-                self.iextent,
-            );
+            unsafe {
+                sliding_sum(
+                    &self.front[y * self.width..(y + 1) * self.width],
+                    &mut self.back[y * self.width..(y + 1) * self.width],
+                    1,
+                    self.width,
+                    self.radius,
+                    self.iextent,
+                );
+            }
         }
 
         unsafe { self.swap_buffers() };
@@ -150,14 +152,16 @@ impl Blurer {
 
     fn box_blur_vertical(&mut self) {
         for x in 0..self.width {
-            sliding_sum(
-                &self.front[x..],
-                &mut self.back[x..],
-                self.width,
-                self.height,
-                self.radius,
-                self.iextent,
-            );
+            unsafe {
+                sliding_sum(
+                    &self.front[x..],
+                    &mut self.back[x..],
+                    self.width,
+                    self.height,
+                    self.radius,
+                    self.iextent,
+                );
+            }
         }
 
         unsafe { self.swap_buffers() };

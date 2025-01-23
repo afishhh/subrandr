@@ -1,7 +1,7 @@
 import { CStructData, decodeAndEscapeControl, sizeStruct, UTF8_ENCODER, WasmPtr, writeStruct } from "./wasm_utils.js";
 
-if (!window.crossOriginIsolated)
-  console.warn("subrandr: not cross origin isolated, clock precision will suffer")
+if ("window" in globalThis && !window.crossOriginIsolated)
+	console.warn("subrandr: not cross origin isolated, clock precision will suffer")
 
 export type LibraryPtr = WasmPtr & { readonly __lib_tag: unique symbol };
 export type SubtitlesPtr = WasmPtr & { readonly __sub_tag: unique symbol };
@@ -137,37 +137,37 @@ export class SubrandrModule {
 		const instantiated = await WebAssembly.instantiateStreaming(source, {
 			env: {},
 			wasi_snapshot_preview1: {
-				environ_get: (environ_1: number, environ_buf: number) => {
+				environ_get: (environ: number, environ_buf: number) => {
 					const array = self.memoryBytes;
 					const view = self.memoryView;
 					let current = environ_buf;
 					for (let i = 0; i < VARIABLES.items.length; ++i) {
 						const item = VARIABLES.items[i];
 						array.set(item, current);
-						view.setUint32(environ_1 + i * 4, current, true);
+						view.setUint32(environ + i * 4, current, true);
 						current += item.length;
 					}
 					return 0;
 				},
-				environ_sizes_get: (environ_count_1: number, environ_buf_size: number) => {
-					const view_1 = self.memoryView;
-					view_1.setUint32(environ_count_1, VARIABLES.items.length, true);
-					view_1.setUint32(environ_buf_size, VARIABLES.total_size, true);
+				environ_sizes_get: (environ_count: number, environ_buf_size: number) => {
+					const view = self.memoryView;
+					view.setUint32(environ_count, VARIABLES.items.length, true);
+					view.setUint32(environ_buf_size, VARIABLES.total_size, true);
 					return 0;
 				},
 				fd_close() {
 					throw Error("fd_close");
 				},
 				fd_fdstat_get(fd: number, buf_ptr: number) {
-					const view_2 = self.memoryView;
+					const view = self.memoryView;
 					if (fd in output_streams) {
 						// filetype = regular
-						view_2.setUint8(buf_ptr, 4);
+						view.setUint8(buf_ptr, 4);
 						// flags = append
-						view_2.setUint16(buf_ptr + 2, 1, true);
+						view.setUint16(buf_ptr + 2, 1, true);
 						// rights = write
-						view_2.setUint32(buf_ptr + 8, 1 << 5, true);
-						view_2.setUint32(buf_ptr + 12, 0, true);
+						view.setUint32(buf_ptr + 8, 1 << 5, true);
+						view.setUint32(buf_ptr + 12, 0, true);
 						return 0;
 					}
 
@@ -188,32 +188,32 @@ export class SubrandrModule {
 				fd_seek() {
 					throw Error("seek");
 				},
-				fd_write(fd_1: number, iovs_ptr: number, iovs_len: number, ret_ptr: number) {
-					const view_3 = self.memoryView;
+				fd_write(fd: number, iovs_ptr: number, iovs_len: number, ret_ptr: number) {
+					const view = self.memoryView;
 					// console.log(`fd_write(${fd}, ${iovs}, ${iovs_len}, ${ret_ptr})`)
-					if (!(fd_1 in output_streams))
-						throw Error(`write(${fd_1}, ...)`);
-					const stream = output_streams[fd_1];
+					if (!(fd in output_streams))
+						throw Error(`write(${fd}, ...)`);
+					const stream = output_streams[fd];
 
 					let total = 0;
-					for (let i_1 = 0; i_1 < iovs_len; ++i_1) {
-						const iov_off = (iovs_ptr + i_1 * 8);
-						const buf = view_3.getUint32(iov_off, true);
-						const len = view_3.getUint32(iov_off + 4, true);
+					for (let i = 0; i < iovs_len; ++i) {
+						const iov_off = (iovs_ptr + i * 8);
+						const buf = view.getUint32(iov_off, true);
+						const len = view.getUint32(iov_off + 4, true);
 
-						stream.write(new Uint8Array(view_3.buffer, buf, len));
+						stream.write(new Uint8Array(view.buffer, buf, len));
 
 						total += len;
 					}
-					view_3.setUint32(ret_ptr, total, true);
+					view.setUint32(ret_ptr, total, true);
 
 					return 0;
 				},
 				fd_filestat_get() {
 					throw Error("fd_filestat_get");
 				},
-				random_get(ptr: number, len_1: number) {
-					window.crypto.getRandomValues(new Uint8Array(self.memoryBuffer, ptr, len_1));
+				random_get(ptr: number, len: number) {
+					globalThis.crypto.getRandomValues(new Uint8Array(self.memoryBuffer, ptr, len));
 					return 0;
 				},
 				path_open() {
@@ -225,7 +225,7 @@ export class SubrandrModule {
 				clock_time_get(clockid: number, _precision: number, ret: number) {
 					if (clockid != 1)
 						throw Error("clock_time_get non-monotonic");
-					const millis = window.performance.now();
+					const millis = globalThis.performance.now();
 					const upper = BigInt(Math.trunc(millis));
 					const lower = BigInt(Math.trunc((millis % 1) * 1000000));
 					const nanos = upper * BigInt(1000000) + lower;

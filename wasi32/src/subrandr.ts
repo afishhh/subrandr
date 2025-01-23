@@ -38,17 +38,29 @@ export class Framebuffer {
 
   constructor(width: number, height: number) {
     const g = state();
-    const front = new PixelBuffer(g.mod, width * height)
-    const back = new PixelBuffer(g.mod, width * height)
+    const npixels = this._checkSize(width, height)
+    const front = new PixelBuffer(g.mod, npixels)
+    const back = new PixelBuffer(g.mod, npixels)
     this._front = front
     this._back = back
     this._width = width
     this._height = height
   }
 
+  private _checkSize(width: number, height: number) {
+    if(!Number.isSafeInteger(width) || !Number.isSafeInteger(height))
+      throw Error("Framebuffer width or height is not a safe integer")
+
+    const pixels = width * height
+    if(!Number.isSafeInteger(4 * pixels))
+      throw Error("Framebuffer size overflow")
+
+    return pixels
+  }
+
   public resize(width: number, height: number) {
     const g = state();
-    const newpixels = width * height
+    const newpixels = this._checkSize(width, height)
 
     // TODO: is this reasonable reallocation behaviour?
     //       add some logs and check
@@ -67,7 +79,7 @@ export class Framebuffer {
 
   public imageData(): ImageData {
     const g = state();
-    const frontPixels = new Uint8ClampedArray(g.mod.memoryBuffer, this._front.ptr, this._front.byteLength)
+    const frontPixels = new Uint8ClampedArray(g.mod.memoryBuffer, this._front.ptr, this._width * this._height * 4)
     const imageData = new ImageData(frontPixels, this._width, this._height, {
       colorSpace: "srgb"
     })
@@ -158,8 +170,8 @@ export class Renderer {
         structField("f32", ctx.padding_bottom ?? 0),
       ]);
 
-    const front = (fb as any)._front as PixelBuffer;
-    const back = (fb as any)._back as PixelBuffer;
+    const front = fb._front;
+    const back = fb._back;
     g.mod.exports.sbr_renderer_render(
       this.__ptr,
       this.__ctxptr,

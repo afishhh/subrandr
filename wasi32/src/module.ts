@@ -1,4 +1,4 @@
-import { CStructData, decodeAndEscapeControl, sizeStruct, UTF8_ENCODER, WasmPtr, writeStruct } from "./wasm_utils.js";
+import { CStructData, decodeAndEscapeControl, sizeStruct, UTF8_DECODER, UTF8_ENCODER, WASM_NULL, WasmPtr, writeStruct } from "./wasm_utils.js";
 
 if ("window" in globalThis && !window.crossOriginIsolated)
 	console.warn("subrandr: not cross origin isolated, clock precision will suffer")
@@ -6,6 +6,14 @@ if ("window" in globalThis && !window.crossOriginIsolated)
 export type LibraryPtr = WasmPtr & { readonly __lib_tag: unique symbol };
 export type SubtitlesPtr = WasmPtr & { readonly __sub_tag: unique symbol };
 export type RendererPtr = WasmPtr & { readonly __renderer_tag: unique symbol };
+export type FontPtr = WasmPtr & { readonly __font_tag: unique symbol };
+
+class SubrandrError extends Error {
+	/** @internal */
+	constructor(message: string) {
+		super(message)
+	}
+}
 
 export interface SubrandrExports {
 	memory: WebAssembly.Memory
@@ -14,10 +22,12 @@ export interface SubrandrExports {
 	sbr_wasm_alloc(size: number): WasmPtr
 	sbr_wasm_dealloc(ptr: WasmPtr, size: number): void
 	sbr_wasm_create_uninit_arc(size: number): WasmPtr
+	sbr_wasm_destroy_arc(ptr: WasmPtr, size: number): void
 
 	// C API
 	sbr_library_init(): LibraryPtr
 	sbr_library_fini(ptr: LibraryPtr): void
+	sbr_library_close_font(sbr: LibraryPtr, ptr: FontPtr): void
 	sbr_renderer_create(sbr: LibraryPtr, subs: SubtitlesPtr): RendererPtr
 	sbr_renderer_render(
 		renderer: RendererPtr,
@@ -29,17 +39,18 @@ export interface SubrandrExports {
 	): void
 	sbr_renderer_destroy(renderer: RendererPtr): void
 	sbr_subtitles_destroy(subtitles: SubtitlesPtr): void
+	sbr_get_last_error_string(): WasmPtr
 
 	// Wasm specific core API
 	sbr_wasm_load_subtitles(sbr: LibraryPtr, string_ptr: WasmPtr, string_len: number): SubtitlesPtr
+	sbr_wasm_library_create_font(sbr: LibraryPtr, arc_data_ptr: WasmPtr, arc_data_len: number): FontPtr
 	sbr_wasm_renderer_add_font(
 		renderer: RendererPtr,
 		name_ptr: WasmPtr,
 		name_len: number,
 		weight: number,
 		italic: boolean,
-		font_ptr: WasmPtr,
-		font_len: number
+		font_ptr: FontPtr,
 	): void
 
 
@@ -71,7 +82,7 @@ export class ConsoleOutputStream implements OutputStream {
 
 	private _log() {
 		console.log("subrandr.wasm/" + this._name + ":", decodeAndEscapeControl(this._buffer))
-		this._buffer = new Uint8Array()
+		this._buffer = new Uint8Array
 	}
 
 	write(bytes: Uint8Array) {
@@ -250,9 +261,7 @@ export class SubrandrModule {
 			bytes = value;
 
 		const ptr = this.alloc(bytes.length)
-		const view = this.memoryView;
-		for (let i = 0; i < bytes.length; ++i)
-			view.setUint8(ptr + i, bytes[i])
+		this.memoryBytes.set(bytes, ptr)
 		return [ptr, bytes.length]
 	}
 
@@ -265,5 +274,22 @@ export class SubrandrModule {
 
 	dealloc(ptr: WasmPtr, len: number) {
 		this.exports.sbr_wasm_dealloc(ptr, len)
+	}
+
+	readCString(ptr: WasmPtr): Uint8Array {
+		const memoryBytes = this.memoryBytes
+		let end = ptr as number
+		while(memoryBytes[end] != 0)
+			++end;
+		return memoryBytes.subarray(ptr, end)
+	}
+
+	handleError(): never {
+		const errorPtr = this.exports.sbr_get_last_error_string()
+		if(errorPtr != WASM_NULL) {
+			const message = this.readCString(errorPtr)
+			throw new SubrandrError(UTF8_DECODER.decode(message))
+		}
+		throw new SubrandrError("unknown error: handleError called but get_last_error_string returned null")
 	}
 }

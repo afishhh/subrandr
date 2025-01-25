@@ -1,4 +1,4 @@
-import { LibraryPtr, RendererPtr, SubrandrModule, ModuleOptions, SubtitlesPtr } from "./module.js";
+import { LibraryPtr, RendererPtr, SubrandrModule, ModuleOptions, SubtitlesPtr, FontPtr } from "./module.js";
 import { structField, WASM_NULL, WasmPtr, writeStruct } from "./wasm_utils.js";
 
 export class Subtitles {
@@ -22,6 +22,11 @@ export class Subtitles {
     }
 
     return new Subtitles(ptr)
+  }
+
+  destroy() {
+    const g = state();
+    g.mod.exports.sbr_subtitles_destroy(this.__ptr)
   }
 }
 
@@ -105,6 +110,35 @@ export class Framebuffer {
   }
 }
 
+export class Font {
+  /** @internal */
+  __ptr: FontPtr;
+
+  constructor(data: Uint8Array) {
+    const g = state();
+    const font_data_ptr = g.mod.exports.sbr_wasm_create_uninit_arc(data.length);
+    g.mod.memoryBytes.set(data, font_data_ptr);
+    try {
+      const font = g.mod.exports.sbr_wasm_library_create_font(
+        g.lib,
+        font_data_ptr,
+        data.length
+      )
+      if(font == WASM_NULL)
+        g.mod.handleError()
+      this.__ptr = font
+    } finally {
+      g.mod.exports.sbr_wasm_destroy_arc(font_data_ptr, data.length)
+    }
+  }
+
+  close() {
+    const g = state();
+    g.mod.exports.sbr_library_close_font(g.lib, this.__ptr)
+    this.__ptr = WASM_NULL as FontPtr
+  }
+}
+
 const SUBCTX_LEN = 28
 
 export interface SubtitleContext {
@@ -132,14 +166,11 @@ export class Renderer {
     this.__ctxptr = g.mod.alloc(SUBCTX_LEN)
   }
 
-  addFont(name: string, weight: number | "variadic", italic: boolean, data: Uint8Array) {
+  addFont(name: string, weight: number | "variadic", italic: boolean, face: Font) {
     if (weight != "variadic" && !(weight > 0 && Number.isInteger(weight)))
       throw new RangeError("font weight must be a positive integer")
 
     const g = state();
-    const font_ptr = g.mod.exports.sbr_wasm_create_uninit_arc(data.length);
-    g.mod.memoryBytes.set(data, font_ptr);
-
     const [name_ptr, name_len] = g.mod.allocCopy(name)
     try {
       g.mod.exports.sbr_wasm_renderer_add_font(
@@ -148,8 +179,7 @@ export class Renderer {
         name_len,
         weight == "variadic" ? -1 : weight,
         italic,
-        font_ptr,
-        data.length
+        face.__ptr
       )
     } finally {
       g.mod.dealloc(name_ptr, name_len)

@@ -9,9 +9,9 @@ export function decodeAndEscapeControl(buf: Uint8Array) {
 	let result = ""
 	for (let i = 0; i < decoded.length; ++i) {
 		let chr = decoded[i];
-		if (chr == "\n")
+		if (chr === "\n")
 			chr = "\\n";
-		else if (chr == "\x1b")
+		else if (chr === "\x1b")
 			chr = "\\e"
 		result += chr;
 	}

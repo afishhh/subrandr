@@ -232,7 +232,9 @@ pub fn monochrome_gaussian_blit(
     let blurred = blurer.front();
 
     for sy in ys {
-        let mut ti = (((sy as i32 + toy) as usize * target_width) as isize + tox as isize) as usize;
+        let mut ti = (((sy as i32 + toy) as usize * target_width) as isize
+            + xs.start as isize
+            + tox as isize) as usize;
         for sx in xs.clone() {
             let mut khere = blurred[sy * blurer.width + sx];
             khere = khere.clamp(0.0, 1.0);

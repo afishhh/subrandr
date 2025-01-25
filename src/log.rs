@@ -3,6 +3,7 @@ use std::{
     collections::HashSet,
     ffi::{c_char, c_void},
     hash::{Hash, Hasher},
+    io::IsTerminal,
     panic::Location,
     str::FromStr,
     sync::OnceLock,
@@ -141,13 +142,22 @@ fn log_default(
     _location: &Location<'static>,
     module_path: &'static str,
 ) {
-    // TODO: check if tty, disable on windows
-    let level_str = match level {
-        Level::Trace => "\x1b[1;37mtrace\x1b[0m",
-        Level::Debug => "\x1b[1;35mdebug\x1b[0m",
-        Level::Info => "\x1b[1;34m info\x1b[0m",
-        Level::Warn => "\x1b[1;33m warn\x1b[0m",
-        Level::Error => "\x1b[1;31merror\x1b[0m",
+    let level_str = if std::io::stderr().is_terminal() {
+        match level {
+            Level::Trace => "\x1b[1;37mtrace\x1b[0m",
+            Level::Debug => "\x1b[1;35mdebug\x1b[0m",
+            Level::Info => "\x1b[1;34m info\x1b[0m",
+            Level::Warn => "\x1b[1;33m warn\x1b[0m",
+            Level::Error => "\x1b[1;31merror\x1b[0m",
+        }
+    } else {
+        match level {
+            Level::Trace => "trace",
+            Level::Debug => "debug",
+            Level::Info => " info",
+            Level::Warn => " warn",
+            Level::Error => "error",
+        }
     };
 
     let module_rel = module_path

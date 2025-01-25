@@ -229,9 +229,12 @@ macro_rules! log_once_state {
     (@mkkey $($rest: tt)*) => {
         compile_error!("log_once_state: invalid syntax")
     };
-    ($($tokens: tt)*) => {
-        let set = $crate::log::LogOnceSet::new();
+    (in $set: expr, $($tokens: tt)*) => {
+        let set = $set;
         $crate::log::log_once_state!(@mkkey set $($tokens)*)
+    };
+    ($($tokens: tt)*) => {
+        $crate::log::log_once_state!(in $crate::log::LogOnceSet::new(), $($tokens)*)
     };
 }
 

@@ -8,7 +8,7 @@ use quick_xml::{
 use thiserror::Error;
 
 use crate::{
-    log::{log_once_state, warning},
+    log::{log_once_state, warning, LogOnceSet},
     Subrandr,
 };
 
@@ -56,7 +56,7 @@ const DEFAULT_PEN: Pen = Pen {
     bold: false,
     italic: false,
     edge_type: EdgeType::None,
-    edge_color: 0x020202FF,
+    edge_color: 0x020202,
     ruby_part: RubyPart::None,
     foreground_color: 0xFFFFFFFF,
     // The default opacity is 0.75
@@ -160,7 +160,7 @@ impl Event {
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]
     InvalidStructure(&'static str),
@@ -284,8 +284,11 @@ impl FromStr for Point {
     }
 }
 
-fn parse_pen(attributes: Attributes) -> Result<Pen, Error> {
+fn parse_pen(sbr: &Subrandr, attributes: Attributes, logset: &LogOnceSet) -> Result<Pen, Error> {
     let mut result = Pen::default();
+
+    log_once_state!(in logset, unknown_pen_attribute: set);
+
     match_attributes! {
         attributes,
         "id"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
@@ -329,7 +332,12 @@ fn parse_pen(attributes: Attributes) -> Result<Pen, Error> {
             result.ruby_part = value;
         },
         else other => {
-            panic!("Unknown pen attribute {other}")
+            warning!(
+                sbr,
+                once_set(unknown_pen_attribute, other),
+                "Unknown attribute encountered on pen: {}",
+                other,
+            );
         }
     }
 
@@ -340,8 +348,14 @@ fn parse_pen(attributes: Attributes) -> Result<Pen, Error> {
     Ok(result)
 }
 
-fn parse_wp(attributes: Attributes) -> Result<WindowPos, Error> {
+fn parse_wp(
+    sbr: &Subrandr,
+    attributes: Attributes,
+    logset: &LogOnceSet,
+) -> Result<WindowPos, Error> {
     let mut result = WindowPos::default();
+
+    log_once_state!(in logset, unknown_wp_attribute: set);
 
     match_attributes! {
         attributes,
@@ -358,7 +372,12 @@ fn parse_wp(attributes: Attributes) -> Result<WindowPos, Error> {
             result.y = y;
         },
         else other => {
-            panic!("Unknown wp attribute {other}")
+            warning!(
+                sbr,
+                once_set(unknown_wp_attribute, other),
+                "Unknown attribute encountered on wp: {}",
+                other,
+            );
         }
     }
 
@@ -375,7 +394,9 @@ fn parse_head(
 ) -> Result<(Vec<Pen>, Vec<WindowPos>), Error> {
     let (mut pens, mut wps) = (vec![], vec![]);
 
-    log_once_state!(unknown_elements_head: set);
+    let logset = LogOnceSet::new();
+    log_once_state!(in &logset, unknown_elements_head: set);
+
     let mut depth = 0;
     loop {
         match reader.read_event()? {
@@ -383,10 +404,10 @@ fn parse_head(
                 match element.local_name().into_inner() {
                     // TODO: Warn on text content in pen or wp
                     b"pen" => {
-                        pens.push(parse_pen(element.attributes())?);
+                        pens.push(parse_pen(sbr, element.attributes(), &logset)?);
                     }
                     b"wp" => {
-                        wps.push(parse_wp(element.attributes())?);
+                        wps.push(parse_wp(sbr, element.attributes(), &logset)?);
                     }
                     name => {
                         warning!(
@@ -470,14 +491,15 @@ fn parse_body(
             XmlEvent::Start(element) if depth == 0 => {
                 match element.local_name().into_inner() {
                     b"p" => {
+                        // time=0 and duration=0 are defaults YouTube uses
+                        // duration=0 events should probably be stripped during conversion
+                        // since they're effectively noops unless I'm missing some subtle behaviour
                         let mut result = Event {
                             time: 0,
                             duration: 0,
                             position: &DEFAULT_WINDOW_POS,
                             segments: vec![],
                         };
-                        let mut has_time = false;
-                        let mut has_duration = false;
 
                         current_event_pen = &DEFAULT_PEN;
 
@@ -485,11 +507,9 @@ fn parse_body(
                             element.attributes(),
                             "t"(time: u32) => {
                                 result.time = time;
-                                has_time = true;
                             },
                             "d"(duration: u32) => {
                                 result.duration = duration;
-                                has_duration = true;
                             },
                             "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
                                 set_or_log!(current_event_pen, pens, id, non_existant_pen, "Pen");
@@ -503,14 +523,6 @@ fn parse_body(
                                     "Unknown event attribute {other}"
                                 )
                             }
-                        }
-
-                        if !has_time {
-                            return Err(Error::MissingAttribute("p", "t"));
-                        }
-
-                        if !has_duration {
-                            return Err(Error::MissingAttribute("p", "d"));
                         }
 
                         current = Some(result);
@@ -594,10 +606,12 @@ fn parse_body(
                     });
                 }
 
-                let event = current.take().unwrap();
-                if !event.segments.is_empty() {
-                    events.push(event);
+                if let Some(event) = current.take() {
+                    if !event.segments.is_empty() {
+                        events.push(event);
+                    }
                 }
+
                 depth = 0;
             }
             XmlEvent::End(_) if depth > 0 => {

@@ -3,6 +3,7 @@ use std::{collections::HashMap, hash::Hash, path::PathBuf};
 use thiserror::Error;
 
 use crate::{
+    text,
     util::{AnyError, OrderedF32, PtrEqArc, Sealed},
     Subrandr,
 };
@@ -34,14 +35,14 @@ pub enum FontWeight {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
     File(PathBuf),
-    Memory(PtrEqArc<[u8]>),
+    Memory(text::Face),
 }
 
 impl FontSource {
     pub fn load(&self) -> Result<Face, AnyError> {
         match self {
             Self::File(file) => Ok(Face::load_from_file(file)),
-            Self::Memory(memory) => Ok(Face::load_from_bytes(memory.0.clone())),
+            Self::Memory(face) => Ok(face.clone()),
         }
     }
 }
@@ -160,7 +161,11 @@ impl FontSelect {
         })
     }
 
-    pub fn add(&mut self, font: FontInfo) {
+    pub fn clear_extra(&mut self) {
+        self.custom.clear();
+    }
+
+    pub fn add_extra(&mut self, font: FontInfo) {
         self.custom.push(font);
     }
 

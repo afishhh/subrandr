@@ -2,12 +2,12 @@ use std::{alloc::Layout, sync::Arc};
 
 use crate::{
     color::BGRA8,
-    text::{FontInfo, FontWeight},
+    text::{Face, FontInfo, FontWeight},
     Renderer, Subrandr, Subtitles,
 };
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_copy_convert_to_rgba(
+pub unsafe extern "C" fn sbr_wasm_copy_convert_to_rgba(
     dst: *mut u32,
     src: *mut BGRA8,
     width: usize,
@@ -23,7 +23,7 @@ pub extern "C" fn sbr_wasm_copy_convert_to_rgba(
 }
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_load_subtitles(
+pub unsafe extern "C" fn sbr_wasm_load_subtitles(
     sbr: &Subrandr,
     text: *mut u8,
     len: usize,
@@ -37,7 +37,7 @@ pub extern "C" fn sbr_wasm_load_subtitles(
 }
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_free_subtitles(subs: *mut Subtitles) {
+pub unsafe extern "C" fn sbr_wasm_free_subtitles(subs: *mut Subtitles) {
     unsafe { drop(Box::from_raw(subs)) }
 }
 
@@ -47,7 +47,7 @@ pub extern "C" fn sbr_wasm_alloc(len: usize) -> *mut u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_dealloc(ptr: *mut u8, len: usize) {
+pub unsafe extern "C" fn sbr_wasm_dealloc(ptr: *mut u8, len: usize) {
     unsafe { std::alloc::dealloc(ptr, Layout::array::<u8>(len).unwrap()) }
 }
 
@@ -57,32 +57,40 @@ pub extern "C" fn sbr_wasm_create_uninit_arc(data_len: usize) -> *const u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_destroy_arc(ptr: *const u8, len: usize) {
+pub unsafe extern "C" fn sbr_wasm_destroy_arc(ptr: *const u8, len: usize) {
     unsafe {
         drop(Arc::from_raw(std::ptr::slice_from_raw_parts(ptr, len)));
     }
 }
 
 #[no_mangle]
-pub extern "C" fn sbr_wasm_renderer_add_font(
+pub unsafe extern "C" fn sbr_wasm_library_create_font(
+    _sbr: *mut Subrandr,
+    data_ptr: *const u8,
+    data_len: usize,
+) -> *mut Face {
+    let data = {
+        let data = std::ptr::slice_from_raw_parts(data_ptr, data_len);
+        Arc::increment_strong_count(data);
+        Arc::from_raw(data)
+    };
+
+    Box::into_raw(Box::new(Face::load_from_bytes(data)))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
     renderer: *mut Renderer,
     name_ptr: *const u8,
     name_len: usize,
     weight: f32,
     italic: bool,
-    data_ptr: *const u8,
-    data_len: usize,
+    font: *mut Face,
 ) {
-    let (name, data) = unsafe {
-        let name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)).unwrap();
-
-        let data = std::ptr::slice_from_raw_parts(data_ptr, data_len);
-        Arc::increment_strong_count(data);
-        (name, Arc::from_raw(data))
-    };
+    let name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)).unwrap();
 
     let renderer = unsafe { &mut *renderer };
-    renderer.fonts.add(FontInfo {
+    renderer.fonts.add_extra(FontInfo {
         family: name.to_owned(),
         weight: if weight.is_sign_negative() {
             FontWeight::Variable
@@ -90,6 +98,6 @@ pub extern "C" fn sbr_wasm_renderer_add_font(
             FontWeight::Static(weight)
         },
         italic,
-        source: crate::text::FontSource::Memory(crate::util::PtrEqArc(data)),
+        source: crate::text::FontSource::Memory((*font).clone()),
     });
 }

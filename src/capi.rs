@@ -3,9 +3,11 @@ use std::{
     cell::UnsafeCell,
     ffi::{c_int, CStr, CString},
     fmt::Formatter,
+    mem::MaybeUninit,
+    sync::Arc,
 };
 
-use crate::{color::BGRA8, Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
+use crate::{color::BGRA8, text::Face, Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -249,6 +251,28 @@ unsafe extern "C" fn sbr_get_last_error_code() -> u32 {
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_library_open_font_from_memory(
+    _sbr: *mut Subrandr,
+    data: *const u8,
+    data_len: usize,
+) -> *mut Face {
+    let mut uninit = Arc::new_uninit_slice(data_len);
+    unsafe {
+        std::mem::transmute::<&mut [MaybeUninit<u8>], &mut [u8]>(
+            Arc::get_mut(&mut uninit).unwrap(),
+        )
+        .copy_from_slice(std::slice::from_raw_parts(data, data_len));
+    }
+    let bytes = Arc::<[MaybeUninit<u8>]>::assume_init(uninit);
+    Box::into_raw(Box::new(Face::load_from_bytes(bytes)))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_library_close_font(_sbr: *mut Subrandr, font: *mut Face) {
+    std::mem::forget((*font).clone());
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_create(
     sbr: *mut Subrandr,
     subs: *mut Subtitles,
@@ -267,6 +291,40 @@ unsafe extern "C" fn sbr_renderer_render(
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
     (*renderer).render(&*ctx, t, &mut Painter::new(width, height, buffer));
+    0
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_clear_fonts(renderer: *mut Renderer<'static>) {
+    (*renderer).fonts.clear_extra();
+}
+
+// This is very unstable: the variable font handling will probably have to change in the future
+// to hold a supported weight range
+// TODO: add to header and test
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_add_font(
+    renderer: *mut Renderer<'static>,
+    family: *const i8,
+    weight: f32,
+    italic: bool,
+    font: *mut Face,
+) -> i32 {
+    let family = ctrywrap!(
+        InvalidArgument("Path is not valid UTF-8"),
+        CStr::from_ptr(family).to_str()
+    );
+    (*renderer).fonts.add_extra(crate::text::FontInfo {
+        family: family.to_owned(),
+        weight: match weight {
+            f if f.is_nan() => crate::text::FontWeight::Variable,
+            f if (0.0..1000.0).contains(&f) => crate::text::FontWeight::Static(f),
+            _ => cthrow!(InvalidArgument, "Font weight out of range"),
+        },
+        italic,
+        source: crate::text::FontSource::Memory((*font).clone()),
+    });
+
     0
 }
 

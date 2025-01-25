@@ -79,6 +79,7 @@ impl SharedFaceData {
 }
 
 #[repr(C)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Face {
     face: FT_Face,
     coords: MmCoords,

@@ -931,7 +931,7 @@ impl MultilineTextShaper {
                         |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
                             ShaperSegment::Text(f) => {
                                 I32Fixed::new(x.paint_rect.y)
-                                    + I32Fixed::from_raw(f.metrics().height as i32)
+                                    + I32Fixed::from_ft(f.metrics().height)
                             }
                             ShaperSegment::Shape(_) => I32Fixed::new(x.paint_rect.h as i32),
                         },
@@ -1247,8 +1247,7 @@ impl<'a> Renderer<'a> {
         if decoration.strike_out {
             let metrics = fonts[0].metrics();
             let strike_y =
-                (y - I32Fixed::from_raw(((metrics.height >> 1) + metrics.descender) as i32))
-                    .trunc_to_inner();
+                (y - I32Fixed::from_ft((metrics.height >> 1) + metrics.descender)).trunc_to_inner();
             painter.horizontal_line(
                 strike_y,
                 x.trunc_to_inner(),

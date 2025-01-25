@@ -1,5 +1,4 @@
 use std::{
-    arch::asm,
     fmt::Debug,
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign},
@@ -346,7 +345,7 @@ where
     #[cfg(target_feature = "sse")]
     unsafe {
         let mut result: f32;
-        asm!("rsqrtss {}, {}", out(xmm_reg) result, in(xmm_reg) squared_denominator);
+        std::arch::asm!("rsqrtss {}, {}", out(xmm_reg) result, in(xmm_reg) squared_denominator);
         // rsqrtss + one newton-raphson step = 22-bits of accuracy
         result *= 1.5 - (squared_denominator * 0.5 * result * result);
         numerator * result

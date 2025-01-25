@@ -3,6 +3,8 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
+use text_sys::FT_Fixed;
+
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Fixed<const P: u32, T>(T);
@@ -283,6 +285,13 @@ define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 
 pub type I32Fixed<const P: u32> = Fixed<P, i32>;
 pub type U32Fixed<const P: u32> = Fixed<P, u32>;
+
+impl<const P: u32> I32Fixed<P> {
+    pub fn from_ft(value: FT_Fixed) -> Self {
+        #[allow(clippy::unnecessary_cast)]
+        Self::from_raw(value as i32)
+    }
+}
 
 #[cfg(test)]
 macro_rules! test_module {

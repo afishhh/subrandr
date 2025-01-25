@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "subrandr",
+  "version": "0.1",
+  
+  "action": {
+    "default_title": "subrandr",
+    "default_popup": "popup.html",
+    "default_area": "navbar"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": ["./content.js"]
+    }
+  ],
+
+  
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'"
+  },
+  "web_accessible_resources": [{
+    "matches": ["<all_urls>"],
+    "resources": ["subrandr.js", "subrandr.wasm", "worker.js"]
+  }],
+
+  "permissions": [
+    "activeTab",
+    "storage"
+  ]
+}

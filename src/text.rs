@@ -676,7 +676,6 @@ impl Image {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyph]) -> Image {
     let mut result = Image {
         glyphs: Vec::new(),

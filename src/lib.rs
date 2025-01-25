@@ -1191,7 +1191,7 @@ impl<'a> Renderer<'a> {
             // Draw the border first
             // TODO: in reality the border should probably be blended with the text using
             //       a substraction function (i.e. only draw the border where there is no glyph)
-            //       same thing applies to shadow
+            //       check how libass handles it
             let mut x = x;
             let mut rasterizer = NonZeroPolygonRasterizer::new();
 

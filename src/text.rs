@@ -8,6 +8,7 @@ mod ft_utils;
 pub use face::*;
 pub mod font_select;
 pub use font_select::*;
+pub mod layout;
 
 use crate::{
     color::{Premultiplied, BGRA8},

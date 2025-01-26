@@ -4,7 +4,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range, rc::Rc};
+use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
@@ -12,7 +12,10 @@ use math::{I32Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::{Srv3Event, Srv3TextShadow};
-use text::{FontRequest, FontSelect, TextExtents};
+use text::{
+    layout::{MultilineTextShaper, TextWrapParams},
+    FontRequest, TextExtents,
+};
 
 pub mod ass;
 mod capi;
@@ -29,7 +32,7 @@ mod util;
 mod wasm;
 
 pub use painter::*;
-use util::{ref_to_slice, RcArray};
+use util::ref_to_slice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
@@ -322,7 +325,7 @@ impl Subtitles {
                             shadows: Vec::new(),
                         }),
                         Segment::Text(TextSegment {
-                            font: vec!["monospace".to_string()],
+                            font: vec!["Liberation Sans".to_string()],
                             font_size: 64.0,
                             font_weight: 400,
                             italic: false,
@@ -337,7 +340,7 @@ impl Subtitles {
                             font_weight: 700,
                             italic: false,
                             decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF0000FF),
+                            color: BGRA8::from_rgba32(0xFFFF00FF),
                             text: "ltil".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -347,7 +350,7 @@ impl Subtitles {
                             font_weight: 400,
                             italic: false,
                             decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF0000FF),
+                            color: BGRA8::from_rgba32(0xFF00FFFF),
                             text: "iね❌".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -562,404 +565,6 @@ struct PixelRect {
     y: i32,
     w: u32,
     h: u32,
-}
-
-const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
-
-enum ShaperSegment {
-    Text(text::Font),
-    Shape(PixelRect),
-}
-
-struct MultilineTextShaper {
-    text: String,
-    explicit_line_bounaries: Vec</* end of line i */ usize>,
-    segment_boundaries: Vec<(ShaperSegment, /* end of segment i */ usize)>,
-    intra_font_segment_splits: Vec<usize>,
-}
-
-#[derive(Debug)]
-struct ShapedLineSegment {
-    glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
-    baseline_offset: (I32Fixed<6>, I32Fixed<6>),
-    paint_rect: PixelRect,
-    corresponding_input_segment: usize,
-    // Implementation details
-    max_bearing_y: I32Fixed<6>,
-    corresponding_font_boundary: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Size2 {
-    w: u32,
-    h: u32,
-}
-
-#[derive(Debug)]
-struct ShapedLine {
-    segments: Vec<ShapedLineSegment>,
-    paint_size: Size2,
-}
-
-#[derive(Debug, Clone)]
-struct TextWrapParams {
-    mode: TextWrapMode,
-    max_width: f32,
-    // will be used later for vertical text I guess
-    max_height: f32,
-}
-
-impl MultilineTextShaper {
-    const fn new() -> Self {
-        Self {
-            text: String::new(),
-            explicit_line_bounaries: Vec::new(),
-            segment_boundaries: Vec::new(),
-            intra_font_segment_splits: Vec::new(),
-        }
-    }
-
-    fn add_text(&mut self, mut text: &str, font: &text::Font) {
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT TEXT: {:?} {:?}", text, font);
-        }
-
-        while let Some(nl) = text.find('\n') {
-            self.text.push_str(&text[..nl]);
-            self.explicit_line_bounaries.push(self.text.len());
-            text = &text[nl + 1..];
-        }
-        self.text.push_str(text);
-
-        if let Some((ShaperSegment::Text(ref last_font), ref mut last_end)) =
-            self.segment_boundaries.last_mut()
-        {
-            if last_font == font {
-                self.intra_font_segment_splits.push(*last_end);
-                *last_end = self.text.len();
-                return;
-            }
-        }
-
-        self.segment_boundaries
-            .push((ShaperSegment::Text(font.clone()), self.text.len()));
-    }
-
-    fn add_shape(&mut self, dim: PixelRect) {
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT SHAPE: {dim:?}",);
-        }
-
-        self.text.push('\0');
-        self.segment_boundaries
-            .push((ShaperSegment::Shape(dim), self.text.len()))
-    }
-
-    fn shape(
-        &self,
-        line_alignment: HorizontalAlignment,
-        _wrap: TextWrapParams,
-        font_select: &mut FontSelect,
-    ) -> (Vec<ShapedLine>, PixelRect) {
-        // assert_eq!(wrap.mode, TextWrapMode::None);
-
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 TEXT {:?}", self.text);
-            println!(
-                "SHAPING V2 LINE BOUNDARIES {:?}",
-                self.explicit_line_bounaries
-            );
-        }
-
-        let mut lines: Vec<ShapedLine> = vec![];
-        let mut total_extents = TextExtents {
-            paint_width: I32Fixed::ZERO,
-            paint_height: I32Fixed::ZERO,
-        };
-        let mut total_rect = PixelRect {
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-        };
-
-        let mut last = 0;
-        for line_boundary in self
-            .explicit_line_bounaries
-            .iter()
-            .copied()
-            .chain(std::iter::once(self.text.len()))
-        {
-            // TODO: Where to get spacing?
-            // let spacing = font.horizontal_extents().line_gap as i32 + 10;
-            // if let Some(last) = lines.last() {
-            //     let x = last
-            //         .segments
-            //         .iter()
-            //         .map(|x| &self.font_boundaries[x.corresponding_font_boundary].0)
-            //         .map(|f| f.metrics().height)
-            //         .collect::<Vec<_>>();
-            //     println!("spacing {x:?}");
-            // }
-            // if !lines.is_empty() {
-            //     total_extents.paint_height += 10 * 64;
-            // }
-
-            let mut segments: Vec<ShapedLineSegment> = vec![];
-            let mut line_extents = TextExtents {
-                paint_height: I32Fixed::ZERO,
-                paint_width: I32Fixed::ZERO,
-            };
-
-            // TODO: These binary searches can be replaced by a pointer
-            let starting_font_segment = match self
-                .segment_boundaries
-                .binary_search_by_key(&last, |(_, b)| *b)
-            {
-                Ok(idx) => idx + 1,
-                Err(idx) => idx,
-            };
-
-            if MULTILINE_SHAPER_DEBUG_PRINT {
-                println!(
-                    "last: {last}, font boundaries: {:?}, binary search result: {}",
-                    self.segment_boundaries
-                        .iter()
-                        .map(|(_, s)| s)
-                        .collect::<Vec<_>>(),
-                    starting_font_segment
-                );
-            }
-
-            let mut max_bearing_y = I32Fixed::ZERO;
-
-            for current_segment in starting_font_segment..self.segment_boundaries.len() {
-                let (segment, font_boundary) = &self.segment_boundaries[current_segment];
-
-                let end = (*font_boundary).min(line_boundary);
-                let segment_slice = last..end;
-
-                let first_internal_split_idx =
-                    match self.intra_font_segment_splits.binary_search(&last) {
-                        Ok(idx) => idx + 1,
-                        Err(idx) => idx,
-                    };
-
-                match segment {
-                    ShaperSegment::Text(font) => {
-                        let mut segment_fonts = Vec::new();
-                        let glyphs = {
-                            let mut buffer = text::ShapingBuffer::new();
-                            let direction = buffer.guess_properties();
-                            if !direction.is_horizontal() {
-                                buffer.set_direction(direction.to_horizontal());
-                            }
-                            buffer.add(&self.text[segment_slice]);
-                            buffer.shape(font, &mut segment_fonts, font_select)
-                        };
-                        let segment_fonts = Rc::new(segment_fonts);
-
-                        let (extents, (trailing_x_advance, _)) =
-                            text::compute_extents_ex(true, &segment_fonts, &glyphs);
-
-                        let segment_max_bearing_y = glyphs
-                            .iter()
-                            .map(|x| {
-                                segment_fonts[x.font_index]
-                                    .glyph_extents(x.index)
-                                    .hori_bearing_y
-                            })
-                            .max()
-                            .unwrap_or(I32Fixed::ZERO);
-
-                        max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
-
-                        let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
-
-                        if MULTILINE_SHAPER_DEBUG_PRINT {
-                            println!(
-                            "last: {last}, end: {end}, intra font splits: {:?}, binary search result: {}",
-                            self.intra_font_segment_splits, first_internal_split_idx
-                        );
-                        }
-
-                        if self
-                            .intra_font_segment_splits
-                            .get(first_internal_split_idx)
-                            .is_none_or(|split| *split >= end)
-                        {
-                            segments.push(ShapedLineSegment {
-                                glyphs_and_fonts: Some((rc_glyphs, segment_fonts)),
-                                baseline_offset: (
-                                    line_extents.paint_width,
-                                    total_extents.paint_height,
-                                ),
-                                paint_rect: PixelRect {
-                                    x: line_extents.paint_width.trunc_to_inner(),
-                                    y: total_extents.paint_height.trunc_to_inner(),
-                                    w: extents.paint_width.trunc_to_inner() as u32,
-                                    h: extents.paint_height.trunc_to_inner() as u32,
-                                },
-                                max_bearing_y: segment_max_bearing_y,
-                                corresponding_font_boundary: current_segment,
-                                corresponding_input_segment: current_segment
-                                    + first_internal_split_idx,
-                            });
-                        } else {
-                            let mut last_glyph_idx = 0;
-                            let mut x = I32Fixed::ZERO;
-                            for (i, split_end) in self.intra_font_segment_splits
-                                [first_internal_split_idx..]
-                                .iter()
-                                .copied()
-                                .take_while(|idx| *idx < end)
-                                .chain(std::iter::once(end))
-                                .enumerate()
-                            {
-                                let end_glyph_idx = rc_glyphs
-                                    .iter()
-                                    .position(|x| x.cluster >= split_end - last)
-                                    .unwrap_or(rc_glyphs.len());
-                                let glyph_range = last_glyph_idx..end_glyph_idx;
-                                let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
-                                let (extents, (x_advance, _)) =
-                                    text::compute_extents_ex(true, &segment_fonts, &glyph_slice);
-                                segments.push(ShapedLineSegment {
-                                    glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
-                                    baseline_offset: (x, total_extents.paint_height),
-                                    paint_rect: PixelRect {
-                                        x: x.trunc_to_inner(),
-                                        y: total_extents.paint_height.trunc_to_inner(),
-                                        w: extents.paint_width.trunc_to_inner() as u32,
-                                        h: extents.paint_height.trunc_to_inner() as u32,
-                                    },
-                                    max_bearing_y: segment_max_bearing_y,
-                                    corresponding_font_boundary: current_segment,
-                                    corresponding_input_segment: current_segment
-                                        + first_internal_split_idx
-                                        + i,
-                                });
-                                last_glyph_idx = end_glyph_idx;
-                                x += extents.paint_width + x_advance;
-                            }
-                        }
-
-                        line_extents.paint_width += extents.paint_width;
-
-                        // FIXME: THIS IS WRONG!!
-                        //        It will add trailing advance when the last segments contains zero or only invisible glyphs.
-                        if end != line_boundary {
-                            line_extents.paint_width += trailing_x_advance;
-                        }
-
-                        if line_extents.paint_height < extents.paint_height {
-                            line_extents.paint_height = extents.paint_height;
-                        }
-                    }
-                    // TODO: Figure out exactly how libass lays out shapes
-                    ShaperSegment::Shape(dim) => {
-                        let logical_w = dim.w - (-dim.x).min(0) as u32;
-                        let logical_h = dim.h - (-dim.y).min(0) as u32;
-                        let segment_max_bearing_y = I32Fixed::new(logical_h as i32);
-                        segments.push(ShapedLineSegment {
-                            glyphs_and_fonts: None,
-                            baseline_offset: (line_extents.paint_width, total_extents.paint_height),
-                            paint_rect: PixelRect {
-                                x: line_extents.paint_width.trunc_to_inner(),
-                                y: total_extents.paint_height.trunc_to_inner(),
-                                w: logical_w,
-                                h: logical_h,
-                            },
-                            corresponding_input_segment: current_segment + first_internal_split_idx,
-                            corresponding_font_boundary: current_segment + first_internal_split_idx,
-                            max_bearing_y: segment_max_bearing_y,
-                        });
-                        line_extents.paint_width += (logical_w * 64) as i32;
-                        max_bearing_y = max_bearing_y.max(segment_max_bearing_y);
-                        line_extents.paint_height = line_extents
-                            .paint_height
-                            .max(I32Fixed::new(logical_h as i32));
-                    }
-                }
-
-                last = end;
-
-                if end == line_boundary {
-                    break;
-                }
-            }
-
-            debug_assert_eq!(last, line_boundary);
-
-            let aligning_x_offset = match line_alignment {
-                HorizontalAlignment::Left => 0,
-                HorizontalAlignment::Center => -line_extents.paint_width.trunc_to_inner() / 2,
-                HorizontalAlignment::Right => -line_extents.paint_width.trunc_to_inner(),
-            };
-
-            for segment in segments.iter_mut() {
-                segment.baseline_offset.0 += aligning_x_offset;
-                segment.paint_rect.x += aligning_x_offset;
-                if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.1 += max_bearing_y - segment.max_bearing_y;
-                } else {
-                    segment.baseline_offset.1 += max_bearing_y;
-                }
-                segment.paint_rect.y += (max_bearing_y - segment.max_bearing_y).trunc_to_inner();
-            }
-
-            if !segments.is_empty() {
-                total_rect.x = total_rect
-                    .x
-                    .min(segments.first().map(|x| x.paint_rect.x).unwrap());
-                total_rect.w = total_rect.w.max(
-                    (segments
-                        .last()
-                        .map(|x| (x.paint_rect.x + x.paint_rect.w as i32))
-                        .unwrap()
-                        - segments.first().map(|x| x.paint_rect.x).unwrap())
-                        as u32,
-                );
-            }
-
-            if line_boundary == self.text.len() {
-                total_extents.paint_height += line_extents.paint_height;
-            } else {
-                total_extents.paint_height += segments
-                    .iter()
-                    .map(
-                        |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
-                            ShaperSegment::Text(f) => {
-                                I32Fixed::new(x.paint_rect.y)
-                                    + I32Fixed::from_ft(f.metrics().height)
-                            }
-                            ShaperSegment::Shape(_) => I32Fixed::new(x.paint_rect.h as i32),
-                        },
-                    )
-                    .max()
-                    .unwrap_or(I32Fixed::ZERO);
-            }
-
-            total_extents.paint_width =
-                std::cmp::max(total_extents.paint_width, line_extents.paint_width);
-
-            lines.push(ShapedLine {
-                segments,
-                paint_size: Size2 {
-                    w: line_extents.paint_width.trunc_to_inner() as u32,
-                    h: line_extents.paint_height.trunc_to_inner() as u32,
-                },
-            });
-        }
-
-        total_rect.h = total_extents.paint_height.trunc_to_inner() as u32;
-
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
-        }
-
-        (lines, total_rect)
-    }
 }
 
 const DRAW_PERF_DEBUG_INFO: bool = true;

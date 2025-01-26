@@ -133,6 +133,8 @@ impl Face {
         if let Some(mm) = FaceMmVar::get(face) {
             for (index, ft_axis) in mm.axes().iter().enumerate() {
                 axes.push(Axis {
+                    // FT_ULong may be u64, but this tag always fits in u32
+                    #[allow(clippy::unnecessary_cast)]
                     tag: ft_axis.tag as u32,
                     index,
                     minimum: ft_axis.minimum,
@@ -385,11 +387,13 @@ impl Font {
 
             // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
             let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
+            #[allow(clippy::useless_conversion)] // c_ulong conversion
             let ppem = map_to_ppem(point_size.into(), dpi.into());
 
             // First size larger than requested, or the largest size if not found
             let mut picked_size_index = 0usize;
             for (i, size) in sizes.iter().enumerate() {
+                #[allow(clippy::useless_conversion)] // c_ulong conversion
                 if i64::from(size.x_ppem) > ppem && size.x_ppem < sizes[picked_size_index].x_ppem {
                     picked_size_index = i;
                 }
@@ -512,6 +516,10 @@ impl Font {
         unsafe { std::mem::transmute(self) }
     }
 
+    pub fn point_size(&self) -> IFixed26Dot6 {
+        IFixed26Dot6::from_ft(self.point_size)
+    }
+
     pub fn weight(&self) -> f32 {
         self.face().weight()
     }
@@ -525,10 +533,7 @@ impl std::fmt::Debug for Font {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Font")
             .field("face", self.face())
-            .field(
-                "point_size",
-                &IFixed26Dot6::from_raw(self.point_size as i32),
-            )
+            .field("point_size", &self.point_size())
             .field("dpi", &self.dpi)
             .finish()
     }

@@ -2,7 +2,7 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit, ops::Range, sync::Arc};
+use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit, ops::Range};
 
 mod rcarray;
 pub use rcarray::*;
@@ -177,28 +177,6 @@ impl Ord for OrderedF32 {
 impl Hash for OrderedF32 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u32(self.0.to_bits());
-    }
-}
-
-#[derive(Debug, Eq)]
-#[repr(transparent)]
-pub struct PtrEqArc<T: ?Sized>(pub Arc<T>);
-
-impl<T: ?Sized> Clone for PtrEqArc<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T: ?Sized> PartialEq for PtrEqArc<T> {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl<T: ?Sized> Hash for PtrEqArc<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.0).hash(state);
     }
 }
 

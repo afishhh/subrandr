@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     text,
-    util::{AnyError, OrderedF32, PtrEqArc, Sealed},
+    util::{AnyError, OrderedF32, Sealed},
     Subrandr,
 };
 

@@ -1,6 +1,7 @@
 {
 	"extends": "@tsconfig/recommended/tsconfig.json",
 	"compilerOptions": {
+		"composite": true,
 		"target": "es2020",
 		"module": "esnext",
 		"esModuleInterop": true,

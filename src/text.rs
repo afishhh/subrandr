@@ -610,7 +610,7 @@ impl GlyphBitmap {
                 // NOTE: This is actually pre-multiplied in linear space...
                 //       But I think libass ignores this too.
                 //       See note in color.rs
-                let n = Premultiplied(source[si]);
+                let n = Premultiplied(*source.get_unchecked(si));
 
                 let di = (fx as usize) + (fy as usize) * stride as usize;
                 let d = unsafe { buffer.get_unchecked_mut(di) };

@@ -889,9 +889,11 @@ impl<'a> Renderer<'a> {
         self.previous_painter_size = painter_size;
         self.fonts.advance_cache_generation();
 
+        let clear_start = std::time::Instant::now();
         // TODO: Implement a damage system?
         //       Only clear required rectangles
         painter.clear(BGRA8::ZERO);
+        let clear_end = std::time::Instant::now();
         self.dpi = ctx.dpi;
 
         trace!(
@@ -918,8 +920,12 @@ impl<'a> Renderer<'a> {
                 (ctx.padding_left + ctx.video_width) as i32,
                 (20.0 * ctx.pixel_scale()) as i32,
                 &format!(
-                    "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
-                    ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
+                    "clear={:.1}ms   l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                    (clear_end - clear_start).as_secs_f32() * 1000.,
+                    ctx.padding_left,
+                    ctx.padding_right,
+                    ctx.padding_top,
+                    ctx.padding_bottom
                 ),
                 Alignment::TopRight,
                 16.0,

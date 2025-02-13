@@ -304,7 +304,7 @@ impl MultilineTextShaper {
                             corresponding_font_boundary: current_segment + current_intra_split,
                             max_bearing_y: segment_max_bearing_y,
                         });
-                        line_extents.paint_width += (logical_w * 64) as i32;
+                        line_extents.paint_width += logical_w as i32;
                         max_bearing_y = max_bearing_y.max(segment_max_bearing_y);
                         line_extents.paint_height = line_extents
                             .paint_height

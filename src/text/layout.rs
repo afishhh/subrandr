@@ -1,6 +1,11 @@
 use std::rc::Rc;
 
-use crate::{math::I32Fixed, text, util::RcArray, HorizontalAlignment, PixelRect, TextWrapMode};
+use crate::{
+    math::I32Fixed,
+    text::{self, ft_utils::IFixed26Dot6},
+    util::RcArray,
+    HorizontalAlignment, PixelRect, TextWrapMode,
+};
 
 use super::{FontSelect, TextExtents};
 
@@ -119,6 +124,7 @@ impl MultilineTextShaper {
         let mut total_extents = TextExtents {
             paint_width: I32Fixed::ZERO,
             paint_height: I32Fixed::ZERO,
+            max_bearing_y: IFixed26Dot6::ZERO,
         };
         let mut total_rect = PixelRect {
             x: 0,
@@ -155,6 +161,7 @@ impl MultilineTextShaper {
             let mut line_extents = TextExtents {
                 paint_height: I32Fixed::ZERO,
                 paint_width: I32Fixed::ZERO,
+                max_bearing_y: IFixed26Dot6::ZERO,
             };
 
             if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -167,8 +174,6 @@ impl MultilineTextShaper {
                     current_segment
                 );
             }
-
-            let mut max_bearing_y = I32Fixed::ZERO;
 
             while self.segment_boundaries[current_segment].1 <= last {
                 current_segment += 1;
@@ -197,9 +202,6 @@ impl MultilineTextShaper {
                         let (extents, (trailing_x_advance, _)) =
                             text::compute_extents_ex(true, &segment_fonts, &glyphs);
 
-                        let segment_max_bearing_y = I32Fixed::from_ft(font.metrics().ascender);
-                        max_bearing_y = std::cmp::max(max_bearing_y, segment_max_bearing_y);
-
                         let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
                         if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -226,7 +228,7 @@ impl MultilineTextShaper {
                                     w: extents.paint_width.trunc_to_inner() as u32,
                                     h: extents.paint_height.trunc_to_inner() as u32,
                                 },
-                                max_bearing_y: segment_max_bearing_y,
+                                max_bearing_y: extents.max_bearing_y,
                                 corresponding_font_boundary: current_segment,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
@@ -258,7 +260,7 @@ impl MultilineTextShaper {
                                         w: extents.paint_width.trunc_to_inner() as u32,
                                         h: extents.paint_height.trunc_to_inner() as u32,
                                     },
-                                    max_bearing_y: segment_max_bearing_y,
+                                    max_bearing_y: extents.max_bearing_y,
                                     corresponding_font_boundary: current_segment,
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
@@ -285,6 +287,9 @@ impl MultilineTextShaper {
                         if line_extents.paint_height < extents.paint_height {
                             line_extents.paint_height = extents.paint_height;
                         }
+
+                        line_extents.max_bearing_y =
+                            line_extents.max_bearing_y.max(extents.max_bearing_y);
                     }
                     // TODO: Figure out exactly how libass lays out shapes
                     ShaperSegment::Shape(dim) => {
@@ -305,7 +310,8 @@ impl MultilineTextShaper {
                             max_bearing_y: segment_max_bearing_y,
                         });
                         line_extents.paint_width += logical_w as i32;
-                        max_bearing_y = max_bearing_y.max(segment_max_bearing_y);
+                        line_extents.max_bearing_y =
+                            line_extents.max_bearing_y.max(segment_max_bearing_y);
                         line_extents.paint_height = line_extents
                             .paint_height
                             .max(I32Fixed::new(logical_h as i32));
@@ -324,20 +330,21 @@ impl MultilineTextShaper {
             debug_assert_eq!(last, line_boundary);
 
             let aligning_x_offset = match line_alignment {
-                HorizontalAlignment::Left => 0,
-                HorizontalAlignment::Center => -line_extents.paint_width.trunc_to_inner() / 2,
-                HorizontalAlignment::Right => -line_extents.paint_width.trunc_to_inner(),
+                HorizontalAlignment::Left => IFixed26Dot6::ZERO,
+                HorizontalAlignment::Center => -line_extents.paint_width / 2,
+                HorizontalAlignment::Right => -line_extents.paint_width,
             };
 
             for segment in segments.iter_mut() {
                 segment.baseline_offset.0 += aligning_x_offset;
-                segment.paint_rect.x += aligning_x_offset;
+                segment.paint_rect.x += aligning_x_offset.trunc_to_inner();
                 if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.1 += max_bearing_y - segment.max_bearing_y;
+                    segment.baseline_offset.1 += line_extents.max_bearing_y - segment.max_bearing_y;
                 } else {
-                    segment.baseline_offset.1 += max_bearing_y;
+                    segment.baseline_offset.1 += line_extents.max_bearing_y;
                 }
-                segment.paint_rect.y += (max_bearing_y - segment.max_bearing_y).trunc_to_inner();
+                segment.paint_rect.y +=
+                    (line_extents.max_bearing_y - segment.max_bearing_y).trunc_to_inner();
             }
 
             if !segments.is_empty() {

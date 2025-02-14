@@ -110,6 +110,7 @@ pub fn compute_extents_ex(
     let mut results = TextExtents {
         paint_height: IFixed26Dot6::ZERO,
         paint_width: IFixed26Dot6::ZERO,
+        max_bearing_y: IFixed26Dot6::ZERO,
     };
 
     let trailing_advance;
@@ -122,8 +123,10 @@ pub fn compute_extents_ex(
         results.paint_width += extents.width;
         if horizontal {
             trailing_advance = ((glyph.x_advance - extents.width), IFixed26Dot6::ZERO);
+            results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
         } else {
             trailing_advance = (IFixed26Dot6::ZERO, (glyph.y_advance - extents.height));
+            results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
     } else {
         trailing_advance = (IFixed26Dot6::ZERO, IFixed26Dot6::ZERO);
@@ -134,9 +137,11 @@ pub fn compute_extents_ex(
         if horizontal {
             results.paint_height = results.paint_height.max(extents.height.abs());
             results.paint_width += glyph.x_advance;
+            results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
         } else {
             results.paint_width = results.paint_width.max(extents.width.abs());
             results.paint_height += glyph.y_advance;
+            results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
     }
 
@@ -481,6 +486,7 @@ pub fn shape_text(font: &Font, text: &str) -> ShapedText {
 pub struct TextExtents {
     pub paint_height: IFixed26Dot6,
     pub paint_width: IFixed26Dot6,
+    pub max_bearing_y: IFixed26Dot6,
 }
 
 struct GlyphBitmap {

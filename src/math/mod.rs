@@ -10,6 +10,7 @@ mod fixed;
 pub use fixed::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "wgpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
 pub struct Point2 {
     pub x: f32,
@@ -43,6 +44,7 @@ impl Debug for Point2 {
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "wgpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
 pub struct Vec2 {
     pub x: f32,

@@ -220,8 +220,8 @@ pub fn monochrome_gaussian_blit(
         toy,
         target_width,
         target_height,
-        source_width + 2 * PADDING_RADIUS * radius,
-        source_height + 2 * PADDING_RADIUS * radius,
+        dbg!(source_width + 2 * PADDING_RADIUS * radius),
+        dbg!(source_height + 2 * PADDING_RADIUS * radius),
     ) else {
         return;
     };

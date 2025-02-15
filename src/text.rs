@@ -1,5 +1,6 @@
 use std::{cell::OnceCell, mem::MaybeUninit, ops::Range, rc::Rc};
 
+use bytemuck::must_cast_slice;
 use ft_utils::IFixed26Dot6;
 use text_sys::*;
 
@@ -11,8 +12,9 @@ pub use font_select::*;
 pub mod layout;
 
 use crate::{
-    color::{Premultiplied, BGRA8},
-    util::{calculate_blit_rectangle, AnyError, BlitRectangle, OrderedF32},
+    color::BGRA8,
+    rasterize::{Rasterizer, RenderTarget, Texture, TextureFormat},
+    util::{AnyError, OrderedF32},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -494,6 +496,7 @@ struct GlyphBitmap {
     width: u32,
     height: u32,
     data: Rc<BufferData>,
+    texture: OnceCell<Texture>,
 }
 
 /// Merged monochrome bitmap of the whole text string, useful for shadows.
@@ -531,26 +534,27 @@ impl MonochromeImage {
         result.data = vec![0; result.width as usize * result.height as usize];
 
         for bitmap in &image.glyphs {
+            let offx = (bitmap.offset.0 - result.offset.0) as usize;
+            let offy = (bitmap.offset.1 - result.offset.1) as usize;
+
             match &*bitmap.data {
                 BufferData::Monochrome(source) => {
-                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
-                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
                     for sy in 0..bitmap.height as usize {
+                        let mut di = (offy + sy) * result.width as usize + offx;
                         for sx in 0..bitmap.width as usize {
                             let si = sy * bitmap.width as usize + sx;
-                            let di = (offy + sy) * result.width as usize + (offx + sx);
                             result.data[di] = source[si];
+                            di += 1;
                         }
                     }
                 }
                 BufferData::Color(source) => {
-                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
-                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
                     for sy in 0..bitmap.height as usize {
+                        let mut di = (offy + sy) * result.width as usize + offx;
                         for sx in 0..bitmap.width as usize {
                             let si = sy * bitmap.width as usize + sx;
-                            let di = (offy + sy) * result.width as usize + (offx + sx);
                             result.data[di] = source[si].a;
+                            di += 1;
                         }
                     }
                 }
@@ -570,92 +574,34 @@ pub struct Image {
 }
 
 impl GlyphBitmap {
-    unsafe fn blit_monochrome_unchecked(
-        &self,
-        dx: i32,
-        dy: i32,
-        buffer: &mut [BGRA8],
-        stride: u32,
-        color: BGRA8,
-        ys: Range<usize>,
-        xs: Range<usize>,
-        source: &[u8],
-    ) {
-        for y in ys {
-            let fy = dy + self.offset.1 + y as i32;
-            for x in xs.clone() {
-                let fx = dx + self.offset.0 + x as i32;
-
-                let si = y * self.width as usize + x;
-                let sv = *unsafe { source.get_unchecked(si) };
-
-                let di = (fx as usize) + (fy as usize) * stride as usize;
-                let d = unsafe { buffer.get_unchecked_mut(di) };
-                *d = color.mul_alpha(sv).blend_over(*d).0;
-            }
-        }
-    }
-
-    unsafe fn blit_bgra_unchecked(
-        &self,
-        dx: i32,
-        dy: i32,
-        buffer: &mut [BGRA8],
-        stride: u32,
-        alpha: u8,
-        ys: Range<usize>,
-        xs: Range<usize>,
-        source: &[BGRA8],
-    ) {
-        for y in ys {
-            let fy = dy + self.offset.1 + y as i32;
-            for x in xs.clone() {
-                let fx = dx + self.offset.0 + x as i32;
-
-                let si = y * self.width as usize + x;
-                // NOTE: This is actually pre-multiplied in linear space...
-                //       But I think libass ignores this too.
-                //       See note in color.rs
-                let n = Premultiplied(*source.get_unchecked(si));
-
-                let di = (fx as usize) + (fy as usize) * stride as usize;
-                let d = unsafe { buffer.get_unchecked_mut(di) };
-                *d = n.mul_alpha(alpha).blend_over(*d).0;
-            }
-        }
-    }
-
     fn blit(
         &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
         dx: i32,
         dy: i32,
-        buffer: &mut [BGRA8],
-        width: u32,
-        stride: u32,
-        height: u32,
         color: BGRA8,
     ) {
-        let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
-            self.offset.0 + dx,
-            self.offset.1 + dy,
-            width as usize,
-            height as usize,
-            self.width as usize,
-            self.height as usize,
-        ) else {
+        if self.width == 0 || self.height == 0 {
             return;
-        };
-
-        unsafe {
-            match &*self.data {
-                BufferData::Monochrome(pixels) => {
-                    self.blit_monochrome_unchecked(dx, dy, buffer, stride, color, ys, xs, pixels);
-                }
-                BufferData::Color(pixels) => {
-                    self.blit_bgra_unchecked(dx, dy, buffer, stride, color.a, ys, xs, pixels);
-                }
-            }
         }
+
+        let texture = self.texture.get_or_init(|| {
+            let (format, data) = match &*self.data {
+                BufferData::Monochrome(vec) => (TextureFormat::Mono8, &vec[..]),
+                BufferData::Color(vec) => (TextureFormat::Bgra8, must_cast_slice(&vec[..])),
+            };
+            // TODO: copy_or_move_into_texture
+            rasterizer.copy_into_texture(self.width, self.height, format, data)
+        });
+
+        rasterizer.blit(
+            target,
+            dx + self.offset.0,
+            dy + self.offset.1,
+            texture,
+            color,
+        );
     }
 }
 
@@ -669,16 +615,14 @@ impl Image {
 impl Image {
     pub fn blit(
         &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
         dx: i32,
         dy: i32,
-        buffer: &mut [BGRA8],
-        width: u32,
-        stride: u32,
-        height: u32,
         color: BGRA8,
     ) {
         for glyph in &self.glyphs {
-            glyph.blit(dx, dy, buffer, width, stride, height, color);
+            glyph.blit(rasterizer, target, dx, dy, color);
         }
     }
 }
@@ -706,6 +650,7 @@ pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyp
             width: cached.width,
             height: cached.height,
             data: cached.data.clone(),
+            texture: OnceCell::new(),
         });
 
         x += shaped_glyph.x_advance;

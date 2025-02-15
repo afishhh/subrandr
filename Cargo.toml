@@ -3,6 +3,10 @@ name = "subrandr"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["wgpu"]
+wgpu = ["dep:wgpu"]
+
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
 
@@ -13,6 +17,8 @@ aliasable = "0.1"
 quick-xml = "0.36"
 
 text-sys = { path = "./text-sys" }
+wgpu = { version = "24", optional = true }
+bytemuck = { version = "1.21.0", features = ["latest_stable_rust"] }
 
 [dev-dependencies]
 xcb = { version = "1", features = ["res", "shape"] }
@@ -20,6 +26,11 @@ clap = { version = "4", features = ["derive"] }
 tungstenite = "0.26.1"
 serde_json = "1.0.134"
 serde = { version = "1.0.216", features = ["derive"] }
+winit = { version = "0.30.9", default-features = false, features = ["rwh_06", "x11"] }
+pollster = "0.4.0"
 
-[profile.dev]
-opt-level = 2
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+panic = "abort"

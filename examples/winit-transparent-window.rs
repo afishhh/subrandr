@@ -42,7 +42,6 @@ struct App<'a> {
 struct WindowState {
     window: Arc<Window>,
     device: wgpu::Device,
-    queue: wgpu::Queue,
     alpha_mode: wgpu::CompositeAlphaMode,
     surface: wgpu::Surface<'static>,
 }
@@ -130,7 +129,6 @@ impl winit::application::ApplicationHandler for App<'_> {
         self.state = Some(WindowState {
             window,
             device,
-            queue,
             surface,
             alpha_mode,
         });

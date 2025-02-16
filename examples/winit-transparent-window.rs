@@ -43,7 +43,26 @@ struct WindowState {
     window: Arc<Window>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    alpha_mode: wgpu::CompositeAlphaMode,
     surface: wgpu::Surface<'static>,
+}
+
+impl WindowState {
+    pub fn reconfigure(&self, size: winit::dpi::PhysicalSize<u32>) {
+        self.surface.configure(
+            &self.device,
+            &wgpu::SurfaceConfiguration {
+                usage: TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                width: size.width,
+                height: size.height,
+                present_mode: wgpu::PresentMode::AutoVsync,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: self.alpha_mode,
+                view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
+            },
+        );
+    }
 }
 
 impl winit::application::ApplicationHandler for App<'_> {
@@ -81,6 +100,31 @@ impl winit::application::ApplicationHandler for App<'_> {
             .block_on()
             .unwrap();
 
+        let cap = surface.get_capabilities(&adapter);
+
+        let mut has_premultiplied = false;
+        let mut has_opaque = false;
+        for mode in cap.alpha_modes {
+            match mode {
+                wgpu::CompositeAlphaMode::Opaque => has_opaque = true,
+                wgpu::CompositeAlphaMode::PreMultiplied => has_premultiplied = true,
+                _ => (),
+            }
+        }
+
+        let alpha_mode = if has_premultiplied {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else if has_opaque {
+            // While this does say that the alpha channel is ignored, this seems like
+            // it's actually not the case on X11 with the nvidia driver.
+            // I would not be surprised if it's because of X11 not truly supporting transparency
+            // and the fact the support is just tacked on by the compositor.
+            wgpu::CompositeAlphaMode::Opaque
+        } else {
+            // I guess it's better specify *something* than to crash?
+            wgpu::CompositeAlphaMode::Inherit
+        };
+
         unsafe { self.renderer.init_wgpwu(device.clone(), queue.clone()) };
 
         self.state = Some(WindowState {
@@ -88,6 +132,7 @@ impl winit::application::ApplicationHandler for App<'_> {
             device,
             queue,
             surface,
+            alpha_mode,
         });
     }
 
@@ -113,28 +158,18 @@ impl winit::application::ApplicationHandler for App<'_> {
             winit::event::WindowEvent::CloseRequested => {
                 event_loop.exit();
             }
+            winit::event::WindowEvent::Resized(size) => {
+                if let Some(ref mut state) = self.state {
+                    state.reconfigure(size);
+                }
+            }
             winit::event::WindowEvent::RedrawRequested => {
                 if let Some(WindowState {
-                    window,
-                    device,
-                    queue: _,
-                    surface,
+                    window, surface, ..
                 }) = self.state.as_ref()
                 {
                     let size = window.inner_size();
-                    surface.configure(
-                        device,
-                        &wgpu::SurfaceConfiguration {
-                            usage: TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
-                            format: wgpu::TextureFormat::Bgra8Unorm,
-                            width: size.width,
-                            height: size.height,
-                            present_mode: wgpu::PresentMode::AutoVsync,
-                            desired_maximum_frame_latency: 2,
-                            alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
-                            view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
-                        },
-                    );
+
                     let surface_texture = surface.get_current_texture().unwrap();
                     unsafe {
                         self.renderer.render_wgpu(

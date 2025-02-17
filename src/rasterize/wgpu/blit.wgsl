@@ -49,3 +49,22 @@ fn fs_main_bgra8(
     sample.w *= ctx.color.w;
     return sample;
 }
+
+@fragment
+fn fs_main_mono_to_mono(
+    in: VertexOutput
+) -> @location(0) vec4<f32> {
+    return textureSample(blit_texture, blit_sampler, in.coord);
+}
+
+@fragment
+fn fs_main_alpha_to_mono(
+    in: VertexOutput
+) -> @location(0) vec4<f32> {
+    return vec4f(
+        textureSample(blit_texture, blit_sampler, in.coord).a,
+        0.0,
+        0.0,
+        1.0
+    );
+}

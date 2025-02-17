@@ -8,7 +8,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::{color::BGRA8, outline::Outline, util::fmt_from_fn};
+use crate::{
+    color::BGRA8,
+    outline::Outline,
+    rasterize::{sw::CpuTextureData, Rasterizer, Texture},
+    util::fmt_from_fn,
+};
 
 use super::ft_utils::*;
 use text_sys::*;
@@ -580,7 +585,7 @@ struct SizeInfo {
 struct CacheSlot {
     generation: u64,
     metrics: Option<GlyphMetrics>,
-    bitmap: Option<SingleGlyphBitmap>,
+    bitmap: Option<SingleGlyphTexture>,
 }
 
 impl CacheSlot {
@@ -636,24 +641,22 @@ impl GlyphCache {
             .get_or_insert_with(|| font.glyph_extents_uncached(index))
     }
 
-    pub fn get_or_render(&self, font: &Font, index: u32) -> &SingleGlyphBitmap {
+    pub fn get_or_render(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        font: &Font,
+        index: u32,
+    ) -> &SingleGlyphTexture {
         unsafe { self.slot(font, index) }
             .bitmap
-            .get_or_insert_with(|| font.render_glyph_uncached(index))
+            .get_or_insert_with(|| font.render_glyph_uncached(rasterizer, index))
     }
 }
 
 #[derive(Clone)]
-pub struct SingleGlyphBitmap {
+pub struct SingleGlyphTexture {
     pub offset: (IFixed26Dot6, IFixed26Dot6),
-    pub width: u32,
-    pub height: u32,
-    pub data: Rc<BufferData>,
-}
-
-pub enum BufferData {
-    Monochrome(Vec<u8>),
-    Color(Vec<BGRA8>),
+    pub texture: Option<Texture>,
 }
 
 impl Font {
@@ -697,7 +700,11 @@ impl Font {
         *self.face().glyph_cache().get_or_measure(self, index)
     }
 
-    fn render_glyph_uncached(&self, index: u32) -> SingleGlyphBitmap {
+    fn render_glyph_uncached(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        index: u32,
+    ) -> SingleGlyphTexture {
         unsafe {
             let face = self.with_applied_size();
 
@@ -726,23 +733,40 @@ impl Font {
             };
 
             let n_pixels = scaled_width as usize * scaled_height as usize;
-            let mut result = SingleGlyphBitmap {
-                offset: (ox, oy),
-                width: scaled_width,
-                height: scaled_height,
-                data: Rc::new(if pixel_width == 1 {
-                    BufferData::Monochrome(Vec::with_capacity(n_pixels))
-                } else {
-                    BufferData::Color(Vec::with_capacity(n_pixels))
-                }),
+
+            if n_pixels == 0 {
+                return SingleGlyphTexture {
+                    offset: (IFixed26Dot6::ZERO, IFixed26Dot6::ZERO),
+                    texture: None,
+                };
+            }
+
+            // TODO: UniqueRc!!!
+            //       https://github.com/rust-lang/rust/issues/112566
+            enum UninitTextureData {
+                Color(Rc<[MaybeUninit<BGRA8>]>),
+                Monochrome(Rc<[MaybeUninit<u8>]>),
+            }
+
+            let mut uninit_data = if pixel_width == 1 {
+                UninitTextureData::Monochrome(Rc::new_uninit_slice(n_pixels))
+            } else {
+                UninitTextureData::Color(Rc::new_uninit_slice(n_pixels))
             };
 
-            let buffer_data = match Rc::get_mut(&mut result.data).unwrap() {
-                BufferData::Monochrome(vec) => vec.spare_capacity_mut(),
-                BufferData::Color(vec) => std::slice::from_raw_parts_mut(
-                    vec.spare_capacity_mut().as_mut_ptr() as *mut MaybeUninit<u8>,
-                    vec.capacity() * std::mem::size_of::<BGRA8>(),
-                ),
+            let buffer_data: &mut [MaybeUninit<u8>] = {
+                match &mut uninit_data {
+                    UninitTextureData::Color(bgra8) => {
+                        // bytemuck doesn't allow casting between MaybeUninits...
+                        // (even though this in particular should be completely safe)
+                        let slice = Rc::get_mut(bgra8).unwrap();
+                        std::slice::from_raw_parts_mut(
+                            slice.as_mut_ptr() as *mut MaybeUninit<u8>,
+                            slice.len() * 4,
+                        )
+                    }
+                    UninitTextureData::Monochrome(mono8) => Rc::get_mut(mono8).unwrap(),
+                }
             };
 
             for biy in 0..scaled_height {
@@ -818,16 +842,28 @@ impl Font {
                 }
             }
 
-            match Rc::get_mut(&mut result.data).unwrap() {
-                BufferData::Monochrome(vec) => vec.set_len(n_pixels),
-                BufferData::Color(vec) => vec.set_len(n_pixels),
+            SingleGlyphTexture {
+                offset: (ox, oy),
+                texture: Some(rasterizer.copy_or_move_into_texture(
+                    scaled_width,
+                    scaled_height,
+                    match uninit_data {
+                        UninitTextureData::Color(bgra8) => {
+                            CpuTextureData::Color(bgra8.assume_init())
+                        }
+                        UninitTextureData::Monochrome(mono8) => {
+                            CpuTextureData::Mono(mono8.assume_init())
+                        }
+                    },
+                )),
             }
-
-            result
         }
     }
 
-    pub fn render_glyph(&self, index: u32) -> SingleGlyphBitmap {
-        self.face().glyph_cache().get_or_render(self, index).clone()
+    pub fn render_glyph(&self, rasterizer: &mut dyn Rasterizer, index: u32) -> SingleGlyphTexture {
+        self.face()
+            .glyph_cache()
+            .get_or_render(rasterizer, self, index)
+            .clone()
     }
 }

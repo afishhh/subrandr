@@ -10,7 +10,7 @@ use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I32Fixed, Point2, Vec2};
 use outline::{OutlineBuilder, SegmentDegree};
-use rasterize::NonZeroPolygonRasterizer;
+use rasterize::{sw::SoftwareRasterizer, wgpu::GpuRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, TextWrapParams},
@@ -23,7 +23,6 @@ mod color;
 mod log;
 mod math;
 mod outline;
-mod painter;
 mod rasterize;
 pub mod srv3;
 mod text;
@@ -31,7 +30,6 @@ mod util;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-pub use painter::*;
 use util::ref_to_slice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,11 +171,11 @@ impl TextDecorations {
     pub const fn none() -> Self {
         Self {
             border: Vec2::ZERO,
-            border_color: BGRA8::ZERO,
+            border_color: BGRA8::TRANSPARENT,
             underline: false,
-            underline_color: BGRA8::ZERO,
+            underline_color: BGRA8::TRANSPARENT,
             strike_out: false,
-            strike_out_color: BGRA8::ZERO,
+            strike_out_color: BGRA8::TRANSPARENT,
         }
     }
 }
@@ -465,7 +463,7 @@ impl Subtitles {
                             }),
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2::new(48.0, 48.0),
-                                blur_radius: 20.0,
+                                blur_radius: 90.0,
                                 color: BGRA8::new(255, 255, 255, 255),
                             }),
                         ],
@@ -645,6 +643,8 @@ pub struct Renderer<'a> {
     subs: &'a Subtitles,
     perf: PerfStats,
 
+    rasterizer: Box<dyn Rasterizer>,
+
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
     previous_painter_size: (u32, u32),
@@ -669,6 +669,7 @@ impl<'a> Renderer<'a> {
             dpi: 0,
             subs,
             perf: PerfStats::new(),
+            rasterizer: Box::new(SoftwareRasterizer::new()),
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
                 dpi: 0,
@@ -685,13 +686,13 @@ impl<'a> Renderer<'a> {
 
     fn debug_text(
         &mut self,
+        target: &mut RenderTarget<'_>,
         x: i32,
         y: i32,
         text: &str,
         alignment: Alignment,
         size: f32,
         color: BGRA8,
-        painter: &mut Painter,
     ) {
         let font = self
             .fonts
@@ -705,7 +706,14 @@ impl<'a> Renderer<'a> {
             &text::compute_extents(true, ref_to_slice(&font), &shaped.glyphs),
             alignment,
         );
-        painter.text(x + ox, y + oy, ref_to_slice(&font), &shaped.glyphs, color);
+        text::render(
+            &mut *self.rasterizer,
+            I32Fixed::ZERO,
+            I32Fixed::ZERO,
+            ref_to_slice(&font),
+            &shaped.glyphs,
+        )
+        .blit(&mut *self.rasterizer, target, ox + x, oy + y, color);
     }
 
     fn translate_for_aligned_text(
@@ -738,9 +746,9 @@ impl<'a> Renderer<'a> {
 
     fn draw_text_full(
         &mut self,
+        target: &mut RenderTarget,
         x: I32Fixed<6>,
         y: I32Fixed<6>,
-        painter: &mut Painter,
         fonts: &[text::Font],
         glyphs: &[text::Glyph],
         color: BGRA8,
@@ -749,31 +757,28 @@ impl<'a> Renderer<'a> {
         scale: f32,
         ctx: &SubtitleContext,
     ) {
-        let image = text::render(x.fract(), y.fract(), fonts, glyphs);
+        let image = text::render(&mut *self.rasterizer, x.fract(), y.fract(), fonts, glyphs);
         let border = decoration.border * scale;
 
         // TODO: This should also draw an offset underline I think and possibly strike through
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
             if shadow.color.a > 0 {
+                let dx = (x + shadow.offset.x).trunc_to_inner();
+                let dy = (y + shadow.offset.y).trunc_to_inner();
+
+                #[allow(clippy::collapsible_else_if)]
                 if shadow.blur_radius > f32::EPSILON {
                     // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
                     // A non-zero blur radius indicates that the resulting shadow should be blurred,
                     // ... by applying to the shadow a Gaussian blur with a standard deviation
                     // equal to half the blur radius.
-                    painter.blit_blurred_monochrome_text(
-                        shadow.blur_radius / 2.0,
-                        (x + shadow.offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y).trunc_to_inner(),
-                        image.monochrome(),
-                        shadow.color.to_bgr_bytes(),
-                    );
+                    let sigma = shadow.blur_radius / 2.0;
+
+                    image.prepare_blur(&mut *self.rasterizer, sigma);
+                    self.rasterizer
+                        .blur_execute(target, dx, dy, shadow.color.to_bgr_bytes());
                 } else {
-                    painter.blit_monochrome_text(
-                        (x + shadow.offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y).trunc_to_inner(),
-                        image.monochrome(),
-                        shadow.color,
-                    );
+                    todo!()
                 }
             }
         };
@@ -798,26 +803,21 @@ impl<'a> Renderer<'a> {
             //       a substraction function (i.e. only draw the border where there is no glyph)
             //       check how libass handles it
             let mut x = x;
-            let mut rasterizer = NonZeroPolygonRasterizer::new();
 
             for glyph in glyphs {
                 if let Some(outline) = fonts[glyph.font_index].glyph_outline(glyph.index) {
                     let (one, two) = outline::stroke(&outline, border.x, border.y, 1.0);
 
-                    rasterizer.reset();
+                    self.rasterizer
+                        .polygon_reset(Vec2::new(x.into_f32(), y.into_f32()));
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
-                        rasterizer.append_polyline(
-                            (x.trunc_to_inner(), y.trunc_to_inner()),
-                            &one.flatten_contour(a),
-                            false,
-                        );
-                        rasterizer.append_polyline(
-                            (x.trunc_to_inner(), y.trunc_to_inner()),
-                            &two.flatten_contour(b),
-                            true,
-                        );
+                        self.rasterizer
+                            .polygon_add_polyline(&one.flatten_contour(a), false);
+                        self.rasterizer
+                            .polygon_add_polyline(&two.flatten_contour(b), true);
                     }
-                    rasterizer.render_fill(painter, decoration.border_color);
+                    self.rasterizer
+                        .polygon_fill(target, decoration.border_color);
                 }
 
                 x += glyph.x_advance;
@@ -840,10 +840,11 @@ impl<'a> Renderer<'a> {
 
         // TODO: This is actually in TT_Postscript table
         if decoration.underline {
-            painter.horizontal_line(
-                y.trunc_to_inner(),
-                x.trunc_to_inner(),
-                text_end_x,
+            self.rasterizer.horizontal_line(
+                target,
+                y.into_f32(),
+                x.into_f32(),
+                text_end_x as f32,
                 decoration.underline_color,
             );
         }
@@ -853,27 +854,71 @@ impl<'a> Renderer<'a> {
             let metrics = fonts[0].metrics();
             let strike_y =
                 (y - I32Fixed::from_ft((metrics.height >> 1) + metrics.descender)).trunc_to_inner();
-            painter.horizontal_line(
-                strike_y,
-                x.trunc_to_inner(),
-                text_end_x,
+            self.rasterizer.horizontal_line(
+                target,
+                strike_y as f32,
+                x.into_f32(),
+                text_end_x as f32,
                 decoration.strike_out_color,
             );
         }
 
-        painter.blit_text_image(x.trunc_to_inner(), y.trunc_to_inner(), &image, color);
+        image.blit(
+            &mut *self.rasterizer,
+            target,
+            x.trunc_to_inner(),
+            y.trunc_to_inner(),
+            color,
+        );
     }
 
-    pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {
-        if painter.height() == 0 || painter.height() == 0 {
+    pub fn unchanged_until(&self) -> Option<u32> {
+        if self.unchanged_range.is_empty() {
+            None
+        } else {
+            Some(self.unchanged_range.end)
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        ctx: &SubtitleContext,
+        t: u32,
+        buffer: &mut [BGRA8],
+        width: u32,
+        height: u32,
+    ) {
+        if self.check_unchanged(ctx, t, (width, height)) {
             return;
         }
 
-        self.perf.start_frame();
+        let mut target =
+            rasterize::sw::SoftwareRasterizer::create_render_target(buffer, width, height);
+        self.render_to(ctx, t, &mut target);
+        self.rasterizer.submit_render(target);
+    }
 
-        let painter_size = (painter.width(), painter.height());
+    pub unsafe fn init_wgpwu(&mut self, device: wgpu::Device, queue: wgpu::Queue) {
+        self.rasterizer = Box::new(GpuRasterizer::new(device, queue));
+    }
+
+    pub unsafe fn render_wgpu(&mut self, ctx: &SubtitleContext, t: u32, texture: wgpu::Texture) {
+        if self.check_unchanged(ctx, t, (texture.width(), texture.height())) {
+            return;
+        }
+
+        let mut target = self
+            .rasterizer
+            .downcast_gpu()
+            .unwrap()
+            .target_from_texture(texture);
+        self.render_to(ctx, t, &mut target);
+        self.rasterizer.submit_render(target);
+    }
+
+    fn check_unchanged(&self, ctx: &SubtitleContext, t: u32, target_size: (u32, u32)) -> bool {
         if self.unchanged_range.contains(&t)
-            && self.previous_painter_size == painter_size
+            && self.previous_painter_size == target_size
             && self.previous_context == *ctx
         {
             trace!(
@@ -882,18 +927,23 @@ impl<'a> Renderer<'a> {
                 self.unchanged_range,
                 self.subs.class.get_name()
             );
+            true
+        } else {
+            false
+        }
+    }
+
+    fn render_to(&mut self, ctx: &SubtitleContext, t: u32, target: &mut RenderTarget<'_>) {
+        if target.height() == 0 || target.height() == 0 {
             return;
         }
 
+        self.perf.start_frame();
+
         self.previous_context = *ctx;
-        self.previous_painter_size = painter_size;
+        self.previous_painter_size = (target.width(), target.height());
         self.fonts.advance_cache_generation();
 
-        let clear_start = std::time::Instant::now();
-        // TODO: Implement a damage system?
-        //       Only clear required rectangles
-        painter.clear(BGRA8::ZERO);
-        let clear_end = std::time::Instant::now();
         self.dpi = ctx.dpi;
 
         trace!(
@@ -904,6 +954,7 @@ impl<'a> Renderer<'a> {
 
         if DRAW_PERF_DEBUG_INFO {
             self.debug_text(
+                target,
                 (ctx.padding_left + ctx.video_width) as i32,
                 0,
                 &format!(
@@ -913,24 +964,19 @@ impl<'a> Renderer<'a> {
                 Alignment::TopRight,
                 16.0,
                 BGRA8::from_rgba32(0xFFFFFFFF),
-                painter,
             );
 
             self.debug_text(
+                target,
                 (ctx.padding_left + ctx.video_width) as i32,
                 (20.0 * ctx.pixel_scale()) as i32,
                 &format!(
-                    "clear={:.1}ms   l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
-                    (clear_end - clear_start).as_secs_f32() * 1000.,
-                    ctx.padding_left,
-                    ctx.padding_right,
-                    ctx.padding_top,
-                    ctx.padding_bottom
+                    "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                    ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                 ),
                 Alignment::TopRight,
                 16.0,
                 BGRA8::from_rgba32(0xFFFFFFFF),
-                painter,
             );
 
             if !self.perf.times.is_empty() {
@@ -938,6 +984,7 @@ impl<'a> Renderer<'a> {
                 let avg = self.perf.avg_frame_time();
 
                 self.debug_text(
+                    target,
                     (ctx.padding_left + ctx.video_width) as i32,
                     (40.0 * ctx.pixel_scale()) as i32,
                     &format!(
@@ -951,33 +998,32 @@ impl<'a> Renderer<'a> {
                     Alignment::TopRight,
                     16.0,
                     BGRA8::from_rgba32(0xFFFFFFFF),
-                    painter,
                 );
 
                 if let Some(&last) = self.perf.times.iter().last() {
                     self.debug_text(
+                        target,
                         (ctx.padding_left + ctx.video_width) as i32,
                         (60.0 * ctx.pixel_scale()) as i32,
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
                         Alignment::TopRight,
                         16.0,
                         BGRA8::from_rgba32(0xFFFFFFFF),
-                        painter,
                     );
                 }
 
                 let graph_width = 300.0 * ctx.pixel_scale();
                 let graph_height = 50.0 * ctx.pixel_scale();
-                let offx = (ctx.padding_left + ctx.video_width - graph_width) as i32;
+                let offx = ctx.padding_left + ctx.video_width - graph_width;
                 let mut polyline = vec![];
                 for (i, time) in self.perf.times.iter().copied().enumerate() {
                     let x = (i as f32 / self.perf.times.len() as f32) * graph_width;
                     polyline.push(Point2::new(x, -(time / max) * graph_height));
                 }
 
-                painter.stroke_polyline(
-                    offx,
-                    (80.0 * ctx.pixel_scale() + graph_height) as i32,
+                self.rasterizer.stroke_polyline(
+                    target,
+                    Vec2::new(offx, 80.0 * ctx.pixel_scale() + graph_height),
                     &polyline,
                     BGRA8::new(255, 255, 0, 255),
                 );
@@ -1060,11 +1106,10 @@ impl<'a> Renderer<'a> {
                     };
 
                 if DRAW_LAYOUT_DEBUG_INFO {
-                    painter.stroke_whrect(
-                        x + total_rect.x - 1,
-                        y + total_rect.y - 1,
-                        total_rect.w + 2,
-                        total_rect.h + 2,
+                    self.rasterizer.stroke_whrectangle(
+                        target,
+                        Point2::new((x + total_rect.x - 1) as f32, (y + total_rect.y - 1) as f32),
+                        Vec2::new((total_rect.w + 2) as f32, (total_rect.h + 2) as f32),
                         BGRA8::from_rgba32(0xFF00FFFF),
                     );
                 }
@@ -1079,6 +1124,7 @@ impl<'a> Renderer<'a> {
 
                 if DRAW_LAYOUT_DEBUG_INFO {
                     self.debug_text(
+                        target,
                         x + total_rect.x + total_rect.w as i32 / 2,
                         y + total_rect.y + total_position_debug_pos.0,
                         &format!(
@@ -1091,7 +1137,6 @@ impl<'a> Renderer<'a> {
                         total_position_debug_pos.1,
                         16.0,
                         BGRA8::from_rgba32(0xFF00FFFF),
-                        painter,
                     );
                 }
 
@@ -1105,6 +1150,7 @@ impl<'a> Renderer<'a> {
 
                     if DRAW_LAYOUT_DEBUG_INFO {
                         self.debug_text(
+                            target,
                             paint_box.0,
                             paint_box.1,
                             &format!(
@@ -1115,10 +1161,10 @@ impl<'a> Renderer<'a> {
                             Alignment::BottomLeft,
                             16.0,
                             BGRA8::from_rgba32(0xFF0000FF),
-                            painter,
                         );
 
                         self.debug_text(
+                            target,
                             paint_box.0,
                             paint_box.1 + shaped_segment.paint_rect.h as i32,
                             &format!(
@@ -1129,10 +1175,10 @@ impl<'a> Renderer<'a> {
                             Alignment::TopLeft,
                             16.0,
                             BGRA8::from_rgba32(0xFF0000FF),
-                            painter,
                         );
 
                         self.debug_text(
+                            target,
                             paint_box.0 + shaped_segment.paint_rect.w as i32,
                             paint_box.1,
                             &if let Segment::Text(segment) = segment {
@@ -1146,21 +1192,23 @@ impl<'a> Renderer<'a> {
                             Alignment::BottomRight,
                             16.0,
                             BGRA8::from_rgba32(0xFFFFFFFF),
-                            painter,
                         );
 
-                        painter.stroke_whrect(
-                            paint_box.0,
-                            paint_box.1,
-                            shaped_segment.paint_rect.w,
-                            shaped_segment.paint_rect.h,
+                        self.rasterizer.stroke_whrectangle(
+                            target,
+                            Point2::new(paint_box.0 as f32, paint_box.1 as f32),
+                            Vec2::new(
+                                shaped_segment.paint_rect.w as f32,
+                                shaped_segment.paint_rect.h as f32,
+                            ),
                             BGRA8::from_rgba32(0x0000FFFF),
                         );
 
-                        painter.horizontal_line(
-                            (shaped_segment.baseline_offset.1 + y).trunc_to_inner(),
-                            paint_box.0,
-                            paint_box.0 + shaped_segment.paint_rect.w as i32,
+                        self.rasterizer.horizontal_line(
+                            target,
+                            (shaped_segment.baseline_offset.1 + y).into_f32(),
+                            paint_box.0 as f32,
+                            (paint_box.0 + shaped_segment.paint_rect.w as i32) as f32,
                             BGRA8::from_rgba32(0x00FF00FF),
                         );
                     }
@@ -1172,9 +1220,9 @@ impl<'a> Renderer<'a> {
                         Segment::Text(t) => {
                             let (glyphs, fonts) = shaped_segment.glyphs_and_fonts.as_ref().unwrap();
                             self.draw_text_full(
+                                target,
                                 x,
                                 y,
-                                painter,
                                 fonts,
                                 glyphs,
                                 t.color,
@@ -1188,17 +1236,15 @@ impl<'a> Renderer<'a> {
                             let mut outline = s.outline.clone();
                             outline.scale(shape_scale);
 
-                            let mut rasterizer = NonZeroPolygonRasterizer::new();
+                            self.rasterizer
+                                .polygon_reset(Vec2::new(x.into_f32(), y.into_f32()));
                             if s.fill_color.a > 0 {
                                 for c in outline.iter_contours() {
-                                    rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &outline.flatten_contour(c),
-                                        false,
-                                    );
-                                    rasterizer.render_fill(painter, s.fill_color);
+                                    self.rasterizer
+                                        .polygon_add_polyline(&outline.flatten_contour(c), false);
                                 }
                             }
+                            self.rasterizer.polygon_fill(target, s.fill_color);
 
                             if s.stroke_color.a > 0 && (s.stroke_x >= 0.01 || s.stroke_y >= 0.01) {
                                 let stroked = outline::stroke(
@@ -1211,34 +1257,29 @@ impl<'a> Renderer<'a> {
                                 for (a, b) in
                                     stroked.0.iter_contours().zip(stroked.1.iter_contours())
                                 {
-                                    rasterizer.reset();
-                                    rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &stroked.0.flatten_contour(a),
-                                        false,
-                                    );
-                                    rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &stroked.1.flatten_contour(b),
-                                        true,
-                                    );
-                                    rasterizer.render_fill(painter, s.stroke_color);
+                                    self.rasterizer
+                                        .polygon_reset(Vec2::new(x.into_f32(), y.into_f32()));
+                                    self.rasterizer
+                                        .polygon_add_polyline(&stroked.0.flatten_contour(a), false);
+                                    self.rasterizer
+                                        .polygon_add_polyline(&stroked.1.flatten_contour(b), true);
+                                    self.rasterizer.polygon_fill(target, s.stroke_color);
                                 }
 
-                                painter.debug_stroke_outline(
-                                    x.trunc_to_inner(),
-                                    y.trunc_to_inner(),
-                                    &stroked.0,
-                                    BGRA8::from_rgba32(0xFF0000FF),
-                                    false,
-                                );
-                                painter.debug_stroke_outline(
-                                    x.trunc_to_inner(),
-                                    y.trunc_to_inner(),
-                                    &stroked.1,
-                                    BGRA8::from_rgba32(0x0000FFFF),
-                                    true,
-                                );
+                                // painter.debug_stroke_outline(
+                                //     x.trunc_to_inner(),
+                                //     y.trunc_to_inner(),
+                                //     &stroked.0,
+                                //     BGRA8::from_rgba32(0xFF0000FF),
+                                //     false,
+                                // );
+                                // painter.debug_stroke_outline(
+                                //     x.trunc_to_inner(),
+                                //     y.trunc_to_inner(),
+                                //     &stroked.1,
+                                //     BGRA8::from_rgba32(0x0000FFFF),
+                                //     true,
+                                // );
                             }
                         }
                     }

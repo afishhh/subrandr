@@ -1,6 +1,5 @@
-use std::{cell::OnceCell, mem::MaybeUninit, ops::Range, rc::Rc};
+use std::{mem::MaybeUninit, ops::Range};
 
-use bytemuck::must_cast_slice;
 use ft_utils::IFixed26Dot6;
 use text_sys::*;
 
@@ -13,7 +12,7 @@ pub mod layout;
 
 use crate::{
     color::BGRA8,
-    rasterize::{Rasterizer, RenderTarget, Texture, TextureFormat},
+    rasterize::{Rasterizer, RenderTarget, Texture},
     util::{AnyError, OrderedF32},
 };
 
@@ -491,12 +490,9 @@ pub struct TextExtents {
     pub max_bearing_y: IFixed26Dot6,
 }
 
-struct GlyphBitmap {
+struct GlyphTexture {
     offset: (i32, i32),
-    width: u32,
-    height: u32,
-    data: Rc<BufferData>,
-    texture: OnceCell<Texture>,
+    texture: Option<Texture>,
 }
 
 /// Merged monochrome bitmap of the whole text string, useful for shadows.
@@ -504,76 +500,17 @@ pub struct MonochromeImage {
     pub offset: (i32, i32),
     pub width: u32,
     pub height: u32,
-    pub data: Vec<u8>,
-}
-
-impl MonochromeImage {
-    pub fn from_image(image: &Image) -> Self {
-        let mut result = MonochromeImage {
-            offset: (0, 0),
-            width: 0,
-            height: 0,
-            data: Vec::new(),
-        };
-
-        for glyph in &image.glyphs {
-            result.offset.0 = result.offset.0.min(glyph.offset.0);
-            result.offset.1 = result.offset.1.min(glyph.offset.1);
-
-            result.width = result.width.max(glyph.offset.0.max(0) as u32 + glyph.width);
-            result.height = result
-                .height
-                .max(glyph.offset.1.max(0) as u32 + glyph.height);
-        }
-
-        result.width += (-result.offset.0).max(0) as u32;
-        result.height += (-result.offset.1).max(0) as u32;
-
-        // NOTE: We cannot MaybeUninit here because the glyphs may have gaps
-        //       between them that will be left uninitialized
-        result.data = vec![0; result.width as usize * result.height as usize];
-
-        for bitmap in &image.glyphs {
-            let offx = (bitmap.offset.0 - result.offset.0) as usize;
-            let offy = (bitmap.offset.1 - result.offset.1) as usize;
-
-            match &*bitmap.data {
-                BufferData::Monochrome(source) => {
-                    for sy in 0..bitmap.height as usize {
-                        let mut di = (offy + sy) * result.width as usize + offx;
-                        for sx in 0..bitmap.width as usize {
-                            let si = sy * bitmap.width as usize + sx;
-                            result.data[di] = source[si];
-                            di += 1;
-                        }
-                    }
-                }
-                BufferData::Color(source) => {
-                    for sy in 0..bitmap.height as usize {
-                        let mut di = (offy + sy) * result.width as usize + offx;
-                        for sx in 0..bitmap.width as usize {
-                            let si = sy * bitmap.width as usize + sx;
-                            result.data[di] = source[si].a;
-                            di += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        result
-    }
+    pub texture: Texture,
 }
 
 pub struct Image {
     // TODO: Test whether combining bitmaps of the same type helps with performance.
     //       Probably not worth it though even if it helps, it'll probably be very
     //       expensive even if done just once, will cause lag on first frames.
-    glyphs: Vec<GlyphBitmap>,
-    monochrome: OnceCell<MonochromeImage>,
+    glyphs: Vec<GlyphTexture>,
 }
 
-impl GlyphBitmap {
+impl GlyphTexture {
     fn blit(
         &self,
         rasterizer: &mut dyn Rasterizer,
@@ -582,33 +519,48 @@ impl GlyphBitmap {
         dy: i32,
         color: BGRA8,
     ) {
-        if self.width == 0 || self.height == 0 {
-            return;
+        if let Some(texture) = self.texture.as_ref() {
+            rasterizer.blit(
+                target,
+                dx + self.offset.0,
+                dy + self.offset.1,
+                texture,
+                color,
+            );
         }
-
-        let texture = self.texture.get_or_init(|| {
-            let (format, data) = match &*self.data {
-                BufferData::Monochrome(vec) => (TextureFormat::Mono8, &vec[..]),
-                BufferData::Color(vec) => (TextureFormat::Bgra8, must_cast_slice(&vec[..])),
-            };
-            // TODO: copy_or_move_into_texture
-            rasterizer.copy_into_texture(self.width, self.height, format, data)
-        });
-
-        rasterizer.blit(
-            target,
-            dx + self.offset.0,
-            dy + self.offset.1,
-            texture,
-            color,
-        );
     }
 }
 
 impl Image {
-    pub fn monochrome(&self) -> &MonochromeImage {
-        self.monochrome
-            .get_or_init(|| MonochromeImage::from_image(self))
+    pub fn prepare_blur(&self, rasterizer: &mut dyn Rasterizer, sigma: f32) {
+        let mut offset = (0, 0);
+        let (mut width, mut height) = (0, 0);
+
+        for glyph in &self.glyphs {
+            offset.0 = offset.0.min(glyph.offset.0);
+            offset.1 = offset.1.min(glyph.offset.1);
+
+            width = width.max(
+                glyph.offset.0.max(0) as u32 + glyph.texture.as_ref().map_or(0, |t| t.width()),
+            );
+            height = height.max(
+                glyph.offset.1.max(0) as u32 + glyph.texture.as_ref().map_or(0, |t| t.height()),
+            );
+        }
+
+        width += (-offset.0).max(0) as u32;
+        height += (-offset.1).max(0) as u32;
+
+        rasterizer.blur_prepare(width, height, sigma);
+
+        for bitmap in &self.glyphs {
+            if let Some(texture) = bitmap.texture.as_ref() {
+                let offx = bitmap.offset.0 - offset.0;
+                let offy = bitmap.offset.1 - offset.1;
+
+                rasterizer.blur_buffer_blit(offx, offy, texture);
+            }
+        }
     }
 }
 
@@ -627,11 +579,14 @@ impl Image {
     }
 }
 
-pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyph]) -> Image {
-    let mut result = Image {
-        glyphs: Vec::new(),
-        monochrome: OnceCell::new(),
-    };
+pub fn render(
+    rasterizer: &mut dyn Rasterizer,
+    xf: IFixed26Dot6,
+    yf: IFixed26Dot6,
+    fonts: &[Font],
+    glyphs: &[Glyph],
+) -> Image {
+    let mut result = Image { glyphs: Vec::new() };
 
     assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&xf));
     assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&yf));
@@ -640,17 +595,14 @@ pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyp
     let mut y = yf;
     for shaped_glyph in glyphs {
         let font = &fonts[shaped_glyph.font_index];
-        let cached = font.render_glyph(shaped_glyph.index);
+        let cached = font.render_glyph(rasterizer, shaped_glyph.index);
 
-        result.glyphs.push(GlyphBitmap {
+        result.glyphs.push(GlyphTexture {
             offset: (
                 (x + cached.offset.0 + shaped_glyph.x_offset).trunc_to_inner(),
                 (y + cached.offset.1 + shaped_glyph.y_offset).trunc_to_inner(),
             ),
-            width: cached.width,
-            height: cached.height,
-            data: cached.data.clone(),
-            texture: OnceCell::new(),
+            texture: cached.texture.clone(),
         });
 
         x += shaped_glyph.x_advance;

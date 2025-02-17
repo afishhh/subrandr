@@ -1,11 +1,11 @@
-use std::{f32::consts::PI, mem::MaybeUninit};
+use std::{f32::consts::PI, mem::MaybeUninit, ops::Range};
 
 use crate::{
     color::BGRA8,
     util::{calculate_blit_rectangle, vec_parts, BlitRectangle},
 };
 
-fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
+pub fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
     // https://drafts.fxtf.org/filter-effects/#funcdef-filter-blur
     // Divided by two because we want a *radius* not the whole "extent".
     (((2.0 * PI).sqrt() * 0.375) * sigma).round() as usize
@@ -29,7 +29,7 @@ unsafe fn sliding_sum(
         sum += unsafe { *front.get_unchecked(x * stride) };
     }
 
-    while x < 2 * radius {
+    while x < radius {
         unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
         sum += unsafe { *front.get_unchecked((x + radius) * stride) };
         x += 1;
@@ -50,7 +50,7 @@ unsafe fn sliding_sum(
 }
 
 // TODO: Is using fixed point arithmetic here worth it?
-struct Blurer {
+pub struct Blurer {
     front: Vec<f32>,
     back: Vec<MaybeUninit<f32>>,
     width: usize,
@@ -71,49 +71,62 @@ impl Blurer {
         }
     }
 
-    fn prepare(&mut self, width: usize, height: usize, radius: usize, source: &[u8]) {
+    pub fn prepare(&mut self, width: usize, height: usize, radius: usize) {
         let twidth = width + 2 * PADDING_RADIUS * radius;
         let theight = height + 2 * PADDING_RADIUS * radius;
         let size = twidth * theight;
 
-        {
-            self.front.clear();
-            self.front.reserve(size);
-            let front = self.front.spare_capacity_mut();
-
-            for y in 0..PADDING_RADIUS * radius {
-                front[y * twidth..(y + 1) * twidth].fill(MaybeUninit::new(0.0))
-            }
-
-            for y in (height + PADDING_RADIUS * radius)..theight {
-                front[y * twidth..(y + 1) * twidth].fill(MaybeUninit::new(0.0))
-            }
-
-            for y in PADDING_RADIUS * radius..(height + PADDING_RADIUS * radius) {
-                let row = &mut front[y * twidth..(y + 1) * twidth];
-                row[..PADDING_RADIUS * radius].fill(MaybeUninit::new(0.0));
-                row[(width + PADDING_RADIUS * radius)..].fill(MaybeUninit::new(0.0));
-            }
-
-            for y in (height + PADDING_RADIUS * radius)..theight {
-                front[y * twidth..(y + 1) * twidth].fill(MaybeUninit::new(0.0))
-            }
-
-            for y in 0..height {
-                for x in 0..width {
-                    front[(y + PADDING_RADIUS * radius) * twidth + x + PADDING_RADIUS * radius]
-                        .write(source[y * width + x] as f32 / 255.0);
-                }
-            }
-
-            unsafe { self.front.set_len(size) };
-        }
-
+        self.front.clear();
+        self.front.resize(twidth * theight, 0.0);
         self.back.resize(size, MaybeUninit::uninit());
+
         self.width = twidth;
         self.height = theight;
         self.radius = radius;
         self.iextent = ((radius * 2 + 1) as f32).recip();
+    }
+
+    pub unsafe fn buffer_blit_bgra8_unchecked(
+        &mut self,
+        dx: usize,
+        dy: usize,
+        source: &[BGRA8],
+        ys: Range<usize>,
+        xs: Range<usize>,
+        stride: usize,
+    ) {
+        for sy in ys {
+            let mut di = self.width * (dy + sy) as usize + dx;
+            for sx in xs.clone() {
+                let si = sy * stride as usize + sx;
+                unsafe {
+                    *self.front.get_unchecked_mut(di) =
+                        (*source.get_unchecked(si)).a as f32 / 255.0;
+                }
+                di += 1;
+            }
+        }
+    }
+
+    pub unsafe fn buffer_blit_mono8_unchecked(
+        &mut self,
+        dx: usize,
+        dy: usize,
+        source: &[u8],
+        ys: Range<usize>,
+        xs: Range<usize>,
+        stride: usize,
+    ) {
+        for sy in ys {
+            let mut di = (dy + sy) * self.width as usize + dx;
+            for sx in xs.clone() {
+                let si = sy * stride as usize + sx;
+                unsafe {
+                    *self.front.get_unchecked_mut(di) = *source.get_unchecked(si) as f32 / 255.0;
+                }
+                di += 1;
+            }
+        }
     }
 
     unsafe fn swap_buffers(&mut self) {
@@ -133,7 +146,7 @@ impl Blurer {
         );
     }
 
-    fn box_blur_horizontal(&mut self) {
+    pub fn box_blur_horizontal(&mut self) {
         for y in 0..self.height {
             unsafe {
                 sliding_sum(
@@ -150,7 +163,7 @@ impl Blurer {
         unsafe { self.swap_buffers() };
     }
 
-    fn box_blur_vertical(&mut self) {
+    pub fn box_blur_vertical(&mut self) {
         for x in 0..self.width {
             unsafe {
                 sliding_sum(
@@ -167,22 +180,6 @@ impl Blurer {
         unsafe { self.swap_buffers() };
     }
 
-    pub fn box_blur(&mut self, source: &[u8], width: usize, height: usize, radius: usize) {
-        self.prepare(width, height, radius, source);
-        self.box_blur_horizontal();
-        self.box_blur_vertical();
-    }
-
-    pub fn box_blur3(&mut self, source: &[u8], width: usize, height: usize, radius: usize) {
-        self.prepare(width, height, radius, source);
-        self.box_blur_horizontal();
-        self.box_blur_horizontal();
-        self.box_blur_horizontal();
-        self.box_blur_vertical();
-        self.box_blur_vertical();
-        self.box_blur_vertical();
-    }
-
     pub fn front(&self) -> &[f32] {
         &self.front
     }
@@ -191,57 +188,15 @@ impl Blurer {
         self.radius
     }
 
+    pub fn padding(&self) -> usize {
+        self.radius * PADDING_RADIUS
+    }
+
     pub fn width(&self) -> usize {
         self.width
     }
 
     pub fn height(&self) -> usize {
         self.height
-    }
-}
-
-pub fn monochrome_gaussian_blit(
-    sigma: f32,
-    x: i32,
-    y: i32,
-    target: &mut [BGRA8],
-    target_width: usize,
-    target_height: usize,
-    source: &[u8],
-    source_width: usize,
-    source_height: usize,
-    color: [u8; 3],
-) {
-    let radius = gaussian_sigma_to_box_radius(sigma);
-    let tox = x - (PADDING_RADIUS * radius) as i32;
-    let toy = y - (PADDING_RADIUS * radius) as i32;
-    let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
-        tox,
-        toy,
-        target_width,
-        target_height,
-        dbg!(source_width + 2 * PADDING_RADIUS * radius),
-        dbg!(source_height + 2 * PADDING_RADIUS * radius),
-    ) else {
-        return;
-    };
-
-    let mut blurer = Blurer::new();
-    blurer.box_blur3(source, source_width, source_height, radius);
-
-    let blurred = blurer.front();
-
-    for sy in ys {
-        let mut ti = (((sy as i32 + toy) as usize * target_width) as isize
-            + xs.start as isize
-            + tox as isize) as usize;
-        for sx in xs.clone() {
-            let mut khere = blurred[sy * blurer.width + sx];
-            khere = khere.clamp(0.0, 1.0);
-
-            let c = BGRA8::from_bytes([color[0], color[1], color[2], (khere * 255.0) as u8]);
-            target[ti] = c.blend_over(target[ti]).0;
-            ti += 1;
-        }
     }
 }

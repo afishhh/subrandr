@@ -1,8 +1,11 @@
 use std::fmt::Debug;
 
+use bytemuck::{Pod, Zeroable};
+
 #[allow(clippy::upper_case_acronyms)]
 #[repr(C, align(4))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wgpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
 // BGRA8888 in memory
 // ARGB32 value on little-endian
 // BGRA32 value on big-endian
@@ -14,7 +17,8 @@ pub struct BGRA8 {
 }
 
 impl BGRA8 {
-    pub const ZERO: Self = Self::new(0, 0, 0, 0);
+    pub const TRANSPARENT: Self = Self::new(0, 0, 0, 0);
+    pub const WHITE: Self = Self::new(255, 255, 255, 255);
 
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }

@@ -1,4 +1,5 @@
-use std::rc::Rc;
+use sw::{CpuTextureData, SoftwareRasterizer};
+use wgpu::GpuRasterizer;
 
 use crate::{
     color::BGRA8,
@@ -11,15 +12,15 @@ pub mod wgpu;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureFormat {
-    Bgra8,
-    Mono8,
+    Bgra,
+    Mono,
 }
 
 #[derive(Debug, Clone)]
 enum TextureDataHandle {
     #[cfg(feature = "wgpu")]
     Gpu(::wgpu::Texture),
-    Sw(Rc<[u8]>),
+    Sw(sw::CpuTextureData),
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +48,7 @@ impl Texture {
 #[derive(Debug)]
 enum RenderTargetHandle<'a> {
     #[cfg(feature = "wgpu")]
-    Gpu(::wgpu::Texture),
+    Gpu(wgpu::GpuRenderTargetHandle),
     Sw(&'a mut [BGRA8]),
 }
 
@@ -67,8 +68,13 @@ impl RenderTarget<'_> {
     }
 }
 
+// TODO: static dispatch with an enum instead
 pub trait Rasterizer {
-    fn downcast_gpu(&mut self) -> Option<&mut wgpu::GpuRasterizer> {
+    fn downcast_sw(&mut self) -> Option<&mut SoftwareRasterizer> {
+        None
+    }
+
+    fn downcast_gpu(&mut self) -> Option<&mut GpuRasterizer> {
         None
     }
 
@@ -76,27 +82,11 @@ pub trait Rasterizer {
         &mut self,
         width: u32,
         height: u32,
-        format: TextureFormat,
-        data: Rc<[u8]>,
-    ) -> Texture {
-        self.copy_into_texture(width, height, format, &data)
-    }
-
-    fn copy_into_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        format: TextureFormat,
-        data: &[u8],
+        data: CpuTextureData,
     ) -> Texture;
 
-    fn begin_frame(&mut self) {}
-    fn end_frame(&mut self) {}
-
     #[allow(unused_variables)]
-    fn begin_render_pass(&mut self, target: &mut RenderTarget) {}
-    #[allow(unused_variables)]
-    fn end_render_pass(&mut self) {}
+    fn submit_render(&mut self, target: RenderTarget) {}
 
     fn line(&mut self, target: &mut RenderTarget, x0: f32, y0: f32, x1: f32, y1: f32, color: BGRA8);
     fn horizontal_line(
@@ -176,4 +166,8 @@ pub trait Rasterizer {
         texture: &Texture,
         color: BGRA8,
     );
+
+    fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
+    fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);
+    fn blur_execute(&mut self, target: &mut RenderTarget, dx: i32, dy: i32, color: [u8; 3]);
 }

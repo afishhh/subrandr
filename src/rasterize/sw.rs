@@ -8,8 +8,41 @@ use crate::{
 
 mod blur;
 pub use blur::*;
+use bytemuck::must_cast_slice;
 
 use super::RenderTarget;
+
+#[derive(Debug, Clone)]
+pub enum CpuTextureData {
+    Color(Rc<[BGRA8]>),
+    Mono(Rc<[u8]>),
+}
+
+impl CpuTextureData {
+    pub fn format(&self) -> super::TextureFormat {
+        match self {
+            CpuTextureData::Color(_) => super::TextureFormat::Bgra,
+            CpuTextureData::Mono(_) => super::TextureFormat::Mono,
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            CpuTextureData::Color(bgra) => must_cast_slice(bgra),
+            CpuTextureData::Mono(bytes) => must_cast_slice(bytes),
+        }
+    }
+
+    pub fn n_pixels(&self) -> usize {
+        match self {
+            CpuTextureData::Color(bgra) => bgra.len(),
+            CpuTextureData::Mono(mono) => mono.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CpuTextureRenderHandle(CpuTextureData);
 
 #[derive(Debug, Clone)]
 struct Bresenham {
@@ -764,9 +797,42 @@ unsafe fn blit_bgra_unchecked(
     }
 }
 
+// TODO: maybe for consistency this should actually care about the color alpha value
+//       I think we're memory bottlenecked here anyway
+unsafe fn blit_monochrome_float_noalpha_unchecked(
+    dx: i32,
+    dy: i32,
+    buffer: &mut [BGRA8],
+    dstride: u32,
+    color: [u8; 3],
+    ys: Range<usize>,
+    xs: Range<usize>,
+    stride: u32,
+    source: &[f32],
+) {
+    for y in ys {
+        let fy = dy + y as i32;
+        for x in xs.clone() {
+            let fx = dx + x as i32;
+
+            let si = y * stride as usize + x;
+            let sv = (*unsafe { source.get_unchecked(si) }).clamp(0.0, 1.0);
+
+            let di = (fx as usize) + (fy as usize) * dstride as usize;
+            let d = unsafe { buffer.get_unchecked_mut(di) };
+
+            let c = BGRA8::from_bytes([color[0], color[1], color[2], (sv * 255.0) as u8]);
+            *d = c.blend_over(*d).0;
+        }
+    }
+}
+
 pub struct SoftwareRasterizer {
     polygon_offset: Vec2,
     polygon_rasterizer: NonZeroPolygonRasterizer,
+
+    blurer: Blurer,
+    is_in_blur: bool,
 }
 
 impl SoftwareRasterizer {
@@ -774,6 +840,8 @@ impl SoftwareRasterizer {
         Self {
             polygon_offset: Vec2::ZERO,
             polygon_rasterizer: NonZeroPolygonRasterizer::new(),
+            blurer: Blurer::new(),
+            is_in_blur: false,
         }
     }
 
@@ -786,7 +854,7 @@ impl SoftwareRasterizer {
         }
     }
 
-    fn get_texture_buffer<'a, 'b: 'a>(handle: &'a super::TextureDataHandle) -> &'a [u8] {
+    fn get_texture_data<'a, 'b: 'a>(handle: &'a super::TextureDataHandle) -> &'a CpuTextureData {
         match handle {
             super::TextureDataHandle::Sw(buffer) => buffer,
             handle => panic!("Unexpected texture handle passed to software rasterizer: {handle:?}"),
@@ -795,6 +863,8 @@ impl SoftwareRasterizer {
 
     pub fn create_render_target(buffer: &mut [BGRA8], width: u32, height: u32) -> RenderTarget {
         assert_eq!(buffer.len(), width as usize * height as usize);
+
+        buffer.fill(BGRA8::TRANSPARENT);
 
         RenderTarget {
             width,
@@ -805,33 +875,24 @@ impl SoftwareRasterizer {
 }
 
 impl super::Rasterizer for SoftwareRasterizer {
+    fn downcast_sw(&mut self) -> Option<&mut SoftwareRasterizer> {
+        Some(self)
+    }
+
     fn copy_or_move_into_texture(
         &mut self,
         width: u32,
         height: u32,
-        format: super::TextureFormat,
-        data: Rc<[u8]>,
+        data: CpuTextureData,
     ) -> super::Texture {
+        assert_eq!(data.n_pixels(), width as usize * height as usize);
+
         super::Texture {
             width,
             height,
-            format,
+            format: super::TextureFormat::Bgra,
             handle: super::TextureDataHandle::Sw(data),
         }
-    }
-
-    fn copy_into_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        format: super::TextureFormat,
-        data: &[u8],
-    ) -> super::Texture {
-        self.copy_or_move_into_texture(width, height, format, data.into())
-    }
-
-    fn begin_render_pass(&mut self, target: &mut RenderTarget) {
-        Self::get_target_buffer(&mut target.handle).fill(BGRA8::TRANSPARENT);
     }
 
     fn line(
@@ -965,13 +1026,9 @@ impl super::Rasterizer for SoftwareRasterizer {
             return;
         };
 
-        match texture.format {
-            super::TextureFormat::Bgra8 => unsafe {
-                let texture_buffer = Self::get_texture_buffer(&texture.handle);
-                assert_eq!(
-                    texture_buffer.len(),
-                    4 * texture.width as usize * texture.height as usize
-                );
+        match Self::get_texture_data(&texture.handle) {
+            CpuTextureData::Color(bgra) => unsafe {
+                debug_assert_eq!(texture.format, super::TextureFormat::Bgra);
 
                 blit_bgra_unchecked(
                     dx,
@@ -982,13 +1039,12 @@ impl super::Rasterizer for SoftwareRasterizer {
                     ys,
                     xs,
                     texture.width,
-                    std::slice::from_raw_parts(
-                        texture_buffer.as_ptr() as *const BGRA8,
-                        texture_buffer.len() >> 2,
-                    ),
+                    bgra,
                 );
             },
-            super::TextureFormat::Mono8 => unsafe {
+            CpuTextureData::Mono(mono) => unsafe {
+                debug_assert_eq!(texture.format, super::TextureFormat::Mono);
+
                 blit_monochrome_unchecked(
                     dx,
                     dy,
@@ -998,9 +1054,101 @@ impl super::Rasterizer for SoftwareRasterizer {
                     ys,
                     xs,
                     texture.width,
-                    Self::get_texture_buffer(&texture.handle),
+                    mono,
                 );
             },
+        }
+    }
+
+    fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32) {
+        if self.is_in_blur {
+            panic!("SoftwareRasterizer::blur_prepare called twice")
+        }
+
+        self.is_in_blur = true;
+        self.blurer.prepare(
+            width as usize,
+            height as usize,
+            gaussian_sigma_to_box_radius(sigma),
+        );
+    }
+
+    fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &super::Texture) {
+        let dx = dx + self.blurer.padding() as i32;
+        let dy = dy + self.blurer.padding() as i32;
+
+        let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
+            dx,
+            dy,
+            self.blurer.width(),
+            self.blurer.height(),
+            texture.width as usize,
+            texture.height as usize,
+        ) else {
+            return;
+        };
+
+        match Self::get_texture_data(&texture.handle) {
+            CpuTextureData::Color(bgra) => unsafe {
+                debug_assert_eq!(texture.format, super::TextureFormat::Bgra);
+
+                self.blurer.buffer_blit_bgra8_unchecked(
+                    dx as usize,
+                    dy as usize,
+                    bgra,
+                    ys,
+                    xs,
+                    texture.width as usize,
+                );
+            },
+            CpuTextureData::Mono(mono) => unsafe {
+                debug_assert_eq!(texture.format, super::TextureFormat::Mono);
+
+                self.blurer.buffer_blit_mono8_unchecked(
+                    dx as usize,
+                    dy as usize,
+                    mono,
+                    ys,
+                    xs,
+                    texture.width as usize,
+                );
+            },
+        }
+    }
+
+    fn blur_execute(&mut self, target: &mut RenderTarget, dx: i32, dy: i32, color: [u8; 3]) {
+        self.is_in_blur = false;
+        self.blurer.box_blur_horizontal();
+        self.blurer.box_blur_horizontal();
+        self.blurer.box_blur_horizontal();
+        self.blurer.box_blur_vertical();
+        self.blurer.box_blur_vertical();
+        self.blurer.box_blur_vertical();
+
+        let buffer = Self::get_target_buffer(&mut target.handle);
+        let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
+            dx - self.blurer.padding() as i32,
+            dy - self.blurer.padding() as i32,
+            target.width as usize,
+            target.height as usize,
+            self.blurer.width(),
+            self.blurer.height(),
+        ) else {
+            return;
+        };
+
+        unsafe {
+            blit_monochrome_float_noalpha_unchecked(
+                dx - self.blurer.padding() as i32,
+                dy - self.blurer.padding() as i32,
+                buffer,
+                target.width,
+                color,
+                ys,
+                xs,
+                self.blurer.width() as u32,
+                self.blurer.front(),
+            );
         }
     }
 }

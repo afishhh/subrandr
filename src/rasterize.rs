@@ -44,7 +44,6 @@ impl Bresenham {
         }
 
         let d = 2 * dy - dx;
-        let y = y0;
 
         Self {
             dx,
@@ -52,7 +51,7 @@ impl Bresenham {
             i: yi,
             d,
             x: x0,
-            y,
+            y: y0,
             x1,
             y1,
         }
@@ -84,14 +83,13 @@ impl Bresenham {
         }
 
         let d = 2 * dx - dy;
-        let x = x0;
 
         Self {
             dx,
             dy,
             i: xi,
             d,
-            x,
+            x: x0,
             y: y0,
             x1,
             y1,
@@ -142,6 +140,71 @@ impl Bresenham {
             BresenhamKind::Low => self.advance_low(),
             BresenhamKind::High => self.advance_high(),
         }
+    }
+}
+
+struct DynBresenham {
+    dx: i32,
+    dy: i32,
+    sx: i32,
+    sy: i32,
+    err: i32,
+
+    x: i32,
+    y: i32,
+    x1: i32,
+    y1: i32,
+}
+
+impl DynBresenham {
+    pub const fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
+        let dx = (x1 - x0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs();
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let err = dx + dy;
+
+        Self {
+            dx,
+            dy,
+            sx,
+            sy,
+            err,
+            x: x0,
+            y: y0,
+            x1,
+            y1,
+        }
+    }
+
+    pub const fn current(&mut self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+
+    pub const fn advance(&mut self) -> bool {
+        let err2 = 2 * self.err;
+
+        if err2 >= self.dy {
+            if self.x == self.x1 {
+                return true;
+            }
+            self.err += self.dy;
+            self.x += self.sx;
+        }
+
+        if err2 <= self.dx {
+            if self.y == self.y1 {
+                return true;
+            }
+            self.err += self.dx;
+            self.y += self.sy;
+        }
+
+        self.is_done()
+    }
+
+    pub const fn is_done(&self) -> bool {
+        self.x == self.x1 && self.y == self.y1
     }
 }
 
@@ -364,10 +427,8 @@ pub fn stroke_triangle(
 
 unsafe fn draw_triangle_half(
     mut current_y: i32,
-    machine1: &mut Bresenham,
-    kind1: BresenhamKind,
-    machine2: &mut Bresenham,
-    kind2: BresenhamKind,
+    machine1: &mut DynBresenham,
+    machine2: &mut DynBresenham,
     buffer: &mut [BGRA8],
     stride: usize,
     width: u32,
@@ -380,7 +441,7 @@ unsafe fn draw_triangle_half(
             let (m1x, m1y) = machine1.current();
             if m1y == current_y {
                 break m1x;
-            } else if machine1.advance(kind1) {
+            } else if machine1.advance() {
                 break 'top;
             }
         };
@@ -388,7 +449,7 @@ unsafe fn draw_triangle_half(
             let (m2x, m2y) = machine2.current();
             if m2y == current_y {
                 break m2x;
-            } else if machine2.advance(kind2) {
+            } else if machine2.advance() {
                 break 'top;
             }
         };
@@ -448,17 +509,15 @@ pub fn fill_triangle(
         std::mem::swap(&mut x2, &mut x1);
     }
 
-    let (mut machine1, kind1) = Bresenham::new(x0, y0, x1, y1);
-    let (mut machine2, kind2) = Bresenham::new(x0, y0, x2, y2);
+    let mut machine1 = DynBresenham::new(x0, y0, x1, y1);
+    let mut machine2 = DynBresenham::new(x0, y0, x2, y2);
 
     let mut current_y = y0;
     current_y = unsafe {
         draw_triangle_half(
             current_y,
             &mut machine1,
-            kind1,
             &mut machine2,
-            kind2,
             buffer,
             stride,
             width,
@@ -467,22 +526,20 @@ pub fn fill_triangle(
         )
     };
 
-    let (mut machine1, kind1) = {
-        if machine1.is_done(kind1) {
-            (machine2, kind2)
+    let mut machine1 = {
+        if machine1.is_done() {
+            machine2
         } else {
-            (machine1, kind1)
+            machine1
         }
     };
-    let (mut machine2, kind2) = Bresenham::new(x1, y1, x2, y2);
+    let mut machine2 = DynBresenham::new(x1, y1, x2, y2);
 
     unsafe {
         draw_triangle_half(
             current_y,
             &mut machine1,
-            kind1,
             &mut machine2,
-            kind2,
             buffer,
             stride,
             width,

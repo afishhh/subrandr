@@ -234,9 +234,8 @@ macro_rules! define_fixed_for_type {
                 }
             }
 
-            pub const fn signum(&self) -> $type {
-                // sign bit is at 1 << i32::BITS
-                self.0 >> (<$type>::BITS - 1 - P)
+            pub const fn signum(self) -> Self {
+                Self(Self::ONE.0 * (1 | (self.0 >> (<$type>::BITS - 1))))
             }
 
             pub const fn abs(self) -> Self {
@@ -424,6 +423,17 @@ macro_rules! test_module {
 #[cfg(test)]
 mod test_signed_24_dot_8 {
     test_module!(I32Fixed<8>, signed = true);
+
+    // TODO: once cfg(false) is stable move it into the macro (since it'll be easy)
+    #[test]
+    fn signum() {
+        for a in const { SIGNED_DATA }.iter().flat_map(|&(a, b)| [a, b]) {
+            let ra = f32::from(TestFixed::from(a).signum());
+            let ea = a.signum();
+            println!("{a}.signum() = {ra}");
+            assert!((ra - ea).abs() < EPS);
+        }
+    }
 }
 
 #[cfg(test)]

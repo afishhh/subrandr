@@ -216,6 +216,7 @@ macro_rules! log {
         $crate::log::AsLogger::as_logger(&$logger).log($level, format_args!($($fmt)*), module_path!())
     };
     (@mkmacro $dollar: tt, $name: ident, $level: ident) => {
+        #[allow(unused_macros)]
         macro_rules! $name {
             ($dollar logger: expr, $dollar ($dollar rest: tt)*) => {
                 $crate::log::log!($dollar logger, $crate::log::Level::$level, $dollar ($dollar rest)*)
@@ -263,4 +264,5 @@ log!(@mkmacro $, info, Info);
 log!(@mkmacro $, error, Error);
 
 #[rustfmt::skip]
+#[allow(unused_imports, clippy::single_component_path_imports)]
 pub(crate) use {trace, debug, warning, info, error};

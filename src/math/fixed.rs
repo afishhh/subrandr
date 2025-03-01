@@ -250,6 +250,12 @@ macro_rules! define_fixed_for_type {
                 Self(-self.0)
             }
         }
+
+        impl<const P: u32> super::Number for Fixed<P, $type> {
+            const ZERO: Self = Self::ZERO;
+            const MIN: Self = Self::MIN;
+            const MAX: Self = Self::MAX;
+        }
     };
     (@unsigned $type: ty, $wide: ty) => {
         impl<const P: u32> Fixed<P, $type> {

@@ -81,7 +81,7 @@ impl Vec2 {
     ///
     /// However there is also a useful geometric definition:
     /// u⋅v = ||u|| * ||v|| * cos(θ)
-    /// where θ is the anglge between u and v.
+    /// where θ is the angle between u and v.
     pub fn dot(self, other: Self) -> f32 {
         self.x * other.x + self.y * other.y
     }

@@ -108,6 +108,8 @@ macro_rules! define_fixed_for_type {
 
             pub const ONE: Self = Self(1 << P);
             pub const ZERO: Self = Self(0);
+            pub const MIN: Self = Self(<$type>::MIN);
+            pub const MAX: Self = Self(<$type>::MAX);
             const HALF: Self = Self(1 << (P - 1));
             const EPS: Self = Self(1);
 

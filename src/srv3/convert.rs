@@ -207,14 +207,37 @@ impl Srv3TextShadow {
             }),
             EdgeType::SoftShadow => {
                 let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
+
+                // wrong:
+                if t > c {
+                    return;
+                }
+
+                // out.push(CssTextShadow {
+                //     offset,
+                //     blur_radius: t,
+                //     color: self.color,
+                // });
+                let mut sigma = t / 2.0;
+                println!("{}", t);
+                t += a;
+
                 while t <= c {
-                    out.push(CssTextShadow {
-                        offset,
-                        blur_radius: t,
-                        color: self.color,
-                    });
+                    println!("{}", t);
+                    // out.push(CssTextShadow {
+                    //     offset,
+                    //     blur_radius: t,
+                    //     color: self.color,
+                    // });
+                    sigma = (sigma * sigma + t * t / 4.0).sqrt();
                     t += a;
                 }
+
+                out.push(CssTextShadow {
+                    offset,
+                    blur_radius: dbg!(sigma * 2.0),
+                    color: self.color,
+                });
             }
         }
     }

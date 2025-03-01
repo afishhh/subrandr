@@ -1579,6 +1579,7 @@ version = "0.1.0"
 dependencies = [
  "aliasable",
  "quick-xml 0.36.2",
+ "rand",
  "text-sys",
  "thiserror 1.0.63",
  "wgpu",

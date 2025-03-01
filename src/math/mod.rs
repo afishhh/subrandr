@@ -10,8 +10,10 @@ mod fixed;
 pub use fixed::*;
 mod num;
 pub use num::*;
+mod tessellate;
+pub use tessellate::*;
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Point2<N> {
     pub x: N,
@@ -37,6 +39,13 @@ impl<N> Point2<N> {
         N: Copy,
     {
         Vec2::new(self.x, self.y)
+    }
+
+    pub fn cast<T: From<N>>(self) -> Point2<T> {
+        Point2 {
+            x: self.x.into(),
+            y: self.y.into(),
+        }
     }
 }
 
@@ -83,6 +92,13 @@ impl<N> Vec2<N> {
         N: Copy,
     {
         Point2::new(self.x, self.y)
+    }
+
+    pub fn cast<T: From<N>>(self) -> Vec2<T> {
+        Vec2 {
+            x: self.x.into(),
+            y: self.y.into(),
+        }
     }
 }
 

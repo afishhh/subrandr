@@ -9,10 +9,9 @@ use std::{
 
 mod rcarray;
 pub use rcarray::*;
-#[expect(dead_code)]
 mod array_vec;
-#[expect(unused_imports)]
 pub use array_vec::ArrayVec;
+pub mod btree;
 
 pub const unsafe fn array_assume_init_ref<const N: usize, T>(
     array: &[MaybeUninit<T>; N],
@@ -35,7 +34,7 @@ pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
     (ptr, len, capacity)
 }
 
-pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
+pub const fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     let r = r as f32 / 255.0;
     let g = g as f32 / 255.0;
     let b = b as f32 / 255.0;
@@ -84,11 +83,11 @@ pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {
     [h, s, l]
 }
 
-pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
+pub const fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
     if s == 0.0 {
         [(l * 255.0) as u8; 3]
     } else {
-        fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+        const fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
             if t < 0.0 {
                 t += 1.0;
             } else if t > 1.0 {

@@ -6,6 +6,7 @@ use std::{
 
 use super::{slice_assume_init_mut, slice_assume_init_ref};
 
+// TODO: allow customizing length size
 pub struct ArrayVec<const CAP: usize, T> {
     data: [MaybeUninit<T>; CAP],
     length: usize,
@@ -34,6 +35,41 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
         self.length += 1;
     }
 
+    pub fn pop(&mut self) -> Option<T> {
+        if self.length == 0 {
+            None
+        } else {
+            self.length -= 1;
+            Some(unsafe { self.data[self.length].assume_init_read() })
+        }
+    }
+
+    pub fn insert(&mut self, index: usize, value: T) {
+        assert!(index <= self.len());
+        assert!(self.length < CAP);
+
+        unsafe {
+            let ptr = self.data.as_mut_ptr();
+            std::ptr::copy(ptr.add(index), ptr.add(index + 1), self.length - index);
+            self.data.get_unchecked_mut(index).write(value);
+            self.length += 1;
+        }
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        assert!(index < self.len());
+
+        unsafe {
+            let result = self.data[index].assume_init_read();
+
+            let ptr = self.data.as_mut_ptr();
+            std::ptr::copy(ptr.add(index + 1), ptr.add(index), self.length - index - 1);
+            self.length -= 1;
+
+            result
+        }
+    }
+
     pub fn as_slice(&self) -> &[T] {
         unsafe { slice_assume_init_ref(&self.data[..self.length]) }
     }
@@ -44,6 +80,10 @@ impl<const CAP: usize, T> ArrayVec<CAP, T> {
 
     pub const fn len(&self) -> usize {
         self.length
+    }
+
+    pub const unsafe fn set_len(&mut self, len: usize) {
+        self.length = len;
     }
 }
 
@@ -56,6 +96,14 @@ impl<const CAP: usize, T: Clone> ArrayVec<CAP, T> {
             result.push(value.clone());
         }
         result
+    }
+
+    pub fn extend_from_slice(&mut self, slice: &[T]) {
+        assert!(CAP - self.length > slice.len());
+
+        for element in slice {
+            self.push(element.clone());
+        }
     }
 }
 
@@ -88,6 +136,14 @@ impl<const CAP: usize, T: Clone> Clone for ArrayVec<CAP, T> {
         }
 
         result
+    }
+}
+
+impl<const CAP: usize, T: Copy> Copy for ArrayVec<CAP, T> {}
+
+impl<const CAP: usize, T> Default for ArrayVec<CAP, T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

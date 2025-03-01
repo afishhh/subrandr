@@ -6,9 +6,12 @@
 
 use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
-use color::BGRA8;
+use color::{rotated_color_iterator, BGRA8};
 use log::{info, trace, Logger};
-use math::{I16Dot16, I26Dot6, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
+use math::{
+    I16Dot16, I26Dot6, I32Fixed, Point2, Point2f, Rect2, Tessellator, Vec2, Vec2f, TESS_DBG_H,
+    TESS_DBG_W,
+};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -1036,6 +1039,358 @@ impl<'a> Renderer<'a> {
         self.fonts.advance_cache_generation();
 
         self.dpi = ctx.dpi;
+
+        let dbg_face = self
+            .fonts
+            .select_simple("monospace", I16Dot16::new(400), false)
+            .unwrap();
+        // let mut tess = math::Tessellator::new();
+
+        // tess.add_segment(
+        //     Point2::new(500.0, 50.0),  // a1
+        //     Point2::new(250.0, 350.0), // b1
+        //     painter,
+        // );
+        // tess.add_segment(
+        //     Point2::new(100.0, 100.0), // a2
+        //     Point2::new(150.0, 400.0), // b2
+        //     painter,
+        // );
+
+        // let points = [
+
+        // ];
+        // let mut last = points[0];
+        // for next in points
+        //     .iter()
+        //     .cloned()
+        //     .skip(1)
+        //     .chain(std::iter::once(points[0]))
+        // {
+        //     tess.add_segment(last, next, painter);
+        //     last = next;
+        // }
+        // tess.finish(painter);
+
+        math::tessellate_simple_polygon_new(
+            &[
+                (
+                    &[
+                        Point2f::new(100.0, 100.0),
+                        Point2f::new(150.0, 50.0),
+                        Point2f::new(150.01, 50.0),
+                        Point2f::new(300.0, 100.5),
+                        Point2f::new(120.0, -100.5),
+                    ],
+                    true,
+                ),
+                // cogs
+                // (
+                //     &[
+                //         (200, 50),
+                //         (190, 10),
+                //         (150, 20),
+                //         (160, 60),
+                //         (120, 80),
+                //         (90, 50),
+                //         (60, 80),
+                //         (90, 110),
+                //         (70, 150),
+                //         (30, 140),
+                //         (20, 180),
+                //         (60, 190),
+                //         (70, 240),
+                //         (30, 250),
+                //         (40, 290),
+                //         (80, 280),
+                //         (110, 320),
+                //         (90, 360),
+                //         (130, 380),
+                //         (150, 340),
+                //         (200, 350),
+                //         (200, 390),
+                //         (240, 390),
+                //         (240, 350),
+                //         (280, 340),
+                //         (300, 380),
+                //         (340, 360),
+                //         (320, 320),
+                //         (330, 310),
+                //         (350, 360),
+                //         (290, 390),
+                //         (278, 356),
+                //         (249, 368),
+                //         (260, 400),
+                //         (220, 442),
+                //         (185, 442),
+                //         (185, 481),
+                //         (222, 482),
+                //         (235, 532),
+                //         (215, 567),
+                //         (249, 586),
+                //         (269, 555),
+                //         (313, 586),
+                //         (299, 618),
+                //         (346, 634),
+                //         (359, 596),
+                //         (398, 598),
+                //         (412, 634),
+                //         (460, 615),
+                //         (442, 580),
+                //         (469, 544),
+                //         (516, 554),
+                //         (522, 509),
+                //         (480, 502),
+                //         (480, 449),
+                //         (521, 440),
+                //         (512, 394),
+                //         (470, 402),
+                //         (445, 374),
+                //         (470, 340),
+                //         (436, 322),
+                //         (417, 356),
+                //         (387, 343),
+                //         (360, 290),
+                //         (370, 280),
+                //         (420, 290),
+                //         (430, 240),
+                //         (380, 230),
+                //         (390, 190),
+                //         (430, 180),
+                //         (420, 140),
+                //         (380, 150),
+                //         (360, 110),
+                //         (390, 80),
+                //         (360, 50),
+                //         (330, 80),
+                //         (290, 60),
+                //         (300, 20),
+                //         (260, 10),
+                //         (250, 50),
+                //     ]
+                //     .map(|(x, y)| Point2f::new(x as f32, y as f32)),
+                //     false,
+                // ),
+                // (
+                //     &[(150, 130), (280, 130), (280, 260), (150, 260)]
+                //         .map(|(x, y)| Point2f::new(x as f32, y as f32)),
+                //     false,
+                // ),
+                // (
+                //     &[(305, 430), (405, 430), (405, 520), (305, 520)]
+                //         .map(|(x, y)| Point2f::new(x as f32, y as f32)),
+                //     false,
+                // ),
+                //
+                // not cogs
+                // (
+                //     &[
+                //         Point2f::new(100.0, TESS_DBG_H - 200.0),
+                //         Point2f::new(300.0, TESS_DBG_H - 225.0),
+                //         Point2f::new(500.0, TESS_DBG_H - 100.0),
+                //         Point2f::new(400.0, TESS_DBG_H - 400.0),
+                //         Point2f::new(300.0, TESS_DBG_H - 500.0),
+                //         Point2f::new(300.0, TESS_DBG_H - 350.0),
+                //         Point2f::new(200.0, TESS_DBG_H - 400.0),
+                //         Point2f::new(100.0, TESS_DBG_H - 700.0),
+                //     ],
+                //     false,
+                // ),
+                //
+                // Point2f::new(0.0, TESS_DBG_W - 400.0),
+                // Point2f::new(600.0, TESS_DBG_W - 500.0),
+                // Point2f::new(300.0, TESS_DBG_W - 000.0),
+                //
+                // (
+                //     &[
+                //         Point2f::new(300.0, TESS_DBG_W - 200.0),
+                //         Point2f::new(100.0, TESS_DBG_W - 600.0),
+                //         Point2f::new(350.0, TESS_DBG_W - 500.0),
+                //         Point2f::new(600.0, TESS_DBG_W - 400.0),
+                //         Point2f::new(400.0, TESS_DBG_W - 360.0),
+                //     ],
+                //     false,
+                // ),
+                //
+                // (
+                //     &[
+                //         Point2f::new(100.0, 200.0),
+                //         Point2f::new(500.0, 200.0),
+                //         Point2f::new(470.0, 600.0),
+                //         Point2f::new(300.0, 600.0),
+                //         Point2f::new(260.0, 500.0),
+                //         Point2f::new(160.0, 600.0),
+                //         Point2f::new(100.0, 400.0),
+                //     ],
+                //     false,
+                // ),
+                //
+                // Point2f::new(100.0, 100.0),
+                // Point2f::new(200.0, 100.0),
+                // Point2f::new(200.0, 0.0),
+                // Point2f::new(300.0, 0.0),
+                // Point2f::new(300.0, 100.0),
+                // Point2f::new(400.0, 100.0),
+                // Point2f::new(400.0, 400.0),
+                // Point2f::new(100.0, 400.0),
+                //
+                // (
+                //     &[
+                //         Point2f::new(150.0, TESS_DBG_W - 250.0),
+                //         Point2f::new(400.0, TESS_DBG_W - 350.0),
+                //         Point2f::new(345.0, TESS_DBG_W - 245.0),
+                //     ],
+                //     true,
+                // ),
+                // (
+                //     &[
+                //         Point2f::new(150.0, TESS_DBG_W - 250.0),
+                //         Point2f::new(400.0, TESS_DBG_W - 350.0),
+                //         Point2f::new(345.0, TESS_DBG_W - 245.0),
+                //     ],
+                //     true,
+                // ),
+                // disjoint test
+                // (
+                //     &[
+                //         Point2f::new(50.0, TESS_DBG_H - 100.0),
+                //         Point2f::new(200.0, TESS_DBG_H - 100.0),
+                //         Point2f::new(270.0, TESS_DBG_H - 120.0),
+                //         Point2f::new(230.0, TESS_DBG_H - 300.0),
+                //         Point2f::new(200.0, TESS_DBG_H - 500.0),
+                //         Point2f::new(50.0, TESS_DBG_H - 500.0),
+                //         Point2f::new(70.0, TESS_DBG_H - 300.0),
+                //         Point2f::new(130.0, TESS_DBG_H - 300.0),
+                //         Point2f::new(190.0, TESS_DBG_H - 300.0),
+                //         Point2f::new(160.0, TESS_DBG_H - 200.0),
+                //         Point2f::new(70.0, TESS_DBG_H - 200.0),
+                //     ],
+                //     false,
+                // ),
+                // (
+                //     &[
+                //         Point2f::new(350.0, TESS_DBG_H - 250.0),
+                //         Point2f::new(600.0, TESS_DBG_H - 450.0),
+                //         Point2f::new(570.0, TESS_DBG_H - 100.0),
+                //         Point2f::new(545.0, TESS_DBG_H - 245.0),
+                //     ],
+                //     false,
+                // ),
+                //
+                // monotone tests
+                // (
+                //     &[
+                //         Point2f::new(300.0, 700.0),
+                //         Point2f::new(600.0, 700.0),
+                //         Point2f::new(600.0, 200.0),
+                //         Point2f::new(100.0, 200.0),
+                //         Point2f::new(400.0, 400.0),
+                //         Point2f::new(300.0, 500.0),
+                //         Point2f::new(100.0, 600.0),
+                //     ],
+                //     false,
+                // ),
+                // (
+                //     &[
+                //         Point2f::new(300.0, 700.0),
+                //         Point2f::new(100.0, 300.0),
+                //         Point2f::new(700.0, 200.0),
+                //         Point2f::new(300.0, 400.0),
+                //         Point2f::new(600.0, 500.0),
+                //         Point2f::new(480.0, 530.0),
+                //     ],
+                //     false,
+                // ),
+                // (
+                //     &[
+                //         Point2f::new(300.0, 700.0),
+                //         Point2f::new(600.0, 700.0),
+                //         Point2f::new(700.0, 100.0),
+                //         Point2f::new(100.0, 100.0),
+                //         Point2f::new(400.0, 300.0),
+                //         Point2f::new(350.0, 500.0),
+                //     ],
+                //     false,
+                // ),
+            ],
+            rasterizer,
+            target,
+            &dbg_face.with_size(I26Dot6::new(6), self.dpi),
+        );
+
+        return;
+
+        let mut shaper = MultilineTextShaper::new();
+        let mut font_arena = text::FontArena::new();
+        let face = self
+            .fonts
+            .select_simple("sans-serif", I16Dot16::new(400), false)
+            .unwrap();
+        let font = face.with_size(I26Dot6::new(300), ctx.dpi);
+        // shaper.add_text("hello world", &font);
+        shaper.add_text("d", &font);
+        // shaper.add_text("自殺したい！", &font);
+        // shaper.add_text("三角度文字！歳", &font);
+        let shaped = shaper.shape(
+            HorizontalAlignment::Left,
+            TextWrapParams {
+                mode: TextWrapMode::Normal,
+                wrap_width: ctx.player_width(),
+            },
+            &mut font_arena,
+            &mut self.fonts,
+        );
+
+        let mut tessellator = Tessellator::new();
+        let mut colors = rotated_color_iterator(BGRA8::new(255, 0, 0, 255), 0.05);
+        for line in shaped.0 {
+            for segment in line.segments {
+                let glyphs = segment.glyphs.unwrap();
+                let mut x = 0.0;
+                for glyph in glyphs.iter() {
+                    let outline = glyph.font.glyph_outline(glyph.index).unwrap();
+                    for contour in outline.iter_contours() {
+                        let mut polygon = outline.flatten_contour_with_tolerance(contour, 2.0);
+                        for point in polygon.iter_mut() {
+                            point.y = TESS_DBG_H - point.y;
+                            point.y -= 500.0 * ctx.pixel_scale();
+                            *point +=
+                                Vec2f::new(glyph.x_offset.into_f32() + x, glyph.y_offset.into_f32())
+                        }
+                        tessellator.add_polygon(&polygon[1..], rasterizer, target, false);
+                    }
+                    x += glyph.x_advance.into_f32();
+                }
+                tessellator.tessellate_d(
+                    rasterizer,
+                    target,
+                    Some(&dbg_face.with_size(I26Dot6::new(12), self.dpi)),
+                );
+                // tessellator.tessellate();
+                for triangle in tessellator.triangles() {
+                    rasterizer.fill_triangle(
+                        target,
+                        &[
+                            Point2::new(
+                                segment.baseline_offset.x.into_f32() + triangle.0.x.into_f32(),
+                                2. * TESS_DBG_H - triangle.0.y.into_f32(),
+                            ),
+                            Point2::new(
+                                segment.baseline_offset.x.into_f32() + triangle.1.x.into_f32(),
+                                2. * TESS_DBG_H - triangle.1.y.into_f32(),
+                            ),
+                            Point2::new(
+                                segment.baseline_offset.x.into_f32() + triangle.2.x.into_f32(),
+                                2. * TESS_DBG_H - triangle.2.y.into_f32(),
+                            ),
+                        ],
+                        colors.next(),
+                    );
+                }
+            }
+        }
+
+        return;
 
         trace!(
             self.sbr,

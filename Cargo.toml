@@ -19,6 +19,9 @@ quick-xml = "0.36"
 text-sys = { path = "./text-sys" }
 wgpu = { version = "24", optional = true }
 
+[dev-dependencies]
+rand = "0.9"
+
 [profile.release]
 panic = "abort"
 

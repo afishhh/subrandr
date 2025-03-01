@@ -301,6 +301,12 @@ macro_rules! define_fixed_for_type {
 
 define_fixed_for_type!(
     signedness = signed,
+    inner = i64,
+    widen = i128,
+    unsigned = u64
+);
+define_fixed_for_type!(
+    signedness = signed,
     inner = i32,
     widen = i64,
     unsigned = u32

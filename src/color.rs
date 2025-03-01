@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use crate::util::{hsl_to_rgb, rgb_to_hsl};
+
 #[allow(clippy::upper_case_acronyms)]
 #[repr(C, align(4))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,5 +136,28 @@ impl Premultiplied<BGRA8> {
             r: ((self.0.r as u16 * other as u16) / 255) as u8,
             a: ((self.0.a as u16 * other as u16) / 255) as u8,
         })
+    }
+}
+
+pub struct RotatedColorIterator {
+    current: [f32; 3],
+    increment: f32,
+    alpha: u8,
+}
+
+pub const fn rotated_color_iterator(starting: BGRA8, hue_increment: f32) -> RotatedColorIterator {
+    RotatedColorIterator {
+        current: rgb_to_hsl(starting.r, starting.g, starting.b),
+        increment: hue_increment,
+        alpha: starting.a,
+    }
+}
+
+impl RotatedColorIterator {
+    pub fn next(&mut self) -> BGRA8 {
+        let [h, s, l] = self.current;
+        let [r, g, b] = hsl_to_rgb(h, s, l);
+        self.current = [(h + self.increment).fract(), s, l];
+        BGRA8::new(r, g, b, self.alpha)
     }
 }

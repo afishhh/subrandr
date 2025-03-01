@@ -105,7 +105,7 @@ pub enum SegmentDegree {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(packed(8))]
+#[repr(Rust, packed(8))]
 pub struct Segment {
     end_of_contour: bool,
     degree: SegmentDegree,

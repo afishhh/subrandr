@@ -44,6 +44,14 @@ impl<'a> Painter<'a> {
         }
     }
 
+    pub const fn empty() -> Self {
+        Self {
+            buffer: &mut [],
+            width: 0,
+            height: 0,
+        }
+    }
+
     #[inline(always)]
     pub const fn height(&self) -> u32 {
         self.height

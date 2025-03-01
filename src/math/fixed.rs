@@ -216,8 +216,8 @@ macro_rules! define_fixed_for_type {
 
             pub const fn fract(self) -> Self {
                 let unsigned = self.0 & Self::FRACTIONAL_MASK;
-                let mut extension = (self.0 & Self::SIGN_MASK) >> (i32::BITS - P - 1);
-                extension *= (unsigned > 0) as i32;
+                let mut extension = (self.0 & Self::SIGN_MASK) >> (<$type>::BITS - P - 1);
+                extension *= (unsigned > 0) as $type;
                 Self(unsigned | extension)
             }
 
@@ -252,8 +252,6 @@ macro_rules! define_fixed_for_type {
     };
     (@unsigned $type: ty, $wide: ty) => {
         impl<const P: u32> Fixed<P, $type> {
-            const SIGN_MASK: i32 = 1 << (i32::BITS - 1);
-
             pub const fn trunc(self) -> Self {
                 Self((self.0 >> P) << P)
             }
@@ -269,11 +267,6 @@ macro_rules! define_fixed_for_type {
                 }  else {
                     self.trunc()
                 }
-            }
-
-            pub const fn signum(&self) -> $type {
-                // sign bit is at 1 << <$type>::BITS
-                self.0 >> (<$type>::BITS - 1 - P)
             }
         }
     };

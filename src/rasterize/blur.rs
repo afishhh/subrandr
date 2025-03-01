@@ -29,7 +29,7 @@ unsafe fn sliding_sum(
         sum += unsafe { *front.get_unchecked(x * stride) };
     }
 
-    while x < 2 * radius {
+    while x < radius {
         unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
         sum += unsafe { *front.get_unchecked((x + radius) * stride) };
         x += 1;

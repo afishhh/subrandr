@@ -1123,8 +1123,8 @@ impl<'a> Renderer<'a> {
                             paint_box.1 + shaped_segment.paint_rect.h as i32,
                             &format!(
                                 "{},{}",
-                                shaped_segment.baseline_offset.0 + x,
-                                shaped_segment.baseline_offset.1 + y
+                                shaped_segment.baseline_offset.x + x,
+                                shaped_segment.baseline_offset.y + y
                             ),
                             Alignment::TopLeft,
                             16.0,
@@ -1158,15 +1158,15 @@ impl<'a> Renderer<'a> {
                         );
 
                         painter.horizontal_line(
-                            (shaped_segment.baseline_offset.1 + y).trunc_to_inner(),
+                            (shaped_segment.baseline_offset.y + y).trunc_to_inner(),
                             paint_box.0,
                             paint_box.0 + shaped_segment.paint_rect.w as i32,
                             BGRA8::from_rgba32(0x00FF00FF),
                         );
                     }
 
-                    let x = shaped_segment.baseline_offset.0 + x;
-                    let y = shaped_segment.baseline_offset.1 + y;
+                    let x = shaped_segment.baseline_offset.x + x;
+                    let y = shaped_segment.baseline_offset.y + y;
 
                     match segment {
                         Segment::Text(t) => {

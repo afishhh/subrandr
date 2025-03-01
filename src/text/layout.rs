@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    math::I32Fixed,
+    math::{I32Fixed, Point2},
     text::{self, ft_utils::IFixed26Dot6},
     util::RcArray,
     HorizontalAlignment, PixelRect, TextWrapMode,
@@ -26,7 +26,7 @@ pub struct MultilineTextShaper {
 #[derive(Debug)]
 pub struct ShapedLineSegment {
     pub glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
-    pub baseline_offset: (I32Fixed<6>, I32Fixed<6>),
+    pub baseline_offset: Point2<I32Fixed<6>>,
     pub paint_rect: PixelRect,
     pub corresponding_input_segment: usize,
     // Implementation details
@@ -218,7 +218,7 @@ impl MultilineTextShaper {
                         {
                             segments.push(ShapedLineSegment {
                                 glyphs_and_fonts: Some((rc_glyphs, segment_fonts)),
-                                baseline_offset: (
+                                baseline_offset: Point2::new(
                                     line_extents.paint_width,
                                     total_extents.paint_height,
                                 ),
@@ -253,7 +253,7 @@ impl MultilineTextShaper {
 
                                 segments.push(ShapedLineSegment {
                                     glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
-                                    baseline_offset: (x, total_extents.paint_height),
+                                    baseline_offset: Point2::new(x, total_extents.paint_height),
                                     paint_rect: PixelRect {
                                         x: x.trunc_to_inner(),
                                         y: total_extents.paint_height.trunc_to_inner(),
@@ -298,7 +298,10 @@ impl MultilineTextShaper {
                         let segment_max_bearing_y = I32Fixed::new(logical_h as i32);
                         segments.push(ShapedLineSegment {
                             glyphs_and_fonts: None,
-                            baseline_offset: (line_extents.paint_width, total_extents.paint_height),
+                            baseline_offset: Point2::new(
+                                line_extents.paint_width,
+                                total_extents.paint_height,
+                            ),
                             paint_rect: PixelRect {
                                 x: line_extents.paint_width.trunc_to_inner(),
                                 y: total_extents.paint_height.trunc_to_inner(),
@@ -336,12 +339,12 @@ impl MultilineTextShaper {
             };
 
             for segment in segments.iter_mut() {
-                segment.baseline_offset.0 += aligning_x_offset;
+                segment.baseline_offset.x += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset.trunc_to_inner();
                 if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.1 += line_extents.max_bearing_y - segment.max_bearing_y;
+                    segment.baseline_offset.y += line_extents.max_bearing_y - segment.max_bearing_y;
                 } else {
-                    segment.baseline_offset.1 += line_extents.max_bearing_y;
+                    segment.baseline_offset.y += line_extents.max_bearing_y;
                 }
                 segment.paint_rect.y +=
                     (line_extents.max_bearing_y - segment.max_bearing_y).trunc_to_inner();

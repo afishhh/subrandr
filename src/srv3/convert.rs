@@ -2,7 +2,7 @@
 ///
 /// Was initially based on YTSubConverter, now mostly reverse engineered straight from YouTube's captions.js.
 use crate::{
-    color::BGRA8, math::Vec2, CssTextShadow, Event, EventExtra, EventLayout, SubtitleClass,
+    color::BGRA8, math::Vec2f, CssTextShadow, Event, EventExtra, EventLayout, SubtitleClass,
     SubtitleContext, Subtitles, TextDecorations, TextSegment,
 };
 
@@ -173,7 +173,7 @@ impl Srv3TextShadow {
                 let mut x = e;
                 while x <= t {
                     out.push(CssTextShadow {
-                        offset: Vec2::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
+                        offset: Vec2f::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
                         blur_radius: 0.0,
                         color: self.color,
                     });
@@ -181,7 +181,7 @@ impl Srv3TextShadow {
                 }
             }
             EdgeType::Bevel => {
-                let offset = Vec2::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
+                let offset = Vec2f::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
                 out.push(CssTextShadow {
                     offset,
                     blur_radius: 0.0,
@@ -196,14 +196,14 @@ impl Srv3TextShadow {
             EdgeType::Glow => {
                 for _ in 0..5 {
                     out.push(CssTextShadow {
-                        offset: Vec2::ZERO,
+                        offset: Vec2f::ZERO,
                         blur_radius: l,
                         color: self.color,
                     })
                 }
             }
             EdgeType::SoftShadow => {
-                let offset = Vec2::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
+                let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
                 while t <= c {
                     out.push(CssTextShadow {
                         offset,

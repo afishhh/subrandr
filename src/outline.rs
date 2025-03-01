@@ -23,17 +23,17 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    pub fn points(&self) -> &[Point2] {
+    pub fn points(&self) -> &[Point2f] {
         self.outline.points()
     }
 
     #[inline(always)]
-    pub fn contour_points(&self) -> &[Point2] {
+    pub fn contour_points(&self) -> &[Point2f] {
         &self.outline.points()[self.first_point_of_contour..]
     }
 
     #[inline(always)]
-    pub fn contour_points_mut(&mut self) -> &mut [Point2] {
+    pub fn contour_points_mut(&mut self) -> &mut [Point2f] {
         &mut self.outline.points[self.first_point_of_contour..]
     }
 
@@ -50,7 +50,7 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    pub fn add_point(&mut self, point: Point2) {
+    pub fn add_point(&mut self, point: Point2f) {
         self.outline.points.push(point)
     }
 
@@ -126,7 +126,7 @@ impl Segment {
 
 #[derive(Clone)]
 pub struct Outline {
-    points: Vec<Point2>,
+    points: Vec<Point2f>,
     segments: Vec<Segment>,
 }
 
@@ -149,7 +149,7 @@ impl Outline {
         for last in contours.iter().map(|&x| x as usize) {
             // FT_Pos in FT_Outline seems to be 26.6
             let to_point = |vec: FT_Vector| {
-                Point2::new(
+                Point2f::new(
                     vec.x as f32 * 2.0f32.powi(-6),
                     // FreeType uses a "Y axis at the bottom" coordinate system,
                     // flip that to match ours
@@ -157,7 +157,8 @@ impl Outline {
                 )
             };
 
-            let midpoint = |a: Point2, b: Point2| Point2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            let midpoint =
+                |a: Point2f, b: Point2f| Point2f::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
 
             let mut last_tag;
             let mut final_degree = SegmentDegree::Linear;
@@ -229,24 +230,24 @@ impl Outline {
     }
 
     #[inline(always)]
-    pub fn points_for_segment(&self, s: Segment) -> &[Point2] {
+    pub fn points_for_segment(&self, s: Segment) -> &[Point2f] {
         let start = s.start as usize;
         &self.points[start..(start + s.degree as usize + 1)]
     }
 
     #[inline(always)]
-    pub fn points(&self) -> &[Point2] {
+    pub fn points(&self) -> &[Point2f] {
         &self.points
     }
 
-    fn evaluate_segment_normalized(&self, i: usize, t: f32) -> Point2 {
+    fn evaluate_segment_normalized(&self, i: usize, t: f32) -> Point2f {
         assert!((0.0..=1.0).contains(&t));
 
         let value = evaluate_bezier(self.points_for_segment(self.segments[i]), t);
         value
     }
 
-    pub fn evaluate_segment(&self, segment: Segment, t: f32) -> Point2 {
+    pub fn evaluate_segment(&self, segment: Segment, t: f32) -> Point2f {
         assert!((0.0..=1.0).contains(&t));
 
         let value = evaluate_bezier(self.points_for_segment(segment), t);
@@ -254,7 +255,7 @@ impl Outline {
     }
 
     #[inline(always)]
-    pub fn evaluate(&self, t: f32) -> Point2 {
+    pub fn evaluate(&self, t: f32) -> Point2f {
         self.evaluate_segment_normalized(t.trunc() as usize, t.fract())
     }
 
@@ -273,7 +274,7 @@ impl Outline {
     }
 
     /// Does not include the first point of the segment in the flattened version
-    pub fn flatten_segment(&self, segment: Segment, tolerance: f32, out: &mut Vec<Point2>) {
+    pub fn flatten_segment(&self, segment: Segment, tolerance: f32, out: &mut Vec<Point2f>) {
         let points = self.points_for_segment(segment);
         match points.len() {
             2 => out.push(points[1]),
@@ -301,7 +302,7 @@ impl Outline {
         })
     }
 
-    pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2> {
+    pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2f> {
         let mut polyline = vec![self.points_for_segment(segments[0])[0]];
         for segment in segments {
             self.flatten_segment(*segment, 0.2, &mut polyline);
@@ -336,7 +337,7 @@ impl Debug for Outline {
 }
 
 #[inline(always)]
-fn b_spline_to_bezier(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> [Point2; 4] {
+fn b_spline_to_bezier(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> [Point2f; 4] {
     [
         ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),
         ((b1.to_vec() * 2.0 + b2.to_vec()) / 3.0).to_point(),
@@ -371,11 +372,11 @@ struct Stroker {
     result_bottom: OutlineBuilder,
 
     /// Normal vector for [`first_point`](Self::first_point).
-    first_normal: Vec2,
+    first_normal: Vec2f,
     /// Normal vector for [`last_point`](Self::last_point).
-    last_normal: Vec2,
-    first_point: Point2,
-    last_point: Point2,
+    last_normal: Vec2f,
+    first_point: Point2f,
+    last_point: Point2f,
 
     xbord: f32,
     ybord: f32,
@@ -453,12 +454,12 @@ impl Debug for StrokerDir {
 // Why does this normal store a length?
 #[derive(Debug)]
 struct WeirdNormal {
-    v: Vec2,
+    v: Vec2f,
     len: f32,
 }
 
 impl WeirdNormal {
-    const fn new(v: Vec2, len: f32) -> Self {
+    const fn new(v: Vec2f, len: f32) -> Self {
         Self { v, len }
     }
 }
@@ -466,12 +467,12 @@ impl WeirdNormal {
 impl Stroker {
     fn emit_point(
         &mut self,
-        point: Point2,
-        normal: Vec2,
+        point: Point2f,
+        normal: Vec2f,
         segment: Option<SegmentDegree>,
         dir: StrokerDir,
     ) {
-        let offset = Vec2::new(normal.x * self.xbord, normal.y * self.ybord);
+        let offset = Vec2f::new(normal.x * self.xbord, normal.y * self.ybord);
 
         if STROKER_PRINT_DEBUG && dir.0 != 0 {
             let mut dirstr = String::with_capacity(2);
@@ -502,16 +503,21 @@ impl Stroker {
         }
     }
 
-    fn emit_first_point(&mut self, point: Point2, segment: Option<SegmentDegree>, dir: StrokerDir) {
+    fn emit_first_point(
+        &mut self,
+        point: Point2f,
+        segment: Option<SegmentDegree>,
+        dir: StrokerDir,
+    ) {
         self.last_skip.0 &= !dir.0;
         self.emit_point(point, self.last_normal, segment, dir);
     }
 
     fn process_arc(
         &mut self,
-        point: Point2,
-        normal0: Vec2,
-        normal1: Vec2,
+        point: Point2f,
+        normal0: Vec2f,
+        normal1: Vec2f,
         coeffs: &[f32],
         dir: StrokerDir,
     ) {
@@ -536,9 +542,9 @@ impl Stroker {
     /// `dir` must contain only a single direction and cannot be zero.
     fn draw_arc(
         &mut self,
-        point: Point2,
-        normal0: Vec2,
-        normal1: Vec2,
+        point: Point2f,
+        normal0: Vec2f,
+        normal1: Vec2f,
         mut cos: f32,
         dir: StrokerDir,
     ) {
@@ -549,7 +555,7 @@ impl Stroker {
 
         let mut mul = [MaybeUninit::<f32>::uninit(); MAX_SUBDIVISIONS + 1];
 
-        let center: Vec2;
+        let center: Vec2f;
         let small_angle = cos >= 0.0;
         // If the angle is greater than 90° (i.e. the cosine is smaller than zero)
         // split the arc into two separate arcs between a center normal vector.
@@ -573,12 +579,12 @@ impl Stroker {
             let mul = mul / (1.0 - cos).sqrt();
             // WHAT: why are we dividing this by sin(θ/2)???? what
             //       the normalization coefficient should be sin(θ) / sin(θ/2)
-            center = Vec2::new(normal1.y - normal0.y, normal0.x - normal1.x) * mul;
+            center = Vec2f::new(normal1.y - normal0.y, normal0.x - normal1.x) * mul;
             // We know cos(θ) is going to be positive, therefore
             // sqrt(1 + cos(θ)) is going to give us cos(θ/2).
             cos = (0.5 + 0.5 * cos).max(0.0).sqrt();
         } else {
-            center = Vec2::default();
+            center = Vec2f::default();
         }
 
         let mut subdivisions_left = MAX_SUBDIVISIONS;
@@ -610,7 +616,7 @@ impl Stroker {
     // WHAT: Figure out how the merge_cos corresponds to the angle and specify
     //       a more exact definition in the doc comment.
     /// previous segment and the current normal vector is too large.
-    fn start_segment(&mut self, point: Point2, normal: Vec2, dir: StrokerDir) {
+    fn start_segment(&mut self, point: Point2f, normal: Vec2f, dir: StrokerDir) {
         if self.contour_start {
             self.contour_start = false;
             self.first_normal = normal;
@@ -662,7 +668,7 @@ impl Stroker {
                     Some(SegmentDegree::Linear),
                     StrokerDir(!self.last_skip.0 & skip.0),
                 );
-                self.emit_point(point, Vec2::ZERO, Some(SegmentDegree::Linear), skip)
+                self.emit_point(point, Vec2f::ZERO, Some(SegmentDegree::Linear), skip)
             }
             self.last_skip = skip;
             // WHAT: Hopefully this is correct
@@ -677,8 +683,8 @@ impl Stroker {
         }
     }
 
-    fn fix_first_point(&mut self, point: Point2, normalized_offset: Vec2, dir: StrokerDir) {
-        let offset = Vec2::new(
+    fn fix_first_point(&mut self, point: Point2f, normalized_offset: Vec2f, dir: StrokerDir) {
+        let offset = Vec2f::new(
             normalized_offset.x * self.xbord,
             normalized_offset.y * self.ybord,
         );
@@ -692,12 +698,12 @@ impl Stroker {
         }
     }
 
-    fn is_epsilon_vec(&self, v: Vec2) -> bool {
+    fn is_epsilon_vec(&self, v: Vec2f) -> bool {
         v.x > -self.eps && v.x < self.eps && v.y > -self.eps && v.y < self.eps
     }
 
     // FIXME: Lines may result in self-intersections!!
-    fn add_line(&mut self, p1: Point2, dir: StrokerDir) {
+    fn add_line(&mut self, p1: Point2f, dir: StrokerDir) {
         let d = p1 - self.last_point;
 
         // Ignore lines shorter than eps.
@@ -706,7 +712,7 @@ impl Stroker {
         }
 
         // Scaled perpendicular to current line
-        let deriv = Vec2::new(d.y * self.yscale, -d.x * self.xscale);
+        let deriv = Vec2f::new(d.y * self.yscale, -d.x * self.xscale);
         let normal = deriv.normalize();
 
         if STROKER_PRINT_DEBUG {
@@ -722,7 +728,7 @@ impl Stroker {
         self.last_point = p1;
     }
 
-    fn prepare_skip(&mut self, point: Point2, dir: StrokerDir, first: bool) {
+    fn prepare_skip(&mut self, point: Point2f, dir: StrokerDir, first: bool) {
         if first {
             self.first_skip.0 |= dir.0;
         }
@@ -744,7 +750,7 @@ impl Stroker {
         sin: f32,
         // WHAT: these normals have a len??
         normals: &[WeirdNormal; 2],
-    ) -> Option<Vec2> {
+    ) -> Option<Vec2f> {
         // WHAT: quadratic
         if (3. + cos) * (3. + cos) >= self.err_q * (1. + cos) {
             return None;
@@ -764,7 +770,7 @@ impl Stroker {
             return None;
         }
 
-        Some(Vec2::new(
+        Some(Vec2f::new(
             (normals[0].v.x + normals[1].v.x) * mul,
             (normals[0].v.y + normals[1].v.y) * mul,
         ))
@@ -773,8 +779,8 @@ impl Stroker {
     // WHAT: quadratic
     fn process_quadratic(
         &mut self,
-        points: &[Point2; 3],
-        deriv: &[Vec2; 2],
+        points: &[Point2f; 3],
+        deriv: &[Vec2f; 2],
         normals: &[WeirdNormal; 2],
         mut dir: StrokerDir,
         first: bool,
@@ -807,13 +813,13 @@ impl Stroker {
                     if f0 < 0.0 || f1 < 0.0 {
                         self.emit_point(
                             points[0],
-                            Vec2::ZERO,
+                            Vec2f::ZERO,
                             Some(SegmentDegree::Linear),
                             skip_dir,
                         );
                         self.emit_point(
                             points[2],
-                            Vec2::ZERO,
+                            Vec2f::ZERO,
                             Some(SegmentDegree::Linear),
                             skip_dir,
                         );
@@ -846,13 +852,13 @@ impl Stroker {
             }
         }
 
-        let mut next = [MaybeUninit::<Point2>::uninit(); 5];
+        let mut next = [MaybeUninit::<Point2f>::uninit(); 5];
         next[1].write(points[0] + points[1].to_vec());
         next[3].write(points[1] + points[2].to_vec());
         unsafe {
             next[2].write(
                 (((next[1].assume_init().to_vec() + next[3].assume_init().to_vec())
-                    + Vec2::new(0.0, 0.0))
+                    + Vec2f::new(0.0, 0.0))
                     * 0.25)
                     .to_point(),
             );
@@ -862,7 +868,7 @@ impl Stroker {
         next[0].write(points[0]);
         next[4].write(points[2]);
 
-        let mut next_deriv = [MaybeUninit::<Vec2>::uninit(); 3];
+        let mut next_deriv = [MaybeUninit::<Vec2f>::uninit(); 3];
         next_deriv[0].write(deriv[0] * 0.5);
         next_deriv[2].write(deriv[1] * 0.5);
         next_deriv[1]
@@ -905,7 +911,7 @@ impl Stroker {
         }
     }
 
-    fn add_quadratic(&mut self, p1: Point2, p2: Point2, dir: StrokerDir) {
+    fn add_quadratic(&mut self, p1: Point2f, p2: Point2f, dir: StrokerDir) {
         let d0 = p1 - self.last_point;
 
         if self.is_epsilon_vec(d0) {
@@ -924,8 +930,8 @@ impl Stroker {
         self.last_point = p2;
 
         let deriv = [
-            Vec2::new(d0.y * self.yscale, -d0.x * self.xscale),
-            Vec2::new(d1.y * self.yscale, -d1.x * self.xscale),
+            Vec2f::new(d0.y * self.yscale, -d0.x * self.xscale),
+            Vec2f::new(d1.y * self.yscale, -d1.x * self.xscale),
         ];
 
         let len0 = deriv[0].length();
@@ -943,7 +949,7 @@ impl Stroker {
     }
 
     // FIXME: Probably doesn't handle all the self intersection stuff...
-    fn add_cubic(&mut self, p1: Point2, p2: Point2, p3: Point2, dir: StrokerDir) {
+    fn add_cubic(&mut self, p1: Point2f, p2: Point2f, p3: Point2f, dir: StrokerDir) {
         let curve = CubicBezier::new([self.last_point, p1, p2, p3]);
         for quadratic in curve.to_quadratics(0.01) {
             self.add_quadratic(quadratic[1], quadratic[2], dir);
@@ -1025,10 +1031,10 @@ pub fn stroke(outline: &Outline, x: f32, y: f32, eps: f32) -> (Outline, Outline)
         result_top: OutlineBuilder::new(),
         result_bottom: OutlineBuilder::new(),
 
-        first_normal: Vec2::default(),
-        last_normal: Vec2::default(),
-        first_point: Point2::default(),
-        last_point: Point2::default(),
+        first_normal: Vec2f::default(),
+        last_normal: Vec2f::default(),
+        first_point: Point2f::default(),
+        last_point: Point2f::default(),
 
         xbord: x,
         ybord: y,

@@ -2,16 +2,16 @@ use std::{mem::MaybeUninit, ops::Deref};
 
 use crate::util::slice_assume_init_mut;
 
-use super::{Point2, Rect2, Vec2};
+use super::{Point2f, Rect2, Vec2f};
 
 const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
 mod flatten;
 
-pub fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
+pub fn evaluate_bezier(points: &[Point2f], t: f32) -> Point2f {
     assert!(points.len() <= MAX_BEZIER_CONTROL_POINTS);
 
-    let mut midpoints_buffer = [MaybeUninit::<Vec2>::uninit(); MAX_BEZIER_CONTROL_POINTS];
+    let mut midpoints_buffer = [MaybeUninit::<Vec2f>::uninit(); MAX_BEZIER_CONTROL_POINTS];
     let mut midpoints = {
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -37,8 +37,8 @@ pub fn evaluate_bezier(points: &[Point2], t: f32) -> Point2 {
 }
 
 pub trait Bezier {
-    fn points(&self) -> &[Point2];
-    fn sample(&self, t: f32) -> Point2 {
+    fn points(&self) -> &[Point2f];
+    fn sample(&self, t: f32) -> Point2f {
         evaluate_bezier(self.points(), t)
     }
 
@@ -49,12 +49,12 @@ pub trait Bezier {
     where
         Self: Sized;
 
-    fn flatten(&self, tolerance: f32) -> Vec<Point2> {
+    fn flatten(&self, tolerance: f32) -> Vec<Point2f> {
         let mut output = vec![self.points()[0]];
         self.flatten_into(tolerance, &mut output);
         output
     }
-    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>);
+    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>);
 
     fn bounding_box(&self) -> Rect2 {
         Rect2::bounding_from_points(self.points())
@@ -65,24 +65,24 @@ macro_rules! define_curve {
     ($name: ident, $npoints: literal) => {
         #[repr(transparent)]
         #[derive(Clone)]
-        pub struct $name(pub [Point2; $npoints]);
+        pub struct $name(pub [Point2f; $npoints]);
 
         impl $name {
-            pub const fn new(points: [Point2; $npoints]) -> Self {
+            pub const fn new(points: [Point2f; $npoints]) -> Self {
                 Self(points)
             }
 
-            pub const fn from_ref(points: &[Point2; $npoints]) -> &Self {
+            pub const fn from_ref(points: &[Point2f; $npoints]) -> &Self {
                 unsafe { &*(points as *const _ as *const Self) }
             }
 
-            pub const fn into_points(self) -> [Point2; $npoints] {
+            pub const fn into_points(self) -> [Point2f; $npoints] {
                 self.0
             }
         }
 
         impl Deref for $name {
-            type Target = [Point2; $npoints];
+            type Target = [Point2f; $npoints];
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -95,7 +95,7 @@ define_curve!(QuadraticBezier, 3);
 define_curve!(CubicBezier, 4);
 
 impl Bezier for QuadraticBezier {
-    fn points(&self) -> &[Point2] {
+    fn points(&self) -> &[Point2f] {
         &self.0
     }
 
@@ -138,13 +138,13 @@ impl Bezier for QuadraticBezier {
         Self([from, p1, to])
     }
 
-    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>) {
+    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>) {
         flatten::flatten_quadratic(self, tolerance, output);
     }
 }
 
 impl Bezier for CubicBezier {
-    fn points(&self) -> &[Point2] {
+    fn points(&self) -> &[Point2f] {
         &self.0
     }
 
@@ -200,7 +200,7 @@ impl Bezier for CubicBezier {
         Self([from, p1, p2, to])
     }
 
-    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2>) {
+    fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>) {
         flatten::flatten_cubic(self, tolerance, output);
     }
 }
@@ -210,7 +210,7 @@ impl CubicBezier {
         flatten::cubic_to_quadratics(self, tolerance)
     }
 
-    pub fn from_b_spline(b0: Point2, b1: Point2, b2: Point2, b3: Point2) -> Self {
+    pub fn from_b_spline(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> Self {
         Self([
             ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),
             ((b1.to_vec() * 2.0 + b2.to_vec()) / 3.0).to_point(),

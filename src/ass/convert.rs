@@ -2,7 +2,7 @@ use std::str::Chars;
 
 use crate::{
     color::BGRA8,
-    math::{CubicBezier, Point2},
+    math::{CubicBezier, Point2f},
     outline::{Outline, OutlineBuilder, SegmentDegree},
     Segment, ShapeSegment, TextDecorations, TextSegment,
 };
@@ -85,16 +85,16 @@ fn get_f32(chars: &mut Chars) -> Option<f32> {
     string[..number_end].parse::<f32>().ok()
 }
 
-fn get_scaled_point(chars: &mut Chars, factor: f32) -> Option<Point2> {
-    Some(Point2::new(
+fn get_scaled_point(chars: &mut Chars, factor: f32) -> Option<Point2f> {
+    Some(Point2f::new(
         get_f32(chars)? * factor,
         get_f32(chars)? * factor,
     ))
 }
 
-fn get_scaled_point_batch<const N: usize>(chars: &mut Chars, factor: f32) -> Option<[Point2; N]> {
+fn get_scaled_point_batch<const N: usize>(chars: &mut Chars, factor: f32) -> Option<[Point2f; N]> {
     // TODO: Once a way to convert [MaybeUninit<T>; N] to [T; N] is stable, do that instead.
-    let mut points = [Point2::ZERO; N];
+    let mut points = [Point2f::ZERO; N];
     for p in points.iter_mut() {
         *p = get_scaled_point(chars, factor)?;
     }
@@ -117,7 +117,7 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
     let mut m_seen = false;
     let mut started = false;
     // If an outline has not been started yet, this is used as the initial point.
-    let mut pen: Option<Point2> = None;
+    let mut pen: Option<Point2f> = None;
     // Used to keep track of the point positions for extending B-Splines
     let mut original_points = Vec::new();
     let mut bspline_start = None;
@@ -129,9 +129,9 @@ fn process_drawing_commands(text: &str, scale: u32) -> Option<Outline> {
         };
 
         let extend_spline = |outline: &mut OutlineBuilder,
-                             original_points: &[Point2],
-                             b3: Point2,
-                             pen: &mut Option<Point2>| {
+                             original_points: &[Point2f],
+                             b3: Point2f,
+                             pen: &mut Option<Point2f>| {
             let &[.., b0, b1, b2] = original_points else {
                 return;
             };

@@ -192,7 +192,7 @@ impl<'a> Painter<'a> {
                 dbg!(outline
                     .points_for_segment(segment)
                     .iter()
-                    .map(|p| *p + Vec2::new(x as f32, y as f32))
+                    .map(|p| *p + Vec2f::new(x as f32, y as f32))
                     .collect::<Vec<_>>());
                 const SAMPLES: i32 = 20;
                 for i in 1..=SAMPLES {
@@ -258,7 +258,7 @@ impl<'a> Painter<'a> {
         }
     }
 
-    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[Point2], color: BGRA8) {
+    pub fn stroke_polyline(&mut self, x: i32, y: i32, points: &[Point2f], color: BGRA8) {
         let mut last = points[0];
         for point in &points[1..] {
             self.line(

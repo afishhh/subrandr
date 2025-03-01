@@ -1,5 +1,5 @@
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign},
 };
@@ -8,35 +8,50 @@ mod curve;
 pub use curve::*;
 mod fixed;
 pub use fixed::*;
+mod num;
+pub use num::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
-pub struct Point2 {
-    pub x: f32,
-    pub y: f32,
+pub struct Point2<N> {
+    pub x: N,
+    pub y: N,
 }
 
-impl Point2 {
-    pub const fn new(x: f32, y: f32) -> Self {
+pub type Point2f = Point2<f32>;
+
+impl<N> Point2<N> {
+    pub const fn new(x: N, y: N) -> Self {
         Self { x, y }
     }
 
-    pub const fn from_array(xy: [f32; 2]) -> Self {
-        Self { x: xy[0], y: xy[1] }
+    pub const fn from_array([x, y]: [N; 2]) -> Self
+    where
+        N: Copy,
+    {
+        Self { x, y }
     }
 
-    pub const fn to_vec(self) -> Vec2 {
+    pub const fn to_vec(self) -> Vec2<N>
+    where
+        N: Copy,
+    {
         Vec2::new(self.x, self.y)
     }
+}
 
-    pub fn distance(self, other: Self) -> f32 {
+impl<N: Number> Point2<N> {
+    pub fn distance(self, other: Self) -> N
+    where
+        N: Sqrt,
+    {
         (self - other).length()
     }
 
-    pub const ZERO: Self = Self::new(0., 0.);
+    pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
-impl Debug for Point2 {
+impl<N: Display> Debug for Point2<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({:.1}, {:.1})", self.x, self.y)
     }
@@ -44,29 +59,42 @@ impl Debug for Point2 {
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
+pub struct Vec2<N> {
+    pub x: N,
+    pub y: N,
 }
 
-impl Vec2 {
-    pub const fn new(x: f32, y: f32) -> Self {
+pub type Vec2f = Vec2<f32>;
+
+impl<N> Vec2<N> {
+    pub const fn new(x: N, y: N) -> Self {
         Self { x, y }
     }
 
-    pub const fn from_array(xy: [f32; 2]) -> Self {
-        Self { x: xy[0], y: xy[1] }
+    pub const fn from_array([x, y]: [N; 2]) -> Self
+    where
+        N: Copy,
+    {
+        Self { x, y }
     }
 
-    pub const fn to_point(self) -> Point2 {
+    pub const fn to_point(self) -> Point2<N>
+    where
+        N: Copy,
+    {
         Point2::new(self.x, self.y)
     }
+}
 
-    pub fn length(self) -> f32 {
+impl<N: Number> Vec2<N> {
+    pub fn length(self) -> N
+    where
+        N: Sqrt,
+    {
         (self.x * self.x + self.y * self.y).sqrt()
     }
 
-    pub fn length_sq(self) -> f32 {
+    pub fn length_sq(self) -> N {
         self.x * self.x + self.y * self.y
     }
 
@@ -82,7 +110,7 @@ impl Vec2 {
     /// However there is also a useful geometric definition:
     /// u⋅v = ||u|| * ||v|| * cos(θ)
     /// where θ is the angle between u and v.
-    pub fn dot(self, other: Self) -> f32 {
+    pub fn dot(self, other: Self) -> N {
         self.x * other.x + self.y * other.y
     }
 
@@ -101,27 +129,30 @@ impl Vec2 {
     /// it is in the "counter-clockwise direction".
     ///
     /// another NOTE: This terminology is made up and probably not very formal.
-    pub fn cross(self, other: Self) -> f32 {
+    pub fn cross(self, other: Self) -> N {
         self.x * other.y - self.y * other.x
     }
 
-    pub fn normalize(self) -> Self {
-        fast_divide_by_sqrt(self, self.length_sq())
+    pub fn normalize(self) -> Self
+    where
+        N: Sqrt,
+    {
+        N::fast_normalize(self)
     }
 
-    pub const ZERO: Self = Self::new(0., 0.);
+    pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
-impl Debug for Vec2 {
+impl<N: Display> Debug for Vec2<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:.1}, {:.1}]", self.x, self.y)
     }
 }
 
-impl Mul<f32> for Vec2 {
+impl<N: Number> Mul<N> for Vec2<N> {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self::Output {
+    fn mul(self, rhs: N) -> Self::Output {
         Self {
             x: self.x * rhs,
             y: self.y * rhs,
@@ -129,10 +160,10 @@ impl Mul<f32> for Vec2 {
     }
 }
 
-impl Div<f32> for Vec2 {
+impl<N: Number> Div<N> for Vec2<N> {
     type Output = Self;
 
-    fn div(self, rhs: f32) -> Self::Output {
+    fn div(self, rhs: N) -> Self::Output {
         Self {
             x: self.x / rhs,
             y: self.y / rhs,
@@ -141,13 +172,13 @@ impl Div<f32> for Vec2 {
 }
 
 macro_rules! impl_binop {
-    (@arg_or_self $arg: ident) => { $arg };
+    (@arg_or_self $arg: ident) => { $arg<N> };
     (@arg_or_self) => { Self };
     ($trait: ident, $fn: ident$(, $trait_assign: ident, $fn_assign: ident)?; $dst: ident, $operator: tt, $operator_assign: tt, $src: ident$(, $output: ident)?) => {
-        impl $trait<$src> for $dst {
+        impl<N: Number> $trait<$src<N>> for $dst<N> {
             type Output = impl_binop!(@arg_or_self $($output)?);
 
-            fn $fn(self, rhs: $src)-> Self::Output {
+            fn $fn(self, rhs: $src<N>)-> Self::Output {
                 <impl_binop!(@arg_or_self $($output)?)>::new(
                     self.x $operator rhs.x,
                     self.y $operator rhs.y,
@@ -156,8 +187,8 @@ macro_rules! impl_binop {
         }
 
         $(
-            impl $trait_assign<$src> for $dst {
-                fn $fn_assign(&mut self, rhs: $src) {
+            impl<N: Number> $trait_assign<$src<N>> for $dst<N> {
+                fn $fn_assign(&mut self, rhs: $src<N>) {
                     self.x $operator_assign rhs.x;
                     self.y $operator_assign rhs.y;
                 }
@@ -191,22 +222,22 @@ impl_binop!(
     Point2, -, _, Point2, Vec2
 );
 
-impl Neg for Vec2 {
-    type Output = Vec2;
+impl Neg for Vec2f {
+    type Output = Vec2f;
 
     fn neg(self) -> Self::Output {
-        Vec2::new(-self.x, -self.y)
+        Vec2f::new(-self.x, -self.y)
     }
 }
 
-impl Sum for Vec2 {
+impl Sum for Vec2f {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.reduce(Self::add).unwrap_or_default()
     }
 }
 
-impl Sum<Vec2> for Point2 {
-    fn sum<I: Iterator<Item = Vec2>>(iter: I) -> Self {
+impl Sum<Vec2f> for Point2f {
+    fn sum<I: Iterator<Item = Vec2f>>(iter: I) -> Self {
         let mut result = Self::ZERO;
         for value in iter {
             result += value;
@@ -217,19 +248,19 @@ impl Sum<Vec2> for Point2 {
 
 #[derive(Debug, Clone, Default)]
 pub struct Rect2 {
-    pub min: Point2,
-    pub max: Point2,
+    pub min: Point2f,
+    pub max: Point2f,
 }
 
 impl Rect2 {
     pub const NOTHING: Self = Self {
-        min: Point2::new(f32::MAX, f32::MAX),
-        max: Point2::new(f32::MIN, f32::MIN),
+        min: Point2f::new(f32::MAX, f32::MAX),
+        max: Point2f::new(f32::MIN, f32::MIN),
     };
 
     pub const ZERO: Self = Self {
-        min: Point2::ZERO,
-        max: Point2::ZERO,
+        min: Point2f::ZERO,
+        max: Point2f::ZERO,
     };
 
     pub fn is_negative(&self) -> bool {
@@ -251,7 +282,7 @@ impl Rect2 {
             && self.max.y >= other.min.y
     }
 
-    pub fn size(&self) -> Vec2 {
+    pub fn size(&self) -> Vec2f {
         self.max - self.min
     }
 
@@ -265,14 +296,14 @@ impl Rect2 {
         }
     }
 
-    pub fn expand_to_point(&mut self, point: &Point2) {
+    pub fn expand_to_point(&mut self, point: &Point2f) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
         self.max.x = self.max.x.max(point.x);
         self.max.y = self.max.y.max(point.y);
     }
 
-    pub fn bounding_from_points(points: &[Point2]) -> Self {
+    pub fn bounding_from_points(points: &[Point2f]) -> Self {
         let mut bb = Self::NOTHING;
         for point in points {
             bb.expand_to_point(point);
@@ -293,19 +324,19 @@ impl Line {
         Self { a, b, c }
     }
 
-    pub const fn from_points(start: Point2, end: Point2) -> Self {
+    pub const fn from_points(start: Point2f, end: Point2f) -> Self {
         let a = end.y - start.y;
         let b = start.x - end.x;
         let c = -(start.y * b + start.x * a);
         Self::new(a, b, c)
     }
 
-    pub fn signed_distance_to_point(self, Point2 { x, y }: Point2) -> f32 {
+    pub fn signed_distance_to_point(self, Point2f { x, y }: Point2f) -> f32 {
         let Self { a, b, c } = self;
         (a * x + b * y + c) / (a * a + b * b).sqrt()
     }
 
-    pub fn distance_to_point(self, p: Point2) -> f32 {
+    pub fn distance_to_point(self, p: Point2f) -> f32 {
         self.signed_distance_to_point(p).abs()
     }
 

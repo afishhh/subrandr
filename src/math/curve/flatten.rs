@@ -1,6 +1,6 @@
 //! An implementation of (this algorithm)[https://raphlinus.github.io/graphics/curves/2019/12/23/flatten-quadbez.html].
 //! Cubic curves are converted into quadratics using (this algorithm)[https://web.archive.org/web/20150403003715/http://www.caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html], found via (this post)[https://minus-ze.ro/posts/flattening-bezier-curves-and-arcs/].
-use super::{Bezier as _, CubicBezier, Point2, QuadraticBezier};
+use super::{Bezier as _, CubicBezier, Point2f, QuadraticBezier};
 
 struct Basic {
     x0: f32,
@@ -10,7 +10,7 @@ struct Basic {
 
 /// Map a quadratic bezier to a scaled, translated and rotated segment of y=x^2
 /// (map_to_basic)[https://github.com/raphlinus/raphlinus.github.io/blob/main/_posts/2019-12-23-flatten-quadbez.md]
-fn map_to_basic(a: Point2, b: Point2, c: Point2) -> Basic {
+fn map_to_basic(a: Point2f, b: Point2f, c: Point2f) -> Basic {
     // (b - a) + (b - c)
     let dd = b.to_vec() * 2.0 - a.to_vec() - c.to_vec();
     let u0 = (b.x - a.x) * dd.x + (b.y - a.y) * dd.y;
@@ -33,7 +33,7 @@ fn approximate_inverse_segments_integral(x: f32) -> f32 {
     x * (1.0 - b + (b * b + 0.25 * x * x).sqrt())
 }
 
-pub fn flatten_quadratic(curve: &QuadraticBezier, tolerance: f32, out: &mut Vec<Point2>) {
+pub fn flatten_quadratic(curve: &QuadraticBezier, tolerance: f32, out: &mut Vec<Point2f>) {
     let basic = map_to_basic(curve[0], curve[1], curve[2]);
     let a0 = approximate_segments_integral(basic.x0);
     let a2 = approximate_segments_integral(basic.x2);
@@ -57,7 +57,7 @@ fn naive_cubic_to_quadratic(cubic: &CubicBezier) -> QuadraticBezier {
     QuadraticBezier::new([cubic[0], ((c1_2 + c2_2) * 0.25).to_point(), cubic[3]])
 }
 
-fn quadratic_count_for_cubic(points: &[Point2; 4], tolerance: f32) -> f32 {
+fn quadratic_count_for_cubic(points: &[Point2f; 4], tolerance: f32) -> f32 {
     let p = points[0].to_vec() - points[1].to_vec() * 3.0 + points[2].to_vec() * 3.0
         - points[3].to_vec();
     let err = p.length_sq();
@@ -82,7 +82,7 @@ pub fn cubic_to_quadratics(
     })
 }
 
-pub fn flatten_cubic(points: &CubicBezier, tolerance: f32, out: &mut Vec<Point2>) {
+pub fn flatten_cubic(points: &CubicBezier, tolerance: f32, out: &mut Vec<Point2f>) {
     for quadratic in cubic_to_quadratics(points, tolerance) {
         flatten_quadratic(&quadratic, tolerance, out)
     }

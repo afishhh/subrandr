@@ -8,7 +8,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I32Fixed, Point2, Vec2};
+use math::{I32Fixed, Point2f, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -147,7 +147,7 @@ struct TextSegment {
 
 #[derive(Debug, Clone)]
 struct TextDecorations {
-    border: Vec2,
+    border: Vec2f,
     border_color: BGRA8,
     // TODO: f32 for size
     underline: bool,
@@ -164,7 +164,7 @@ enum TextShadow {
 
 #[derive(Debug, Clone)]
 struct CssTextShadow {
-    offset: Vec2,
+    offset: Vec2f,
     blur_radius: f32,
     color: BGRA8,
 }
@@ -172,7 +172,7 @@ struct CssTextShadow {
 impl TextDecorations {
     pub const fn none() -> Self {
         Self {
-            border: Vec2::ZERO,
+            border: Vec2f::ZERO,
             border_color: BGRA8::ZERO,
             underline: false,
             underline_color: BGRA8::ZERO,
@@ -357,9 +357,9 @@ impl Subtitles {
                         Segment::Shape(ShapeSegment::new(
                             {
                                 let mut b = OutlineBuilder::new();
-                                b.add_point(Point2::new(0.0, 0.0));
-                                b.add_point(Point2::new(30.0, 120.));
-                                b.add_point(Point2::new(120.0, 120.));
+                                b.add_point(Point2f::new(0.0, 0.0));
+                                b.add_point(Point2f::new(30.0, 120.));
+                                b.add_point(Point2f::new(120.0, 120.));
                                 b.add_segment(SegmentDegree::Linear);
                                 b.add_segment(SegmentDegree::Linear);
                                 b.add_segment(SegmentDegree::Linear);
@@ -385,7 +385,7 @@ impl Subtitles {
                         font_weight: 400,
                         italic: false,
                         decorations: TextDecorations {
-                            border: Vec2::new(2.0, 2.0),
+                            border: Vec2f::new(2.0, 2.0),
                             border_color: BGRA8::new(255, 0, 0, 255),
                             underline: true,
                             underline_color: BGRA8::new(255, 255, 255, 255),
@@ -459,12 +459,12 @@ impl Subtitles {
                         text: "with shadows".to_string(),
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
-                                offset: Vec2::new(80.0, 80.0),
+                                offset: Vec2f::new(80.0, 80.0),
                                 blur_radius: 7.5,
                                 color: BGRA8::new(0, 0, 255, 255),
                             }),
                             TextShadow::Css(CssTextShadow {
-                                offset: Vec2::new(48.0, 48.0),
+                                offset: Vec2f::new(48.0, 48.0),
                                 blur_radius: 20.0,
                                 color: BGRA8::new(255, 255, 255, 255),
                             }),
@@ -504,7 +504,7 @@ impl Subtitles {
                             color: BGRA8::from_rgba32(0x00000000),
                             text: "嗚呼ー".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
-                                offset: Vec2::ZERO,
+                                offset: Vec2f::ZERO,
                                 blur_radius: 15.0,
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
@@ -518,7 +518,7 @@ impl Subtitles {
                             color: BGRA8::from_rgba32(0xFF000099),
                             text: "helloworld".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
-                                offset: Vec2::ZERO,
+                                offset: Vec2f::ZERO,
                                 blur_radius: 15.0,
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
@@ -972,7 +972,7 @@ impl<'a> Renderer<'a> {
                 let mut polyline = vec![];
                 for (i, time) in self.perf.times.iter().copied().enumerate() {
                     let x = (i as f32 / self.perf.times.len() as f32) * graph_width;
-                    polyline.push(Point2::new(x, -(time / max) * graph_height));
+                    polyline.push(Point2f::new(x, -(time / max) * graph_height));
                 }
 
                 painter.stroke_polyline(

@@ -1,6 +1,6 @@
 use crate::{
     color::BGRA8,
-    math::{I32Fixed, Point2},
+    math::{I32Fixed, Point2f},
     Painter,
 };
 
@@ -582,7 +582,13 @@ impl NonZeroPolygonRasterizer {
         self.right.clear();
     }
 
-    fn add_line(&mut self, offset: (i32, i32), start: &Point2, end: &Point2, invert_winding: bool) {
+    fn add_line(
+        &mut self,
+        offset: (i32, i32),
+        start: &Point2f,
+        end: &Point2f,
+        invert_winding: bool,
+    ) {
         let istart = (
             IFixed18Dot14::from_f32(start.x) + offset.0,
             IFixed18Dot14::from_f32(start.y) + offset.1,
@@ -657,7 +663,7 @@ impl NonZeroPolygonRasterizer {
     pub fn append_polyline(
         &mut self,
         offset: (i32, i32),
-        polyline: &[Point2],
+        polyline: &[Point2f],
         invert_winding: bool,
     ) {
         if polyline.is_empty() {

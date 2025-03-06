@@ -441,16 +441,20 @@ unsafe fn draw_triangle_half(
             let (m1x, m1y) = machine1.current();
             if m1y == current_y {
                 break m1x;
-            } else if machine1.advance() {
+            } else if machine1.is_done() {
                 break 'top;
+            } else {
+                machine1.advance();
             }
         };
         let m2x = loop {
             let (m2x, m2y) = machine2.current();
             if m2y == current_y {
                 break m2x;
-            } else if machine2.advance() {
+            } else if machine2.is_done() {
                 break 'top;
+            } else {
+                machine2.advance();
             }
         };
 

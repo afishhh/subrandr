@@ -222,22 +222,22 @@ impl_binop!(
     Point2, -, _, Point2, Vec2
 );
 
-impl Neg for Vec2f {
-    type Output = Vec2f;
+impl<N: Number> Neg for Vec2<N> {
+    type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Vec2f::new(-self.x, -self.y)
+        Self::new(-self.x, -self.y)
     }
 }
 
-impl Sum for Vec2f {
+impl<N: Number> Sum for Vec2<N> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.reduce(Self::add).unwrap_or_default()
+        iter.reduce(Self::add).unwrap_or(Self::ZERO)
     }
 }
 
-impl Sum<Vec2f> for Point2f {
-    fn sum<I: Iterator<Item = Vec2f>>(iter: I) -> Self {
+impl<N: Number> Sum<Vec2<N>> for Point2<N> {
+    fn sum<I: Iterator<Item = Vec2<N>>>(iter: I) -> Self {
         let mut result = Self::ZERO;
         for value in iter {
             result += value;

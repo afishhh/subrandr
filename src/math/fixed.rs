@@ -289,7 +289,7 @@ impl<const P: u32> I32Fixed<P> {
 
 #[cfg(test)]
 macro_rules! test_module {
-    ($fixed_type: ty, signed = $signed: literal) => {
+    ($fixed_type: ty, signed = $signed: tt) => {
         use super::*;
         use crate::util::ArrayVec;
 
@@ -417,23 +417,26 @@ macro_rules! test_module {
                 }
             }
         }
+
+        test_module!(@signedness_specific $signed);
+    };
+    (@signedness_specific false) => {};
+    (@signedness_specific true) => {
+        #[test]
+        fn signum() {
+            for a in const { SIGNED_DATA }.iter().flat_map(|&(a, b)| [a, b]) {
+                let ra = f32::from(TestFixed::from(a).signum());
+                let ea = a.signum();
+                println!("{a}.signum() = {ra}");
+                assert!((ra - ea).abs() < EPS);
+            }
+        }
     };
 }
 
 #[cfg(test)]
 mod test_signed_24_dot_8 {
     test_module!(I32Fixed<8>, signed = true);
-
-    // TODO: once cfg(false) is stable move it into the macro (since it'll be easy)
-    #[test]
-    fn signum() {
-        for a in const { SIGNED_DATA }.iter().flat_map(|&(a, b)| [a, b]) {
-            let ra = f32::from(TestFixed::from(a).signum());
-            let ea = a.signum();
-            println!("{a}.signum() = {ra}");
-            assert!((ra - ea).abs() < EPS);
-        }
-    }
 }
 
 #[cfg(test)]

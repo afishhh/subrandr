@@ -300,9 +300,17 @@ impl Outline {
     }
 
     pub fn flatten_contour(&self, segments: &[Segment]) -> Vec<Point2f> {
+        self.flatten_contour_with_tolerance(segments, 0.2)
+    }
+
+    pub fn flatten_contour_with_tolerance(
+        &self,
+        segments: &[Segment],
+        tolerance: f32,
+    ) -> Vec<Point2f> {
         let mut polyline = vec![self.points_for_segment(segments[0])[0]];
         for segment in segments {
-            self.flatten_segment(*segment, 0.2, &mut polyline);
+            self.flatten_segment(*segment, tolerance, &mut polyline);
         }
         polyline
     }

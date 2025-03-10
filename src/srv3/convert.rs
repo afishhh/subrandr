@@ -193,15 +193,15 @@ impl Srv3TextShadow {
                     color: self.color,
                 });
             }
-            EdgeType::Glow => {
-                for _ in 0..5 {
-                    out.push(CssTextShadow {
-                        offset: Vec2f::ZERO,
-                        blur_radius: l,
-                        color: self.color,
-                    })
-                }
-            }
+            EdgeType::Glow => out.push(CssTextShadow {
+                offset: Vec2f::ZERO,
+                // this may or may not be the correct formula for a 5x repeated blur radius
+                // it results in a slightly different blur than actually repeated blur
+                // but browsers seem to give a result that is closer to this anyway?
+                // although firefox and chromium don't even agree on how a blur should look sooo
+                blur_radius: (t * t + t * t / 4.0).sqrt() * 2.0,
+                color: self.color,
+            }),
             EdgeType::SoftShadow => {
                 let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
                 while t <= c {

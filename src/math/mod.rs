@@ -375,8 +375,17 @@ where
 {
     #[cfg(target_feature = "sse")]
     unsafe {
-        let mut result: f32;
-        std::arch::asm!("rsqrtss {}, {}", out(xmm_reg) result, in(xmm_reg) squared_denominator);
+        use std::arch::x86_64::*;
+        use std::mem::MaybeUninit;
+
+        let mut result = {
+            let mut rsqrt: MaybeUninit<f32> = MaybeUninit::uninit();
+            _mm_store_ss(
+                rsqrt.as_mut_ptr(),
+                _mm_rsqrt_ss(_mm_set_ss(squared_denominator)),
+            );
+            rsqrt.assume_init()
+        };
         // rsqrtss + one newton-raphson step = 22-bits of accuracy
         result *= 1.5 - (squared_denominator * 0.5 * result * result);
         numerator * result

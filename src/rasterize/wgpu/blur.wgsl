@@ -9,7 +9,7 @@ struct ComputeContext {
 @group(0) @binding(2) var out_texture: texture_storage_2d<r32float, write>;
 
 @compute
-@workgroup_size(1)
+@workgroup_size(64)
 fn cs_main(
     @builtin(global_invocation_id) id: vec3<u32>,
 ) {
@@ -25,6 +25,10 @@ fn cs_main(
     let radiusStep = step * cctx.radius;
     let iextent = 1.0 / f32(2 * cctx.radius + 1);
     var sum = 0.0;
+
+    if(dot(size, cctx.cross_axis) >= cross) {
+        return;
+    }
 
     var current = start;
     for (var i: u32 = 0; i < cctx.radius; i += 1) {

@@ -846,18 +846,18 @@ impl GpuRasterizer {
         };
 
         set_pass_params(&mut pass, &horizontal_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.height(), 1, 1);
+        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
         set_pass_params(&mut pass, &horizontal_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.height(), 1, 1);
+        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
         set_pass_params(&mut pass, &horizontal_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.height(), 1, 1);
+        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
 
         set_pass_params(&mut pass, &vertical_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.width(), 1, 1);
+        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
         set_pass_params(&mut pass, &vertical_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.width(), 1, 1);
+        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
         set_pass_params(&mut pass, &vertical_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.width(), 1, 1);
+        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
     }
 }
 

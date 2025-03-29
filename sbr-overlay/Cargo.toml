@@ -1,0 +1,24 @@
+[package]
+name = "sbr-overlay"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["ipc-mpv", "ipc-browser-cdp"]
+ipc-mpv = ["dep:serde_json", "_serde"]
+ipc-browser-cdp = ["dep:tungstenite", "dep:serde_json", "_serde"]
+_serde = ["dep:serde"]
+
+[dependencies]
+subrandr = { path = ".." }
+
+anyhow = "1.0.97"
+
+clap = { version = "4", features = ["derive"] }
+tungstenite = { version = "0.26.1", optional = true }
+serde_json = { version = "1.0.134", optional = true }
+serde = { version = "1.0.216", features = ["derive"], optional = true }
+
+xcb = { version = "1", features = ["res", "shape", "xlib_xcb"] }
+winit = { version = "0.30.9", default-features = false, features = ["rwh_06", "x11"] }
+

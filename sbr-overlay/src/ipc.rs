@@ -1,0 +1,62 @@
+use anyhow::Result;
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "_serde", derive(serde::Deserialize))]
+pub struct PlayerDimensions {
+    pub video_width: f32,
+    pub video_height: f32,
+    pub player_width: f32,
+    pub player_height: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "_serde", derive(serde::Deserialize))]
+pub struct PlayerViewport {
+    pub offset_x: u32,
+    pub offset_y: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "_serde", derive(serde::Deserialize))]
+pub struct PlayerState {
+    #[cfg_attr(feature = "_serde", serde(flatten))]
+    pub dimensions: Option<PlayerDimensions>,
+    pub viewport: Option<PlayerViewport>,
+    // in ms
+    pub current_time: u32,
+}
+
+pub trait PlayerConnector {
+    fn try_connect(&self, connection_string: &str) -> Result<Box<dyn PlayerConnection>>;
+}
+
+pub trait PlayerConnection {
+    // TODO: Make this fallible
+    fn poll(&mut self) -> PlayerState;
+}
+
+#[cfg(feature = "ipc-browser-cdp")]
+mod cdp;
+#[cfg(feature = "ipc-mpv")]
+mod mpv;
+
+pub struct PlayerConnectorDescriptor {
+    pub id: &'static str,
+    pub description: &'static str,
+    pub connector: &'static dyn PlayerConnector,
+}
+
+pub const AVAILABLE_CONNECTORS: &[PlayerConnectorDescriptor] = &[
+    #[cfg(feature = "ipc-mpv")]
+    PlayerConnectorDescriptor {
+        id: "mpv",
+        description: "mpv player IPC socket",
+        connector: &mpv::Connector,
+    },
+    #[cfg(feature = "ipc-browser-cdp")]
+    PlayerConnectorDescriptor {
+        id: "youtube-cdp",
+        description: "browser YouTube tab via Chrome DevTools Protocol",
+        connector: &cdp::Connector,
+    },
+];

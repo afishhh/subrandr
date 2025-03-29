@@ -18,12 +18,14 @@ use xcb::XidNew;
 #[derive(clap::Parser)]
 struct Args {
     file: Option<PathBuf>,
-    #[clap(long = "dpi", default_value = "auto")]
+
+    #[clap(long = "dpi", value_name = "DPI_MODE", default_value = "auto")]
     dpi: DpiMode,
 
     #[clap(
         long = "start",
         default_value_t = 0,
+        value_name = "MILLISECONDS",
         conflicts_with = "ipc_connection_string"
     )]
     start_at: u32,
@@ -38,7 +40,12 @@ struct Args {
     #[clap(long = "parse")]
     parse: bool,
 
-    #[clap(long = "overlay", verbatim_doc_comment, default_value = "auto")]
+    #[clap(
+        long = "overlay",
+        verbatim_doc_comment,
+        value_name = "OVERLAY_MODE",
+        default_value = "auto"
+    )]
     /// Overlay the subtitle window over another existing window
     ///
     /// Allowed values:
@@ -54,8 +61,9 @@ struct Args {
     /// Player IPC connection string
     ipc_connection_string: Option<String>,
 
-    #[clap(long = "fps", default_value_t = 30.0)]
+    #[clap(long = "fps", value_name = "FPS", default_value_t = 30.0)]
     target_fps: f32,
+
     #[clap(long = "rasterizer", value_enum, default_value_t = Rasterizer::Software)]
     rasterizer: Rasterizer,
 }

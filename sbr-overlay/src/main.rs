@@ -169,6 +169,14 @@ impl winit::application::ApplicationHandler for App<'_> {
             )
             .expect("failed to create window");
 
+        if let Some(DisplayHandle::X11(conn)) = &self.display_handle {
+            conn.send_and_check_request(&xcb::x::ChangeWindowAttributes {
+                window: softpresent::x11::extract_window_handle_from_window(&window).unwrap(),
+                value_list: &[xcb::x::Cw::BackPixel(0), xcb::x::Cw::BorderPixel(0)],
+            })
+            .unwrap();
+        };
+
         match self.args.rasterizer {
             Rasterizer::Software => {
                 if self.overlay_window_id.is_some() {

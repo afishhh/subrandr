@@ -31,6 +31,10 @@ pub trait PlayerConnector {
 }
 
 pub trait PlayerConnection {
+    fn get_window_id(&mut self) -> Option<u32> {
+        None
+    }
+
     // TODO: Make this fallible
     fn poll(&mut self) -> PlayerState;
 }

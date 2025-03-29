@@ -2,6 +2,7 @@ use std::{
     io::{BufRead as _, BufReader, Write as _},
     os::unix::net::UnixStream,
     path::PathBuf,
+    str::FromStr,
 };
 
 use anyhow::Result;
@@ -17,12 +18,19 @@ impl MpvSocket {
         })
     }
 
-    fn get_playback_time(&mut self) -> u32 {
+    fn get_property<T: FromStr>(&mut self, key: &str) -> T
+    where
+        <T as std::str::FromStr>::Err: std::fmt::Debug,
+    {
         loop {
             self.stream
                 .get_mut()
                 .write_all(
-                    concat!(r#"{ "command": ["get_property", "playback-time"] }"#, "\n").as_bytes(),
+                    format!(
+                        concat!(r#"{{ "command": ["get_property", "{key}"] }}"#, "\n"),
+                        key = key
+                    )
+                    .as_bytes(),
                 )
                 .unwrap();
 
@@ -37,8 +45,8 @@ impl MpvSocket {
                 if let Some(data_idx) = line.find(r#""data""#) {
                     let colon_idx = data_idx + line[data_idx..].find(":").unwrap() + 1;
                     let comma_idx = colon_idx + line[colon_idx..].find(',').unwrap();
-                    return (line[colon_idx..comma_idx].trim().parse::<f32>().unwrap() * 1000.)
-                        as u32;
+                    return line[colon_idx..comma_idx].trim().parse::<T>().unwrap();
+                    //     as u32;
                 }
             }
         }
@@ -46,11 +54,15 @@ impl MpvSocket {
 }
 
 impl super::PlayerConnection for MpvSocket {
+    fn get_window_id(&mut self) -> Option<u32> {
+        Some(dbg!(self.get_property("window-id")))
+    }
+
     fn poll(&mut self) -> super::PlayerState {
         super::PlayerState {
             dimensions: None,
             viewport: None,
-            current_time: self.get_playback_time(),
+            current_time: (self.get_property::<f32>("playback-time") * 1000.) as u32,
         }
     }
 }

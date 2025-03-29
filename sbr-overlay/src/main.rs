@@ -20,25 +20,38 @@ struct Args {
     file: Option<PathBuf>,
     #[clap(long = "dpi", default_value = "auto")]
     dpi: DpiMode,
+
     #[clap(
         long = "start",
         default_value_t = 0,
         conflicts_with = "ipc_connection_string"
     )]
     start_at: u32,
+
     #[clap(
         long = "speed",
         default_value_t = 1.0,
         conflicts_with = "ipc_connection_string"
     )]
     speed: f32,
+
     #[clap(long = "parse")]
     parse: bool,
-    #[clap(long = "overlay")]
-    /// X11 window ID to stay on top of.
-    x11_overlay_window: Option<u32>,
+
+    #[clap(long = "overlay", verbatim_doc_comment, default_value = "auto")]
+    /// Overlay the subtitle window over another existing window
+    ///
+    /// Allowed values:
+    /// - "player": Will attempt to get the player's window id via IPC. Requires `--connect` to be specified.
+    /// - "auto": Works like "player" except does not trigger an error if the feature is unsupported or `--connect` was not specified.
+    /// - "no": Disable overlaying entirely, useful to override the "auto" default.
+    /// - anything else: Will be parsed as a platform specific window id (currently a 32-bit unsigned integer). On X11 this ID can be acquired through tools like `xdotool`.
+    ///
+    /// Currently this is only supported on X11.
+    overlay: OverlayMode,
+
     #[clap(long = "connect")]
-    /// Player IPC connection string.
+    /// Player IPC connection string
     ipc_connection_string: Option<String>,
 
     #[clap(long = "fps", default_value_t = 30.0)]
@@ -75,10 +88,34 @@ impl FromStr for DpiMode {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum OverlayMode {
+    Auto,
+    Player,
+    Window(u32),
+    Disable,
+}
+
+impl FromStr for OverlayMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Auto),
+            "player" => Ok(Self::Player),
+            "no" => Ok(Self::Disable),
+            other => Ok(Self::Window(other.parse().map_err(
+                |_| r#"must be either "auto", "player", "no", or a non-negative 32-bit integer"#,
+            )?)),
+        }
+    }
+}
+
 struct App<'a> {
     args: Args,
 
     player_connection: Option<Box<dyn ipc::PlayerConnection>>,
+    overlay_window_id: Option<u32>,
 
     start: std::time::Instant,
     renderer: Renderer<'a>,
@@ -126,7 +163,7 @@ impl winit::application::ApplicationHandler for App<'_> {
 
         match self.args.rasterizer {
             Rasterizer::Software => {
-                if self.args.x11_overlay_window.is_some() {
+                if self.overlay_window_id.is_some() {
                     let xwindow = match window
                         .window_handle()
                         .expect("failed to get system window handle")
@@ -201,7 +238,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                 Some(state) => {
                     let frame_start = Instant::now();
 
-                    let geometry = if let Some(id) = self.args.x11_overlay_window {
+                    let geometry = if let Some(id) = self.overlay_window_id {
                         let conn = match &self.display_handle {
                             Some(DisplayHandle::X11(conn)) => conn,
                             _ => unreachable!(),
@@ -406,11 +443,7 @@ fn main() {
         },
     }
 
-    if args.x11_overlay_window.is_some() && !matches!(display_handle, Some(DisplayHandle::X11(_))) {
-        panic!("x11_overlay_window is only supported on X11")
-    }
-
-    let player_connection = if let Some(connection_string) = &args.ipc_connection_string {
+    let mut player_connection = if let Some(connection_string) = &args.ipc_connection_string {
         let mut result = None;
         for desc in ipc::AVAILABLE_CONNECTORS {
             if let Some(suffix) = connection_string
@@ -429,11 +462,32 @@ fn main() {
         None
     };
 
+    let display_supports_overlay = matches!(display_handle, Some(DisplayHandle::X11(_)));
+
+    let overlay_window_id = match (args.overlay, display_supports_overlay) {
+        (OverlayMode::Auto, false) => None,
+        (OverlayMode::Disable, _) => None,
+        (_, false) => panic!("Window overlay is only supported on X11"),
+        (OverlayMode::Auto | OverlayMode::Player, true) => {
+            if let Some(player) = player_connection.as_mut() {
+                player.get_window_id()
+            } else {
+                if matches!(args.overlay, OverlayMode::Player) {
+                    panic!("Overlay mode is `player` but no player connection string specified");
+                }
+
+                None
+            }
+        }
+        (OverlayMode::Window(window), true) => Some(window),
+    };
+
     event_loop
         .run_app(&mut App {
             start: std::time::Instant::now(),
 
             player_connection,
+            overlay_window_id,
 
             display_handle,
 

@@ -1,6 +1,7 @@
 use std::{
     mem::ManuallyDrop,
     path::PathBuf,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -17,8 +18,8 @@ use xcb::XidNew;
 #[derive(clap::Parser)]
 struct Args {
     file: Option<PathBuf>,
-    #[clap(long = "dpi")]
-    dpi: Option<u32>,
+    #[clap(long = "dpi", default_value = "auto")]
+    dpi: DpiMode,
     #[clap(
         long = "start",
         default_value_t = 0,
@@ -55,16 +56,28 @@ enum Rasterizer {
 mod ipc;
 mod softpresent;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum DpiMode {
     Automatic,
     Override(u32),
 }
 
+impl FromStr for DpiMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "auto" => Ok(Self::Automatic),
+            other => Ok(Self::Override(other.parse().map_err(
+                |_| r#"must be either "auto" or a non-negative 64-bit integer"#,
+            )?)),
+        }
+    }
+}
+
 struct App<'a> {
     args: Args,
 
-    dpi: DpiMode,
     player_connection: Option<Box<dyn ipc::PlayerConnection>>,
 
     start: std::time::Instant,
@@ -224,7 +237,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                     };
 
                     let mut ctx = SubtitleContext {
-                        dpi: match self.dpi {
+                        dpi: match self.args.dpi {
                             DpiMode::Automatic => (state.window().scale_factor() * 72.) as u32,
                             DpiMode::Override(dpi) => dpi,
                         },
@@ -417,10 +430,6 @@ fn main() {
         .run_app(&mut App {
             start: std::time::Instant::now(),
 
-            dpi: match args.dpi {
-                Some(dpi) => DpiMode::Override(dpi),
-                None => DpiMode::Automatic,
-            },
             player_connection,
 
             display_handle,

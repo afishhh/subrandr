@@ -10,12 +10,13 @@ TODO: ttml is what netflix uses, probably not too difficult to support
 TODO: experiment with using fixed point arithmetic for linear RGBA calculations
       and gaussian blur
 
-#### x11-transparent-window example
+#### `sbr-overlay`
 
-An example program for X11 is also present in this repository. It allows testing this library by rendering subtitles onto a transparent X11 window. To aid in this testing it also provides functionality that allows you to overlay the window on an existing video player (or even the YouTube website).
+An example program is also present in this repository. It allows testing this library by rendering subtitles onto a transparent window. To aid in this testing it also provides functionality that allows you to overlay the window on an existing video player (or even the YouTube website).
 
-The `--overlay` flag allows you to specify an X window id to overlay the window over.
-Subtitles can be synchronized with video playback in the `mpv` video player by specifying an `--mpv-socket` (created using `--input-ipc-server` mpv option). You can also synchronize and overlay over a YouTube tab by using the `--cbp` flag which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.
+Subtitles can be synchronized with video playback in the mpv video player by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (created using `--input-ipc-server` mpv option). You can also synchronize and overlay over a YouTube tab using `--connect youtube-cdp:<CDP_URL>` which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.
+
+The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target.
 
 #### Usage
 

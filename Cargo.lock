@@ -1159,14 +1159,9 @@ name = "subrandr"
 version = "0.1.0"
 dependencies = [
  "aliasable",
- "clap",
  "quick-xml 0.36.2",
- "serde",
- "serde_json",
  "text-sys",
  "thiserror 1.0.63",
- "tungstenite",
- "xcb",
 ]
 
 [[package]]

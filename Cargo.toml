@@ -14,15 +14,6 @@ quick-xml = "0.36"
 
 text-sys = { path = "./text-sys" }
 
-# TODO: remove x11-transparent-window once sbr-overlay is tested to be
-#       good enough
-[dev-dependencies]
-xcb = { version = "1", features = ["res", "shape"] }
-clap = { version = "4", features = ["derive"] }
-tungstenite = "0.26.1"
-serde_json = "1.0.134"
-serde = { version = "1.0.216", features = ["derive"] }
-
 [profile.release]
 panic = "abort"
 

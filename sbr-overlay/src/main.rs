@@ -119,7 +119,8 @@ impl winit::application::ApplicationHandler for App<'_> {
             .create_window(
                 WindowAttributes::default()
                     .with_transparent(true)
-                    .with_decorations(false),
+                    .with_decorations(false)
+                    .with_visible(false),
             )
             .expect("failed to create window");
 
@@ -161,6 +162,8 @@ impl winit::application::ApplicationHandler for App<'_> {
                     })
                     .unwrap();
                 }
+
+                window.set_visible(true);
 
                 self.state = Some(WindowState::Software(SoftwareWindowState {
                     presenter: softpresent::Presenter::new(&window)

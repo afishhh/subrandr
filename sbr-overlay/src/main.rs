@@ -420,6 +420,11 @@ fn main() {
         Subtitles::test_new()
     };
 
+    if args.parse {
+        println!("{subs:?}");
+        return;
+    }
+
     let renderer = Renderer::new(&sbr, &subs);
 
     let event_loop = EventLoop::new().unwrap();

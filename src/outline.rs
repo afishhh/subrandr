@@ -259,8 +259,8 @@ impl Outline {
         self.evaluate_segment_normalized(t.trunc() as usize, t.fract())
     }
 
-    pub fn control_box(&self) -> Rect2 {
-        let mut bb = Rect2::NOTHING;
+    pub fn control_box(&self) -> Rect2f {
+        let mut bb = Rect2f::NOTHING;
         for point in self.points.iter() {
             bb.expand_to_point(point);
         }

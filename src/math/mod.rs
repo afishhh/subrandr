@@ -247,20 +247,23 @@ impl<N: Number> Sum<Vec2<N>> for Point2<N> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Rect2 {
-    pub min: Point2f,
-    pub max: Point2f,
+// TODO: Maybe just make Point2 Debug when N: Debug
+pub struct Rect2<N: Display> {
+    pub min: Point2<N>,
+    pub max: Point2<N>,
 }
 
-impl Rect2 {
+pub type Rect2f = Rect2<f32>;
+
+impl<N: Number + Display> Rect2<N> {
     pub const NOTHING: Self = Self {
-        min: Point2f::new(f32::MAX, f32::MAX),
-        max: Point2f::new(f32::MIN, f32::MIN),
+        min: Point2::new(N::MAX, N::MAX),
+        max: Point2::new(N::MIN, N::MIN),
     };
 
     pub const ZERO: Self = Self {
-        min: Point2f::ZERO,
-        max: Point2f::ZERO,
+        min: Point2::ZERO,
+        max: Point2::ZERO,
     };
 
     pub fn is_negative(&self) -> bool {
@@ -282,28 +285,28 @@ impl Rect2 {
             && self.max.y >= other.min.y
     }
 
-    pub fn size(&self) -> Vec2f {
+    pub fn size(&self) -> Vec2<N> {
         self.max - self.min
     }
 
-    pub fn area(&self) -> f32 {
+    pub fn area(&self) -> N {
         let size = self.size();
-        // Rect2::NOTHING
-        if self.min.x > self.max.x {
-            0.0
+
+        if self.is_negative() {
+            N::ZERO
         } else {
             size.x * size.y
         }
     }
 
-    pub fn expand_to_point(&mut self, point: &Point2f) {
+    pub fn expand_to_point(&mut self, point: &Point2<N>) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
         self.max.x = self.max.x.max(point.x);
         self.max.y = self.max.y.max(point.y);
     }
 
-    pub fn bounding_from_points(points: &[Point2f]) -> Self {
+    pub fn bounding_from_points(points: &[Point2<N>]) -> Self {
         let mut bb = Self::NOTHING;
         for point in points {
             bb.expand_to_point(point);

@@ -2,7 +2,7 @@ use std::{mem::MaybeUninit, ops::Deref};
 
 use crate::util::slice_assume_init_mut;
 
-use super::{Point2f, Rect2, Vec2f};
+use super::{Point2f, Rect2f, Vec2f};
 
 const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
@@ -56,8 +56,8 @@ pub trait Bezier {
     }
     fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>);
 
-    fn bounding_box(&self) -> Rect2 {
-        Rect2::bounding_from_points(self.points())
+    fn bounding_box(&self) -> Rect2f {
+        Rect2f::bounding_from_points(self.points())
     }
 }
 

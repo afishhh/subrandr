@@ -13,8 +13,25 @@ pub trait Number:
     + DivAssign<Self>
     + MulAssign<Self>
     + Neg<Output = Self>
+    + PartialOrd
     + Copy
 {
+    fn min(self, other: Self) -> Self {
+        if self < other {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn max(self, other: Self) -> Self {
+        if self > other {
+            self
+        } else {
+            other
+        }
+    }
+
     const MIN: Self;
     const MAX: Self;
     const ZERO: Self;

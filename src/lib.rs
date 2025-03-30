@@ -192,7 +192,7 @@ impl Default for TextDecorations {
 #[derive(Debug, Clone)]
 pub struct ShapeSegment {
     outline: outline::Outline,
-    bounding_box: math::Rect2,
+    bounding_box: math::Rect2f,
     stroke_x: f32,
     stroke_y: f32,
     stroke_color: BGRA8,

@@ -180,8 +180,20 @@ impl FontSelect {
             cached.as_ref().cloned()
         } else {
             let mut choices = self.provider.query(request).map_err(Error::Provider)?;
-            // TODO: sort these
+
+            let custom_start = choices.len();
             choices.extend(self.custom.iter().cloned());
+
+            choices[custom_start..].sort_by_cached_key(|font| {
+                let score = request
+                    .families
+                    .iter()
+                    .position(|rf| font.family.eq_ignore_ascii_case(rf))
+                    .unwrap_or(usize::MAX);
+
+                score
+            });
+
             let mut result = choose(&choices, request)
                 .map(|x| {
                     if let Some(cached) = self.source_cache.get(&x.source) {

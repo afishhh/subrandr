@@ -14,7 +14,7 @@ const SRV3_FONTS: &[&[&str]] = &[
         "Courier",
         "Nimbus Mono L",
         "Cutive Mono",
-        "monosopace",
+        "monospace",
     ],
     &[
         "Times New Roman",

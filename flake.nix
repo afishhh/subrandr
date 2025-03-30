@@ -33,6 +33,7 @@
             rust-bindgen
             pkg-config
             xdotool # useful for testing
+            web-ext
           ] ++ runtimeLibs;
           buildInputs = runtimeLibs;
           shellHook = ''

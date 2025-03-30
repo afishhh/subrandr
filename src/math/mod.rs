@@ -299,7 +299,7 @@ impl<N: Number + Display> Rect2<N> {
         }
     }
 
-    pub fn expand_to_point(&mut self, point: &Point2<N>) {
+    pub fn expand_to_point(&mut self, point: Point2<N>) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
         self.max.x = self.max.x.max(point.x);
@@ -308,7 +308,7 @@ impl<N: Number + Display> Rect2<N> {
 
     pub fn bounding_from_points(points: &[Point2<N>]) -> Self {
         let mut bb = Self::NOTHING;
-        for point in points {
+        for &point in points {
             bb.expand_to_point(point);
         }
         bb

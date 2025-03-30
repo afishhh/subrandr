@@ -103,8 +103,7 @@ impl EventExtra {
             &Self::Test { x, y } => EventLayout {
                 x: ctx.padding_left + (x * ctx.video_width),
                 y: ctx.padding_top + (y * ctx.video_height),
-                max_width: f32::INFINITY,
-                max_height: f32::INFINITY,
+                wrap_width: ctx.player_width(),
             },
         }
     }
@@ -113,8 +112,7 @@ impl EventExtra {
 struct EventLayout {
     x: f32,
     y: f32,
-    max_width: f32,
-    max_height: f32,
+    wrap_width: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -567,6 +565,7 @@ struct PixelRect {
     h: u32,
 }
 
+const DRAW_VERSION_STRING: bool = true;
 const DRAW_PERF_DEBUG_INFO: bool = true;
 const DRAW_LAYOUT_DEBUG_INFO: bool = false;
 
@@ -718,7 +717,6 @@ impl<'a> Renderer<'a> {
 
         let (horizontal, vertical) = alignment.into_parts();
 
-        // TODO: Numbers chosen arbitrarily
         let ox = match horizontal {
             HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
             HorizontalAlignment::Center => -extents.paint_width.trunc_to_inner() / 2,
@@ -902,6 +900,23 @@ impl<'a> Renderer<'a> {
             self.subs.class.get_name()
         );
 
+        if DRAW_VERSION_STRING {
+            self.debug_text(
+                0,
+                0,
+                concat!(
+                    "subrandr ",
+                    env!("CARGO_PKG_VERSION"),
+                    " rev ",
+                    env!("BUILD_REV")
+                ),
+                Alignment::TopLeft,
+                16.0,
+                BGRA8::WHITE,
+                painter,
+            );
+        }
+
         if DRAW_PERF_DEBUG_INFO {
             self.debug_text(
                 (ctx.padding_left + ctx.video_width) as i32,
@@ -912,7 +927,7 @@ impl<'a> Renderer<'a> {
                 ),
                 Alignment::TopRight,
                 16.0,
-                BGRA8::from_rgba32(0xFFFFFFFF),
+                BGRA8::WHITE,
                 painter,
             );
 
@@ -929,7 +944,7 @@ impl<'a> Renderer<'a> {
                 ),
                 Alignment::TopRight,
                 16.0,
-                BGRA8::from_rgba32(0xFFFFFFFF),
+                BGRA8::WHITE,
                 painter,
             );
 
@@ -950,7 +965,7 @@ impl<'a> Renderer<'a> {
                     ),
                     Alignment::TopRight,
                     16.0,
-                    BGRA8::from_rgba32(0xFFFFFFFF),
+                    BGRA8::WHITE,
                     painter,
                 );
 
@@ -961,7 +976,7 @@ impl<'a> Renderer<'a> {
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
                         Alignment::TopRight,
                         16.0,
-                        BGRA8::from_rgba32(0xFFFFFFFF),
+                        BGRA8::WHITE,
                         painter,
                     );
                 }
@@ -1001,12 +1016,7 @@ impl<'a> Renderer<'a> {
                     continue;
                 }
 
-                let EventLayout {
-                    x,
-                    y,
-                    max_width,
-                    max_height,
-                } = event.extra.compute_layout(ctx, event);
+                let EventLayout { x, y, wrap_width } = event.extra.compute_layout(ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
                 for segment in event.segments.iter() {
@@ -1045,8 +1055,7 @@ impl<'a> Renderer<'a> {
                     horizontal_alignment,
                     TextWrapParams {
                         mode: event.text_wrap,
-                        max_width,
-                        max_height,
+                        wrap_width,
                     },
                     &mut self.fonts,
                 );
@@ -1145,7 +1154,7 @@ impl<'a> Renderer<'a> {
                             },
                             Alignment::BottomRight,
                             16.0,
-                            BGRA8::from_rgba32(0xFFFFFFFF),
+                            BGRA8::WHITE,
                             painter,
                         );
 

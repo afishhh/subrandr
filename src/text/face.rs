@@ -496,6 +496,7 @@ impl Font {
         unsafe { (*(*face).size).metrics }
     }
 
+    // TODO: Make these result in Fixed<> values
     pub fn horizontal_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {

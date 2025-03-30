@@ -30,7 +30,7 @@ pub struct ShapedLineSegment {
     pub paint_rect: PixelRect,
     pub corresponding_input_segment: usize,
     // Implementation details
-    max_bearing_y: I32Fixed<6>,
+    max_ascender: I32Fixed<6>,
     corresponding_font_boundary: usize,
 }
 
@@ -46,12 +46,10 @@ pub struct ShapedLine {
     pub paint_size: Size2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TextWrapParams {
     pub mode: TextWrapMode,
-    pub max_width: f32,
-    // will be used later for vertical text I guess
-    pub max_height: f32,
+    pub wrap_width: f32,
 }
 
 // TODO: Notes on text layout for ASS when time comes
@@ -107,7 +105,7 @@ impl MultilineTextShaper {
     pub fn shape(
         &self,
         line_alignment: HorizontalAlignment,
-        _wrap: TextWrapParams,
+        wrap: TextWrapParams,
         font_select: &mut FontSelect,
     ) -> (Vec<ShapedLine>, PixelRect) {
         // assert_eq!(wrap.mode, TextWrapMode::None);
@@ -119,6 +117,8 @@ impl MultilineTextShaper {
                 self.explicit_line_bounaries
             );
         }
+
+        let wrap_width = I32Fixed::from_f32(wrap.wrap_width);
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut total_extents = TextExtents {
@@ -133,30 +133,17 @@ impl MultilineTextShaper {
             h: 0,
         };
 
+        let mut current_explicit_line = 0;
         let mut current_segment = 0;
         let mut current_intra_split = 0;
         let mut last = 0;
-        for line_boundary in self
-            .explicit_line_bounaries
-            .iter()
-            .copied()
-            .chain(std::iter::once(self.text.len()))
-        {
-            // TODO: Where to get spacing?
-            // let spacing = font.horizontal_extents().line_gap as i32 + 10;
-            // if let Some(last) = lines.last() {
-            //     let x = last
-            //         .segments
-            //         .iter()
-            //         .map(|x| &self.font_boundaries[x.corresponding_font_boundary].0)
-            //         .map(|f| f.metrics().height)
-            //         .collect::<Vec<_>>();
-            //     println!("spacing {x:?}");
-            // }
-            // if !lines.is_empty() {
-            //     total_extents.paint_height += 10 * 64;
-            // }
-
+        let mut post_wrap_skip = 0;
+        while current_explicit_line <= self.explicit_line_bounaries.len() {
+            let mut line_boundary = self
+                .explicit_line_bounaries
+                .get(current_explicit_line)
+                .copied()
+                .unwrap_or(self.text.len());
             let mut segments: Vec<ShapedLineSegment> = vec![];
             let mut line_extents = TextExtents {
                 paint_height: I32Fixed::ZERO,
@@ -175,11 +162,15 @@ impl MultilineTextShaper {
                 );
             }
 
+            let mut max_ascender = I32Fixed::ZERO;
+
             while self.segment_boundaries[current_segment].1 <= last {
                 current_segment += 1;
             }
 
-            loop {
+            let mut did_wrap = false;
+
+            'segment_shaper: loop {
                 let (ref segment, font_boundary) = self.segment_boundaries[current_segment];
 
                 let end = font_boundary.min(line_boundary);
@@ -197,11 +188,76 @@ impl MultilineTextShaper {
                             buffer.add(&self.text[segment_slice]);
                             buffer.shape(font, &mut segment_fonts, font_select)
                         };
-                        let segment_fonts = Rc::new(segment_fonts);
 
                         let (extents, (trailing_x_advance, _)) =
                             text::compute_extents_ex(true, &segment_fonts, &glyphs);
 
+                        // println!("{:?} {:?}", line_extents, extents);
+                        if !did_wrap && line_extents.paint_width + extents.paint_width > wrap_width
+                        {
+                            let mut x = line_extents.paint_width;
+                            let mut glyph_it = glyphs.iter();
+                            if let Some(first) = glyph_it.next() {
+                                x += first.x_advance;
+                            }
+
+                            for glyph in glyph_it {
+                                let x_after = x
+                                    + glyph.x_offset
+                                    + segment_fonts[glyph.font_index]
+                                        .glyph_extents(glyph.index)
+                                        .width;
+                                // TODO: also ensure conformance with unicode line breaking
+                                //       this would ensure, for example, that no line
+                                //       breaks are inserted between a character and
+                                //       a combining mark and that word joiners are
+                                //       respected.
+                                if x_after > wrap_width {
+                                    let idx = last + glyph.cluster;
+                                    let break_at = {
+                                        // FIXME: What to do about words that are partially rendered with
+                                        //        different fonts? This will not handle those properly because
+                                        //        they will be in different segments...
+                                        //        This would basically require backtracking and reshaping across
+                                        //        segment boundaries.
+                                        match self.text[last..idx].rfind(' ') {
+                                            Some(off) => {
+                                                post_wrap_skip = 1;
+                                                last + off
+                                            }
+                                            None => {
+                                                // No spaces available for breaking, render the whole word.
+                                                match self.text[idx..end].find(' ') {
+                                                    Some(off) => {
+                                                        post_wrap_skip = 1;
+                                                        idx + off
+                                                    }
+                                                    None => break,
+                                                }
+                                            }
+                                        }
+                                    };
+
+                                    did_wrap = true;
+                                    line_boundary = break_at;
+
+                                    if line_boundary == last {
+                                        break 'segment_shaper;
+                                    }
+
+                                    // Reshape this segment with the new line boundary
+                                    continue 'segment_shaper;
+                                }
+                                x += glyph.x_advance;
+                            }
+                            // the text is made up of one glyph and we can't
+                            // split it up, go through with rendering it.
+                        }
+
+                        let segment_ascender = I32Fixed::from_ft(font.metrics().ascender);
+                        max_ascender = std::cmp::max(max_ascender, segment_ascender);
+
+                        let segment_fonts = Rc::new(segment_fonts);
                         let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
                         if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -228,7 +284,7 @@ impl MultilineTextShaper {
                                     w: extents.paint_width.trunc_to_inner() as u32,
                                     h: extents.paint_height.trunc_to_inner() as u32,
                                 },
-                                max_bearing_y: extents.max_bearing_y,
+                                max_ascender: segment_ascender,
                                 corresponding_font_boundary: current_segment,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
@@ -260,7 +316,7 @@ impl MultilineTextShaper {
                                         w: extents.paint_width.trunc_to_inner() as u32,
                                         h: extents.paint_height.trunc_to_inner() as u32,
                                     },
-                                    max_bearing_y: extents.max_bearing_y,
+                                    max_ascender: segment_ascender,
                                     corresponding_font_boundary: current_segment,
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
@@ -310,11 +366,10 @@ impl MultilineTextShaper {
                             },
                             corresponding_input_segment: current_segment + current_intra_split,
                             corresponding_font_boundary: current_segment + current_intra_split,
-                            max_bearing_y: segment_max_bearing_y,
+                            max_ascender: segment_max_bearing_y,
                         });
-                        line_extents.paint_width += logical_w as i32;
-                        line_extents.max_bearing_y =
-                            line_extents.max_bearing_y.max(segment_max_bearing_y);
+                        line_extents.paint_width += (logical_w * 64) as i32;
+                        max_ascender = max_ascender.max(segment_max_bearing_y);
                         line_extents.paint_height = line_extents
                             .paint_height
                             .max(I32Fixed::new(logical_h as i32));
@@ -324,6 +379,9 @@ impl MultilineTextShaper {
                 last = end;
 
                 if end == line_boundary {
+                    if !did_wrap {
+                        current_explicit_line += 1;
+                    }
                     break;
                 } else {
                     current_segment += 1;
@@ -331,6 +389,9 @@ impl MultilineTextShaper {
             }
 
             debug_assert_eq!(last, line_boundary);
+
+            last += post_wrap_skip;
+            post_wrap_skip = 0;
 
             let aligning_x_offset = match line_alignment {
                 HorizontalAlignment::Left => IFixed26Dot6::ZERO,
@@ -342,12 +403,11 @@ impl MultilineTextShaper {
                 segment.baseline_offset.x += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset.trunc_to_inner();
                 if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.y += line_extents.max_bearing_y - segment.max_bearing_y;
+                    segment.baseline_offset.y += max_ascender - segment.max_ascender;
                 } else {
-                    segment.baseline_offset.y += line_extents.max_bearing_y;
+                    segment.baseline_offset.y += max_ascender;
                 }
-                segment.paint_rect.y +=
-                    (line_extents.max_bearing_y - segment.max_bearing_y).trunc_to_inner();
+                segment.paint_rect.y += (max_ascender - segment.max_ascender).trunc_to_inner();
             }
 
             if !segments.is_empty() {

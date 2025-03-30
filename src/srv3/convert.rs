@@ -228,8 +228,7 @@ impl Srv3Event {
         EventLayout {
             x: self.x * ctx.player_width(),
             y: self.y * ctx.player_height(),
-            max_width: ctx.player_width() * 0.96,
-            max_height: ctx.player_height() * 0.96,
+            wrap_width: ctx.player_width() * 0.96,
         }
     }
 }

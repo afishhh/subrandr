@@ -13,11 +13,10 @@ fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
 
 const PADDING_RADIUS: usize = 2;
 
-// FIXME: I wonder whether this gets as inlined as I want it to be
 #[inline(always)]
 unsafe fn sliding_sum(
-    front: &[f32],
-    back: &mut [MaybeUninit<f32>],
+    front: *const f32,
+    back: *mut f32,
     stride: usize,
     length: usize,
     radius: usize,
@@ -26,25 +25,25 @@ unsafe fn sliding_sum(
     let mut sum = 0.0;
     let mut x = 0;
     for _ in 0..radius {
-        sum += unsafe { *front.get_unchecked(x * stride) };
+        sum += unsafe { *front.add(x * stride) };
     }
 
     while x < radius {
-        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
-        sum += unsafe { *front.get_unchecked((x + radius) * stride) };
+        unsafe { back.add(x * stride).write(sum * iextent) };
+        sum += unsafe { *front.add((x + radius) * stride) };
         x += 1;
     }
 
     while x < length - radius {
-        sum += unsafe { *front.get_unchecked((x + radius) * stride) };
-        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
-        sum -= unsafe { *front.get_unchecked((x - radius) * stride) };
+        sum += unsafe { *front.add((x + radius) * stride) };
+        unsafe { back.add(x * stride).write(sum * iextent) };
+        sum -= unsafe { *front.add((x - radius) * stride) };
         x += 1;
     }
 
     while x < length {
-        unsafe { back.get_unchecked_mut(x * stride).write(sum * iextent) };
-        sum -= unsafe { *front.get_unchecked((x - radius) * stride) };
+        unsafe { back.add(x * stride).write(sum * iextent) };
+        sum -= unsafe { *front.add((x - radius) * stride) };
         x += 1;
     }
 }
@@ -133,12 +132,13 @@ impl Blurer {
         );
     }
 
+    #[inline(never)]
     fn box_blur_horizontal(&mut self) {
         for y in 0..self.height {
             unsafe {
                 sliding_sum(
-                    &self.front[y * self.width..(y + 1) * self.width],
-                    &mut self.back[y * self.width..(y + 1) * self.width],
+                    self.front.as_ptr().add(y * self.width),
+                    self.back.as_mut_ptr().add(y * self.width).cast(),
                     1,
                     self.width,
                     self.radius,
@@ -150,12 +150,13 @@ impl Blurer {
         unsafe { self.swap_buffers() };
     }
 
+    #[inline(never)]
     fn box_blur_vertical(&mut self) {
         for x in 0..self.width {
             unsafe {
                 sliding_sum(
-                    &self.front[x..],
-                    &mut self.back[x..],
+                    self.front.as_ptr().add(x),
+                    self.back.as_mut_ptr().add(x).cast(),
                     self.width,
                     self.height,
                     self.radius,
@@ -236,10 +237,9 @@ pub fn monochrome_gaussian_blit(
             + xs.start as isize
             + tox as isize) as usize;
         for sx in xs.clone() {
-            let mut khere = blurred[sy * blurer.width + sx];
-            khere = khere.clamp(0.0, 1.0);
+            let k = blurred[sy * blurer.width + sx].clamp(0.0, 1.0);
 
-            let c = BGRA8::from_bytes([color[0], color[1], color[2], (khere * 255.0) as u8]);
+            let c = BGRA8::from_bytes([color[0], color[1], color[2], (k * 255.0) as u8]);
             target[ti] = c.blend_over(target[ti]).0;
             ti += 1;
         }

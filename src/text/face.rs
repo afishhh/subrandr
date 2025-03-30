@@ -611,7 +611,10 @@ impl GlyphCache {
         let glyphs = unsafe { &mut *self.glyphs.get() };
 
         let keep_after = self.generation.get().saturating_sub(2);
-        glyphs.retain(|_, slot| slot.generation > keep_after);
+        // TODO: A scan-resistant LRU?
+        if glyphs.len() > 200 {
+            glyphs.retain(|_, slot| slot.generation > keep_after);
+        }
         self.generation.set(self.generation.get() + 1);
     }
 

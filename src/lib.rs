@@ -32,7 +32,6 @@ mod util;
 mod wasm;
 
 pub use painter::*;
-use util::ref_to_slice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
@@ -701,10 +700,16 @@ impl<'a> Renderer<'a> {
         let (ox, oy) = Self::translate_for_aligned_text(
             &font,
             true,
-            &text::compute_extents(true, ref_to_slice(&font), &shaped.glyphs),
+            &text::compute_extents(true, std::slice::from_ref(&font), &shaped.glyphs),
             alignment,
         );
-        painter.text(x + ox, y + oy, ref_to_slice(&font), &shaped.glyphs, color);
+        painter.text(
+            x + ox,
+            y + oy,
+            std::slice::from_ref(&font),
+            &shaped.glyphs,
+            color,
+        );
     }
 
     fn translate_for_aligned_text(

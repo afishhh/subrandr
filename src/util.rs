@@ -31,10 +31,6 @@ pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
     (ptr, len, capacity)
 }
 
-pub const fn ref_to_slice<T>(reference: &T) -> &[T; 1] {
-    unsafe { std::mem::transmute(reference) }
-}
-
 pub struct BlitRectangle {
     pub xs: Range<usize>,
     pub ys: Range<usize>,

@@ -309,7 +309,23 @@ impl winit::application::ApplicationHandler for App<'_> {
                     let mut voffset_y = 0;
 
                     let t = if let Some(ref mut ipc) = self.player_connection {
-                        let state = ipc.poll();
+                        let mut track_switched = false;
+
+                        let state = ipc.poll(&mut track_switched);
+
+                        if track_switched && self.args.file.is_none() {
+                            if let Some(path) = self
+                                .player_connection
+                                .as_mut()
+                                .and_then(|x| x.get_stream_path().transpose())
+                                .transpose()
+                                .context("Failed to get stream path from player")
+                                .unwrap()
+                            {
+                                self.subs =
+                                    find_subs_near_path(self.renderer.library(), &path).unwrap();
+                            };
+                        }
 
                         if let Some(ipc::PlayerViewport { offset_x, offset_y }) = state.viewport {
                             s_width -= offset_x;
@@ -413,6 +429,39 @@ fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitle
     })
 }
 
+fn find_subs_near_path(sbr: &Subrandr, path: &Path) -> Result<Option<subrandr::Subtitles>> {
+    const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"ass"];
+
+    println!("Looking for subtitles files near {}", path.display());
+
+    let mut candidates = Vec::new();
+    for entry in path.parent().unwrap().read_dir().unwrap() {
+        let entry = entry.unwrap();
+        let filename = entry.file_name();
+
+        if filename
+            .as_encoded_bytes()
+            .starts_with(path.file_stem().unwrap().as_encoded_bytes())
+        {
+            for (i, &ext) in ATTEMPTED_EXTENSIONS.iter().enumerate() {
+                if filename.as_encoded_bytes().ends_with(ext) {
+                    candidates.push((entry.path(), i));
+                }
+            }
+        }
+    }
+
+    candidates.sort_by_key(|(_, index)| *index);
+
+    if let Some((found, _)) = candidates.first() {
+        println!("Using {}", found.display());
+        Ok(Some(load_subs_from_file(sbr, found)?))
+    } else {
+        println!("No subtitles found");
+        Ok(None)
+    }
+}
+
 fn main() {
     let args = Args::from_arg_matches_mut(
         &mut Args::command()
@@ -480,6 +529,14 @@ fn main() {
     let sbr = Subrandr::init();
     let subs = if let Some(file) = args.file.as_ref() {
         Some(load_subs_from_file(&sbr, file).unwrap())
+    } else if let Some(path) = player_connection
+        .as_mut()
+        .and_then(|x| x.get_stream_path().transpose())
+        .transpose()
+        .context("Failed to get stream path from player")
+        .unwrap()
+    {
+        find_subs_near_path(&sbr, &path).unwrap()
     } else {
         Some(Subtitles::test_new())
     };

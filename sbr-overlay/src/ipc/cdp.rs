@@ -202,7 +202,7 @@ impl ChromeYoutubeIpc {
 }
 
 impl super::PlayerConnection for ChromeYoutubeIpc {
-    fn poll(&mut self) -> super::PlayerState {
+    fn poll(&mut self, _track_switched: &mut bool) -> super::PlayerState {
         // whole player = #movie_player
         // video part only = #movie_player > div:nth-child(1) > video:nth-child(1)
         serde_json::from_value(self.run_js_in_lambda(

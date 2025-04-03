@@ -42,7 +42,7 @@ pub trait PlayerConnection {
     }
 
     // TODO: Make this fallible
-    fn poll(&mut self) -> PlayerState;
+    fn poll(&mut self, track_switched: &mut bool) -> PlayerState;
 }
 
 #[cfg(feature = "ipc-browser-cdp")]

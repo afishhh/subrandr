@@ -695,6 +695,14 @@ impl<'a> Renderer<'a> {
         }
     }
 
+    pub fn library(&self) -> &'a Subrandr {
+        self.sbr
+    }
+
+    pub fn invalidate_subtitles(&mut self) {
+        self.unchanged_range = 0..0;
+    }
+
     fn debug_text(
         &mut self,
         x: i32,

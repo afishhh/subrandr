@@ -13,12 +13,16 @@ struct MpvSocket {
 
 impl MpvSocket {
     fn connect(path: PathBuf) -> std::io::Result<MpvSocket> {
-        Ok(MpvSocket {
+        Ok(Self {
             stream: BufReader::new(UnixStream::connect(path)?),
         })
     }
 
-    fn get_property<T: DeserializeOwned>(&mut self, key: &str) -> Result<T> {
+    fn get_property<T: DeserializeOwned>(
+        &mut self,
+        key: &str,
+        mut track_switched: Option<&mut bool>,
+    ) -> Result<T> {
         loop {
             self.stream
                 .get_mut()
@@ -35,6 +39,13 @@ impl MpvSocket {
             loop {
                 line.clear();
                 self.stream.read_line(&mut line).unwrap();
+
+                if line.contains("start-file") {
+                    if let Some(flag) = track_switched.as_deref_mut() {
+                        *flag = true;
+                    }
+                    continue;
+                }
 
                 if line.contains("property unavailable") {
                     break;
@@ -55,24 +66,47 @@ impl MpvSocket {
     }
 }
 
-impl super::PlayerConnection for MpvSocket {
+struct MpvConnection {
+    socket: MpvSocket,
+    remote_working_dir: PathBuf,
+}
+
+impl MpvConnection {
+    fn connect(path: PathBuf) -> Result<Self> {
+        Ok({
+            let mut socket = MpvSocket::connect(path)?;
+            Self {
+                remote_working_dir: socket.get_property("working-directory", None)?,
+                socket,
+            }
+        })
+    }
+}
+
+impl super::PlayerConnection for MpvConnection {
     fn get_window_id(&mut self) -> Option<u32> {
-        Some(self.get_property("window-id").unwrap())
+        Some(self.socket.get_property("window-id", None).unwrap())
     }
 
     fn get_stream_path(&mut self) -> Result<Option<PathBuf>> {
         Ok(Some(
-            self.get_property::<PathBuf>("working-directory")
-                .unwrap()
-                .join(self.get_property::<PathBuf>("stream-path").unwrap()),
+            self.remote_working_dir.join(
+                self.socket
+                    .get_property::<PathBuf>("stream-path", None)
+                    .unwrap(),
+            ),
         ))
     }
 
-    fn poll(&mut self) -> super::PlayerState {
+    fn poll(&mut self, track_switched: &mut bool) -> super::PlayerState {
         super::PlayerState {
             dimensions: None,
             viewport: None,
-            current_time: (self.get_property::<f32>("playback-time").unwrap() * 1000.) as u32,
+            current_time: (self
+                .socket
+                .get_property::<f32>("playback-time", Some(track_switched))
+                .unwrap()
+                * 1000.) as u32,
         }
     }
 }
@@ -82,7 +116,7 @@ pub struct Connector;
 impl super::PlayerConnector for Connector {
     fn try_connect(&self, connection_string: &str) -> Result<Box<dyn super::PlayerConnection>> {
         Ok(
-            Box::new(MpvSocket::connect(PathBuf::from(connection_string))?)
+            Box::new(MpvConnection::connect(PathBuf::from(connection_string))?)
                 as Box<dyn super::PlayerConnection>,
         )
     }

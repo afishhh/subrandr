@@ -8,7 +8,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I32Fixed, Point2f, Vec2f};
+use math::{I32Fixed, Point2f, Rect2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -138,6 +138,7 @@ struct TextSegment {
     italic: bool,
     decorations: TextDecorations,
     color: BGRA8,
+    background_color: BGRA8,
     text: String,
     shadows: Vec<TextShadow>,
 }
@@ -308,6 +309,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
+                            background_color: BGRA8::ZERO,
                             text: "this ".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -318,6 +320,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x0000FFFF),
+                            background_color: BGRA8::ZERO,
                             text: "is\n".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -328,6 +331,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
+                            background_color: BGRA8::ZERO,
                             text: "mu".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -338,6 +342,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFF00FF),
+                            background_color: BGRA8::ZERO,
                             text: "ltil".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -348,6 +353,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF00FFFF),
+                            background_color: BGRA8::ZERO,
                             text: "iね❌".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -390,6 +396,7 @@ impl Subtitles {
                             strike_out_color: BGRA8::new(255, 255, 255, 255),
                         },
                         color: BGRA8::from_rgba32(0x00FF00AA),
+                        background_color: BGRA8::ZERO,
                         text: "this is for comparison".to_string(),
                         shadows: Vec::new(),
                     })],
@@ -408,6 +415,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x00FF00AA),
+                            background_color: BGRA8::ZERO,
                             text: "mo".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -418,6 +426,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFF00AA),
+                            background_color: BGRA8::ZERO,
                             text: "ment".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -436,6 +445,7 @@ impl Subtitles {
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0x0000FFAA),
+                        background_color: BGRA8::ZERO,
                         text: "moment".to_string(),
                         shadows: Vec::new(),
                     })],
@@ -453,6 +463,7 @@ impl Subtitles {
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0x00FF0099),
+                        background_color: BGRA8::ZERO,
                         text: "with shadows".to_string(),
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
@@ -481,6 +492,7 @@ impl Subtitles {
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0xFFFFFFFF),
+                        background_color: BGRA8::ZERO,
                         text: "this is bold..".to_string(),
                         shadows: Vec::new(),
                     })],
@@ -499,6 +511,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x00000000),
+                            background_color: BGRA8::ZERO,
                             text: "嗚呼ー".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::ZERO,
@@ -513,6 +526,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF000099),
+                            background_color: BGRA8::ZERO,
                             text: "helloworld".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::ZERO,
@@ -536,6 +550,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
+                            background_color: BGRA8::ZERO,
                             text: "😭".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -546,6 +561,7 @@ impl Subtitles {
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
+                            background_color: BGRA8::ZERO,
                             text: "😭".to_string(),
                             shadows: Vec::new(),
                         }),
@@ -1112,6 +1128,56 @@ impl<'a> Renderer<'a> {
                         BGRA8::from_rgba32(0xFF00FFFF),
                         painter,
                     );
+                }
+
+                for line in &lines {
+                    let mut current_background_box = Rect2::<I32Fixed<6>>::NOTHING;
+                    let mut last_segment_index = usize::MAX;
+
+                    for shaped_segment in &line.segments {
+                        if shaped_segment.corresponding_input_segment != last_segment_index {
+                            if last_segment_index != usize::MAX {
+                                match &event.segments[last_segment_index] {
+                                    Segment::Text(text) => {
+                                        if text.background_color.a != 0 {
+                                            painter.fill_rect(
+                                                x + current_background_box.min.x.trunc_to_inner(),
+                                                y + current_background_box.min.y.trunc_to_inner(),
+                                                x + current_background_box.max.x.trunc_to_inner(),
+                                                y + current_background_box.max.y.trunc_to_inner(),
+                                                text.background_color,
+                                            );
+                                        }
+                                    }
+                                    Segment::Shape(_) => {}
+                                }
+                            }
+
+                            current_background_box = shaped_segment.logical_rect;
+                            last_segment_index = shaped_segment.corresponding_input_segment;
+                        } else {
+                            current_background_box.expand_to_point(shaped_segment.logical_rect.max);
+                        }
+                    }
+
+                    // FIXME: Sometimes background boxes which shouldn't be visible (zero sized) are shown.
+                    // FIXME: Background boxes should have corner radius
+                    if last_segment_index != usize::MAX {
+                        match &event.segments[last_segment_index] {
+                            Segment::Text(text) => {
+                                if text.background_color.a != 0 {
+                                    painter.fill_rect(
+                                        x + current_background_box.min.x.trunc_to_inner(),
+                                        y + current_background_box.min.y.trunc_to_inner(),
+                                        x + current_background_box.max.x.trunc_to_inner(),
+                                        y + current_background_box.max.y.trunc_to_inner(),
+                                        text.background_color,
+                                    );
+                                }
+                            }
+                            Segment::Shape(_) => (),
+                        }
+                    }
                 }
 
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {

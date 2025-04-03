@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    math::{I32Fixed, Point2},
+    math::{I32Fixed, Point2, Rect2, Vec2},
     text::{self, ft_utils::IFixed26Dot6},
     util::RcArray,
     HorizontalAlignment, PixelRect, TextWrapMode,
@@ -27,7 +27,11 @@ pub struct MultilineTextShaper {
 pub struct ShapedLineSegment {
     pub glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
     pub baseline_offset: Point2<I32Fixed<6>>,
+    // TODO: Phase out paint_rect in favor of logical_rect
+    //       There is little practical use for a paint_rect currently and the calculation
+    //       is kind of incorrect I think.
     pub paint_rect: PixelRect,
+    pub logical_rect: Rect2<I32Fixed<6>>,
     pub corresponding_input_segment: usize,
     // Implementation details
     max_ascender: I32Fixed<6>,
@@ -162,7 +166,7 @@ impl MultilineTextShaper {
                 );
             }
 
-            let mut max_ascender = I32Fixed::ZERO;
+            let mut line_max_ascender = I32Fixed::ZERO;
 
             while self.segment_boundaries[current_segment].1 <= last {
                 current_segment += 1;
@@ -254,9 +258,6 @@ impl MultilineTextShaper {
                             // split it up, go through with rendering it.
                         }
 
-                        let segment_ascender = I32Fixed::from_ft(font.metrics().ascender);
-                        max_ascender = std::cmp::max(max_ascender, segment_ascender);
-
                         let segment_fonts = Rc::new(segment_fonts);
                         let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
@@ -266,6 +267,23 @@ impl MultilineTextShaper {
                                 self.intra_font_segment_splits, current_intra_split
                             );
                         }
+
+                        let mut local_max_ascender = IFixed26Dot6::MIN;
+                        let mut local_min_descender = IFixed26Dot6::MAX;
+
+                        for font in segment_fonts.iter() {
+                            let ascender = IFixed26Dot6::from_ft(font.metrics().ascender);
+                            let descender = IFixed26Dot6::from_ft(font.metrics().descender);
+
+                            local_max_ascender = local_max_ascender.max(ascender);
+                            local_min_descender = local_min_descender.min(descender);
+                        }
+
+                        if local_max_ascender > line_max_ascender {
+                            line_max_ascender = local_max_ascender;
+                        }
+
+                        let logical_height = local_max_ascender - local_min_descender;
 
                         if self
                             .intra_font_segment_splits
@@ -284,7 +302,14 @@ impl MultilineTextShaper {
                                     w: extents.paint_width.trunc_to_inner() as u32,
                                     h: extents.paint_height.trunc_to_inner() as u32,
                                 },
-                                max_ascender: segment_ascender,
+                                logical_rect: Rect2::new(
+                                    Point2::ZERO,
+                                    Point2::new(
+                                        extents.paint_width + trailing_x_advance,
+                                        logical_height,
+                                    ),
+                                ),
+                                max_ascender: local_max_ascender,
                                 corresponding_font_boundary: current_segment,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
@@ -316,7 +341,14 @@ impl MultilineTextShaper {
                                         w: extents.paint_width.trunc_to_inner() as u32,
                                         h: extents.paint_height.trunc_to_inner() as u32,
                                     },
-                                    max_ascender: segment_ascender,
+                                    logical_rect: Rect2::new(
+                                        Point2::ZERO,
+                                        Point2::new(
+                                            extents.paint_width + x_advance,
+                                            logical_height,
+                                        ),
+                                    ),
+                                    max_ascender: local_max_ascender,
                                     corresponding_font_boundary: current_segment,
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
@@ -364,12 +396,19 @@ impl MultilineTextShaper {
                                 w: logical_w,
                                 h: logical_h,
                             },
+                            logical_rect: Rect2::new(
+                                Point2::ZERO,
+                                Point2::new(
+                                    IFixed26Dot6::new(logical_w as i32),
+                                    IFixed26Dot6::new(logical_h as i32),
+                                ),
+                            ),
                             corresponding_input_segment: current_segment + current_intra_split,
                             corresponding_font_boundary: current_segment + current_intra_split,
                             max_ascender: segment_max_bearing_y,
                         });
                         line_extents.paint_width += (logical_w * 64) as i32;
-                        max_ascender = max_ascender.max(segment_max_bearing_y);
+                        line_max_ascender = line_max_ascender.max(segment_max_bearing_y);
                         line_extents.paint_height = line_extents
                             .paint_height
                             .max(I32Fixed::new(logical_h as i32));
@@ -403,11 +442,15 @@ impl MultilineTextShaper {
                 segment.baseline_offset.x += aligning_x_offset;
                 segment.paint_rect.x += aligning_x_offset.trunc_to_inner();
                 if segment.glyphs_and_fonts.is_none() {
-                    segment.baseline_offset.y += max_ascender - segment.max_ascender;
+                    segment.baseline_offset.y += line_max_ascender - segment.max_ascender;
                 } else {
-                    segment.baseline_offset.y += max_ascender;
+                    segment.baseline_offset.y += line_max_ascender;
                 }
-                segment.paint_rect.y += (max_ascender - segment.max_ascender).trunc_to_inner();
+                segment.paint_rect.y += (line_max_ascender - segment.max_ascender).trunc_to_inner();
+                segment.logical_rect = segment.logical_rect.translate(Vec2::new(
+                    segment.baseline_offset.x,
+                    segment.baseline_offset.y - line_max_ascender,
+                ));
             }
 
             if !segments.is_empty() {
@@ -436,7 +479,7 @@ impl MultilineTextShaper {
                         },
                     )
                     .max()
-                    .unwrap_or(I32Fixed::ZERO)
+                    .unwrap_or(I32Fixed::ZERO);
             }
 
             total_extents.paint_width =

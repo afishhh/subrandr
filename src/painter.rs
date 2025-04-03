@@ -115,6 +115,19 @@ impl<'a> Painter<'a> {
         )
     }
 
+    pub fn fill_rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: BGRA8) {
+        rasterize::fill_axis_aligned_rect(
+            x0,
+            y0,
+            x1,
+            y1,
+            self.buffer,
+            self.width,
+            self.height,
+            color,
+        )
+    }
+
     pub fn stroke_triangle(
         &mut self,
         x0: i32,

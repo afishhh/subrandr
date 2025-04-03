@@ -367,6 +367,33 @@ pub fn stroke_polygon(
     }
 }
 
+pub fn fill_axis_aligned_rect(
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    buffer: &mut [BGRA8],
+    width: u32,
+    height: u32,
+    color: BGRA8,
+) {
+    check_buffer!("fill_axis_aligned_rect", buffer, width, height);
+
+    debug_assert!(x0 <= x1);
+    debug_assert!(y0 <= y1);
+
+    for y in y0.clamp(0, height as i32)..y1.clamp(0, height as i32) {
+        unsafe {
+            horizontal_line_unchecked(
+                x0,
+                x1,
+                &mut buffer[y as usize * width as usize..],
+                width as i32,
+                color,
+            );
+        }
+    }
+}
 pub fn stroke_triangle(
     x0: i32,
     y0: i32,

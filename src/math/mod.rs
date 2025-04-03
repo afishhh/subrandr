@@ -246,7 +246,7 @@ impl<N: Number> Sum<Vec2<N>> for Point2<N> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 // TODO: Maybe just make Point2 Debug when N: Debug
 pub struct Rect2<N: Display> {
     pub min: Point2<N>,
@@ -265,6 +265,24 @@ impl<N: Number + Display> Rect2<N> {
         min: Point2::ZERO,
         max: Point2::ZERO,
     };
+
+    pub fn new(min: Point2<N>, max: Point2<N>) -> Self {
+        Self { min, max }
+    }
+
+    pub fn from_min_size(min: Point2<N>, size: Vec2<N>) -> Self {
+        Self {
+            min,
+            max: min + size,
+        }
+    }
+
+    pub fn translate(self, vector: Vec2<N>) -> Self {
+        Self {
+            min: self.min + vector,
+            max: self.max + vector,
+        }
+    }
 
     pub fn is_negative(&self) -> bool {
         self.min.x > self.max.x || self.min.y > self.max.y

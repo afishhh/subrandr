@@ -276,6 +276,7 @@ pub fn convert(document: Document) -> Subtitles {
                     ..Default::default()
                 },
                 color: BGRA8::from_rgba32(segment.pen().foreground_color),
+                background_color: BGRA8::from_rgba32(segment.pen().background_color),
                 text: segment.text.clone(),
                 shadows,
             }))

@@ -43,6 +43,12 @@ impl Number for f32 {
     const ZERO: Self = 0.0;
 }
 
+impl Number for i32 {
+    const MIN: Self = i32::MIN;
+    const MAX: Self = i32::MAX;
+    const ZERO: Self = 0;
+}
+
 pub trait Sqrt: Number {
     fn sqrt(self) -> Self;
     fn fast_normalize(vector: Vec2<Self>) -> Vec2<Self> {

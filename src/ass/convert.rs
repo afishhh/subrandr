@@ -373,6 +373,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                                 ..Default::default()
                             },
                             color: convert_ass_color(current_style.primary_colour),
+                            background_color: BGRA8::ZERO,
                             text,
                             shadows: Vec::new(),
                         }))

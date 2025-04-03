@@ -13,11 +13,11 @@ extern "C" {
 #define SBR_UNSTABLE
 #else
 #define SBR_UNSTABLE                                                           \
-  __attribute__((                                                              \
-      unavailable("This item is not part of subrandr's stable API yet.\n"      \
-                  "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
-                  "you still want to use it.")                                 \
-  ))
+  __attribute__((unavailable(                                                  \
+      "This item is not part of subrandr's stable API yet.\n"                  \
+      "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "              \
+      "you still want to use it."                                              \
+  )))
 #endif
 
 typedef struct sbr_library sbr_library;
@@ -39,11 +39,13 @@ typedef uint16_t SBR_UNSTABLE sbr_subtitle_format;
 sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
 void sbr_subtitles_destroy(sbr_subtitles *subs);
 
-sbr_renderer *sbr_renderer_create(sbr_library *, sbr_subtitles *subs);
+sbr_renderer *sbr_renderer_create(sbr_library *);
 int sbr_renderer_render(
     sbr_renderer *renderer, sbr_subtitle_context const *ctx,
     // current time value in milliseconds
     uint32_t t,
+    // subtitles to render, on change invalidate the cache before rendering
+    sbr_subtitles *subs,
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height
 );

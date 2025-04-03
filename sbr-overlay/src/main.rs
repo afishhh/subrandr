@@ -124,6 +124,7 @@ struct App<'a> {
     overlay_window_id: Option<u32>,
 
     start: std::time::Instant,
+    subs: Option<Subtitles>,
     renderer: Renderer<'a>,
 
     display_handle: Option<DisplayHandle>,
@@ -350,19 +351,25 @@ impl winit::application::ApplicationHandler for App<'_> {
                             x11.buffer.resize(s_width as usize * s_height as usize, 0);
                             let mut painter =
                                 Painter::new(s_width, s_height, x11.buffer.as_mut_slice());
-                            println!(
-                                "render t = {}ms to {}x{}",
-                                t, geometry.width, geometry.height
-                            );
-                            self.renderer.render(&ctx, t, &mut painter);
+                            if let Some(subs) = self.subs.as_ref() {
+                                println!(
+                                    "render t = {}ms to {}x{}",
+                                    t, geometry.width, geometry.height
+                                );
+                                self.renderer.render(&ctx, t, subs, &mut painter);
+                            } else {
+                                x11.buffer.fill(0);
+                            }
                         }
                     }
 
                     let render_end = Instant::now();
-                    println!(
-                        "took {:.2}ms",
-                        (render_end - render_start).as_micros() as f64 / 1000.
-                    );
+                    if self.subs.is_some() {
+                        println!(
+                            "took {:.2}ms",
+                            (render_end - render_start).as_micros() as f64 / 1000.
+                        );
+                    }
 
                     match state {
                         WindowState::Software(soft) => {
@@ -472,49 +479,9 @@ fn main() {
 
     let sbr = Subrandr::init();
     let subs = if let Some(file) = args.file.as_ref() {
-        load_subs_from_file(&sbr, file).unwrap()
+        Some(load_subs_from_file(&sbr, file).unwrap())
     } else {
-        'result: {
-            if let Some(path) = player_connection
-                .as_mut()
-                .and_then(|x| x.get_stream_path().transpose())
-                .transpose()
-                .context("Failed to get stream path from player")
-                .unwrap()
-            {
-                const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"ass"];
-
-                println!("Looking for subtitles files near {}", path.display());
-
-                let mut candidates = Vec::new();
-                for entry in path.parent().unwrap().read_dir().unwrap() {
-                    let entry = entry.unwrap();
-                    let filename = entry.file_name();
-
-                    if filename
-                        .as_encoded_bytes()
-                        .starts_with(path.file_stem().unwrap().as_encoded_bytes())
-                    {
-                        for (i, &ext) in ATTEMPTED_EXTENSIONS.iter().enumerate() {
-                            if filename.as_encoded_bytes().ends_with(ext) {
-                                candidates.push((entry.path(), i));
-                            }
-                        }
-                    }
-                }
-
-                candidates.sort_by_key(|(_, index)| *index);
-
-                if let Some((found, _)) = candidates.first() {
-                    println!("Using {}", found.display());
-                    break 'result load_subs_from_file(&sbr, found).unwrap();
-                }
-
-                panic!("Failed to find a subtitle file for this stream");
-            }
-
-            Subtitles::test_new()
-        }
+        Some(Subtitles::test_new())
     };
 
     let display_supports_overlay = matches!(display_handle, Some(DisplayHandle::X11(_)));
@@ -547,7 +514,8 @@ fn main() {
             display_handle,
 
             args,
-            renderer: Renderer::new(&sbr, &subs),
+            subs,
+            renderer: Renderer::new(&sbr),
             state: None,
         })
         .unwrap()

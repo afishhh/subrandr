@@ -41,7 +41,7 @@ int main() {
   if(!subs)
     exit(1);
   
-  sbr_renderer *renderer = sbr_renderer_create(sbr, subs);
+  sbr_renderer *renderer = sbr_renderer_create(sbr);
   if(!renderer)
     exit(1);
 
@@ -71,6 +71,7 @@ int main() {
     renderer,
     &ctx,
     t,
+    subs,
     pixel_buffer,
     width,
     height

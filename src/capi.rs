@@ -273,11 +273,8 @@ unsafe extern "C" fn sbr_library_close_font(_sbr: *mut Subrandr, font: *mut Face
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_create(
-    sbr: *mut Subrandr,
-    subs: *mut Subtitles,
-) -> *mut Renderer<'static> {
-    Box::into_raw(Box::new(Renderer::new(&*sbr, unsafe { &*subs })))
+unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut Renderer<'static> {
+    Box::into_raw(Box::new(Renderer::new(&*sbr)))
 }
 
 #[unsafe(no_mangle)]
@@ -285,12 +282,18 @@ unsafe extern "C" fn sbr_renderer_render(
     renderer: *mut Renderer<'static>,
     ctx: *const SubtitleContext,
     t: u32,
+    subs: *const Subtitles,
     buffer: *mut BGRA8,
     width: u32,
     height: u32,
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
-    (*renderer).render(&*ctx, t, &mut Painter::new(width, height, buffer));
+    (*renderer).render(
+        &*ctx,
+        t,
+        unsafe { &*subs },
+        &mut Painter::new(width, height, buffer),
+    );
     0
 }
 

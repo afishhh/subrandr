@@ -640,7 +640,6 @@ pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     fonts: text::FontSelect,
     dpi: u32,
-    subs: &'a Subtitles,
     perf: PerfStats,
 
     unchanged_range: Range<u32>,
@@ -649,7 +648,7 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(sbr: &'a Subrandr, subs: &'a Subtitles) -> Self {
+    pub fn new(sbr: &'a Subrandr) -> Self {
         if !sbr.did_log_version.get() {
             sbr.did_log_version.set(true);
             info!(
@@ -665,7 +664,6 @@ impl<'a> Renderer<'a> {
             sbr,
             fonts: text::FontSelect::new(sbr).unwrap(),
             dpi: 0,
-            subs,
             perf: PerfStats::new(),
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
@@ -867,7 +865,13 @@ impl<'a> Renderer<'a> {
         painter.blit_text_image(x.trunc_to_inner(), y.trunc_to_inner(), &image, color);
     }
 
-    pub fn render(&mut self, ctx: &SubtitleContext, t: u32, painter: &mut Painter) {
+    pub fn render(
+        &mut self,
+        ctx: &SubtitleContext,
+        t: u32,
+        subs: &Subtitles,
+        painter: &mut Painter,
+    ) {
         if painter.height() == 0 || painter.height() == 0 {
             return;
         }
@@ -883,7 +887,7 @@ impl<'a> Renderer<'a> {
                 self.sbr,
                 "rendering skipped: frame hasn't changed {:?} (class={} ctx={ctx:?} t={t}ms)",
                 self.unchanged_range,
-                self.subs.class.get_name()
+                subs.class.get_name()
             );
             return;
         }
@@ -902,7 +906,7 @@ impl<'a> Renderer<'a> {
         trace!(
             self.sbr,
             "rendering frame (class={} ctx={ctx:?} t={t}ms)",
-            self.subs.class.get_name()
+            subs.class.get_name()
         );
 
         if DRAW_VERSION_STRING {
@@ -1008,7 +1012,7 @@ impl<'a> Renderer<'a> {
 
         let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
-            for event in self.subs.events.iter() {
+            for event in subs.events.iter() {
                 let r = unchanged_range.clone();
                 if (event.start..event.end).contains(&t) {
                     unchanged_range = r.start.max(event.start)..r.end.min(event.end);
@@ -1033,10 +1037,11 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let font = self.fonts.select(&font_request).unwrap().with_size(
-                                self.subs.class.get_font_size(ctx, event, segment),
-                                ctx.dpi,
-                            );
+                            let font = self
+                                .fonts
+                                .select(&font_request)
+                                .unwrap()
+                                .with_size(subs.class.get_font_size(ctx, event, segment), ctx.dpi);
 
                             shaper.add_text(&segment.text, &font);
                         }
@@ -1150,10 +1155,7 @@ impl<'a> Renderer<'a> {
                             paint_box.0 + shaped_segment.paint_rect.w as i32,
                             paint_box.1,
                             &if let Segment::Text(segment) = segment {
-                                format!(
-                                    "{:.0}pt",
-                                    self.subs.class.get_font_size(ctx, event, segment)
-                                )
+                                format!("{:.0}pt", subs.class.get_font_size(ctx, event, segment))
                             } else {
                                 "shape".to_owned()
                             },

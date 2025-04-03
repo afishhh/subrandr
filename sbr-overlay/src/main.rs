@@ -1,10 +1,11 @@
 use std::{
     mem::ManuallyDrop,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     time::{Duration, Instant},
 };
 
+use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, FromArgMatches};
 use subrandr::{Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
 use winit::{
@@ -36,9 +37,6 @@ struct Args {
         conflicts_with = "ipc_connection_string"
     )]
     speed: f32,
-
-    #[clap(long = "parse")]
-    parse: bool,
 
     #[clap(
         long = "overlay",
@@ -394,6 +392,20 @@ impl winit::application::ApplicationHandler for App<'_> {
     }
 }
 
+fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitles> {
+    Ok(match path.extension().and_then(|x| x.to_str()) {
+        Some("srv3" | "ytt") => {
+            let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
+            subrandr::srv3::convert(document)
+        }
+        Some("ass") => {
+            let script = subrandr::ass::parse(&std::fs::read_to_string(path).unwrap())?;
+            subrandr::ass::convert(script)
+        }
+        _ => bail!("Unrecognised subtitle file extension"),
+    })
+}
+
 fn main() {
     let args = Args::from_arg_matches_mut(
         &mut Args::command()
@@ -409,31 +421,6 @@ fn main() {
             })
             .get_matches(),
     ).unwrap();
-
-    let sbr = Subrandr::init();
-    let subs = if let Some(file) = args.file.as_ref() {
-        match file.extension().and_then(|x| x.to_str()) {
-            Some("srv3" | "ytt") => {
-                let document =
-                    subrandr::srv3::parse(&sbr, &std::fs::read_to_string(file).unwrap()).unwrap();
-                subrandr::srv3::convert(document)
-            }
-            Some("ass") => {
-                let script = subrandr::ass::parse(&std::fs::read_to_string(file).unwrap()).unwrap();
-                subrandr::ass::convert(script)
-            }
-            _ => panic!("Unrecognised subtitle file extension"),
-        }
-    } else {
-        Subtitles::test_new()
-    };
-
-    if args.parse {
-        println!("{subs:?}");
-        return;
-    }
-
-    let renderer = Renderer::new(&sbr, &subs);
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -483,6 +470,53 @@ fn main() {
         None
     };
 
+    let sbr = Subrandr::init();
+    let subs = if let Some(file) = args.file.as_ref() {
+        load_subs_from_file(&sbr, file).unwrap()
+    } else {
+        'result: {
+            if let Some(path) = player_connection
+                .as_mut()
+                .and_then(|x| x.get_stream_path().transpose())
+                .transpose()
+                .context("Failed to get stream path from player")
+                .unwrap()
+            {
+                const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"ass"];
+
+                println!("Looking for subtitles files near {}", path.display());
+
+                let mut candidates = Vec::new();
+                for entry in path.parent().unwrap().read_dir().unwrap() {
+                    let entry = entry.unwrap();
+                    let filename = entry.file_name();
+
+                    if filename
+                        .as_encoded_bytes()
+                        .starts_with(path.file_stem().unwrap().as_encoded_bytes())
+                    {
+                        for (i, &ext) in ATTEMPTED_EXTENSIONS.iter().enumerate() {
+                            if filename.as_encoded_bytes().ends_with(ext) {
+                                candidates.push((entry.path(), i));
+                            }
+                        }
+                    }
+                }
+
+                candidates.sort_by_key(|(_, index)| *index);
+
+                if let Some((found, _)) = candidates.first() {
+                    println!("Using {}", found.display());
+                    break 'result load_subs_from_file(&sbr, found).unwrap();
+                }
+
+                panic!("Failed to find a subtitle file for this stream");
+            }
+
+            Subtitles::test_new()
+        }
+    };
+
     let display_supports_overlay = matches!(display_handle, Some(DisplayHandle::X11(_)));
 
     let overlay_window_id = match (args.overlay, display_supports_overlay) {
@@ -513,7 +547,7 @@ fn main() {
             display_handle,
 
             args,
-            renderer,
+            renderer: Renderer::new(&sbr, &subs),
             state: None,
         })
         .unwrap()

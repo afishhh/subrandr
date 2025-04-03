@@ -2,10 +2,10 @@ use std::{
     io::{BufRead as _, BufReader, Write as _},
     os::unix::net::UnixStream,
     path::PathBuf,
-    str::FromStr,
 };
 
 use anyhow::Result;
+use serde::{Deserialize, de::DeserializeOwned};
 
 struct MpvSocket {
     stream: BufReader<UnixStream>,
@@ -18,10 +18,7 @@ impl MpvSocket {
         })
     }
 
-    fn get_property<T: FromStr>(&mut self, key: &str) -> T
-    where
-        <T as std::str::FromStr>::Err: std::fmt::Debug,
-    {
+    fn get_property<T: DeserializeOwned>(&mut self, key: &str) -> Result<T> {
         loop {
             self.stream
                 .get_mut()
@@ -36,17 +33,22 @@ impl MpvSocket {
 
             let mut line = String::new();
             loop {
+                line.clear();
                 self.stream.read_line(&mut line).unwrap();
 
                 if line.contains("property unavailable") {
                     break;
                 }
 
-                if let Some(data_idx) = line.find(r#""data""#) {
-                    let colon_idx = data_idx + line[data_idx..].find(":").unwrap() + 1;
-                    let comma_idx = colon_idx + line[colon_idx..].find(',').unwrap();
-                    return line[colon_idx..comma_idx].trim().parse::<T>().unwrap();
-                    //     as u32;
+                #[derive(Deserialize)]
+                struct DataResponse<T> {
+                    data: T,
+                }
+
+                if line.contains(r#""data""#) {
+                    return serde_json::from_str::<DataResponse<T>>(&line)
+                        .map(|r| r.data)
+                        .map_err(Into::into);
                 }
             }
         }
@@ -55,14 +57,22 @@ impl MpvSocket {
 
 impl super::PlayerConnection for MpvSocket {
     fn get_window_id(&mut self) -> Option<u32> {
-        Some(dbg!(self.get_property("window-id")))
+        Some(self.get_property("window-id").unwrap())
+    }
+
+    fn get_stream_path(&mut self) -> Result<Option<PathBuf>> {
+        Ok(Some(
+            self.get_property::<PathBuf>("working-directory")
+                .unwrap()
+                .join(self.get_property::<PathBuf>("stream-path").unwrap()),
+        ))
     }
 
     fn poll(&mut self) -> super::PlayerState {
         super::PlayerState {
             dimensions: None,
             viewport: None,
-            current_time: (self.get_property::<f32>("playback-time") * 1000.) as u32,
+            current_time: (self.get_property::<f32>("playback-time").unwrap() * 1000.) as u32,
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +35,10 @@ pub trait PlayerConnector {
 pub trait PlayerConnection {
     fn get_window_id(&mut self) -> Option<u32> {
         None
+    }
+
+    fn get_stream_path(&mut self) -> Result<Option<PathBuf>> {
+        Ok(None)
     }
 
     // TODO: Make this fallible

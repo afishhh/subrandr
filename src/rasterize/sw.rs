@@ -1,48 +1,22 @@
-use std::{ops::Range, rc::Rc};
+use std::{ops::Range, sync::Arc};
 
 use crate::{
     color::{Premultiplied, BGRA8},
     math::{I32Fixed, Point2, Vec2},
+    rasterize::bitmap::PixelFormat,
     util::{calculate_blit_rectangle, BlitRectangle},
 };
 
 mod blur;
 pub use blur::*;
-use bytemuck::must_cast_slice;
 
-use super::RenderTarget;
-
-#[derive(Debug, Clone)]
-pub enum CpuTextureData {
-    Color(Rc<[BGRA8]>),
-    Mono(Rc<[u8]>),
-}
-
-impl CpuTextureData {
-    pub fn format(&self) -> super::TextureFormat {
-        match self {
-            CpuTextureData::Color(_) => super::TextureFormat::Bgra,
-            CpuTextureData::Mono(_) => super::TextureFormat::Mono,
-        }
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        match self {
-            CpuTextureData::Color(bgra) => must_cast_slice(bgra),
-            CpuTextureData::Mono(bytes) => must_cast_slice(bytes),
-        }
-    }
-
-    pub fn n_pixels(&self) -> usize {
-        match self {
-            CpuTextureData::Color(bgra) => bgra.len(),
-            CpuTextureData::Mono(mono) => mono.len(),
-        }
-    }
-}
+use super::{
+    bitmap::{Bitmap, BitmapCast, Dynamic},
+    RenderTarget,
+};
 
 #[derive(Debug, Clone)]
-pub struct CpuTextureRenderHandle(CpuTextureData);
+pub struct CpuTextureRenderHandle(Arc<Bitmap<BGRA8>>);
 
 #[derive(Debug, Clone)]
 struct Bresenham {
@@ -854,7 +828,7 @@ impl SoftwareRasterizer {
         }
     }
 
-    fn get_texture_data<'a, 'b: 'a>(handle: &'a super::TextureDataHandle) -> &'a CpuTextureData {
+    fn get_texture_data<'a, 'b: 'a>(handle: &'a super::TextureDataHandle) -> &'a Bitmap<Dynamic> {
         match handle {
             super::TextureDataHandle::Sw(buffer) => buffer,
             handle => panic!("Unexpected texture handle passed to software rasterizer: {handle:?}"),
@@ -879,18 +853,11 @@ impl super::Rasterizer for SoftwareRasterizer {
         Some(self)
     }
 
-    fn copy_or_move_into_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        data: CpuTextureData,
-    ) -> super::Texture {
-        assert_eq!(data.n_pixels(), width as usize * height as usize);
-
+    fn copy_or_move_into_texture(&mut self, data: Arc<Bitmap<Dynamic>>) -> super::Texture {
         super::Texture {
-            width,
-            height,
-            format: super::TextureFormat::Bgra,
+            width: data.width(),
+            height: data.height(),
+            format: PixelFormat::Bgra,
             handle: super::TextureDataHandle::Sw(data),
         }
     }
@@ -1026,9 +993,9 @@ impl super::Rasterizer for SoftwareRasterizer {
             return;
         };
 
-        match Self::get_texture_data(&texture.handle) {
-            CpuTextureData::Color(bgra) => unsafe {
-                debug_assert_eq!(texture.format, super::TextureFormat::Bgra);
+        match Self::get_texture_data(&texture.handle).cast() {
+            BitmapCast::Bgra(bitmap) => unsafe {
+                debug_assert_eq!(texture.format, PixelFormat::Bgra);
 
                 blit_bgra_unchecked(
                     dx,
@@ -1039,11 +1006,11 @@ impl super::Rasterizer for SoftwareRasterizer {
                     ys,
                     xs,
                     texture.width,
-                    bgra,
+                    bitmap.data(),
                 );
             },
-            CpuTextureData::Mono(mono) => unsafe {
-                debug_assert_eq!(texture.format, super::TextureFormat::Mono);
+            BitmapCast::Mono(bitmap) => unsafe {
+                debug_assert_eq!(texture.format, PixelFormat::Mono);
 
                 blit_monochrome_unchecked(
                     dx,
@@ -1054,7 +1021,7 @@ impl super::Rasterizer for SoftwareRasterizer {
                     ys,
                     xs,
                     texture.width,
-                    mono,
+                    bitmap.data(),
                 );
             },
         }
@@ -1088,26 +1055,26 @@ impl super::Rasterizer for SoftwareRasterizer {
             return;
         };
 
-        match Self::get_texture_data(&texture.handle) {
-            CpuTextureData::Color(bgra) => unsafe {
-                debug_assert_eq!(texture.format, super::TextureFormat::Bgra);
+        match Self::get_texture_data(&texture.handle).cast() {
+            BitmapCast::Bgra(bitmap) => unsafe {
+                debug_assert_eq!(texture.format, PixelFormat::Bgra);
 
                 self.blurer.buffer_blit_bgra8_unchecked(
                     dx as usize,
                     dy as usize,
-                    bgra,
+                    bitmap.data(),
                     ys,
                     xs,
                     texture.width as usize,
                 );
             },
-            CpuTextureData::Mono(mono) => unsafe {
-                debug_assert_eq!(texture.format, super::TextureFormat::Mono);
+            BitmapCast::Mono(mono) => unsafe {
+                debug_assert_eq!(texture.format, PixelFormat::Mono);
 
                 self.blurer.buffer_blit_mono8_unchecked(
                     dx as usize,
                     dy as usize,
-                    mono,
+                    mono.data(),
                     ys,
                     xs,
                     texture.width as usize,

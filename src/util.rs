@@ -9,6 +9,8 @@ pub use rcarray::*;
 pub mod array_vec;
 #[cfg_attr(not(test), expect(unused_imports))]
 pub use array_vec::ArrayVec;
+mod unique_arc;
+pub use unique_arc::*;
 
 pub const unsafe fn array_assume_init_ref<const N: usize, T>(
     array: &[MaybeUninit<T>; N],

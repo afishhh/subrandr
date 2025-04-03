@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, sync::Arc};
 
 use wgpu::{include_wgsl, util::DeviceExt, vertex_attr_array};
 
@@ -7,7 +7,10 @@ use crate::{
     math::{Point2, Vec2},
 };
 
-use super::sw::gaussian_sigma_to_box_radius;
+use super::{
+    bitmap::{Bitmap, Dynamic, PixelFormat},
+    sw::gaussian_sigma_to_box_radius,
+};
 
 pub struct GpuRasterizer {
     device: wgpu::Device,
@@ -303,6 +306,10 @@ impl GpuRasterizer {
         }
     }
 
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
     pub fn target_from_texture(&self, texture: wgpu::Texture) -> super::RenderTarget<'static> {
         let mut encoder = self
             .device
@@ -489,28 +496,23 @@ impl super::Rasterizer for GpuRasterizer {
         Some(self)
     }
 
-    fn copy_or_move_into_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        data: super::sw::CpuTextureData,
-    ) -> super::Texture {
-        let wgpu_format = match data.format() {
-            crate::rasterize::TextureFormat::Bgra => wgpu::TextureFormat::Bgra8Unorm,
-            crate::rasterize::TextureFormat::Mono => wgpu::TextureFormat::R8Unorm,
+    fn copy_or_move_into_texture(&mut self, bitmap: Arc<Bitmap<Dynamic>>) -> super::Texture {
+        let wgpu_format = match bitmap.format() {
+            PixelFormat::Bgra => wgpu::TextureFormat::Bgra8Unorm,
+            PixelFormat::Mono => wgpu::TextureFormat::R8Unorm,
         };
 
         super::Texture {
-            width,
-            height,
-            format: data.format(),
+            width: bitmap.width(),
+            height: bitmap.height(),
+            format: bitmap.format(),
             handle: super::TextureDataHandle::Gpu(self.device.create_texture_with_data(
                 &self.queue,
                 &wgpu::TextureDescriptor {
                     label: None,
                     size: wgpu::Extent3d {
-                        width,
-                        height,
+                        width: bitmap.width(),
+                        height: bitmap.height(),
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -521,7 +523,7 @@ impl super::Rasterizer for GpuRasterizer {
                     view_formats: &[wgpu_format],
                 },
                 wgpu::util::TextureDataOrder::default(),
-                data.bytes(),
+                bitmap.bytes(),
             )),
         }
     }
@@ -547,7 +549,7 @@ impl super::Rasterizer for GpuRasterizer {
         self.blitter.do_blit(
             &self.device,
             Self::pass_from_target(&mut target.handle),
-            super::TextureFormat::Bgra,
+            super::PixelFormat::Bgra,
             target.width,
             target.height,
             dx,
@@ -689,7 +691,7 @@ impl super::Rasterizer for GpuRasterizer {
         self.blitter.do_blit(
             &self.device,
             &mut state.blit_pass,
-            super::TextureFormat::Mono,
+            PixelFormat::Mono,
             state.front_texture.width(),
             state.front_texture.height(),
             dx + (2 * state.radius) as i32,
@@ -717,13 +719,13 @@ impl super::Rasterizer for GpuRasterizer {
         self.blitter.do_blit(
             &self.device,
             pass,
-            super::TextureFormat::Bgra,
+            PixelFormat::Bgra,
             target.width,
             target.height,
             dx - (2 * state.radius) as i32,
             dy - (2 * state.radius) as i32,
             &state.front_texture,
-            super::TextureFormat::Mono,
+            PixelFormat::Mono,
             BGRA8::new(color[2], color[1], color[0], 255),
         );
     }
@@ -846,18 +848,18 @@ impl GpuRasterizer {
         };
 
         set_pass_params(&mut pass, &horizontal_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.height() + 0x3F) >> 6, 1, 1);
         set_pass_params(&mut pass, &horizontal_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.height() + 0x3F) >> 6, 1, 1);
         set_pass_params(&mut pass, &horizontal_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.height() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.height() + 0x3F) >> 6, 1, 1);
 
         set_pass_params(&mut pass, &vertical_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.width() + 0x3F) >> 6, 1, 1);
         set_pass_params(&mut pass, &vertical_params, front_texture, &back_texture);
-        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.width() + 0x3F) >> 6, 1, 1);
         set_pass_params(&mut pass, &vertical_params, &back_texture, front_texture);
-        pass.dispatch_workgroups(front_texture.width() << 6, 1, 1);
+        pass.dispatch_workgroups((front_texture.width() + 0x3F) >> 6, 1, 1);
     }
 }
 
@@ -866,13 +868,13 @@ impl Blitter {
         &self,
         device: &wgpu::Device,
         pass: &mut wgpu::RenderPass,
-        pass_format: super::TextureFormat,
+        pass_format: PixelFormat,
         twidth: u32,
         theight: u32,
         dx: i32,
         dy: i32,
         texture: &wgpu::Texture,
-        source_format: super::TextureFormat,
+        source_format: PixelFormat,
         color: BGRA8,
     ) {
         let data = {
@@ -906,16 +908,16 @@ impl Blitter {
         });
 
         match (pass_format, source_format) {
-            (super::TextureFormat::Bgra, super::TextureFormat::Bgra) => {
+            (PixelFormat::Bgra, PixelFormat::Bgra) => {
                 pass.set_pipeline(&self.pipeline_color_to_bgra8u);
             }
-            (super::TextureFormat::Bgra, super::TextureFormat::Mono) => {
+            (PixelFormat::Bgra, PixelFormat::Mono) => {
                 pass.set_pipeline(&self.pipeline_mono_to_bgra8u);
             }
-            (super::TextureFormat::Mono, super::TextureFormat::Bgra) => {
+            (PixelFormat::Mono, PixelFormat::Bgra) => {
                 pass.set_pipeline(&self.pipeline_alpha_to_mono32f);
             }
-            (super::TextureFormat::Mono, super::TextureFormat::Mono) => {
+            (PixelFormat::Mono, PixelFormat::Mono) => {
                 pass.set_pipeline(&self.pipeline_mono_to_mono32f);
             }
         }

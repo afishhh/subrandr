@@ -1,4 +1,7 @@
-use sw::{CpuTextureData, SoftwareRasterizer};
+use std::sync::Arc;
+
+use bitmap::{Bitmap, Dynamic, PixelFormat};
+use sw::SoftwareRasterizer;
 use wgpu::GpuRasterizer;
 
 use crate::{
@@ -6,28 +9,23 @@ use crate::{
     math::{Point2, Vec2},
 };
 
+pub mod bitmap;
 pub mod sw;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextureFormat {
-    Bgra,
-    Mono,
-}
 
 #[derive(Debug, Clone)]
 enum TextureDataHandle {
     #[cfg(feature = "wgpu")]
     Gpu(::wgpu::Texture),
-    Sw(sw::CpuTextureData),
+    Sw(Arc<Bitmap<Dynamic>>),
 }
 
 #[derive(Debug, Clone)]
 pub struct Texture {
     width: u32,
     height: u32,
-    format: TextureFormat,
+    format: PixelFormat,
     handle: TextureDataHandle,
 }
 
@@ -40,7 +38,7 @@ impl Texture {
         self.height
     }
 
-    pub fn format(&self) -> TextureFormat {
+    pub fn format(&self) -> PixelFormat {
         self.format
     }
 }
@@ -78,12 +76,7 @@ pub trait Rasterizer {
         None
     }
 
-    fn copy_or_move_into_texture(
-        &mut self,
-        width: u32,
-        height: u32,
-        data: CpuTextureData,
-    ) -> Texture;
+    fn copy_or_move_into_texture(&mut self, data: Arc<Bitmap<Dynamic>>) -> Texture;
 
     #[allow(unused_variables)]
     fn submit_render(&mut self, target: RenderTarget) {}

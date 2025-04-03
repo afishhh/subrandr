@@ -11,8 +11,11 @@ use std::{
 use crate::{
     color::BGRA8,
     outline::Outline,
-    rasterize::{sw::CpuTextureData, Rasterizer, Texture},
-    util::fmt_from_fn,
+    rasterize::{
+        bitmap::{Bitmap, PixelFormat},
+        Rasterizer, Texture,
+    },
+    util::{fmt_from_fn, UniqueArc},
 };
 
 use super::ft_utils::*;
@@ -748,26 +751,11 @@ impl Font {
                 Monochrome(Rc<[MaybeUninit<u8>]>),
             }
 
-            let mut uninit_data = if pixel_width == 1 {
-                UninitTextureData::Monochrome(Rc::new_uninit_slice(n_pixels))
-            } else {
-                UninitTextureData::Color(Rc::new_uninit_slice(n_pixels))
-            };
+            let mut uninit_bitmap =
+                Bitmap::new_uninit(n_pixels * pixel_width as usize, scaled_width, scaled_height);
 
-            let buffer_data: &mut [MaybeUninit<u8>] = {
-                match &mut uninit_data {
-                    UninitTextureData::Color(bgra8) => {
-                        // bytemuck doesn't allow casting between MaybeUninits...
-                        // (even though this in particular should be completely safe)
-                        let slice = Rc::get_mut(bgra8).unwrap();
-                        std::slice::from_raw_parts_mut(
-                            slice.as_mut_ptr() as *mut MaybeUninit<u8>,
-                            slice.len() * 4,
-                        )
-                    }
-                    UninitTextureData::Monochrome(mono8) => Rc::get_mut(mono8).unwrap(),
-                }
-            };
+            let buffer_data: &mut [MaybeUninit<u8>] =
+                uninit_bitmap.bytes_mut(n_pixels * pixel_width as usize);
 
             for biy in 0..scaled_height {
                 for bix in 0..scaled_width {
@@ -844,18 +832,16 @@ impl Font {
 
             SingleGlyphTexture {
                 offset: (ox, oy),
-                texture: Some(rasterizer.copy_or_move_into_texture(
-                    scaled_width,
-                    scaled_height,
-                    match uninit_data {
-                        UninitTextureData::Color(bgra8) => {
-                            CpuTextureData::Color(bgra8.assume_init())
-                        }
-                        UninitTextureData::Monochrome(mono8) => {
-                            CpuTextureData::Mono(mono8.assume_init())
-                        }
-                    },
-                )),
+                texture: Some(rasterizer.copy_or_move_into_texture(UniqueArc::freeze(
+                    Bitmap::assume_init_dynamic(
+                        uninit_bitmap,
+                        if pixel_width == 1 {
+                            PixelFormat::Mono
+                        } else {
+                            PixelFormat::Bgra
+                        },
+                    ),
+                ))),
             }
         }
     }

@@ -439,15 +439,6 @@ fn parse_head(
     Ok((pens, wps))
 }
 
-// TODO: this technically can be improved
-fn clean_segment_text(output: &mut String, text: &str) {
-    output.push_str(
-        &text
-            .replace("\u{200B} \u{200B}", "")
-            .replace("\u{200B}", ""),
-    );
-}
-
 fn parse_body(
     sbr: &Subrandr,
     pens: &HashMap<i32, &'static Pen>,
@@ -620,7 +611,7 @@ fn parse_body(
             XmlEvent::End(_) => break,
             XmlEvent::Empty(_) => unreachable!(),
             XmlEvent::Text(x) if current.is_some() && (depth > 0 && depth <= 2) => {
-                clean_segment_text(&mut current_text, &x.unescape()?);
+                current_text.push_str(&x.unescape()?);
             }
             XmlEvent::Text(x)
                 if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {}

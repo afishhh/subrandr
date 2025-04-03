@@ -1192,8 +1192,8 @@ impl<'a> Renderer<'a> {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
 
                     let paint_box = (
-                        x + shaped_segment.paint_rect.x,
-                        y + shaped_segment.paint_rect.y,
+                        x + shaped_segment.logical_rect.min.x.trunc_to_inner(),
+                        y + shaped_segment.logical_rect.min.y.trunc_to_inner(),
                     );
 
                     if DRAW_LAYOUT_DEBUG_INFO {
@@ -1201,9 +1201,9 @@ impl<'a> Renderer<'a> {
                             paint_box.0,
                             paint_box.1,
                             &format!(
-                                "{},{}",
-                                x + shaped_segment.paint_rect.x,
-                                y + shaped_segment.paint_rect.y
+                                "{:.0},{:.0}",
+                                shaped_segment.logical_rect.min.x + x,
+                                shaped_segment.logical_rect.min.y + y
                             ),
                             Alignment::BottomLeft,
                             16.0,
@@ -1213,12 +1213,8 @@ impl<'a> Renderer<'a> {
 
                         self.debug_text(
                             paint_box.0,
-                            paint_box.1 + shaped_segment.paint_rect.h as i32,
-                            &format!(
-                                "{},{}",
-                                shaped_segment.baseline_offset.x + x,
-                                shaped_segment.baseline_offset.y + y
-                            ),
+                            y + shaped_segment.logical_rect.max.y.trunc_to_inner(),
+                            &format!("{:.1}", shaped_segment.baseline_offset.x),
                             Alignment::TopLeft,
                             16.0,
                             BGRA8::from_rgba32(0xFF0000FF),
@@ -1226,7 +1222,7 @@ impl<'a> Renderer<'a> {
                         );
 
                         self.debug_text(
-                            paint_box.0 + shaped_segment.paint_rect.w as i32,
+                            x + shaped_segment.logical_rect.max.x.trunc_to_inner(),
                             paint_box.1,
                             &if let Segment::Text(segment) = segment {
                                 format!("{:.0}pt", subs.class.get_font_size(ctx, event, segment))
@@ -1239,18 +1235,19 @@ impl<'a> Renderer<'a> {
                             painter,
                         );
 
+                        let rect_size = shaped_segment.logical_rect.size();
                         painter.stroke_whrect(
                             paint_box.0,
                             paint_box.1,
-                            shaped_segment.paint_rect.w,
-                            shaped_segment.paint_rect.h,
+                            rect_size.x.trunc_to_inner() as u32,
+                            rect_size.y.trunc_to_inner() as u32,
                             BGRA8::from_rgba32(0x0000FFFF),
                         );
 
                         painter.horizontal_line(
                             (shaped_segment.baseline_offset.y + y).trunc_to_inner(),
                             paint_box.0,
-                            paint_box.0 + shaped_segment.paint_rect.w as i32,
+                            x + shaped_segment.logical_rect.max.x.trunc_to_inner(),
                             BGRA8::from_rgba32(0x00FF00FF),
                         );
                     }

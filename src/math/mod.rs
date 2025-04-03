@@ -292,7 +292,7 @@ impl<N: Number + Display> Rect2<N> {
         if self.is_negative() {
             Self::ZERO
         } else {
-            self.clone()
+            *self
         }
     }
 
@@ -305,6 +305,10 @@ impl<N: Number + Display> Rect2<N> {
 
     pub fn size(&self) -> Vec2<N> {
         self.max - self.min
+    }
+
+    pub fn height(&self) -> N {
+        self.size().y
     }
 
     pub fn area(&self) -> N {

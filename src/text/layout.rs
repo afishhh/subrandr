@@ -27,10 +27,6 @@ pub struct MultilineTextShaper {
 pub struct ShapedLineSegment {
     pub glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
     pub baseline_offset: Point2<I32Fixed<6>>,
-    // TODO: Phase out paint_rect in favor of logical_rect
-    //       There is little practical use for a paint_rect currently and the calculation
-    //       is kind of incorrect I think.
-    pub paint_rect: PixelRect,
     pub logical_rect: Rect2<I32Fixed<6>>,
     pub corresponding_input_segment: usize,
     // Implementation details
@@ -167,6 +163,7 @@ impl MultilineTextShaper {
             }
 
             let mut line_max_ascender = I32Fixed::ZERO;
+            let mut line_min_descender = I32Fixed::ZERO;
 
             while self.segment_boundaries[current_segment].1 <= last {
                 current_segment += 1;
@@ -283,6 +280,10 @@ impl MultilineTextShaper {
                             line_max_ascender = local_max_ascender;
                         }
 
+                        if local_min_descender < line_min_descender {
+                            line_min_descender = local_min_descender;
+                        }
+
                         let logical_height = local_max_ascender - local_min_descender;
 
                         if self
@@ -296,12 +297,6 @@ impl MultilineTextShaper {
                                     line_extents.paint_width,
                                     total_extents.paint_height,
                                 ),
-                                paint_rect: PixelRect {
-                                    x: line_extents.paint_width.trunc_to_inner(),
-                                    y: total_extents.paint_height.trunc_to_inner(),
-                                    w: extents.paint_width.trunc_to_inner() as u32,
-                                    h: extents.paint_height.trunc_to_inner() as u32,
-                                },
                                 logical_rect: Rect2::new(
                                     Point2::ZERO,
                                     Point2::new(
@@ -335,12 +330,6 @@ impl MultilineTextShaper {
                                 segments.push(ShapedLineSegment {
                                     glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
                                     baseline_offset: Point2::new(x, total_extents.paint_height),
-                                    paint_rect: PixelRect {
-                                        x: x.trunc_to_inner(),
-                                        y: total_extents.paint_height.trunc_to_inner(),
-                                        w: extents.paint_width.trunc_to_inner() as u32,
-                                        h: extents.paint_height.trunc_to_inner() as u32,
-                                    },
                                     logical_rect: Rect2::new(
                                         Point2::ZERO,
                                         Point2::new(
@@ -390,12 +379,6 @@ impl MultilineTextShaper {
                                 line_extents.paint_width,
                                 total_extents.paint_height,
                             ),
-                            paint_rect: PixelRect {
-                                x: line_extents.paint_width.trunc_to_inner(),
-                                y: total_extents.paint_height.trunc_to_inner(),
-                                w: logical_w,
-                                h: logical_h,
-                            },
                             logical_rect: Rect2::new(
                                 Point2::ZERO,
                                 Point2::new(
@@ -440,13 +423,11 @@ impl MultilineTextShaper {
 
             for segment in segments.iter_mut() {
                 segment.baseline_offset.x += aligning_x_offset;
-                segment.paint_rect.x += aligning_x_offset.trunc_to_inner();
                 if segment.glyphs_and_fonts.is_none() {
                     segment.baseline_offset.y += line_max_ascender - segment.max_ascender;
                 } else {
                     segment.baseline_offset.y += line_max_ascender;
                 }
-                segment.paint_rect.y += (line_max_ascender - segment.max_ascender).trunc_to_inner();
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
                     segment.baseline_offset.y - line_max_ascender,
@@ -454,28 +435,33 @@ impl MultilineTextShaper {
             }
 
             if !segments.is_empty() {
-                total_rect.x = total_rect
-                    .x
-                    .min(segments.first().map(|x| x.paint_rect.x).unwrap());
+                total_rect.x = total_rect.x.min(
+                    segments
+                        .first()
+                        .map(|x| x.logical_rect.min.x.trunc_to_inner())
+                        .unwrap(),
+                );
                 total_rect.w = total_rect.w.max(
                     (segments
                         .last()
-                        .map(|x| (x.paint_rect.x + x.paint_rect.w as i32))
+                        .map(|x| x.logical_rect.max.x.trunc_to_inner())
                         .unwrap()
-                        - segments.first().map(|x| x.paint_rect.x).unwrap())
-                        as u32,
+                        - segments
+                            .first()
+                            .map(|x| x.logical_rect.min.x.trunc_to_inner())
+                            .unwrap()) as u32,
                 );
             }
 
             if line_boundary == self.text.len() {
-                total_extents.paint_height += line_extents.paint_height;
+                total_extents.paint_height += line_max_ascender - line_min_descender;
             } else {
                 total_extents.paint_height += segments
                     .iter()
                     .map(
                         |x| match &self.segment_boundaries[x.corresponding_font_boundary].0 {
                             ShaperSegment::Text(f) => I32Fixed::from_ft(f.metrics().height),
-                            ShaperSegment::Shape(_) => I32Fixed::new(x.paint_rect.h as i32),
+                            ShaperSegment::Shape(_) => x.logical_rect.height(),
                         },
                     )
                     .max()

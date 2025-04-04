@@ -284,7 +284,8 @@ pub fn convert(document: Document) -> Subtitles {
 
         result.events.push(Event {
             start: event.time,
-            end: event.time + event.duration,
+            // I believe this may actually be inclusive in srv3 hence the + 1, not absolutely confirmed though.
+            end: event.time + event.duration + 1,
             extra: EventExtra::Srv3(Srv3Event {
                 x: convert_coordinate(event.position().x as f32),
                 y: convert_coordinate(event.position().y as f32),

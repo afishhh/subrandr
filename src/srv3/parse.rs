@@ -26,8 +26,8 @@ pub enum RubyPart {
     None = 0,
     Base = 1,
     Parenthesis = 2,
-    Before = 4,
-    After = 5,
+    Over = 4,
+    Under = 5,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -258,8 +258,8 @@ impl FromStr for RubyPart {
             "0" => Self::None,
             "1" => Self::Base,
             "2" => Self::Parenthesis,
-            "4" => Self::Before,
-            "5" => Self::After,
+            "4" => Self::Over,
+            "5" => Self::Under,
             _ => return Err("Unknown ruby part".into()),
         })
     }

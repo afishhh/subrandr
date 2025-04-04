@@ -7699,7 +7699,7 @@ pub struct __va_list_tag {
     pub overflow_arg_area: *mut ::std::os::raw::c_void,
     pub reg_save_area: *mut ::std::os::raw::c_void,
 }
-pub const FREETYPE_ERRORS: &[(FT_Error, &'static str)] = &[
+pub const FREETYPE_ERRORS: &[(FT_Error, &str)] = &[
 	(0x01, "cannot open resource"),
 	(0x02, "unknown file format"),
 	(0x03, "broken file"),

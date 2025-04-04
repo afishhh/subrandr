@@ -562,9 +562,6 @@ impl MonochromeImage {
 }
 
 pub struct Image {
-    // TODO: Test whether combining bitmaps of the same type helps with performance.
-    //       Probably not worth it though even if it helps, it'll probably be very
-    //       expensive even if done just once, will cause lag on first frames.
     glyphs: Vec<GlyphBitmap>,
     monochrome: OnceCell<MonochromeImage>,
 }

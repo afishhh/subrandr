@@ -556,7 +556,7 @@ impl Clone for Font {
 
 impl PartialEq for Font {
     fn eq(&self, other: &Self) -> bool {
-        self.ft_face == other.ft_face
+        std::ptr::eq(self.ft_face, other.ft_face)
             && self.point_size == other.point_size
             && self.dpi == other.dpi
             && self.coords == other.coords

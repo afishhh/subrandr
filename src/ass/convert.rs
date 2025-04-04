@@ -301,10 +301,10 @@ pub const fn convert_ass_color(abgr: u32) -> BGRA8 {
 }
 
 pub fn convert(ass: Script) -> crate::Subtitles {
-    let mut subs = crate::Subtitles {
-        class: todo!(),
-        events: vec![],
-    };
+    // let mut subs = crate::Subtitles {
+    //     class: todo!(),
+    //     events: vec![],
+    // };
 
     let layout_resolution = if ass.layout_resolution.0 > 0 && ass.layout_resolution.1 > 0 {
         ass.layout_resolution
@@ -384,6 +384,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                     let (max_x, max_y) = layout_resolution;
                     x = nx as f32 / max_x as f32;
                     y = ny as f32 / max_y as f32;
+                    todo!("ass pos x={x} y={y}");
                 }
                 Override(Command::R(style)) => {
                     current_style = ass.get_style(style).unwrap_or(&DEFAULT_STYLE).clone();
@@ -407,7 +408,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
             }
         }
 
-        todo!("redo event construction for ass")
+        todo!("redo event construction for ass {alignment:?} {x} {y}")
         // subs.events.push(crate::Event {
         //     start: event.start,
         //     end: event.end,
@@ -419,5 +420,6 @@ pub fn convert(ass: Script) -> crate::Subtitles {
         // })
     }
 
-    subs
+    // subs
+    todo!()
 }

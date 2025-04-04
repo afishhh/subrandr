@@ -394,6 +394,7 @@ pub fn fill_axis_aligned_rect(
         }
     }
 }
+
 pub fn stroke_triangle(
     x0: i32,
     y0: i32,

@@ -963,6 +963,7 @@ impl Stroker {
             if dir == StrokerDir::ALL {
                 dir = StrokerDir::UP;
             }
+            todo!("contour_start case in stroker close_contour {dir:?}")
             // self.draw_circle(self.last_point, dir);
         } else {
             self.add_line(self.first_point, dir);

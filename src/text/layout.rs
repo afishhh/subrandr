@@ -34,16 +34,9 @@ pub struct ShapedLineSegment {
     corresponding_font_boundary: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Size2 {
-    w: u32,
-    h: u32,
-}
-
 #[derive(Debug)]
 pub struct ShapedLine {
     pub segments: Vec<ShapedLineSegment>,
-    pub paint_size: Size2,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -452,13 +445,7 @@ impl MultilineTextShaper {
             total_extents.paint_width =
                 std::cmp::max(total_extents.paint_width, line_extents.paint_width);
 
-            lines.push(ShapedLine {
-                segments,
-                paint_size: Size2 {
-                    w: line_extents.paint_width.trunc_to_inner() as u32,
-                    h: line_extents.paint_height.trunc_to_inner() as u32,
-                },
-            });
+            lines.push(ShapedLine { segments });
         }
 
         if MULTILINE_SHAPER_DEBUG_PRINT {

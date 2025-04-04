@@ -532,7 +532,7 @@ impl MultilineTextShaper {
                             });
                         } else {
                             let mut last_glyph_idx = 0;
-                            let mut x = I32Fixed::ZERO;
+                            let mut x = line_extents.paint_width;
 
                             loop {
                                 let split_end = self
@@ -646,7 +646,7 @@ impl MultilineTextShaper {
                 }
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
-                    segment.baseline_offset.y - line_max_ascender,
+                    line_max_ascender - segment.max_ascender,
                 ));
             }
 

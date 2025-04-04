@@ -4,7 +4,7 @@ use crate::{
     color::BGRA8,
     math::{CubicBezier, Point2f},
     outline::{Outline, OutlineBuilder, SegmentDegree},
-    Segment, ShapeSegment, TextDecorations, TextSegment,
+    Ruby, Segment, ShapeSegment, TextDecorations, TextSegment,
 };
 
 use super::*;
@@ -376,6 +376,7 @@ pub fn convert(ass: Script) -> crate::Subtitles {
                             background_color: BGRA8::ZERO,
                             text,
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }))
                     }
                 }

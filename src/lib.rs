@@ -142,6 +142,14 @@ struct TextSegment {
     background_color: BGRA8,
     text: String,
     shadows: Vec<TextShadow>,
+    ruby: Ruby,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Ruby {
+    None,
+    Base,
+    Over,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +321,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "this ".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
@@ -324,6 +333,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "is\n".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["Liberation Sans".to_string()],
@@ -335,6 +345,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "mu".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
@@ -346,6 +357,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "ltil".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["Arial".to_string()],
@@ -357,6 +369,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "iね❌".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Shape(ShapeSegment::new(
                             {
@@ -400,6 +413,7 @@ impl Subtitles {
                         background_color: BGRA8::ZERO,
                         text: "this is for comparison".to_string(),
                         shadows: Vec::new(),
+                        ruby: Ruby::None,
                     })],
                 },
                 Event {
@@ -419,6 +433,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "mo".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
@@ -430,6 +445,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "ment".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                     ],
                 },
@@ -449,6 +465,7 @@ impl Subtitles {
                         background_color: BGRA8::ZERO,
                         text: "moment".to_string(),
                         shadows: Vec::new(),
+                        ruby: Ruby::None,
                     })],
                 },
                 Event {
@@ -478,6 +495,7 @@ impl Subtitles {
                                 color: BGRA8::new(255, 255, 255, 255),
                             }),
                         ],
+                        ruby: Ruby::None,
                     })],
                 },
                 Event {
@@ -496,6 +514,7 @@ impl Subtitles {
                         background_color: BGRA8::ZERO,
                         text: "this is bold..".to_string(),
                         shadows: Vec::new(),
+                        ruby: Ruby::None,
                     })],
                 },
                 Event {
@@ -519,6 +538,7 @@ impl Subtitles {
                                 blur_radius: 15.0,
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
@@ -534,6 +554,7 @@ impl Subtitles {
                                 blur_radius: 15.0,
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
+                            ruby: Ruby::None,
                         }),
                     ],
                 },
@@ -554,6 +575,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "😭".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["emoji".to_string()],
@@ -565,6 +587,7 @@ impl Subtitles {
                             background_color: BGRA8::ZERO,
                             text: "😭".to_string(),
                             shadows: Vec::new(),
+                            ruby: Ruby::None,
                         }),
                     ],
                 },
@@ -1045,6 +1068,7 @@ impl<'a> Renderer<'a> {
                 let EventLayout { x, y, wrap_width } = event.extra.compute_layout(ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
+                let mut last_ruby_base = None;
                 for segment in event.segments.iter() {
                     match segment {
                         Segment::Text(segment) => {
@@ -1054,13 +1078,31 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let font = self
-                                .fonts
-                                .select(&font_request)
-                                .unwrap()
-                                .with_size(subs.class.get_font_size(ctx, event, segment), ctx.dpi);
+                            let face = self.fonts.select(&font_request).unwrap();
+                            let base_size = subs.class.get_font_size(ctx, event, segment);
 
-                            shaper.add_text(&segment.text, &font);
+                            match segment.ruby {
+                                Ruby::None => {
+                                    let font = face.with_size(base_size, ctx.dpi);
+                                    shaper.add_text(&segment.text, &font);
+                                }
+                                Ruby::Base => {
+                                    let font = face.with_size(base_size, ctx.dpi);
+                                    last_ruby_base =
+                                        Some(shaper.add_ruby_base(&segment.text, &font));
+                                }
+                                Ruby::Over => {
+                                    let font = face.with_size(base_size / 2.0, ctx.dpi);
+                                    shaper.add_ruby_annotation(
+                                        last_ruby_base
+                                            .expect("Ruby::Over without preceding Ruby::Base"),
+                                        &segment.text,
+                                        &font,
+                                        false,
+                                    );
+                                    last_ruby_base = None;
+                                }
+                            }
                         }
                         Segment::Shape(shape) => {
                             shaper.add_shape(Rect2::new(

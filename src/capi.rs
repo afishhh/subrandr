@@ -208,7 +208,7 @@ unsafe extern "C" fn sbr_library_fini(sbr: *mut Subrandr) {
 
 #[unsafe(no_mangle)]
 #[cfg(not(target_arch = "wasm32"))]
-unsafe extern "C" fn sbr_load_file(sbr: *mut Subrandr, path: *const i8) -> *mut Subtitles {
+unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subtitles {
     let str = CStr::from_ptr(path);
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
     if bytes.ends_with(".ass") {
@@ -218,9 +218,10 @@ unsafe extern "C" fn sbr_load_file(sbr: *mut Subrandr, path: *const i8) -> *mut 
         )))))
     } else if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
-        Box::into_raw(Box::new(crate::srv3::convert(ctry!(crate::srv3::parse(
-            &*sbr, &text
-        )))))
+        Box::into_raw(Box::new(crate::srv3::convert(
+            sbr,
+            ctry!(crate::srv3::parse(sbr, &text)),
+        )))
     } else {
         cthrow!(UnrecognizedFile, "Unrecognized file format")
     }

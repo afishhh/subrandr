@@ -2,11 +2,14 @@
 ///
 /// Was initially based on YTSubConverter, now mostly reverse engineered straight from YouTube's captions.js.
 use crate::{
-    color::BGRA8, math::Vec2f, CssTextShadow, Event, EventExtra, EventLayout, SubtitleClass,
-    SubtitleContext, Subtitles, TextDecorations, TextSegment,
+    color::BGRA8,
+    log::{log_once_state, warning},
+    math::Vec2f,
+    CssTextShadow, Event, EventExtra, EventLayout, Ruby, Subrandr, SubtitleClass, SubtitleContext,
+    Subtitles, TextDecorations, TextSegment,
 };
 
-use super::{Document, EdgeType};
+use super::{Document, EdgeType, RubyPart};
 
 const SRV3_FONTS: &[&[&str]] = &[
     &[
@@ -245,41 +248,87 @@ impl SubtitleClass for Srv3SubtitleClass {
     }
 }
 
-pub fn convert(document: Document) -> Subtitles {
+fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
+    let mut shadows = Vec::new();
+
+    if segment.pen().edge_type != EdgeType::None {
+        let edge_color = BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000);
+        shadows.push(crate::TextShadow::Srv3(Srv3TextShadow {
+            kind: segment.pen().edge_type,
+            color: edge_color,
+        }));
+    }
+
+    crate::Segment::Text(TextSegment {
+        font: font_style_to_name(segment.pen().font_style)
+            .iter()
+            .copied()
+            .map(str::to_owned)
+            .collect(),
+        font_size: pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75),
+        font_weight: if segment.pen().bold { 700 } else { 400 },
+        italic: segment.pen().italic,
+        decorations: TextDecorations {
+            ..Default::default()
+        },
+        color: BGRA8::from_rgba32(segment.pen().foreground_color),
+        background_color: BGRA8::from_rgba32(segment.pen().background_color),
+        text: segment.text.clone(),
+        shadows,
+        ruby,
+    })
+}
+
+pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut result = Subtitles {
         class: &Srv3SubtitleClass,
         events: vec![],
     };
 
+    log_once_state!(ruby_under_unsupported: set);
+
     for event in document.events() {
         let mut segments = vec![];
 
-        for segment in event.segments.iter() {
-            let mut shadows = Vec::new();
-            if segment.pen().edge_type != EdgeType::None {
-                let edge_color = BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000);
-                shadows.push(crate::TextShadow::Srv3(Srv3TextShadow {
-                    kind: segment.pen().edge_type,
-                    color: edge_color,
-                }));
+        let mut it = event.segments.iter();
+        'segment_loop: while let Some(segment) = it.next() {
+            'ruby_failed: {
+                if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
+                    let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
+
+                    if !matches!(
+                        ruby_block.each_ref().map(|s| s.pen().ruby_part),
+                        [
+                            RubyPart::Parenthesis,
+                            RubyPart::Over | RubyPart::Under,
+                            RubyPart::Parenthesis,
+                        ]
+                    ) {
+                        break 'ruby_failed;
+                    }
+                    let ruby = match ruby_block[1].pen().ruby_part {
+                        RubyPart::Over => Ruby::Over,
+                        RubyPart::Under => {
+                            warning!(
+                                sbr,
+                                once_set(ruby_under_unsupported, ()),
+                                "Ruby `ruby-position: under`-style ruby text is not supported yet"
+                            );
+                            break 'ruby_failed;
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    segments.push(convert_segment(segment, Ruby::Base));
+                    _ = it.next().unwrap();
+                    segments.push(convert_segment(it.next().unwrap(), ruby));
+                    _ = it.next().unwrap();
+
+                    continue 'segment_loop;
+                }
             }
-            segments.push(crate::Segment::Text(TextSegment {
-                font: font_style_to_name(segment.pen().font_style)
-                    .iter()
-                    .copied()
-                    .map(str::to_owned)
-                    .collect(),
-                font_size: pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75),
-                font_weight: if segment.pen().bold { 700 } else { 400 },
-                italic: segment.pen().italic,
-                decorations: TextDecorations {
-                    ..Default::default()
-                },
-                color: BGRA8::from_rgba32(segment.pen().foreground_color),
-                background_color: BGRA8::from_rgba32(segment.pen().background_color),
-                text: segment.text.clone(),
-                shadows,
-            }))
+
+            segments.push(convert_segment(segment, Ruby::None));
         }
 
         result.events.push(Event {

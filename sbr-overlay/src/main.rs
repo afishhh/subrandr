@@ -419,7 +419,7 @@ fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitle
     Ok(match path.extension().and_then(|x| x.to_str()) {
         Some("srv3" | "ytt") => {
             let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
-            subrandr::srv3::convert(document)
+            subrandr::srv3::convert(sbr, document)
         }
         Some("ass") => {
             let script = subrandr::ass::parse(&std::fs::read_to_string(path).unwrap())?;

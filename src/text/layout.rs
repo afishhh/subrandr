@@ -24,7 +24,6 @@ struct RubyAnnotationSegment {
     starting_base_segment_index: usize,
     font: text::Font,
     input_index: usize,
-    num_bases: usize,
     text_end: usize,
     next_continues_container: bool,
 }
@@ -147,6 +146,7 @@ pub struct RubyBaseId(usize);
 // (I do not believe this is currently done correctly as of now though)
 // Annotations are passed into the shaper already paired with appriopriate bases.
 // Ruby bases and annotations forbid internal line wrapping.
+// All ruby annotations have exactly one base.
 // TODO: default ruby-align is "space-around", this means justification with extra
 //       justification opportunities at the start and end of the text
 //       justification is not yet implemented, implement it. (
@@ -154,7 +154,8 @@ pub struct RubyBaseId(usize);
 //         it should probably work like MultilineTextShaper except it accepts glyphstrings?
 //       )
 // Chromium seems to lay out ruby text at the top of the current entire line box,
-// so we do it like that too.
+// *when the whole thing is in one block* but youtube uses inline-block so the sane
+// layout is correct.
 // TODO: Currently annotations are not taken into account when line wrapping,
 //       and ruby bases are not centered when annotations overflow them.
 
@@ -235,14 +236,13 @@ impl MultilineTextShaper {
     pub fn add_ruby_annotation(
         &mut self,
         base: RubyBaseId,
-        length: usize,
         text: &str,
         font: &text::Font,
         next_continues_container: bool,
     ) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!(
-                "SHAPING V2 INPUT RUBY ANNOTATION AT {} SPANNING {length}: {:?} {:?}",
+                "SHAPING V2 INPUT RUBY ANNOTATION AT {}: {:?} {:?}",
                 base.0, text, font
             );
         }
@@ -252,7 +252,6 @@ impl MultilineTextShaper {
             font: font.clone(),
             starting_base_segment_index: base.0,
             input_index: self.segment_boundaries.len() + self.intra_font_segment_splits.len(),
-            num_bases: length,
             text_end: self.ruby_annotation_text.len(),
             next_continues_container,
         });
@@ -274,9 +273,7 @@ impl MultilineTextShaper {
         segments: &mut Vec<ShapedSegment>,
         annotations: &[RubyAnnotationSegment],
         font_select: &mut FontSelect,
-        line_ascender: IFixed26Dot6,
     ) {
-        let non_ruby_segment_len = segments.len();
         let mut current_segment = 0;
         let mut current_text_cursor = 0;
         let mut current_annotation = 0;
@@ -287,23 +284,9 @@ impl MultilineTextShaper {
                 == annotation.starting_base_segment_index
             {
                 let start_x = first_base.logical_rect.min.x;
-                let mut end_x = IFixed26Dot6::MIN;
+                let end_x = first_base.logical_rect.max.x;
 
-                // There's a ruby annotation that starts above this segment.
-                // and it spans num_bases, figure out how much space we have
-                // spanning the bases.
-                for base in &segments[current_segment..non_ruby_segment_len] {
-                    if base.corresponding_input_segment
-                        >= annotation.starting_base_segment_index + annotation.num_bases
-                        || base.corresponding_input_segment < annotation.starting_base_segment_index
-                    {
-                        break;
-                    }
-
-                    end_x = base.logical_rect.max.x;
-                }
-
-                let baseline_y = first_base.baseline_offset.y - line_ascender;
+                let baseline_y = first_base.baseline_offset.y - first_base.max_ascender;
 
                 let shaped = SimpleShapedTextSegment::shape(
                     &annotation.font,
@@ -667,7 +650,6 @@ impl MultilineTextShaper {
                     &mut segments,
                     &self.ruby_annotations[line_ruby_annotations_start..current_ruby_annotation],
                     font_select,
-                    line_max_ascender,
                 );
             }
 

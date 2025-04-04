@@ -27,6 +27,7 @@ The library performs all rendering on the CPU and renders to a BGRA8888 bitmap t
 
 ```c
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "subrandr.h"
 
@@ -78,19 +79,17 @@ int main() {
   ) < 0)
     exit(1);
 
-    /* blit bitmap to the screen OVER the video */
-    /* note: OVER is an alpha blending function */
-    /* note: bitmap is already premultiplied, use premultiplied blending function */
+  /* blit bitmap to the screen OVER the video */
+  /* note: OVER is an alpha blending function */
+  /* note: bitmap is already premultiplied, use premultiplied blending function */
 
-    // some time later
+  // some time later
 
-    // you own the bitmap at all times and can free it whenever you want
-    free(pixel_buffer);
-    sbr_renderer_destroy(renderer);
-    // destroying subtitles before the renderer is undefined behaviour
-    // (dangling Rust reference)
-    sbr_subtitles_destroy(renderer);
-    // same here, destroy the library last
-    sbr_library_fini(sbr);
+  // you own the bitmap at all times and can free it whenever you want
+  free(pixel_buffer);
+  sbr_renderer_destroy(renderer);
+  sbr_subtitles_destroy(subs);
+  // same here, destroy the library last
+  sbr_library_fini(sbr);
 }
 ```

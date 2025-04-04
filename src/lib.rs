@@ -1114,7 +1114,7 @@ impl<'a> Renderer<'a> {
                                 final_total_rect.max.y.trunc_to_inner() + 2,
                             ),
                         ),
-                        BGRA8::from_rgba32(0xFF00FFFF),
+                        BGRA8::MAGENTA,
                     );
                 }
 
@@ -1139,7 +1139,7 @@ impl<'a> Renderer<'a> {
                         ),
                         total_position_debug_pos.1,
                         16.0,
-                        BGRA8::from_rgba32(0xFF00FFFF),
+                        BGRA8::MAGENTA,
                         painter,
                     );
                 }
@@ -1215,7 +1215,7 @@ impl<'a> Renderer<'a> {
                             ),
                             Alignment::BottomLeft,
                             16.0,
-                            BGRA8::from_rgba32(0xFF0000FF),
+                            BGRA8::RED,
                             painter,
                         );
 
@@ -1225,7 +1225,7 @@ impl<'a> Renderer<'a> {
                             &format!("{:.1}", shaped_segment.baseline_offset.x),
                             Alignment::TopLeft,
                             16.0,
-                            BGRA8::from_rgba32(0xFF0000FF),
+                            BGRA8::RED,
                             painter,
                         );
 
@@ -1239,17 +1239,17 @@ impl<'a> Renderer<'a> {
                             },
                             Alignment::BottomRight,
                             16.0,
-                            BGRA8::WHITE,
+                            BGRA8::GOLD,
                             painter,
                         );
 
-                        painter.stroke_rect(final_logical_box, BGRA8::from_rgba32(0x0000FFFF));
+                        painter.stroke_rect(final_logical_box, BGRA8::BLUE);
 
                         painter.horizontal_line(
                             (shaped_segment.baseline_offset.y + y).trunc_to_inner(),
                             final_logical_box.min.x,
                             final_logical_box.max.x,
-                            BGRA8::from_rgba32(0x00FF00FF),
+                            BGRA8::GREEN,
                         );
                     }
 

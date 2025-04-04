@@ -15,6 +15,14 @@ pub struct BGRA8 {
 
 impl BGRA8 {
     pub const WHITE: Self = Self::new(255, 255, 255, 255);
+
+    pub const RED: Self = Self::new(255, 0, 0, 255);
+    pub const GREEN: Self = Self::new(0, 255, 0, 255);
+    pub const BLUE: Self = Self::new(0, 0, 255, 255);
+
+    pub const GOLD: Self = Self::new(255, 215, 0, 255);
+    pub const MAGENTA: Self = Self::new(255, 0, 255, 255);
+
     pub const ZERO: Self = Self::new(0, 0, 0, 0);
 
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {

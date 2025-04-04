@@ -249,7 +249,7 @@ pub unsafe fn horizontal_line_unchecked(
     width: i32,
     color: BGRA8,
 ) {
-    for x in x0.clamp(0, width)..(x1 + 1).clamp(0, width) {
+    for x in x0.clamp(0, width)..x1.clamp(0, width) {
         *offset_buffer.get_unchecked_mut(x as usize) = color;
     }
 }

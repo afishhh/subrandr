@@ -85,7 +85,8 @@ enum HorizontalAlignment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextWrapMode {
-    Normal, // the css one? greedy I think
+    /// Greedy line breaking.
+    Normal,
     None,
 }
 

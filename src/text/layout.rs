@@ -178,7 +178,9 @@ impl MultilineTextShaper {
                             text::compute_extents_ex(true, &segment_fonts, &glyphs);
 
                         // println!("{:?} {:?}", line_extents, extents);
-                        if !did_wrap && line_extents.paint_width + extents.paint_width > wrap_width
+                        if !did_wrap
+                            && wrap.mode == TextWrapMode::Normal
+                            && line_extents.paint_width + extents.paint_width > wrap_width
                         {
                             let mut x = line_extents.paint_width;
                             let mut glyph_it = glyphs.iter();

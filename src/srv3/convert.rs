@@ -301,7 +301,7 @@ pub fn convert(document: Document) -> Subtitles {
                 super::Point::BottomCenter => crate::Alignment::Bottom,
                 super::Point::BottomRight => crate::Alignment::BottomRight,
             },
-            text_wrap: crate::TextWrapMode::None,
+            text_wrap: crate::TextWrapMode::Normal,
             segments,
         })
     }

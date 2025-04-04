@@ -45,10 +45,6 @@ pub struct TextWrapParams {
     pub wrap_width: f32,
 }
 
-// TODO: Notes on text layout for ASS when time comes
-//       Max ascender + max descender = line height for ASS
-//       libass/ass_render.c@measure_text
-
 impl MultilineTextShaper {
     pub const fn new() -> Self {
         Self {

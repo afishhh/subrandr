@@ -1,6 +1,6 @@
 use crate::{
     color::BGRA8,
-    math::{I32Fixed, Point2f},
+    math::{I32Fixed, Point2, Point2f},
     Painter,
 };
 
@@ -320,7 +320,7 @@ pub fn horizontal_line(
 }
 
 pub fn stroke_polygon(
-    points: impl IntoIterator<Item = (i32, i32)>,
+    points: impl IntoIterator<Item = Point2<i32>>,
     buffer: &mut [BGRA8],
     width: u32,
     height: u32,
@@ -337,10 +337,10 @@ pub fn stroke_polygon(
     for next in it {
         unsafe {
             line_unchecked(
-                last.0,
-                last.1,
-                next.0,
-                next.1,
+                last.x,
+                last.y,
+                next.x,
+                next.y,
                 buffer,
                 width as usize,
                 width as i32,
@@ -354,10 +354,10 @@ pub fn stroke_polygon(
 
     unsafe {
         line_unchecked(
-            last.0,
-            last.1,
-            first.0,
-            first.1,
+            last.x,
+            last.y,
+            first.x,
+            first.y,
             buffer,
             width as usize,
             width as i32,

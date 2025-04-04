@@ -8,7 +8,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I32Fixed, Point2f, Rect2, Vec2f};
+use math::{I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::NonZeroPolygonRasterizer;
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -1103,11 +1103,11 @@ impl<'a> Renderer<'a> {
                     };
 
                 if DRAW_LAYOUT_DEBUG_INFO {
-                    painter.stroke_whrect(
-                        x + total_rect.x - 1,
-                        y + total_rect.y - 1,
-                        total_rect.w + 2,
-                        total_rect.h + 2,
+                    painter.stroke_rect(
+                        Rect2::from_min_size(
+                            Point2::new(x + total_rect.x - 1, y + total_rect.y - 1),
+                            Vec2::new(total_rect.w as i32 + 2, total_rect.h as i32 + 2),
+                        ),
                         BGRA8::from_rgba32(0xFF00FFFF),
                     );
                 }
@@ -1138,6 +1138,14 @@ impl<'a> Renderer<'a> {
                     );
                 }
 
+                fn round_rect(rect: Rect2<I32Fixed<6>>) -> Rect2<i32> {
+                    Rect2::new(
+                        Point2::new(rect.min.x.trunc_to_inner(), rect.min.y.trunc_to_inner()),
+                        // TODO: ceil max?
+                        Point2::new(rect.max.x.trunc_to_inner(), rect.max.y.trunc_to_inner()),
+                    )
+                }
+
                 for line in &lines {
                     let mut current_background_box = Rect2::<I32Fixed<6>>::NOTHING;
                     let mut last_segment_index = usize::MAX;
@@ -1149,10 +1157,8 @@ impl<'a> Renderer<'a> {
                                     Segment::Text(text) => {
                                         if text.background_color.a != 0 {
                                             painter.fill_rect(
-                                                x + current_background_box.min.x.trunc_to_inner(),
-                                                y + current_background_box.min.y.trunc_to_inner(),
-                                                x + current_background_box.max.x.trunc_to_inner(),
-                                                y + current_background_box.max.y.trunc_to_inner(),
+                                                round_rect(current_background_box)
+                                                    .translate(Vec2::new(x, y)),
                                                 text.background_color,
                                             );
                                         }
@@ -1175,10 +1181,8 @@ impl<'a> Renderer<'a> {
                             Segment::Text(text) => {
                                 if text.background_color.a != 0 {
                                     painter.fill_rect(
-                                        x + current_background_box.min.x.trunc_to_inner(),
-                                        y + current_background_box.min.y.trunc_to_inner(),
-                                        x + current_background_box.max.x.trunc_to_inner(),
-                                        y + current_background_box.max.y.trunc_to_inner(),
+                                        round_rect(current_background_box)
+                                            .translate(Vec2::new(x, y)),
                                         text.background_color,
                                     );
                                 }
@@ -1191,15 +1195,13 @@ impl<'a> Renderer<'a> {
                 for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
                     let segment = &event.segments[shaped_segment.corresponding_input_segment];
 
-                    let paint_box = (
-                        x + shaped_segment.logical_rect.min.x.trunc_to_inner(),
-                        y + shaped_segment.logical_rect.min.y.trunc_to_inner(),
-                    );
+                    let final_logical_box =
+                        round_rect(shaped_segment.logical_rect).translate(Vec2::new(x, y));
 
                     if DRAW_LAYOUT_DEBUG_INFO {
                         self.debug_text(
-                            paint_box.0,
-                            paint_box.1,
+                            final_logical_box.min.x,
+                            final_logical_box.min.y,
                             &format!(
                                 "{:.0},{:.0}",
                                 shaped_segment.logical_rect.min.x + x,
@@ -1212,8 +1214,8 @@ impl<'a> Renderer<'a> {
                         );
 
                         self.debug_text(
-                            paint_box.0,
-                            y + shaped_segment.logical_rect.max.y.trunc_to_inner(),
+                            final_logical_box.min.x,
+                            final_logical_box.max.y,
                             &format!("{:.1}", shaped_segment.baseline_offset.x),
                             Alignment::TopLeft,
                             16.0,
@@ -1222,8 +1224,8 @@ impl<'a> Renderer<'a> {
                         );
 
                         self.debug_text(
-                            x + shaped_segment.logical_rect.max.x.trunc_to_inner(),
-                            paint_box.1,
+                            final_logical_box.max.x,
+                            final_logical_box.min.y,
                             &if let Segment::Text(segment) = segment {
                                 format!("{:.0}pt", subs.class.get_font_size(ctx, event, segment))
                             } else {
@@ -1235,19 +1237,12 @@ impl<'a> Renderer<'a> {
                             painter,
                         );
 
-                        let rect_size = shaped_segment.logical_rect.size();
-                        painter.stroke_whrect(
-                            paint_box.0,
-                            paint_box.1,
-                            rect_size.x.trunc_to_inner() as u32,
-                            rect_size.y.trunc_to_inner() as u32,
-                            BGRA8::from_rgba32(0x0000FFFF),
-                        );
+                        painter.stroke_rect(final_logical_box, BGRA8::from_rgba32(0x0000FFFF));
 
                         painter.horizontal_line(
                             (shaped_segment.baseline_offset.y + y).trunc_to_inner(),
-                            paint_box.0,
-                            x + shaped_segment.logical_rect.max.x.trunc_to_inner(),
+                            final_logical_box.min.x,
+                            final_logical_box.max.x,
                             BGRA8::from_rgba32(0x00FF00FF),
                         );
                     }

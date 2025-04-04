@@ -100,13 +100,13 @@ impl<'a> Painter<'a> {
         rasterize::line(x0, y0, x1, y1, self.buffer, self.width, self.height, color)
     }
 
-    pub fn stroke_whrect(&mut self, x: i32, y: i32, w: u32, h: u32, color: BGRA8) {
+    pub fn stroke_rect(&mut self, rect: Rect2<i32>, color: BGRA8) {
         rasterize::stroke_polygon(
             [
-                (x, y),
-                (x.saturating_add_unsigned(w), y),
-                (x.saturating_add_unsigned(w), y.saturating_add_unsigned(h)),
-                (x, y.saturating_add_unsigned(h)),
+                rect.min,
+                Point2::new(rect.max.x, rect.min.y),
+                rect.max,
+                Point2::new(rect.min.x, rect.max.y),
             ],
             self.buffer,
             self.width,
@@ -115,12 +115,12 @@ impl<'a> Painter<'a> {
         )
     }
 
-    pub fn fill_rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: BGRA8) {
+    pub fn fill_rect(&mut self, rect: Rect2<i32>, color: BGRA8) {
         rasterize::fill_axis_aligned_rect(
-            x0,
-            y0,
-            x1,
-            y1,
+            rect.min.x,
+            rect.min.y,
+            rect.max.x,
+            rect.max.y,
             self.buffer,
             self.width,
             self.height,

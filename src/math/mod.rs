@@ -175,10 +175,10 @@ macro_rules! impl_binop {
     (@arg_or_self $arg: ident) => { $arg<N> };
     (@arg_or_self) => { Self };
     ($trait: ident, $fn: ident$(, $trait_assign: ident, $fn_assign: ident)?; $dst: ident, $operator: tt, $operator_assign: tt, $src: ident$(, $output: ident)?) => {
-        impl<N: Number> $trait<$src<N>> for $dst<N> {
+        impl<N: Number, U: Number> $trait<$src<U>> for $dst<N> where N: $trait<U, Output = N> {
             type Output = impl_binop!(@arg_or_self $($output)?);
 
-            fn $fn(self, rhs: $src<N>)-> Self::Output {
+            fn $fn(self, rhs: $src<U>)-> Self::Output {
                 <impl_binop!(@arg_or_self $($output)?)>::new(
                     self.x $operator rhs.x,
                     self.y $operator rhs.y,
@@ -277,7 +277,11 @@ impl<N: Number + Display> Rect2<N> {
         }
     }
 
-    pub fn translate(self, vector: Vec2<N>) -> Self {
+    pub fn translate<U>(self, vector: Vec2<U>) -> Self
+    where
+        U: Number + Display,
+        N: Add<U, Output = N>,
+    {
         Self {
             min: self.min + vector,
             max: self.max + vector,
@@ -307,6 +311,18 @@ impl<N: Number + Display> Rect2<N> {
         self.max - self.min
     }
 
+    pub fn x(&self) -> N {
+        self.min.x
+    }
+
+    pub fn y(&self) -> N {
+        self.min.y
+    }
+
+    pub fn width(&self) -> N {
+        self.size().x
+    }
+
     pub fn height(&self) -> N {
         self.size().y
     }
@@ -326,6 +342,13 @@ impl<N: Number + Display> Rect2<N> {
         self.min.y = self.min.y.min(point.y);
         self.max.x = self.max.x.max(point.x);
         self.max.y = self.max.y.max(point.y);
+    }
+
+    pub fn expand_to_rect(&mut self, rect: Rect2<N>) {
+        self.min.x = self.min.x.min(rect.min.x);
+        self.min.y = self.min.y.min(rect.min.y);
+        self.max.x = self.max.x.max(rect.max.x);
+        self.max.y = self.max.y.max(rect.max.y);
     }
 
     pub fn bounding_from_points(points: &[Point2<N>]) -> Self {

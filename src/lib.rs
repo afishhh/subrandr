@@ -572,14 +572,6 @@ impl Subtitles {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
-struct PixelRect {
-    x: i32,
-    y: i32,
-    w: u32,
-    h: u32,
-}
-
 const DRAW_VERSION_STRING: bool = true;
 const DRAW_PERF_DEBUG_INFO: bool = true;
 const DRAW_LAYOUT_DEBUG_INFO: bool = false;
@@ -1070,16 +1062,20 @@ impl<'a> Renderer<'a> {
                             shaper.add_text(&segment.text, &font);
                         }
                         Segment::Shape(shape) => {
-                            shaper.add_shape(PixelRect {
-                                x: (shape.bounding_box.min.x * shape_scale).floor() as i32,
-                                y: (shape.bounding_box.min.y * shape_scale).floor() as i32,
-                                w: ((shape.bounding_box.size().x + shape.stroke_x / 2.0)
-                                    * shape_scale)
-                                    .ceil() as u32,
-                                h: ((shape.bounding_box.size().y + shape.stroke_y / 2.0)
-                                    * shape_scale)
-                                    .ceil() as u32,
-                            });
+                            shaper.add_shape(Rect2::new(
+                                Point2::new(
+                                    (shape.bounding_box.min.x * shape_scale).floor() as i32,
+                                    (shape.bounding_box.min.y * shape_scale).floor() as i32,
+                                ),
+                                Point2::new(
+                                    ((shape.bounding_box.max.x + shape.stroke_x / 2.0)
+                                        * shape_scale)
+                                        .ceil() as i32,
+                                    ((shape.bounding_box.max.y + shape.stroke_y / 2.0)
+                                        * shape_scale)
+                                        .ceil() as i32,
+                                ),
+                            ));
                         }
                     }
                 }
@@ -1098,38 +1094,48 @@ impl<'a> Renderer<'a> {
                 let y = y as i32
                     + match vertical_alignment {
                         VerticalAlignment::Top => 0,
-                        VerticalAlignment::BaselineCentered => -(total_rect.h as i32) / 2,
-                        VerticalAlignment::Bottom => -(total_rect.h as i32),
+                        VerticalAlignment::BaselineCentered => {
+                            -total_rect.height().trunc_to_inner() / 2
+                        }
+                        VerticalAlignment::Bottom => -total_rect.height().trunc_to_inner(),
                     };
+
+                let final_total_rect = total_rect.translate(Vec2::new(x, y));
 
                 if DRAW_LAYOUT_DEBUG_INFO {
                     painter.stroke_rect(
-                        Rect2::from_min_size(
-                            Point2::new(x + total_rect.x - 1, y + total_rect.y - 1),
-                            Vec2::new(total_rect.w as i32 + 2, total_rect.h as i32 + 2),
+                        Rect2::new(
+                            Point2::new(
+                                final_total_rect.min.x.trunc_to_inner() - 1,
+                                final_total_rect.min.y.trunc_to_inner() - 1,
+                            ),
+                            Point2::new(
+                                final_total_rect.max.x.trunc_to_inner() + 2,
+                                final_total_rect.max.y.trunc_to_inner() + 2,
+                            ),
                         ),
                         BGRA8::from_rgba32(0xFF00FFFF),
                     );
                 }
 
                 let total_position_debug_pos = match vertical_alignment {
-                    VerticalAlignment::Top => (total_rect.h as i32 + 20, Alignment::Top),
+                    VerticalAlignment::Top => (total_rect.height() + 20, Alignment::Top),
                     VerticalAlignment::BaselineCentered => {
-                        (total_rect.h as i32 + 20, Alignment::Top)
+                        (total_rect.height() + 20, Alignment::Top)
                     }
-                    VerticalAlignment::Bottom => (-32, Alignment::Bottom),
+                    VerticalAlignment::Bottom => (I32Fixed::new(-24), Alignment::Bottom),
                 };
 
                 if DRAW_LAYOUT_DEBUG_INFO {
                     self.debug_text(
-                        x + total_rect.x + total_rect.w as i32 / 2,
-                        y + total_rect.y + total_position_debug_pos.0,
+                        (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
+                        (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
                         &format!(
-                            "x:{} y:{} w:{} h:{}",
-                            x + total_rect.x,
-                            y + total_rect.y,
-                            total_rect.w,
-                            total_rect.h
+                            "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
+                            final_total_rect.x(),
+                            final_total_rect.y(),
+                            final_total_rect.width(),
+                            final_total_rect.height()
                         ),
                         total_position_debug_pos.1,
                         16.0,

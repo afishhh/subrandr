@@ -4,7 +4,7 @@ use crate::{
     math::{I32Fixed, Point2, Rect2, Vec2},
     text::{self, ft_utils::IFixed26Dot6},
     util::RcArray,
-    HorizontalAlignment, PixelRect, TextWrapMode,
+    HorizontalAlignment, TextWrapMode,
 };
 
 use super::{FontSelect, TextExtents};
@@ -13,7 +13,7 @@ const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
 enum ShaperSegment {
     Text(text::Font),
-    Shape(PixelRect),
+    Shape(Rect2<i32>),
 }
 
 pub struct MultilineTextShaper {
@@ -92,7 +92,7 @@ impl MultilineTextShaper {
             .push((ShaperSegment::Text(font.clone()), self.text.len()));
     }
 
-    pub fn add_shape(&mut self, dim: PixelRect) {
+    pub fn add_shape(&mut self, dim: Rect2<i32>) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 INPUT SHAPE: {dim:?}",);
         }
@@ -107,7 +107,7 @@ impl MultilineTextShaper {
         line_alignment: HorizontalAlignment,
         wrap: TextWrapParams,
         font_select: &mut FontSelect,
-    ) -> (Vec<ShapedLine>, PixelRect) {
+    ) -> (Vec<ShapedLine>, Rect2<IFixed26Dot6>) {
         // assert_eq!(wrap.mode, TextWrapMode::None);
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -126,12 +126,7 @@ impl MultilineTextShaper {
             paint_height: I32Fixed::ZERO,
             max_bearing_y: IFixed26Dot6::ZERO,
         };
-        let mut total_rect = PixelRect {
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-        };
+        let mut total_rect = Rect2::NOTHING;
 
         let mut current_explicit_line = 0;
         let mut current_segment = 0;
@@ -370,9 +365,9 @@ impl MultilineTextShaper {
                     }
                     // TODO: Figure out exactly how libass lays out shapes
                     ShaperSegment::Shape(dim) => {
-                        let logical_w = dim.w - (-dim.x).min(0) as u32;
-                        let logical_h = dim.h - (-dim.y).min(0) as u32;
-                        let segment_max_bearing_y = I32Fixed::new(logical_h as i32);
+                        let logical_w = dim.width() - (-dim.min.x).min(0);
+                        let logical_h = dim.height() - (-dim.min.y).min(0);
+                        let segment_max_bearing_y = I32Fixed::new(logical_h);
                         segments.push(ShapedLineSegment {
                             glyphs_and_fonts: None,
                             baseline_offset: Point2::new(
@@ -382,19 +377,18 @@ impl MultilineTextShaper {
                             logical_rect: Rect2::new(
                                 Point2::ZERO,
                                 Point2::new(
-                                    IFixed26Dot6::new(logical_w as i32),
-                                    IFixed26Dot6::new(logical_h as i32),
+                                    IFixed26Dot6::new(logical_w),
+                                    IFixed26Dot6::new(logical_h),
                                 ),
                             ),
                             corresponding_input_segment: current_segment + current_intra_split,
                             corresponding_font_boundary: current_segment + current_intra_split,
                             max_ascender: segment_max_bearing_y,
                         });
-                        line_extents.paint_width += (logical_w * 64) as i32;
+                        line_extents.paint_width += logical_w;
                         line_max_ascender = line_max_ascender.max(segment_max_bearing_y);
-                        line_extents.paint_height = line_extents
-                            .paint_height
-                            .max(I32Fixed::new(logical_h as i32));
+                        line_extents.paint_height =
+                            line_extents.paint_height.max(I32Fixed::new(logical_h));
                     }
                 }
 
@@ -435,22 +429,9 @@ impl MultilineTextShaper {
             }
 
             if !segments.is_empty() {
-                total_rect.x = total_rect.x.min(
-                    segments
-                        .first()
-                        .map(|x| x.logical_rect.min.x.trunc_to_inner())
-                        .unwrap(),
-                );
-                total_rect.w = total_rect.w.max(
-                    (segments
-                        .last()
-                        .map(|x| x.logical_rect.max.x.trunc_to_inner())
-                        .unwrap()
-                        - segments
-                            .first()
-                            .map(|x| x.logical_rect.min.x.trunc_to_inner())
-                            .unwrap()) as u32,
-                );
+                for segment in &segments {
+                    total_rect.expand_to_rect(segment.logical_rect);
+                }
             }
 
             if line_boundary == self.text.len() {
@@ -479,8 +460,6 @@ impl MultilineTextShaper {
                 },
             });
         }
-
-        total_rect.h = total_extents.paint_height.trunc_to_inner() as u32;
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);

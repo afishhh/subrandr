@@ -265,7 +265,13 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
             .copied()
             .map(str::to_owned)
             .collect(),
-        font_size: pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75),
+        font_size: {
+            let mut base = pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75);
+            if matches!(ruby, Ruby::Over) {
+                base /= 2.0;
+            }
+            base
+        },
         font_weight: if segment.pen().bold { 700 } else { 400 },
         italic: segment.pen().italic,
         decorations: TextDecorations {

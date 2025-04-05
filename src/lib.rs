@@ -1079,21 +1079,21 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let face = self.fonts.select(&font_request).unwrap();
-                            let base_size = subs.class.get_font_size(ctx, event, segment);
+                            let font = self
+                                .fonts
+                                .select(&font_request)
+                                .unwrap()
+                                .with_size(subs.class.get_font_size(ctx, event, segment), ctx.dpi);
 
                             match segment.ruby {
                                 Ruby::None => {
-                                    let font = face.with_size(base_size, ctx.dpi);
                                     shaper.add_text(&segment.text, &font);
                                 }
                                 Ruby::Base => {
-                                    let font = face.with_size(base_size, ctx.dpi);
                                     last_ruby_base =
                                         Some(shaper.add_ruby_base(&segment.text, &font));
                                 }
                                 Ruby::Over => {
-                                    let font = face.with_size(base_size / 2.0, ctx.dpi);
                                     shaper.add_ruby_annotation(
                                         last_ruby_base
                                             .expect("Ruby::Over without preceding Ruby::Base"),

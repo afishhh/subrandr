@@ -672,7 +672,7 @@ impl MultilineTextShaper {
                 }
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
-                    line_max_ascender - segment.max_ascender,
+                    total_extents.paint_height + line_max_ascender - segment.max_ascender,
                 ));
             }
 

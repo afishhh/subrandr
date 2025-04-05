@@ -7,72 +7,122 @@ use crate::{
     math::{Point2f, Rect2f, Vec2f},
 };
 
-pub mod polygon;
-pub mod sw;
+pub(crate) mod polygon;
+pub(crate) mod sw;
+#[cfg(feature = "wgpu")]
+pub mod wgpu;
 
-pub enum PixelFormat {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PixelFormat {
     Mono,
     Bgra,
+}
+
+impl PixelFormat {
+    pub(crate) fn width(&self) -> u8 {
+        match self {
+            PixelFormat::Mono => 1,
+            PixelFormat::Bgra => 4,
+        }
+    }
 }
 
 enum RenderTargetInner<'a> {
     Software(sw::RenderTargetImpl<'a>),
     SoftwareTexture(sw::TextureRenderTargetImpl),
+    #[cfg(feature = "wgpu")]
+    Wgpu(wgpu::RenderTargetImpl),
+    #[cfg(feature = "wgpu")]
+    // For zero-sized renders, TODO: move this logic into RenderTargetImpl
+    WgpuEmpty,
 }
 
 impl RenderTargetInner<'_> {
     fn variant_name(&self) -> &'static str {
         match self {
-            RenderTargetInner::Software(_) => "software",
-            RenderTargetInner::SoftwareTexture(_) => "software texture",
+            Self::Software(_) => "software",
+            Self::SoftwareTexture(_) => "software texture",
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) | Self::WgpuEmpty => "wgpu",
         }
     }
 }
 
 pub struct RenderTarget<'a>(RenderTargetInner<'a>);
 
+impl RenderTarget<'_> {
+    pub(crate) fn width(&self) -> u32 {
+        match &self.0 {
+            // TODO: Make these fields private and have all the impls define accessors for them
+            RenderTargetInner::Software(sw) => sw.width,
+            RenderTargetInner::SoftwareTexture(sw_tex) => sw_tex.width,
+            #[cfg(feature = "wgpu")]
+            RenderTargetInner::Wgpu(wgpu) => wgpu.tex.width(),
+            #[cfg(feature = "wgpu")]
+            RenderTargetInner::WgpuEmpty => 0,
+        }
+    }
+
+    pub(crate) fn height(&self) -> u32 {
+        match &self.0 {
+            // TODO: Make these fields private and have all the impls define accessors for them
+            RenderTargetInner::Software(sw) => sw.height,
+            RenderTargetInner::SoftwareTexture(sw_tex) => sw_tex.height,
+            #[cfg(feature = "wgpu")]
+            RenderTargetInner::Wgpu(wgpu) => wgpu.tex.height(),
+            #[cfg(feature = "wgpu")]
+            RenderTargetInner::WgpuEmpty => 0,
+        }
+    }
+}
+
 #[derive(Clone)]
 enum TextureInner<'a> {
     Software(sw::TextureImpl<'a>),
+    #[cfg(feature = "wgpu")]
+    Wgpu(wgpu::TextureImpl),
 }
 
 impl TextureInner<'_> {
     fn variant_name(&self) -> &'static str {
         match self {
             TextureInner::Software(_) => "software",
+            #[cfg(feature = "wgpu")]
+            TextureInner::Wgpu(_) => "wgpu",
         }
     }
 }
 
 #[derive(Clone)]
-pub struct Texture<'a>(TextureInner<'a>);
+pub(crate) struct Texture<'a>(TextureInner<'a>);
 
 impl Texture<'_> {
-    pub fn width(&self) -> u32 {
+    pub(crate) fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width,
+            #[cfg(feature = "wgpu")]
+            TextureInner::Wgpu(wgpu::TextureImpl { tex }) => {
+                tex.as_ref().map_or(0, |tex| tex.width())
+            }
         }
     }
 
-    pub fn height(&self) -> u32 {
+    pub(crate) fn height(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.height,
-        }
-    }
-
-    pub fn format(&self) -> PixelFormat {
-        match &self.0 {
-            TextureInner::Software(sw) => match sw.data {
-                sw::TextureData::BorrowedMono(_) => PixelFormat::Mono,
-                sw::TextureData::BorrowedBGRA(_) => PixelFormat::Bgra,
-                sw::TextureData::OwnedMono(_) => PixelFormat::Mono,
-                sw::TextureData::OwnedBgra(_) => PixelFormat::Bgra,
-            },
+            #[cfg(feature = "wgpu")]
+            TextureInner::Wgpu(wgpu::TextureImpl { tex }) => {
+                tex.as_ref().map_or(0, |tex| tex.height())
+            }
         }
     }
 }
 
-pub trait Rasterizer {
+pub(crate) trait Rasterizer {
+    // Used for display debug information
+    fn name(&self) -> &'static str;
+    fn adapter_info_string(&self) -> Option<String>;
+
     #[allow(clippy::type_complexity)]
     unsafe fn create_texture_mapped(
         &mut self,
@@ -80,7 +130,7 @@ pub trait Rasterizer {
         height: u32,
         format: PixelFormat,
         // FIXME: ugly box...
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>]) + '_>,
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
     ) -> Texture<'static>;
 
     fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
@@ -95,7 +145,9 @@ pub trait Rasterizer {
         x0: f32,
         x1: f32,
         color: BGRA8,
-    );
+    ) {
+        self.line(target, Point2f::new(x0, y), Point2f::new(x1, y), color);
+    }
 
     fn stroke_triangle(
         &mut self,

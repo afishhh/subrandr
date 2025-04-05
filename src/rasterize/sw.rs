@@ -8,7 +8,7 @@ use crate::{
 };
 
 mod blit;
-mod blur;
+pub(super) mod blur;
 
 #[derive(Debug, Clone)]
 struct Bresenham {
@@ -559,8 +559,8 @@ fn fill_triangle(
 
 pub(super) struct RenderTargetImpl<'a> {
     buffer: &'a mut [BGRA8],
-    width: u32,
-    height: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub fn create_render_target(buffer: &mut [BGRA8], width: u32, height: u32) -> super::RenderTarget {
@@ -587,8 +587,8 @@ fn unwrap_sw_render_target<'a, 'b>(
 //       and not have to worry about this split anymore.
 pub(super) struct TextureRenderTargetImpl {
     buffer: Arc<[u8]>,
-    width: u32,
-    height: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 fn unwrap_sw_render_texture<'a, 'b>(
@@ -650,7 +650,7 @@ struct UnwrappedTexture<'a> {
 }
 
 fn unwrap_sw_texture<'a>(texture: &'a super::Texture) -> UnwrappedTexture<'a> {
-    #[expect(unreachable_patterns)]
+    #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
     match &texture.0 {
         super::TextureInner::Software(texture) => UnwrappedTexture {
             width: texture.width,
@@ -682,19 +682,27 @@ impl Rasterizer {
 }
 
 impl super::Rasterizer for Rasterizer {
+    fn name(&self) -> &'static str {
+        "software"
+    }
+
+    fn adapter_info_string(&self) -> Option<String> {
+        None
+    }
+
     unsafe fn create_texture_mapped(
         &mut self,
         width: u32,
         height: u32,
         format: super::PixelFormat,
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>]) + '_>,
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
     ) -> super::Texture<'static> {
         let n_pixels = width as usize * height as usize;
         match format {
             super::PixelFormat::Mono => {
                 let mut data = Arc::new_uninit_slice(n_pixels);
                 let slice = unsafe { Arc::get_mut(&mut data).unwrap_unchecked() };
-                callback(slice);
+                callback(slice, width as usize);
                 super::Texture(super::TextureInner::Software(TextureImpl {
                     width,
                     height,
@@ -711,7 +719,7 @@ impl super::Rasterizer for Rasterizer {
                     )
                 };
 
-                callback(slice);
+                callback(slice, width as usize * 4);
 
                 super::Texture(super::TextureInner::Software(TextureImpl {
                     width,

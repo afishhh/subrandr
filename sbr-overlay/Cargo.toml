@@ -5,12 +5,15 @@ edition = "2024"
 
 [features]
 default = ["ipc-mpv", "ipc-browser-cdp"]
+
+wgpu = ["subrandr/wgpu", "dep:wgpu", "dep:pollster"]
+
 ipc-mpv = ["dep:serde_json", "_serde"]
 ipc-browser-cdp = ["dep:tungstenite", "dep:serde_json", "_serde"]
 _serde = ["dep:serde"]
 
 [dependencies]
-subrandr = { path = ".." }
+subrandr = { path = "..", default-features = false }
 
 anyhow = "1.0.97"
 
@@ -21,4 +24,7 @@ serde = { version = "1.0.216", features = ["derive"], optional = true }
 
 xcb = { version = "1", features = ["res", "shape", "xlib_xcb"] }
 winit = { version = "0.30.9", default-features = false, features = ["rwh_06", "x11"] }
+
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4.0", optional = true }
 

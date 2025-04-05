@@ -23,7 +23,7 @@ mod color;
 mod log;
 mod math;
 mod outline;
-mod rasterize;
+pub mod rasterize;
 pub mod srv3;
 mod text;
 mod util;
@@ -717,6 +717,10 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = 0..0;
     }
 
+    pub fn unchanged_inside(&mut self) -> Range<u32> {
+        self.unchanged_range.clone()
+    }
+
     fn debug_text(
         &mut self,
         rasterizer: &mut dyn Rasterizer,
@@ -936,14 +940,6 @@ impl<'a> Renderer<'a> {
         width: u32,
         height: u32,
     ) {
-        if width == 0 || height == 0 {
-            return;
-        }
-
-        let rasterizer = &mut rasterize::sw::Rasterizer::new();
-
-        self.perf.start_frame();
-
         if self.unchanged_range.contains(&t)
             && self.previous_output_size == (width, height)
             && self.previous_context == *ctx
@@ -959,13 +955,49 @@ impl<'a> Renderer<'a> {
 
         self.previous_context = *ctx;
         self.previous_output_size = (width, height);
+
+        buffer.fill(BGRA8::ZERO);
+        self.render_to(
+            &mut rasterize::sw::Rasterizer::new(),
+            &mut rasterize::sw::create_render_target(buffer, width, height),
+            ctx,
+            t,
+            subs,
+        );
+    }
+
+    // FIXME: This is kinda ugly but `render_to` cannot be public without
+    //        exposing the Rasterizer trait.
+    //        Maybe just do it and mark it #[doc(hidden)]?
+    #[cfg(feature = "wgpu")]
+    pub fn render_to_wgpu(
+        &mut self,
+        rasterizer: &mut rasterize::wgpu::Rasterizer,
+        mut target: RenderTarget,
+        ctx: &SubtitleContext,
+        t: u32,
+        subs: &Subtitles,
+    ) {
+        self.render_to(rasterizer, &mut target, ctx, t, subs);
+        rasterizer.submit_render(target);
+    }
+
+    fn render_to(
+        &mut self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
+        ctx: &SubtitleContext,
+        t: u32,
+        subs: &Subtitles,
+    ) {
+        let (target_width, target_height) = (target.width(), target.width());
+        if target_width == 0 || target_height == 0 {
+            return;
+        }
+
+        self.perf.start_frame();
         self.fonts.advance_cache_generation();
 
-        let clear_start = std::time::Instant::now();
-        buffer.fill(BGRA8::ZERO);
-        let clear_end = std::time::Instant::now();
-
-        let target = &mut rasterize::sw::create_render_target(buffer, width, height);
         self.dpi = ctx.dpi;
 
         trace!(
@@ -990,6 +1022,31 @@ impl<'a> Renderer<'a> {
                 16.0,
                 BGRA8::WHITE,
             );
+
+            let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
+            self.debug_text(
+                rasterizer,
+                target,
+                0,
+                (20.0 * ctx.pixel_scale()) as i32,
+                &rasterizer_line,
+                Alignment::TopLeft,
+                16.0,
+                BGRA8::WHITE,
+            );
+
+            if let Some(adapter_line) = rasterizer.adapter_info_string() {
+                self.debug_text(
+                    rasterizer,
+                    target,
+                    0,
+                    (40.0 * ctx.pixel_scale()) as i32,
+                    &adapter_line,
+                    Alignment::TopLeft,
+                    16.0,
+                    BGRA8::WHITE,
+                );
+            }
         }
 
         if DRAW_PERF_DEBUG_INFO {
@@ -1013,12 +1070,8 @@ impl<'a> Renderer<'a> {
                 (ctx.padding_left + ctx.video_width) as i32,
                 (20.0 * ctx.pixel_scale()) as i32,
                 &format!(
-                    "clear={:.1}ms   l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
-                    (clear_end - clear_start).as_secs_f32() * 1000.,
-                    ctx.padding_left,
-                    ctx.padding_right,
-                    ctx.padding_top,
-                    ctx.padding_bottom
+                    "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                    ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                 ),
                 Alignment::TopRight,
                 16.0,

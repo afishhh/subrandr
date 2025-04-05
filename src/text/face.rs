@@ -748,7 +748,7 @@ impl Font {
                 } else {
                     PixelFormat::Bgra
                 },
-                Box::new(|buffer_data: &mut [MaybeUninit<u8>]| {
+                Box::new(|buffer_data, stride| {
                     for biy in 0..scaled_height {
                         for bix in 0..scaled_width {
                             let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
@@ -834,8 +834,7 @@ impl Font {
                                 }
                             };
 
-                            let i = (bix as usize + biy as usize * scaled_width as usize)
-                                * pixel_width as usize;
+                            let i = bix as usize * pixel_width as usize + biy as usize * stride;
                             buffer_data[i..i + pixel_width as usize].copy_from_slice(
                                 std::mem::transmute(&pixel_data[..pixel_width as usize]),
                             );

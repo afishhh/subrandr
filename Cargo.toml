@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[features]
+default = []
+wgpu = ["dep:wgpu"]
+
 [dependencies]
 thiserror = "1"
 
@@ -13,6 +17,7 @@ aliasable = "0.1"
 quick-xml = "0.36"
 
 text-sys = { path = "./text-sys" }
+wgpu = { version = "24", optional = true }
 
 [profile.release]
 panic = "abort"

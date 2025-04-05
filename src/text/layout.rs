@@ -683,7 +683,7 @@ impl MultilineTextShaper {
                     .get(current_ruby_annotation)
                     .is_some_and(|annotation| {
                         annotation.starting_base_segment_index
-                            < current_segment + current_intra_split
+                            <= current_segment + current_intra_split
                     })
                 {
                     current_ruby_annotation += 1;

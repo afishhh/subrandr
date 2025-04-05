@@ -157,12 +157,9 @@ export class Renderer {
   /** @internal */
   __ctxptr: WasmPtr;
 
-  constructor(subtitles: Subtitles) {
+  constructor() {
     const g = state();
-    this.__ptr = g.mod.exports.sbr_renderer_create(
-      g.lib,
-      subtitles.__ptr
-    );
+    this.__ptr = g.mod.exports.sbr_renderer_create(g.lib);
     this.__ctxptr = g.mod.alloc(SUBCTX_LEN)
   }
 
@@ -186,7 +183,7 @@ export class Renderer {
     }
   }
 
-  render(ctx: SubtitleContext, fb: Framebuffer, t: number) {
+  render(ctx: SubtitleContext, fb: Framebuffer, subs: Subtitles, t: number) {
     const g = state();
     writeStruct(
       new DataView(g.mod.memoryBuffer, this.__ctxptr, SUBCTX_LEN),
@@ -206,6 +203,7 @@ export class Renderer {
       this.__ptr,
       this.__ctxptr,
       t,
+      subs.__ptr,
       back.ptr,
       fb._width,
       fb._height,

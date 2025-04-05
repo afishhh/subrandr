@@ -52,7 +52,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       console.log("reloading subs")
       
       subtitles = Subtitles.parseFromString(event.data.text)
-      renderer = new Renderer(subtitles)
+      renderer = new Renderer()
       
       renderer.addFont(
         "Noto Sans JP",
@@ -74,7 +74,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       const params = event.data
 
       fb.resize(Math.ceil(params.player_width), Math.ceil(params.player_height))
-      renderer!!.render(params.ctx, fb, params.playback_time)
+      renderer!!.render(params.ctx, fb, subtitles!!, params.playback_time)
 
       const bitmap = await fb.imageBitmap()
       postMessage({ id: event.data.id, bitmap }, { transfer: [bitmap] })

@@ -28,11 +28,12 @@ export interface SubrandrExports {
 	sbr_library_init(): LibraryPtr
 	sbr_library_fini(ptr: LibraryPtr): void
 	sbr_library_close_font(sbr: LibraryPtr, ptr: FontPtr): void
-	sbr_renderer_create(sbr: LibraryPtr, subs: SubtitlesPtr): RendererPtr
+	sbr_renderer_create(sbr: LibraryPtr): RendererPtr
 	sbr_renderer_render(
 		renderer: RendererPtr,
 		subtitle_context: WasmPtr,
 		t: number,
+		subs: SubtitlesPtr,
 		buf_ptr: WasmPtr,
 		buf_width: number,
 		buf_height: number

@@ -90,11 +90,12 @@ impl SimpleShapedTextSegment {
         let mut fonts = Vec::new();
         let glyphs = {
             let mut buffer = text::ShapingBuffer::new();
+            buffer.reset();
+            buffer.add(text);
             let direction = buffer.guess_properties();
             if !direction.is_horizontal() {
                 buffer.set_direction(direction.to_horizontal());
             }
-            buffer.add(text);
             buffer.shape(font, &mut fonts, font_select)
         };
 

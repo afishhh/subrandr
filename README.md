@@ -56,6 +56,9 @@ int main() {
     .dpi = 144,
     .video_width = 1920.0,
     .video_height = 1080.0,
+    // if your player has additional padding around the video (for example black bars)
+    // you should provide it here, srv3 subtitles are laid out differently depending
+    // on this padding
     .padding_left = 0.0,
     .padding_right = 0.0,
     .padding_top = 0.0,
@@ -83,9 +86,8 @@ int main() {
   ) < 0)
     exit(1);
 
-  /* blit bitmap to the screen OVER the video */
-  /* note: OVER is an alpha blending function */
-  /* note: bitmap is already premultiplied, use premultiplied blending function */
+  // blit bitmap to the screen OVER the viewport
+  // note: bitmap is already premultiplied, use premultiplied blending function
 
   // some time later
 
@@ -93,7 +95,8 @@ int main() {
   free(pixel_buffer);
   sbr_renderer_destroy(renderer);
   sbr_subtitles_destroy(subs);
-  // same here, destroy the library last
+  // the library must be destroyed only after all associated renderers and subtitles
+  // have also been destroyed
   sbr_library_fini(sbr);
 }
 ```

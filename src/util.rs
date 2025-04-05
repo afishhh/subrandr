@@ -6,7 +6,7 @@ use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit};
 
 mod rcarray;
 pub use rcarray::*;
-pub mod array_vec;
+mod array_vec;
 #[cfg_attr(not(test), expect(unused_imports))]
 pub use array_vec::ArrayVec;
 

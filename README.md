@@ -2,13 +2,17 @@
 
 ### An experimental subtitle rendering library
 
-#### Supported subtitle formats:
-- ASS (very incomplete, **currently disabled and on hold**)
-- SRV3 (less incomplete, still very incomplete)
+subrandr is a subtitle rendering library that aims to fill the gap in open-source rendering of non-ASS subtitles accurately.
+The first goal is to achieve good rendering of YouTube's SRV3 format, currently the library does a pretty good job of it if I do say so myself, but it is not perfect and still under heavy development.
 
-TODO: ttml is what netflix uses, probably not too difficult to support
-TODO: experiment with using fixed point arithmetic for linear RGBA calculations
-      and gaussian blur
+#### Supported subtitle formats:
+- SRV3 (incomplete, but works decently well)
+
+#### WebAssembly library and extension
+
+There's a WebAssembly library being worked on in the `wasi32` directory and a webextension that is able to successfully render subtitles over YouTube videos on youtube.com in the `webextension` directory.
+
+Currently it uses pure software rendering so it is slow in certain blur-heavy scenarios, work is underway to make subrandr support GPU acceleration.
 
 #### `sbr-overlay`
 

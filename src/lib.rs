@@ -599,6 +599,7 @@ impl Subtitles {
 const DRAW_VERSION_STRING: bool = true;
 const DRAW_PERF_DEBUG_INFO: bool = true;
 const DRAW_LAYOUT_DEBUG_INFO: bool = false;
+const DEBUG_STROKE_SHAPE_OUTLINES: bool = false;
 
 pub struct Subrandr {
     logger: log::Logger,
@@ -1356,20 +1357,22 @@ impl<'a> Renderer<'a> {
                                     rasterizer.render_fill(painter, s.stroke_color);
                                 }
 
-                                painter.debug_stroke_outline(
-                                    x.trunc_to_inner(),
-                                    y.trunc_to_inner(),
-                                    &stroked.0,
-                                    BGRA8::from_rgba32(0xFF0000FF),
-                                    false,
-                                );
-                                painter.debug_stroke_outline(
-                                    x.trunc_to_inner(),
-                                    y.trunc_to_inner(),
-                                    &stroked.1,
-                                    BGRA8::from_rgba32(0x0000FFFF),
-                                    true,
-                                );
+                                if DEBUG_STROKE_SHAPE_OUTLINES {
+                                    painter.debug_stroke_outline(
+                                        x.trunc_to_inner(),
+                                        y.trunc_to_inner(),
+                                        &stroked.0,
+                                        BGRA8::from_rgba32(0xFF0000FF),
+                                        false,
+                                    );
+                                    painter.debug_stroke_outline(
+                                        x.trunc_to_inner(),
+                                        y.trunc_to_inner(),
+                                        &stroked.1,
+                                        BGRA8::from_rgba32(0x0000FFFF),
+                                        true,
+                                    );
+                                }
                             }
                         }
                     }

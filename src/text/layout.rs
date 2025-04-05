@@ -159,6 +159,14 @@ pub struct RubyBaseId(usize);
 // layout is correct.
 // TODO: Currently annotations are not taken into account when line wrapping,
 //       and ruby bases are not centered when annotations overflow them.
+// TODO: Overlapping rubies are currently handled by joining and centering the
+//       text above them, this is not the correct solution.
+//       Instead the underlying bases should be spaced out, all this means that ruby
+//       layout in general should be integrated into the main loop somehow.
+//       Possibly by actually having the "we're laying out *multiple rows of text at once*"
+//       concept going.
+//       Note that the currently solution also works only one way, i.e. annotations are only
+//       merged in a single pass towards the right, which misses some cases.
 
 impl MultilineTextShaper {
     pub const fn new() -> Self {
@@ -275,6 +283,8 @@ impl MultilineTextShaper {
         annotations: &[RubyAnnotationSegment],
         font_select: &mut FontSelect,
     ) {
+        let ruby_segments_start = segments.len();
+
         let mut current_segment = 0;
         let mut current_text_cursor = 0;
         let mut current_annotation = 0;
@@ -303,8 +313,9 @@ impl MultilineTextShaper {
                         shaped.fonts.into(),
                     )),
                     baseline_offset: Point2::new(
-                        // TODO: Make this store x extent and fill in during justification
-                        (start_x + end_x) / 2 - shaped.extents.paint_width / 2,
+                        // This is only temporarily stored here, and read during the
+                        // second pass below.
+                        shaped.extents.paint_width + shaped.trailing_x_advance,
                         baseline_y,
                     ),
                     logical_rect: Rect2::new(
@@ -319,6 +330,37 @@ impl MultilineTextShaper {
                 current_text_cursor = annotation.text_end;
             }
             current_segment += 1;
+        }
+
+        let mut current = ruby_segments_start;
+        while let Some(first) = segments.get(current) {
+            let start_x = first.logical_rect.min.x;
+            let mut total_width = IFixed26Dot6::ZERO;
+
+            let merged_start = current;
+            loop {
+                let segment = &segments[current];
+                total_width += segment.baseline_offset.x;
+                let centered_end = (start_x + segment.logical_rect.max.x) / 2 + total_width / 2;
+                current += 1;
+                if current >= segments.len() || centered_end < segments[current].logical_rect.min.x
+                {
+                    break;
+                }
+            }
+
+            let merged = &mut segments[merged_start..current];
+            let total_space = merged.last().unwrap().logical_rect.max.x - start_x;
+            let centering_pad = (total_space - total_width) / 2;
+
+            let mut last_end = start_x + centering_pad;
+            for next in merged {
+                let width = next.baseline_offset.x;
+                next.baseline_offset.x = last_end;
+                next.logical_rect.min.x = next.logical_rect.min.x.min(last_end);
+                last_end += width;
+                next.logical_rect.max.x = next.logical_rect.max.x.max(last_end);
+            }
         }
     }
 

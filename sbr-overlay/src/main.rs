@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, FromArgMatches};
-use subrandr::{Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
+use subrandr::{Renderer, Subrandr, SubtitleContext, Subtitles};
 use winit::{
     event::StartCause,
     event_loop::{self, ControlFlow, EventLoop},
@@ -365,14 +365,23 @@ impl winit::application::ApplicationHandler for App<'_> {
                     match state {
                         WindowState::Software(x11) => {
                             x11.buffer.resize(s_width as usize * s_height as usize, 0);
-                            let mut painter =
-                                Painter::new(s_width, s_height, x11.buffer.as_mut_slice());
                             if let Some(subs) = self.subs.as_ref() {
                                 println!(
                                     "render t = {}ms to {}x{}",
                                     t, geometry.width, geometry.height
                                 );
-                                self.renderer.render(&ctx, t, subs, &mut painter);
+                                self.renderer.render(
+                                    &ctx,
+                                    t,
+                                    subs,
+                                    unsafe {
+                                        std::mem::transmute::<&mut [u32], &mut [_]>(
+                                            x11.buffer.as_mut_slice(),
+                                        )
+                                    },
+                                    s_width,
+                                    s_height,
+                                );
                             } else {
                                 x11.buffer.fill(0);
                             }

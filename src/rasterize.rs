@@ -1,803 +1,181 @@
+use std::mem::MaybeUninit;
+
+use polygon::NonZeroPolygonRasterizer;
+
 use crate::{
     color::BGRA8,
-    math::{I32Fixed, Point2, Point2f},
-    Painter,
+    math::{Point2f, Rect2f, Vec2f},
 };
 
-mod blur;
-pub use blur::*;
+pub mod polygon;
+pub mod sw;
 
-#[derive(Debug, Clone)]
-struct Bresenham {
-    dx: i32,
-    dy: i32,
-    // Either xi or yi
-    i: i32,
-    d: i32,
-
-    x: i32,
-    y: i32,
-    x1: i32,
-    y1: i32,
+pub enum PixelFormat {
+    Mono,
+    Bgra,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum BresenhamKind {
-    Low,
-    High,
+enum RenderTargetInner<'a> {
+    Software(sw::RenderTargetImpl<'a>),
+    SoftwareTexture(sw::TextureRenderTargetImpl),
 }
 
-impl Bresenham {
-    #[inline(always)]
-    pub const fn current(&self) -> (i32, i32) {
-        (self.x, self.y)
-    }
-
-    pub const fn new_low(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
-        let dx = x1 - x0;
-        let mut dy = y1 - y0;
-        let mut yi = 1;
-
-        if dy < 0 {
-            yi = -1;
-            dy = -dy;
-        }
-
-        let d = 2 * dy - dx;
-
-        Self {
-            dx,
-            dy,
-            i: yi,
-            d,
-            x: x0,
-            y: y0,
-            x1,
-            y1,
-        }
-    }
-
-    #[inline(always)]
-    pub const fn is_done_low(&self) -> bool {
-        self.x > self.x1
-    }
-
-    pub const fn advance_low(&mut self) -> bool {
-        if self.d > 0 {
-            self.y += self.i;
-            self.d -= 2 * self.dx;
-        }
-        self.d += 2 * self.dy;
-        self.x += 1;
-        self.is_done_low()
-    }
-
-    pub const fn new_high(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
-        let mut dx = x1 - x0;
-        let dy = y1 - y0;
-        let mut xi = 1;
-
-        if dx < 0 {
-            xi = -1;
-            dx = -dx;
-        }
-
-        let d = 2 * dx - dy;
-
-        Self {
-            dx,
-            dy,
-            i: xi,
-            d,
-            x: x0,
-            y: y0,
-            x1,
-            y1,
-        }
-    }
-
-    #[inline(always)]
-    pub const fn is_done_high(&self) -> bool {
-        self.y > self.y1
-    }
-
-    pub const fn advance_high(&mut self) -> bool {
-        if self.d > 0 {
-            self.x += self.i;
-            self.d -= 2 * self.dy;
-        }
-        self.d += 2 * self.dx;
-        self.y += 1;
-        self.is_done_high()
-    }
-
-    pub const fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> (Self, BresenhamKind) {
-        #[allow(clippy::collapsible_else_if)]
-        if (y1 - y0).abs() < (x1 - x0).abs() {
-            if x0 > x1 {
-                (Self::new_low(x1, y1, x0, y0), BresenhamKind::Low)
-            } else {
-                (Self::new_low(x0, y0, x1, y1), BresenhamKind::Low)
-            }
-        } else {
-            if y0 > y1 {
-                (Self::new_high(x1, y1, x0, y0), BresenhamKind::High)
-            } else {
-                (Self::new_high(x0, y0, x1, y1), BresenhamKind::High)
-            }
-        }
-    }
-
-    pub const fn is_done(&self, kind: BresenhamKind) -> bool {
-        match kind {
-            BresenhamKind::Low => self.is_done_low(),
-            BresenhamKind::High => self.is_done_high(),
-        }
-    }
-
-    pub const fn advance(&mut self, kind: BresenhamKind) -> bool {
-        match kind {
-            BresenhamKind::Low => self.advance_low(),
-            BresenhamKind::High => self.advance_high(),
+impl RenderTargetInner<'_> {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            RenderTargetInner::Software(_) => "software",
+            RenderTargetInner::SoftwareTexture(_) => "software texture",
         }
     }
 }
 
-struct DynBresenham {
-    dx: i32,
-    dy: i32,
-    sx: i32,
-    sy: i32,
-    err: i32,
+pub struct RenderTarget<'a>(RenderTargetInner<'a>);
 
-    x: i32,
-    y: i32,
-    x1: i32,
-    y1: i32,
+#[derive(Clone)]
+enum TextureInner<'a> {
+    Software(sw::TextureImpl<'a>),
 }
 
-impl DynBresenham {
-    pub const fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
-        let dx = (x1 - x0).abs();
-        let sx = if x0 < x1 { 1 } else { -1 };
-        let dy = -(y1 - y0).abs();
-        let sy = if y0 < y1 { 1 } else { -1 };
-        let err = dx + dy;
-
-        Self {
-            dx,
-            dy,
-            sx,
-            sy,
-            err,
-            x: x0,
-            y: y0,
-            x1,
-            y1,
-        }
-    }
-
-    pub const fn current(&mut self) -> (i32, i32) {
-        (self.x, self.y)
-    }
-
-    pub const fn advance(&mut self) -> bool {
-        let err2 = 2 * self.err;
-
-        if err2 >= self.dy {
-            if self.x == self.x1 {
-                return true;
-            }
-            self.err += self.dy;
-            self.x += self.sx;
-        }
-
-        if err2 <= self.dx {
-            if self.y == self.y1 {
-                return true;
-            }
-            self.err += self.dx;
-            self.y += self.sy;
-        }
-
-        self.is_done()
-    }
-
-    pub const fn is_done(&self) -> bool {
-        self.x == self.x1 && self.y == self.y1
-    }
-}
-
-pub unsafe fn line_unchecked(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    buffer: &mut [BGRA8],
-    stride: usize,
-    width: i32,
-    height: i32,
-    color: BGRA8,
-) {
-    let (mut machine, kind) = Bresenham::new(x0, y0, x1, y1);
-    loop {
-        let (x, y) = machine.current();
-
-        'a: {
-            if y < 0 || y >= height {
-                break 'a;
-            }
-
-            if x < 0 || x >= width {
-                break 'a;
-            }
-
-            let i = y as usize * stride + x as usize;
-            buffer[i] = color;
-        }
-
-        if machine.advance(kind) {
-            return;
+impl TextureInner<'_> {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            TextureInner::Software(_) => "software",
         }
     }
 }
 
-pub unsafe fn horizontal_line_unchecked(
-    x0: i32,
-    x1: i32,
-    offset_buffer: &mut [BGRA8],
-    width: i32,
-    color: BGRA8,
-) {
-    for x in x0.clamp(0, width)..x1.clamp(0, width) {
-        *offset_buffer.get_unchecked_mut(x as usize) = color;
-    }
-}
+#[derive(Clone)]
+pub struct Texture<'a>(TextureInner<'a>);
 
-macro_rules! check_buffer {
-    ($what: literal, $buffer: ident, $width: ident, $height: ident) => {
-        if $buffer.len() < $width as usize * $height as usize {
-            panic!(concat!(
-                "Buffer passed to rasterize::",
-                $what,
-                " is too small"
-            ))
-        }
-    };
-}
-
-pub fn line(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("line", buffer, width, height);
-
-    unsafe {
-        line_unchecked(
-            x0,
-            y0,
-            x1,
-            y1,
-            buffer,
-            width as usize,
-            width as i32,
-            height as i32,
-            color,
-        )
-    }
-}
-
-pub fn horizontal_line(
-    y: i32,
-    x0: i32,
-    x1: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("horizontal_line", buffer, width, height);
-
-    if y < 0 || y >= height as i32 {
-        return;
-    }
-
-    unsafe {
-        horizontal_line_unchecked(
-            x0,
-            x1,
-            &mut buffer[y as usize * width as usize..],
-            width as i32,
-            color,
-        )
-    }
-}
-
-pub fn stroke_polygon(
-    points: impl IntoIterator<Item = Point2<i32>>,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("stroke_rectangle", buffer, width, height);
-
-    let mut it = points.into_iter();
-    let Some(first) = it.next() else {
-        return;
-    };
-
-    let mut last = first;
-    for next in it {
-        unsafe {
-            line_unchecked(
-                last.x,
-                last.y,
-                next.x,
-                next.y,
-                buffer,
-                width as usize,
-                width as i32,
-                height as i32,
-                color,
-            );
-        }
-
-        last = next;
-    }
-
-    unsafe {
-        line_unchecked(
-            last.x,
-            last.y,
-            first.x,
-            first.y,
-            buffer,
-            width as usize,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-}
-
-pub fn fill_axis_aligned_rect(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("fill_axis_aligned_rect", buffer, width, height);
-
-    debug_assert!(x0 <= x1);
-    debug_assert!(y0 <= y1);
-
-    for y in y0.clamp(0, height as i32)..y1.clamp(0, height as i32) {
-        unsafe {
-            horizontal_line_unchecked(
-                x0,
-                x1,
-                &mut buffer[y as usize * width as usize..],
-                width as i32,
-                color,
-            );
-        }
-    }
-}
-
-pub fn stroke_triangle(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("stroke_triangle", buffer, width, height);
-
-    let stride = width as usize;
-    unsafe {
-        line_unchecked(
-            x0,
-            y0,
-            x1,
-            y1,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-
-    unsafe {
-        line_unchecked(
-            x1,
-            y1,
-            x2,
-            y2,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-
-    unsafe {
-        line_unchecked(
-            x0,
-            y0,
-            x2,
-            y2,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-}
-
-unsafe fn draw_triangle_half(
-    mut current_y: i32,
-    machine1: &mut DynBresenham,
-    machine2: &mut DynBresenham,
-    buffer: &mut [BGRA8],
-    stride: usize,
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) -> i32 {
-    'top: loop {
-        // Advance both lines until they are at the current y
-        let m1x = loop {
-            let (m1x, m1y) = machine1.current();
-            if m1y == current_y {
-                break m1x;
-            } else if machine1.is_done() {
-                break 'top;
-            } else {
-                machine1.advance();
-            }
-        };
-        let m2x = loop {
-            let (m2x, m2y) = machine2.current();
-            if m2y == current_y {
-                break m2x;
-            } else if machine2.is_done() {
-                break 'top;
-            } else {
-                machine2.advance();
-            }
-        };
-
-        // Fill the appropriate part of the line at the current y
-        if current_y >= 0 && current_y < height as i32 {
-            let (lx1, lx2) = if m1x < m2x { (m1x, m2x) } else { (m2x, m1x) };
-
-            unsafe {
-                horizontal_line_unchecked(
-                    lx1,
-                    lx2,
-                    &mut buffer[current_y as usize * stride..],
-                    width as i32,
-                    color,
-                );
-            }
-        }
-
-        current_y += 1;
-    }
-    current_y
-}
-
-pub fn fill_triangle(
-    mut x0: i32,
-    mut y0: i32,
-    mut x1: i32,
-    mut y1: i32,
-    mut x2: i32,
-    mut y2: i32,
-    buffer: &mut [BGRA8],
-    stride: usize,
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("fill_triangle", buffer, width, height);
-
-    // First, ensure (x0, y0) is the highest point of the triangle
-    if y1 < y0 {
-        if y2 < y1 {
-            std::mem::swap(&mut y0, &mut y2);
-            std::mem::swap(&mut x0, &mut x2);
-        } else {
-            std::mem::swap(&mut y0, &mut y1);
-            std::mem::swap(&mut x0, &mut x1);
-        }
-    } else if y2 < y0 {
-        std::mem::swap(&mut y0, &mut y2);
-        std::mem::swap(&mut x0, &mut x2);
-    }
-
-    // Next, ensure (x2, y2) is the lowest point of the rectangle
-    if y1 > y2 {
-        std::mem::swap(&mut y2, &mut y1);
-        std::mem::swap(&mut x2, &mut x1);
-    }
-
-    let mut machine1 = DynBresenham::new(x0, y0, x1, y1);
-    let mut machine2 = DynBresenham::new(x0, y0, x2, y2);
-
-    let mut current_y = y0;
-    current_y = unsafe {
-        draw_triangle_half(
-            current_y,
-            &mut machine1,
-            &mut machine2,
-            buffer,
-            stride,
-            width,
-            height,
-            color,
-        )
-    };
-
-    let mut machine1 = {
-        if machine1.is_done() {
-            machine2
-        } else {
-            machine1
-        }
-    };
-    let mut machine2 = DynBresenham::new(x1, y1, x2, y2);
-
-    unsafe {
-        draw_triangle_half(
-            current_y,
-            &mut machine1,
-            &mut machine2,
-            buffer,
-            stride,
-            width,
-            height,
-            color,
-        )
-    };
-}
-
-const POLYGON_RASTERIZER_DEBUG_PRINT: bool = false;
-
-type IFixed18Dot14 = I32Fixed<14>;
-
-#[derive(Debug)]
-struct Profile {
-    current: IFixed18Dot14,
-    step: IFixed18Dot14,
-    end_y: u32,
-}
-
-#[derive(Debug)]
-pub struct NonZeroPolygonRasterizer {
-    queue: Vec<(u32, bool, Profile)>,
-    left: Vec<Profile>,
-    right: Vec<Profile>,
-}
-
-impl NonZeroPolygonRasterizer {
-    pub const fn new() -> Self {
-        Self {
-            queue: Vec::new(),
-            left: Vec::new(),
-            right: Vec::new(),
+impl Texture<'_> {
+    pub fn width(&self) -> u32 {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.width,
         }
     }
 
-    pub fn reset(&mut self) {
-        self.queue.clear();
-        self.left.clear();
-        self.right.clear();
+    pub fn height(&self) -> u32 {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.height,
+        }
     }
 
-    fn add_line(
-        &mut self,
-        offset: (i32, i32),
-        start: &Point2f,
-        end: &Point2f,
-        invert_winding: bool,
-    ) {
-        let istart = (
-            IFixed18Dot14::from_f32(start.x) + offset.0,
-            IFixed18Dot14::from_f32(start.y) + offset.1,
-        );
-        let iend = (
-            IFixed18Dot14::from_f32(end.x) + offset.0,
-            IFixed18Dot14::from_f32(end.y) + offset.1,
-        );
-
-        let direction = match iend.1.cmp(&istart.1) {
-            // Line is going up
-            std::cmp::Ordering::Less => false ^ invert_winding,
-            // Horizontal line, ignore
-            std::cmp::Ordering::Equal => return,
-            // Line is going down
-            std::cmp::Ordering::Greater => true ^ invert_winding,
-        };
-
-        let step = if istart.0 == iend.0 {
-            IFixed18Dot14::ZERO
-        } else {
-            (iend.0 - istart.0) / (iend.1 - istart.1)
-        };
-
-        let start_y = istart.1.round_to_inner();
-        let mut start_x = istart.0;
-        start_x -= (istart.1 - start_y) * step;
-
-        let end_y = iend.1.round_to_inner();
-        let mut end_x = iend.0;
-        end_x -= (iend.1 - end_y) * step;
-
-        let (mut top_y, mut bottom_y, mut init_x) = if end_y >= start_y {
-            (start_y, end_y, start_x)
-        } else {
-            (end_y, start_y, end_x)
-        };
-
-        // FIXME: HACK: This is terrible but I tried everything and only this works
-        bottom_y -= 1;
-        init_x -= step;
-
-        if top_y < 0 {
-            init_x += step * -top_y;
-            top_y = 0;
-        }
-
-        if top_y > bottom_y {
-            return;
-        }
-
-        if POLYGON_RASTERIZER_DEBUG_PRINT {
-            println!("{start_y} {end_y} {start_x} {end_x}");
-            println!("{top_y} {bottom_y}");
-            println!(
-                "line {start:?} -- {end:?} results in top_y={top_y} direction={:?}",
-                step > 0
-            );
-        }
-
-        self.queue.push((
-            top_y as u32,
-            direction,
-            Profile {
-                current: init_x,
-                step,
-                end_y: bottom_y as u32,
+    pub fn format(&self) -> PixelFormat {
+        match &self.0 {
+            TextureInner::Software(sw) => match sw.data {
+                sw::TextureData::BorrowedMono(_) => PixelFormat::Mono,
+                sw::TextureData::BorrowedBGRA(_) => PixelFormat::Bgra,
+                sw::TextureData::OwnedMono(_) => PixelFormat::Mono,
+                sw::TextureData::OwnedBgra(_) => PixelFormat::Bgra,
             },
-        ));
+        }
     }
+}
 
-    pub fn append_polyline(
+pub trait Rasterizer {
+    #[allow(clippy::type_complexity)]
+    unsafe fn create_texture_mapped(
         &mut self,
-        offset: (i32, i32),
-        polyline: &[Point2f],
-        invert_winding: bool,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        // FIXME: ugly box...
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>]) + '_>,
+    ) -> Texture<'static>;
+
+    fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
+    fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture<'static>;
+
+    fn line(&mut self, target: &mut RenderTarget, p0: Point2f, p1: Point2f, color: BGRA8);
+
+    fn horizontal_line(
+        &mut self,
+        target: &mut RenderTarget,
+        y: f32,
+        x0: f32,
+        x1: f32,
+        color: BGRA8,
+    );
+
+    fn stroke_triangle(
+        &mut self,
+        target: &mut RenderTarget,
+        vertices: &[Point2f; 3],
+        color: BGRA8,
     ) {
-        if polyline.is_empty() {
-            return;
-        }
+        self.stroke_polygon(target, Vec2f::ZERO, vertices, color);
+    }
 
-        let mut i = 0;
-        while i < polyline.len() - 1 {
-            let start = &polyline[i];
-            i += 1;
-            let end = &polyline[i];
-            self.add_line(offset, start, end, invert_winding)
-        }
+    fn fill_triangle(&mut self, target: &mut RenderTarget, vertices: &[Point2f; 3], color: BGRA8);
 
-        let last = polyline.last().unwrap();
-        if &polyline[0] != last {
-            self.add_line(offset, last, &polyline[0], invert_winding)
+    fn stroke_polygon(
+        &mut self,
+        target: &mut RenderTarget,
+        offset: Vec2f,
+        vertices: &[Point2f],
+        color: BGRA8,
+    ) {
+        let mut last = vertices[vertices.len() - 1];
+        for &point in vertices {
+            self.line(target, last + offset, point + offset, color);
+            last = point;
         }
     }
 
-    fn queue_pop_if(&mut self, cy: u32) -> Option<(u32, bool, Profile)> {
-        let &(y, ..) = self.queue.last()?;
-
-        if y <= cy {
-            self.queue.pop()
-        } else {
-            None
+    fn stroke_polyline(
+        &mut self,
+        target: &mut RenderTarget,
+        offset: Vec2f,
+        vertices: &[Point2f],
+        color: BGRA8,
+    ) {
+        let mut last = vertices[0];
+        for &point in &vertices[1..] {
+            self.line(target, last + offset, point + offset, color);
+            last = point;
         }
     }
 
-    fn push_queue_to_lr(&mut self, cy: u32) {
-        while let Some((_, d, p)) = self.queue_pop_if(cy) {
-            let vec = if d { &mut self.right } else { &mut self.left };
-            let idx = match vec.binary_search_by_key(&p.current, |profile| profile.current) {
-                Ok(i) => i,
-                Err(i) => i,
-            };
-            vec.insert(idx, p);
-        }
+    fn stroke_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8) {
+        self.stroke_polygon(
+            target,
+            Vec2f::ZERO,
+            &[
+                rect.min,
+                Point2f::new(rect.max.x, rect.min.y),
+                rect.max,
+                Point2f::new(rect.min.x, rect.max.y),
+            ],
+            color,
+        )
     }
+    fn fill_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8);
 
-    fn prune_lr(&mut self, cy: u32) {
-        self.left.retain(|profile| profile.end_y >= cy);
-        self.right.retain(|profile| profile.end_y >= cy);
-    }
+    fn blit(
+        &mut self,
+        target: &mut RenderTarget,
+        dx: i32,
+        dy: i32,
+        texture: &Texture,
+        color: BGRA8,
+    );
 
-    fn advance_lr_sort(&mut self) {
-        for profile in self.left.iter_mut() {
-            profile.current += profile.step;
-        }
+    unsafe fn blit_to_mono_texture_unchecked(
+        &mut self,
+        target: &mut RenderTarget,
+        dx: i32,
+        dy: i32,
+        texture: &Texture,
+    );
 
-        for profile in self.right.iter_mut() {
-            profile.current += profile.step;
-        }
+    fn blit_cpu_polygon(
+        &mut self,
+        target: &mut RenderTarget,
+        rasterizer: &mut NonZeroPolygonRasterizer,
+        color: BGRA8,
+    );
 
-        self.left.sort_unstable_by_key(|profile| profile.current);
-        self.right.sort_unstable_by_key(|profile| profile.current);
-    }
-
-    pub fn render(&mut self, width: u32, height: u32, mut filler: impl FnMut(u32, u32, u32)) {
-        self.queue.sort_unstable_by(|(ay, ..), (by, ..)| by.cmp(ay));
-
-        if self.queue.is_empty() {
-            return;
-        }
-
-        let mut y = self.queue.last().unwrap().0;
-
-        while (!self.queue.is_empty() || !self.left.is_empty()) && y < height {
-            self.prune_lr(y);
-            self.push_queue_to_lr(y);
-
-            if POLYGON_RASTERIZER_DEBUG_PRINT {
-                println!("--- POLYLINE RASTERIZER SCANLINE y={y} ---");
-                println!("left: {:?}", self.left);
-                println!("right: {:?}", self.right);
-                assert_eq!(self.left.len(), self.right.len());
-            }
-
-            for i in 0..self.left.len() {
-                let (left, right) = (&self.left[i], &self.right[i]);
-
-                let round_clamp = |f: IFixed18Dot14| (f.round_to_inner().max(0) as u32).min(width);
-                let mut x0 = round_clamp(left.current);
-                let mut x1 = round_clamp(right.current);
-                // TODO: is this necessary? can this be removed?
-                if x0 > x1 {
-                    std::mem::swap(&mut x0, &mut x1);
-                }
-                filler(y, x0, x1);
-            }
-
-            self.advance_lr_sort();
-
-            y += 1;
-        }
-    }
-
-    // TODO: Move to painter
-    pub fn render_fill(&mut self, painter: &mut Painter, color: BGRA8) {
-        self.render(painter.width(), painter.height(), |y, x1, x2| {
-            painter.horizontal_line(y as i32, x1 as i32, x2 as i32, color);
-        });
-    }
+    fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
+    fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);
+    fn blur_execute(&mut self, target: &mut RenderTarget, dx: i32, dy: i32, color: [u8; 3]);
 }

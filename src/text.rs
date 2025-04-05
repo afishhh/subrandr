@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, mem::MaybeUninit, ops::Range, rc::Rc};
+use std::{cell::OnceCell, mem::MaybeUninit, ops::Range};
 
 use ft_utils::IFixed26Dot6;
 use text_sys::*;
@@ -11,8 +11,10 @@ pub use font_select::*;
 pub mod layout;
 
 use crate::{
-    color::{Premultiplied, BGRA8},
-    util::{calculate_blit_rectangle, AnyError, BlitRectangle, OrderedF32},
+    color::BGRA8,
+    math::Vec2,
+    rasterize::{Rasterizer, RenderTarget, Texture},
+    util::{AnyError, OrderedF32},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -491,73 +493,58 @@ pub struct TextExtents {
 
 struct GlyphBitmap {
     offset: (i32, i32),
-    width: u32,
-    height: u32,
-    data: Rc<BufferData>,
+    texture: Texture<'static>,
 }
 
 /// Merged monochrome bitmap of the whole text string, useful for shadows.
 pub struct MonochromeImage {
-    pub offset: (i32, i32),
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<u8>,
+    pub offset: Vec2<i32>,
+    pub texture: Texture<'static>,
 }
 
 impl MonochromeImage {
-    pub fn from_image(image: &Image) -> Self {
-        let mut result = MonochromeImage {
-            offset: (0, 0),
-            width: 0,
-            height: 0,
-            data: Vec::new(),
-        };
-
+    pub fn from_image(rasterizer: &mut dyn Rasterizer, image: &Image) -> Self {
+        let mut offset = Vec2::<i32>::ZERO;
+        let (mut width, mut height) = (0, 0);
         for glyph in &image.glyphs {
-            result.offset.0 = result.offset.0.min(glyph.offset.0);
-            result.offset.1 = result.offset.1.min(glyph.offset.1);
+            offset.x = offset.x.min(glyph.offset.0);
+            offset.y = offset.y.min(glyph.offset.1);
 
-            result.width = result.width.max(glyph.offset.0.max(0) as u32 + glyph.width);
-            result.height = result
-                .height
-                .max(glyph.offset.1.max(0) as u32 + glyph.height);
+            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
+            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
         }
 
-        result.width += (-result.offset.0).max(0) as u32;
-        result.height += (-result.offset.1).max(0) as u32;
+        width += (-offset.x).max(0) as u32;
+        height += (-offset.y).max(0) as u32;
 
-        // NOTE: We cannot MaybeUninit here because the glyphs may have gaps
-        //       between them that will be left uninitialized
-        result.data = vec![0; result.width as usize * result.height as usize];
+        let mut target = rasterizer.create_mono_texture_rendered(width, height);
 
-        for bitmap in &image.glyphs {
-            match &*bitmap.data {
-                BufferData::Monochrome(source) => {
-                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
-                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
-                    for sy in 0..bitmap.height as usize {
-                        for sx in 0..bitmap.width as usize {
-                            let si = sy * bitmap.width as usize + sx;
-                            let di = (offy + sy) * result.width as usize + (offx + sx);
-                            result.data[di] = source[si];
-                        }
-                    }
-                }
-                BufferData::Color(source) => {
-                    let offx = (bitmap.offset.0 - result.offset.0) as usize;
-                    let offy = (bitmap.offset.1 - result.offset.1) as usize;
-                    for sy in 0..bitmap.height as usize {
-                        for sx in 0..bitmap.width as usize {
-                            let si = sy * bitmap.width as usize + sx;
-                            let di = (offy + sy) * result.width as usize + (offx + sx);
-                            result.data[di] = source[si].a;
-                        }
-                    }
-                }
+        for glyph in &image.glyphs {
+            unsafe {
+                rasterizer.blit_to_mono_texture_unchecked(
+                    &mut target,
+                    glyph.offset.0 - offset.x,
+                    glyph.offset.1 - offset.y,
+                    &glyph.texture,
+                );
             }
         }
 
-        result
+        MonochromeImage {
+            offset,
+            texture: rasterizer.finalize_texture_render(target),
+        }
+    }
+
+    pub fn blit(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget<'_>,
+        dx: i32,
+        dy: i32,
+        color: BGRA8,
+    ) {
+        rasterizer.blit(target, dx, dy, &self.texture, color);
     }
 }
 
@@ -567,120 +554,76 @@ pub struct Image {
 }
 
 impl GlyphBitmap {
-    unsafe fn blit_monochrome_unchecked(
-        &self,
-        dx: i32,
-        dy: i32,
-        buffer: &mut [BGRA8],
-        stride: u32,
-        color: BGRA8,
-        ys: Range<usize>,
-        xs: Range<usize>,
-        source: &[u8],
-    ) {
-        for y in ys {
-            let fy = dy + self.offset.1 + y as i32;
-            for x in xs.clone() {
-                let fx = dx + self.offset.0 + x as i32;
-
-                let si = y * self.width as usize + x;
-                let sv = *unsafe { source.get_unchecked(si) };
-
-                let di = (fx as usize) + (fy as usize) * stride as usize;
-                let d = unsafe { buffer.get_unchecked_mut(di) };
-                *d = color.mul_alpha(sv).blend_over(*d).0;
-            }
-        }
-    }
-
-    unsafe fn blit_bgra_unchecked(
-        &self,
-        dx: i32,
-        dy: i32,
-        buffer: &mut [BGRA8],
-        stride: u32,
-        alpha: u8,
-        ys: Range<usize>,
-        xs: Range<usize>,
-        source: &[BGRA8],
-    ) {
-        for y in ys {
-            let fy = dy + self.offset.1 + y as i32;
-            for x in xs.clone() {
-                let fx = dx + self.offset.0 + x as i32;
-
-                let si = y * self.width as usize + x;
-                // NOTE: This is actually pre-multiplied in linear space...
-                //       But I think libass ignores this too.
-                //       See note in color.rs
-                let n = Premultiplied(*source.get_unchecked(si));
-
-                let di = (fx as usize) + (fy as usize) * stride as usize;
-                let d = unsafe { buffer.get_unchecked_mut(di) };
-                *d = n.mul_alpha(alpha).blend_over(*d).0;
-            }
-        }
-    }
-
     fn blit(
         &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
         dx: i32,
         dy: i32,
-        buffer: &mut [BGRA8],
-        width: u32,
-        stride: u32,
-        height: u32,
         color: BGRA8,
     ) {
-        let Some(BlitRectangle { xs, ys }) = calculate_blit_rectangle(
-            self.offset.0 + dx,
-            self.offset.1 + dy,
-            width as usize,
-            height as usize,
-            self.width as usize,
-            self.height as usize,
-        ) else {
-            return;
-        };
-
-        unsafe {
-            match &*self.data {
-                BufferData::Monochrome(pixels) => {
-                    self.blit_monochrome_unchecked(dx, dy, buffer, stride, color, ys, xs, pixels);
-                }
-                BufferData::Color(pixels) => {
-                    self.blit_bgra_unchecked(dx, dy, buffer, stride, color.a, ys, xs, pixels);
-                }
-            }
-        }
+        rasterizer.blit(
+            target,
+            dx + self.offset.0,
+            dy + self.offset.1,
+            &self.texture,
+            color,
+        );
     }
 }
 
 impl Image {
-    pub fn monochrome(&self) -> &MonochromeImage {
+    pub fn monochrome(&self, rasterizer: &mut dyn Rasterizer) -> &MonochromeImage {
         self.monochrome
-            .get_or_init(|| MonochromeImage::from_image(self))
+            .get_or_init(|| MonochromeImage::from_image(rasterizer, self))
     }
-}
 
-impl Image {
     pub fn blit(
         &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
         dx: i32,
         dy: i32,
-        buffer: &mut [BGRA8],
-        width: u32,
-        stride: u32,
-        height: u32,
         color: BGRA8,
     ) {
         for glyph in &self.glyphs {
-            glyph.blit(dx, dy, buffer, width, stride, height, color);
+            glyph.blit(rasterizer, target, dx, dy, color);
+        }
+    }
+
+    pub fn blit_for_blur(&self, rasterizer: &mut dyn Rasterizer, sigma: f32) {
+        let mut offset = (0, 0);
+        let (mut width, mut height) = (0, 0);
+
+        for glyph in &self.glyphs {
+            offset.0 = offset.0.min(glyph.offset.0);
+            offset.1 = offset.1.min(glyph.offset.1);
+
+            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
+            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
+        }
+
+        width += (-offset.0).max(0) as u32;
+        height += (-offset.1).max(0) as u32;
+
+        rasterizer.blur_prepare(width, height, sigma);
+
+        for bitmap in &self.glyphs {
+            let offx = bitmap.offset.0 - offset.0;
+            let offy = bitmap.offset.1 - offset.1;
+
+            rasterizer.blur_buffer_blit(offx, offy, &bitmap.texture);
         }
     }
 }
 
-pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyph]) -> Image {
+pub fn render(
+    rasterizer: &mut dyn Rasterizer,
+    xf: IFixed26Dot6,
+    yf: IFixed26Dot6,
+    fonts: &[Font],
+    glyphs: &[Glyph],
+) -> Image {
     let mut result = Image {
         glyphs: Vec::new(),
         monochrome: OnceCell::new(),
@@ -693,16 +636,14 @@ pub fn render(xf: IFixed26Dot6, yf: IFixed26Dot6, fonts: &[Font], glyphs: &[Glyp
     let mut y = yf;
     for shaped_glyph in glyphs {
         let font = &fonts[shaped_glyph.font_index];
-        let cached = font.render_glyph(shaped_glyph.index);
+        let cached = font.render_glyph(rasterizer, shaped_glyph.index);
 
         result.glyphs.push(GlyphBitmap {
             offset: (
                 (x + cached.offset.0 + shaped_glyph.x_offset).trunc_to_inner(),
                 (y + cached.offset.1 + shaped_glyph.y_offset).trunc_to_inner(),
             ),
-            width: cached.width,
-            height: cached.height,
-            data: cached.data.clone(),
+            texture: cached.texture.clone(),
         });
 
         x += shaped_glyph.x_advance;

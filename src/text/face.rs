@@ -4,11 +4,15 @@ use std::{
     ffi::{CStr, CString},
     mem::MaybeUninit,
     path::Path,
-    rc::Rc,
     sync::Arc,
 };
 
-use crate::{color::BGRA8, outline::Outline, util::fmt_from_fn};
+use crate::{
+    color::BGRA8,
+    outline::Outline,
+    rasterize::{PixelFormat, Rasterizer, Texture},
+    util::fmt_from_fn,
+};
 
 use super::ft_utils::*;
 use text_sys::*;
@@ -640,19 +644,22 @@ impl GlyphCache {
             .get_or_insert_with(|| font.glyph_extents_uncached(index))
     }
 
-    pub fn get_or_render(&self, font: &Font, index: u32) -> &SingleGlyphBitmap {
+    pub fn get_or_render(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        font: &Font,
+        index: u32,
+    ) -> &SingleGlyphBitmap {
         unsafe { self.slot(font, index) }
             .bitmap
-            .get_or_insert_with(|| font.render_glyph_uncached(index))
+            .get_or_insert_with(|| font.render_glyph_uncached(rasterizer, index))
     }
 }
 
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
     pub offset: (IFixed26Dot6, IFixed26Dot6),
-    pub width: u32,
-    pub height: u32,
-    pub data: Rc<BufferData>,
+    pub texture: Texture<'static>,
 }
 
 pub enum BufferData {
@@ -701,7 +708,11 @@ impl Font {
         *self.face().glyph_cache().get_or_measure(self, index)
     }
 
-    fn render_glyph_uncached(&self, index: u32) -> SingleGlyphBitmap {
+    fn render_glyph_uncached(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        index: u32,
+    ) -> SingleGlyphBitmap {
         unsafe {
             let face = self.with_applied_size();
 
@@ -729,109 +740,121 @@ impl Font {
                 _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
             };
 
-            let n_pixels = scaled_width as usize * scaled_height as usize;
-            let mut result = SingleGlyphBitmap {
-                offset: (ox, oy),
-                width: scaled_width,
-                height: scaled_height,
-                data: Rc::new(if pixel_width == 1 {
-                    BufferData::Monochrome(Vec::with_capacity(n_pixels))
+            let texture = rasterizer.create_texture_mapped(
+                scaled_width,
+                scaled_height,
+                if pixel_width == 1 {
+                    PixelFormat::Mono
                 } else {
-                    BufferData::Color(Vec::with_capacity(n_pixels))
-                }),
-            };
+                    PixelFormat::Bgra
+                },
+                Box::new(|buffer_data: &mut [MaybeUninit<u8>]| {
+                    for biy in 0..scaled_height {
+                        for bix in 0..scaled_width {
+                            let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
+                                let bpos = (y as i32 * bitmap.pitch) + (x * pixel_width) as i32;
+                                let bslice = std::slice::from_raw_parts(
+                                    bitmap.buffer.offset(bpos as isize),
+                                    pixel_width as usize,
+                                );
+                                let mut pixel_data: [u8; MAX_PIXEL_WIDTH] = [0; 4];
+                                pixel_data[..pixel_width as usize].copy_from_slice(bslice);
+                                pixel_data
+                            };
 
-            let buffer_data = match Rc::get_mut(&mut result.data).unwrap() {
-                BufferData::Monochrome(vec) => vec.spare_capacity_mut(),
-                BufferData::Color(vec) => std::slice::from_raw_parts_mut(
-                    vec.spare_capacity_mut().as_mut_ptr() as *mut MaybeUninit<u8>,
-                    vec.capacity() * std::mem::size_of::<BGRA8>(),
-                ),
-            };
+                            let interpolate_pixel_values =
+                                |a: [u8; MAX_PIXEL_WIDTH],
+                                 fa: u32,
+                                 b: [u8; MAX_PIXEL_WIDTH],
+                                 fb: u32| {
+                                    let mut r = [0; MAX_PIXEL_WIDTH];
+                                    for i in 0..pixel_width as usize {
+                                        r[i] =
+                                            (((a[i] as u32 * fa) + (b[i] as u32 * fb)) >> 6) as u8;
+                                    }
+                                    r
+                                };
 
-            for biy in 0..scaled_height {
-                for bix in 0..scaled_width {
-                    let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
-                        let bpos = (y as i32 * bitmap.pitch) + (x * pixel_width) as i32;
-                        let bslice = std::slice::from_raw_parts(
-                            bitmap.buffer.offset(bpos as isize),
-                            pixel_width as usize,
-                        );
-                        let mut pixel_data: [u8; MAX_PIXEL_WIDTH] = [0; 4];
-                        pixel_data[..pixel_width as usize].copy_from_slice(bslice);
-                        pixel_data
-                    };
-
-                    let interpolate_pixel_values =
-                        |a: [u8; MAX_PIXEL_WIDTH], fa: u32, b: [u8; MAX_PIXEL_WIDTH], fb: u32| {
-                            let mut r = [0; MAX_PIXEL_WIDTH];
-                            for i in 0..pixel_width as usize {
-                                r[i] = (((a[i] as u32 * fa) + (b[i] as u32 * fb)) >> 6) as u8;
-                            }
-                            r
-                        };
-
-                    let pixel_data = if scale6 == 64 {
-                        get_pixel_values(bix, biy)
-                    } else {
-                        // bilinear scaling
-                        let source_pixel_x6 = (bix << 12) / scale6 as u32;
-                        let source_pixel_y6 = (biy << 12) / scale6 as u32;
-
-                        let floor_x = source_pixel_x6 >> 6;
-                        let floor_y = source_pixel_y6 >> 6;
-                        let next_x = floor_x + 1;
-                        let next_y = floor_y + 1;
-
-                        let factor_floor_x = 64 - (source_pixel_x6 & 0x3F);
-                        let factor_next_x = source_pixel_x6 & 0x3F;
-                        let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
-                        let factor_next_y = source_pixel_y6 & 0x3F;
-
-                        if next_x >= bitmap.width {
-                            if next_y >= bitmap.rows {
-                                get_pixel_values(floor_x, floor_y)
+                            let pixel_data = if scale6 == 64 {
+                                get_pixel_values(bix, biy)
                             } else {
-                                let a = get_pixel_values(floor_x, floor_y);
-                                let b = get_pixel_values(floor_x, next_y);
-                                interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                            }
-                        } else if next_y >= bitmap.rows {
-                            let a = get_pixel_values(floor_x, floor_y);
-                            let b = get_pixel_values(next_x, floor_y);
-                            interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                        } else {
-                            let a = {
-                                let a = get_pixel_values(floor_x, floor_y);
-                                let b = get_pixel_values(next_x, floor_y);
-                                interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
+                                // bilinear scaling
+                                let source_pixel_x6 = (bix << 12) / scale6 as u32;
+                                let source_pixel_y6 = (biy << 12) / scale6 as u32;
+
+                                let floor_x = source_pixel_x6 >> 6;
+                                let floor_y = source_pixel_y6 >> 6;
+                                let next_x = floor_x + 1;
+                                let next_y = floor_y + 1;
+
+                                let factor_floor_x = 64 - (source_pixel_x6 & 0x3F);
+                                let factor_next_x = source_pixel_x6 & 0x3F;
+                                let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
+                                let factor_next_y = source_pixel_y6 & 0x3F;
+
+                                if next_x >= bitmap.width {
+                                    if next_y >= bitmap.rows {
+                                        get_pixel_values(floor_x, floor_y)
+                                    } else {
+                                        let a = get_pixel_values(floor_x, floor_y);
+                                        let b = get_pixel_values(floor_x, next_y);
+                                        interpolate_pixel_values(
+                                            a,
+                                            factor_floor_y,
+                                            b,
+                                            factor_next_y,
+                                        )
+                                    }
+                                } else if next_y >= bitmap.rows {
+                                    let a = get_pixel_values(floor_x, floor_y);
+                                    let b = get_pixel_values(next_x, floor_y);
+                                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+                                } else {
+                                    let a = {
+                                        let a = get_pixel_values(floor_x, floor_y);
+                                        let b = get_pixel_values(next_x, floor_y);
+                                        interpolate_pixel_values(
+                                            a,
+                                            factor_floor_x,
+                                            b,
+                                            factor_next_x,
+                                        )
+                                    };
+                                    let b = {
+                                        let a = get_pixel_values(floor_x, next_y);
+                                        let b = get_pixel_values(next_x, next_y);
+                                        interpolate_pixel_values(
+                                            a,
+                                            factor_floor_x,
+                                            b,
+                                            factor_next_x,
+                                        )
+                                    };
+                                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+                                }
                             };
-                            let b = {
-                                let a = get_pixel_values(floor_x, next_y);
-                                let b = get_pixel_values(next_x, next_y);
-                                interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
-                            };
-                            interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+
+                            let i = (bix as usize + biy as usize * scaled_width as usize)
+                                * pixel_width as usize;
+                            buffer_data[i..i + pixel_width as usize].copy_from_slice(
+                                std::mem::transmute(&pixel_data[..pixel_width as usize]),
+                            );
                         }
-                    };
+                    }
+                }),
+            );
 
-                    let i = (bix as usize + biy as usize * scaled_width as usize)
-                        * pixel_width as usize;
-                    buffer_data[i..i + pixel_width as usize]
-                        .copy_from_slice(std::mem::transmute(&pixel_data[..pixel_width as usize]));
-                }
+            SingleGlyphBitmap {
+                offset: (ox, oy),
+                texture,
             }
-
-            match Rc::get_mut(&mut result.data).unwrap() {
-                BufferData::Monochrome(vec) => vec.set_len(n_pixels),
-                BufferData::Color(vec) => vec.set_len(n_pixels),
-            }
-
-            result
         }
     }
 
-    pub fn render_glyph(&self, index: u32) -> SingleGlyphBitmap {
-        self.face().glyph_cache().get_or_render(self, index).clone()
+    pub fn render_glyph(&self, rasterizer: &mut dyn Rasterizer, index: u32) -> SingleGlyphBitmap {
+        self.face()
+            .glyph_cache()
+            .get_or_render(rasterizer, self, index)
+            .clone()
     }
 }

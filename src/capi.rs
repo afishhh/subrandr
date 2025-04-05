@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{color::BGRA8, text::Face, Painter, Renderer, Subrandr, SubtitleContext, Subtitles};
+use crate::{color::BGRA8, text::Face, Renderer, Subrandr, SubtitleContext, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -289,12 +289,7 @@ unsafe extern "C" fn sbr_renderer_render(
     height: u32,
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
-    (*renderer).render(
-        &*ctx,
-        t,
-        unsafe { &*subs },
-        &mut Painter::new(width, height, buffer),
-    );
+    (*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height);
     0
 }
 

@@ -2,7 +2,7 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit, ops::Range};
+use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit};
 
 mod rcarray;
 pub use rcarray::*;
@@ -29,35 +29,6 @@ pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
     let len = v.len();
     let capacity = v.capacity();
     (ptr, len, capacity)
-}
-
-pub struct BlitRectangle {
-    pub xs: Range<usize>,
-    pub ys: Range<usize>,
-}
-
-pub fn calculate_blit_rectangle(
-    x: i32,
-    y: i32,
-    target_width: usize,
-    target_height: usize,
-    source_width: usize,
-    source_height: usize,
-) -> Option<BlitRectangle> {
-    let isx = if x < 0 { (-x) as usize } else { 0 };
-    let isy = if y < 0 { (-y) as usize } else { 0 };
-    let msx = (source_width as i32).min(target_width as i32 - x);
-    let msy = (source_height as i32).min(target_height as i32 - y);
-    if msx <= 0 || msy <= 0 {
-        return None;
-    }
-    let msx = msx as usize;
-    let msy = msy as usize;
-
-    Some(BlitRectangle {
-        xs: isx..msx,
-        ys: isy..msy,
-    })
 }
 
 pub fn rgb_to_hsl(r: u8, g: u8, b: u8) -> [f32; 3] {

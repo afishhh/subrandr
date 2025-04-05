@@ -822,11 +822,12 @@ impl<'a> Renderer<'a> {
                         shadow.color.to_bgr_bytes(),
                     );
                 } else {
-                    image.monochrome(rasterizer).blit(
+                    let monochrome = image.monochrome(rasterizer);
+                    monochrome.blit(
                         rasterizer,
                         target,
-                        (x + shadow.offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y).trunc_to_inner(),
+                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
+                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
                         shadow.color,
                     );
                 }

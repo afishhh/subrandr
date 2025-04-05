@@ -23,6 +23,10 @@ The mpv IPC implementation is able to automatically acquire the X11 window id of
 Currently only a C API is provided, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.
 The C API is defined in the `subrandr.h` header, items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined and no API stability is guaranteed for them.
 
+> [!WARNING]
+> This library is experimental and no API stability is guaranteed for any of its APIs
+> even for items not marked unstable. This *may* or *may not* change in the future.
+
 The library performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
 
 ```c

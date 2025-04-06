@@ -1,6 +1,5 @@
 use std::{cell::OnceCell, mem::MaybeUninit, ops::Range};
 
-use ft_utils::IFixed26Dot6;
 use text_sys::*;
 
 mod face;
@@ -12,7 +11,7 @@ pub mod layout;
 
 use crate::{
     color::BGRA8,
-    math::Vec2,
+    math::{I26Dot6, Vec2},
     rasterize::{Rasterizer, RenderTarget, Texture},
     util::{AnyError, OrderedF32},
 };
@@ -68,10 +67,10 @@ pub struct Glyph {
     pub index: hb_codepoint_t,
     /// Byte position where this glyph started in the original UTF-8 string
     pub cluster: usize,
-    pub x_advance: IFixed26Dot6,
-    pub y_advance: IFixed26Dot6,
-    pub x_offset: IFixed26Dot6,
-    pub y_offset: IFixed26Dot6,
+    pub x_advance: I26Dot6,
+    pub y_advance: I26Dot6,
+    pub x_offset: I26Dot6,
+    pub y_offset: I26Dot6,
     pub font_index: usize,
     flags: hb_glyph_flags_t,
 }
@@ -86,10 +85,10 @@ impl Glyph {
         Self {
             index: info.codepoint,
             cluster: original_cluster,
-            x_advance: IFixed26Dot6::from_raw(position.x_advance),
-            y_advance: IFixed26Dot6::from_raw(position.y_advance),
-            x_offset: IFixed26Dot6::from_raw(position.x_offset),
-            y_offset: IFixed26Dot6::from_raw(position.y_offset),
+            x_advance: I26Dot6::from_raw(position.x_advance),
+            y_advance: I26Dot6::from_raw(position.y_advance),
+            x_offset: I26Dot6::from_raw(position.x_offset),
+            y_offset: I26Dot6::from_raw(position.y_offset),
             font_index,
             flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }
@@ -108,11 +107,11 @@ pub fn compute_extents_ex(
     horizontal: bool,
     fonts: &[Font],
     glyphs: &[Glyph],
-) -> (TextExtents, (IFixed26Dot6, IFixed26Dot6)) {
+) -> (TextExtents, (I26Dot6, I26Dot6)) {
     let mut results = TextExtents {
-        paint_height: IFixed26Dot6::ZERO,
-        paint_width: IFixed26Dot6::ZERO,
-        max_bearing_y: IFixed26Dot6::ZERO,
+        paint_height: I26Dot6::ZERO,
+        paint_width: I26Dot6::ZERO,
+        max_bearing_y: I26Dot6::ZERO,
     };
 
     let trailing_advance;
@@ -124,14 +123,14 @@ pub fn compute_extents_ex(
         results.paint_height += extents.height.abs();
         results.paint_width += extents.width;
         if horizontal {
-            trailing_advance = ((glyph.x_advance - extents.width), IFixed26Dot6::ZERO);
+            trailing_advance = ((glyph.x_advance - extents.width), I26Dot6::ZERO);
             results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
         } else {
-            trailing_advance = (IFixed26Dot6::ZERO, (glyph.y_advance - extents.height));
+            trailing_advance = (I26Dot6::ZERO, (glyph.y_advance - extents.height));
             results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
     } else {
-        trailing_advance = (IFixed26Dot6::ZERO, IFixed26Dot6::ZERO);
+        trailing_advance = (I26Dot6::ZERO, I26Dot6::ZERO);
     }
 
     for glyph in glyphs {
@@ -486,9 +485,9 @@ pub fn shape_text(font: &Font, text: &str) -> ShapedText {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextExtents {
-    pub paint_height: IFixed26Dot6,
-    pub paint_width: IFixed26Dot6,
-    pub max_bearing_y: IFixed26Dot6,
+    pub paint_height: I26Dot6,
+    pub paint_width: I26Dot6,
+    pub max_bearing_y: I26Dot6,
 }
 
 struct GlyphBitmap {
@@ -619,8 +618,8 @@ impl Image {
 
 pub fn render(
     rasterizer: &mut dyn Rasterizer,
-    xf: IFixed26Dot6,
-    yf: IFixed26Dot6,
+    xf: I26Dot6,
+    yf: I26Dot6,
     fonts: &[Font],
     glyphs: &[Glyph],
 ) -> Image {
@@ -629,8 +628,8 @@ pub fn render(
         monochrome: OnceCell::new(),
     };
 
-    assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&xf));
-    assert!((-IFixed26Dot6::ONE..IFixed26Dot6::ONE).contains(&yf));
+    assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&xf));
+    assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&yf));
 
     let mut x = xf;
     let mut y = yf;

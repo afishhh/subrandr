@@ -110,7 +110,7 @@ macro_rules! define_fixed_for_type {
             pub const ZERO: Self = Self(0);
             pub const MIN: Self = Self(<$type>::MIN);
             pub const MAX: Self = Self(<$type>::MAX);
-            const HALF: Self = Self(1 << (P - 1));
+            pub const HALF: Self = Self(1 << (P - 1));
             const EPS: Self = Self(1);
 
             const FRACTIONAL_MASK: $type = (1 << P) - 1;
@@ -286,9 +286,17 @@ define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 pub type I32Fixed<const P: u32> = Fixed<P, i32>;
 pub type U32Fixed<const P: u32> = Fixed<P, u32>;
 
+pub type I26Dot6 = Fixed<6, i32>;
+pub type I16Dot16 = Fixed<16, i32>;
+
 impl<const P: u32> I32Fixed<P> {
+    #[allow(clippy::unnecessary_cast)]
+    pub fn into_ft(self) -> FT_Fixed {
+        Self::into_raw(self) as FT_Fixed
+    }
+
+    #[allow(clippy::unnecessary_cast)]
     pub fn from_ft(value: FT_Fixed) -> Self {
-        #[allow(clippy::unnecessary_cast)]
         Self::from_raw(value as i32)
     }
 }

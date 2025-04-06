@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    math::{I32Fixed, Point2, Rect2, Vec2},
-    text::{self, ft_utils::IFixed26Dot6},
+    math::{I26Dot6, I32Fixed, Point2, Rect2, Vec2},
+    text::{self},
     util::RcArray,
     HorizontalAlignment, TextWrapMode,
 };
@@ -82,7 +82,7 @@ struct SimpleShapedTextSegment {
     glyphs: Vec<text::Glyph>,
     fonts: Vec<text::Font>,
     extents: TextExtents,
-    trailing_x_advance: IFixed26Dot6,
+    trailing_x_advance: I26Dot6,
 }
 
 impl SimpleShapedTextSegment {
@@ -110,18 +110,16 @@ impl SimpleShapedTextSegment {
     }
 }
 
-fn calculate_multi_font_metrics(
-    fonts: &[text::Font],
-) -> (IFixed26Dot6, IFixed26Dot6, IFixed26Dot6) {
-    let mut max_ascender = IFixed26Dot6::MIN;
-    let mut min_descender = IFixed26Dot6::MAX;
-    let mut max_lineskip_descent = IFixed26Dot6::MIN;
+fn calculate_multi_font_metrics(fonts: &[text::Font]) -> (I26Dot6, I26Dot6, I26Dot6) {
+    let mut max_ascender = I26Dot6::MIN;
+    let mut min_descender = I26Dot6::MAX;
+    let mut max_lineskip_descent = I26Dot6::MIN;
 
     for font in fonts {
         let metrics = font.metrics();
-        let ascender = IFixed26Dot6::from_ft(metrics.ascender);
-        let descender = IFixed26Dot6::from_ft(metrics.descender);
-        let lineskip_descent = IFixed26Dot6::from_ft(metrics.height - metrics.ascender);
+        let ascender = I26Dot6::from_ft(metrics.ascender);
+        let descender = I26Dot6::from_ft(metrics.descender);
+        let lineskip_descent = I26Dot6::from_ft(metrics.height - metrics.ascender);
 
         max_ascender = max_ascender.max(ascender);
         min_descender = min_descender.min(descender);
@@ -335,7 +333,7 @@ impl MultilineTextShaper {
         let mut current = ruby_segments_start;
         while let Some(first) = segments.get(current) {
             let start_x = first.logical_rect.min.x;
-            let mut total_width = IFixed26Dot6::ZERO;
+            let mut total_width = I26Dot6::ZERO;
 
             let merged_start = current;
             loop {
@@ -369,7 +367,7 @@ impl MultilineTextShaper {
         line_alignment: HorizontalAlignment,
         wrap: TextWrapParams,
         font_select: &mut FontSelect,
-    ) -> (Vec<ShapedLine>, Rect2<IFixed26Dot6>) {
+    ) -> (Vec<ShapedLine>, Rect2<I26Dot6>) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
             println!(
@@ -384,7 +382,7 @@ impl MultilineTextShaper {
         let mut total_extents = TextExtents {
             paint_width: I32Fixed::ZERO,
             paint_height: I32Fixed::ZERO,
-            max_bearing_y: IFixed26Dot6::ZERO,
+            max_bearing_y: I26Dot6::ZERO,
         };
         let mut total_rect = Rect2::NOTHING;
 
@@ -404,7 +402,7 @@ impl MultilineTextShaper {
             let mut line_extents = TextExtents {
                 paint_height: I32Fixed::ZERO,
                 paint_width: I32Fixed::ZERO,
-                max_bearing_y: IFixed26Dot6::ZERO,
+                max_bearing_y: I26Dot6::ZERO,
             };
 
             if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -625,10 +623,7 @@ impl MultilineTextShaper {
                             ),
                             logical_rect: Rect2::new(
                                 Point2::ZERO,
-                                Point2::new(
-                                    IFixed26Dot6::new(logical_w),
-                                    IFixed26Dot6::new(logical_h),
-                                ),
+                                Point2::new(I26Dot6::new(logical_w), I26Dot6::new(logical_h)),
                             ),
                             corresponding_input_segment: current_segment + current_intra_split,
                             max_ascender: segment_max_bearing_y,
@@ -658,7 +653,7 @@ impl MultilineTextShaper {
             post_wrap_skip = 0;
 
             let aligning_x_offset = match line_alignment {
-                HorizontalAlignment::Left => IFixed26Dot6::ZERO,
+                HorizontalAlignment::Left => I26Dot6::ZERO,
                 HorizontalAlignment::Center => -line_extents.paint_width / 2,
                 HorizontalAlignment::Right => -line_extents.paint_width,
             };

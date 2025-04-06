@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     color::BGRA8,
+    math::{I16Dot16, I26Dot6},
     outline::Outline,
     rasterize::{PixelFormat, Rasterizer, Texture},
     util::fmt_from_fn,
@@ -141,8 +142,8 @@ impl Face {
                     #[allow(clippy::unnecessary_cast)]
                     tag: ft_axis.tag as u32,
                     index,
-                    minimum: ft_axis.minimum,
-                    maximum: ft_axis.maximum,
+                    minimum: I16Dot16::from_ft(ft_axis.minimum),
+                    maximum: I16Dot16::from_ft(ft_axis.maximum),
                 });
                 default_coords[index] = ft_axis.def;
             }
@@ -165,8 +166,7 @@ impl Face {
 
     #[inline(always)]
     pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
-        let point_size = f32_to_fractional_points(point_size);
-        Font::create(self.face, self.coords, point_size, dpi)
+        Font::create(self.face, self.coords, I26Dot6::from_f32(point_size), dpi)
     }
 
     pub fn with_size_from(&self, other: &Font) -> Font {
@@ -196,7 +196,7 @@ impl Face {
 
     pub fn set_axis(&mut self, index: usize, value: f32) {
         assert!(self.shared_data().axes[index].is_value_in_range(value));
-        self.coords[index] = f32_to_fixed_point(value);
+        self.coords[index] = I16Dot16::from_f32(value).into_ft();
     }
 
     fn os2_weight(&self) -> Option<u16> {
@@ -223,7 +223,7 @@ impl Face {
                         (300 + 400 * has_bold_flag as i32) as f32
                     }
                 },
-                |idx| fixed_point_to_f32(self.coords[idx]),
+                |idx| I16Dot16::from_ft(self.coords[idx]).into_f32(),
             )
     }
 
@@ -234,7 +234,7 @@ impl Face {
             .find_map(|x| (x.tag == ITALIC_AXIS).then_some(x.index))
             .map_or_else(
                 || unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 },
-                |idx| fixed_point_to_f32(self.coords[idx]) > 0.5,
+                |idx| I16Dot16::from_ft(self.coords[idx]) > I16Dot16::HALF,
             )
     }
 }
@@ -256,7 +256,7 @@ impl std::fmt::Debug for Face {
                 self.axes()
                     .iter()
                     .enumerate()
-                    .map(|(i, axis)| (debug_tag(axis.tag), fixed_point_to_f32(self.coords[i]))),
+                    .map(|(i, axis)| (debug_tag(axis.tag), I16Dot16::from_ft(self.coords[i]))),
             )
             .finish()?;
         write!(f, ")")
@@ -267,8 +267,8 @@ impl std::fmt::Debug for Face {
 pub struct Axis {
     pub tag: u32,
     pub index: usize,
-    minimum: FT_Fixed,
-    maximum: FT_Fixed,
+    minimum: I16Dot16,
+    maximum: I16Dot16,
 }
 
 fn debug_tag(tag: u32) -> impl std::fmt::Debug {
@@ -292,24 +292,25 @@ fn debug_tag(tag: u32) -> impl std::fmt::Debug {
 }
 
 impl Axis {
+    // TODO: Switch these APIs to I16Dot16 instead.
     #[inline(always)]
     pub fn minimum(&self) -> f32 {
-        fixed_point_to_f32(self.minimum)
+        self.minimum.into_f32()
     }
 
     #[inline(always)]
     pub fn maximum(&self) -> f32 {
-        fixed_point_to_f32(self.maximum)
+        self.maximum.into_f32()
     }
 
     #[inline(always)]
-    const fn is_fixed_value_in_range(&self, fixed: FT_Fixed) -> bool {
+    fn is_fixed_value_in_range(&self, fixed: I16Dot16) -> bool {
         self.minimum <= fixed && fixed <= self.maximum
     }
 
     #[inline(always)]
     pub fn is_value_in_range(&self, value: f32) -> bool {
-        self.is_fixed_value_in_range(f32_to_fixed_point(value))
+        self.is_fixed_value_in_range(I16Dot16::from_f32(value))
     }
 }
 
@@ -347,14 +348,14 @@ impl Drop for Face {
 
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphMetrics {
-    pub width: IFixed26Dot6,
-    pub height: IFixed26Dot6,
-    pub hori_bearing_x: IFixed26Dot6,
-    pub hori_bearing_y: IFixed26Dot6,
-    pub hori_advance: IFixed26Dot6,
-    pub vert_bearing_x: IFixed26Dot6,
-    pub vert_bearing_y: IFixed26Dot6,
-    pub vert_advance: IFixed26Dot6,
+    pub width: I26Dot6,
+    pub height: I26Dot6,
+    pub hori_bearing_x: I26Dot6,
+    pub hori_bearing_y: I26Dot6,
+    pub hori_advance: I26Dot6,
+    pub vert_bearing_x: I26Dot6,
+    pub vert_bearing_y: I26Dot6,
+    pub vert_advance: I26Dot6,
 }
 
 #[repr(C)]
@@ -363,24 +364,30 @@ pub struct Font {
     ft_face: FT_Face,
     coords: MmCoords,
     hb_font: *mut hb_font_t,
-    point_size: FT_F26Dot6,
+    point_size: I26Dot6,
     dpi: u32,
 
     /// -1 = not fixed size
     fixed_size_index: i32,
-    pub(super) scale: IFixed26Dot6,
+    pub(super) scale: I26Dot6,
 }
 
 impl Font {
-    fn create(face: FT_Face, coords: MmCoords, point_size: FT_F26Dot6, dpi: u32) -> Self {
+    fn create(face: FT_Face, coords: MmCoords, point_size: I26Dot6, dpi: u32) -> Self {
         let (fixed_size_index, scale) = if unsafe {
             (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0
         } {
             unsafe {
-                fttry!(FT_Set_Char_Size(face, point_size, point_size, dpi, dpi));
+                fttry!(FT_Set_Char_Size(
+                    face,
+                    point_size.into_ft(),
+                    point_size.into_ft(),
+                    dpi,
+                    dpi
+                ));
             }
 
-            (-1, IFixed26Dot6::ONE)
+            (-1, I26Dot6::ONE)
         } else {
             let sizes = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -391,8 +398,7 @@ impl Font {
 
             // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
             let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
-            #[allow(clippy::useless_conversion)] // c_ulong conversion
-            let ppem = map_to_ppem(point_size.into(), dpi.into());
+            let ppem = map_to_ppem(point_size.into_ft(), dpi.into());
 
             // First size larger than requested, or the largest size if not found
             let mut picked_size_index = 0usize;
@@ -403,8 +409,7 @@ impl Font {
                 }
             }
 
-            let scale =
-                IFixed26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
+            let scale = I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
 
             unsafe {
                 fttry!(FT_Select_Size(face, picked_size_index as i32));
@@ -449,8 +454,8 @@ impl Font {
             } else {
                 fttry!(FT_Set_Char_Size(
                     self.ft_face,
-                    self.point_size,
-                    self.point_size,
+                    self.point_size.into_ft(),
+                    self.point_size.into_ft(),
                     self.dpi,
                     self.dpi,
                 ));
@@ -521,8 +526,8 @@ impl Font {
         unsafe { std::mem::transmute(self) }
     }
 
-    pub fn point_size(&self) -> IFixed26Dot6 {
-        IFixed26Dot6::from_ft(self.point_size)
+    pub fn point_size(&self) -> I26Dot6 {
+        self.point_size
     }
 
     pub fn weight(&self) -> f32 {
@@ -578,7 +583,7 @@ impl Drop for Font {
 #[derive(PartialEq, Eq, Hash)]
 struct SizeInfo {
     coords: MmCoords,
-    point_size: FT_F26Dot6,
+    point_size: I26Dot6,
     dpi: u32,
 }
 
@@ -658,7 +663,7 @@ impl GlyphCache {
 
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
-    pub offset: (IFixed26Dot6, IFixed26Dot6),
+    pub offset: (I26Dot6, I26Dot6),
     pub texture: Texture<'static>,
 }
 
@@ -693,14 +698,14 @@ impl Font {
         }
 
         GlyphMetrics {
-            width: IFixed26Dot6::from_raw(metrics.width as i32),
-            height: IFixed26Dot6::from_raw(metrics.height as i32),
-            hori_bearing_x: IFixed26Dot6::from_raw(metrics.horiBearingX as i32),
-            hori_bearing_y: IFixed26Dot6::from_raw(metrics.horiBearingY as i32),
-            hori_advance: IFixed26Dot6::from_raw(metrics.horiAdvance as i32),
-            vert_bearing_x: IFixed26Dot6::from_raw(metrics.vertBearingX as i32),
-            vert_bearing_y: IFixed26Dot6::from_raw(metrics.vertBearingY as i32),
-            vert_advance: IFixed26Dot6::from_raw(metrics.vertAdvance as i32),
+            width: I26Dot6::from_raw(metrics.width as i32),
+            height: I26Dot6::from_raw(metrics.height as i32),
+            hori_bearing_x: I26Dot6::from_raw(metrics.horiBearingX as i32),
+            hori_bearing_y: I26Dot6::from_raw(metrics.horiBearingY as i32),
+            hori_advance: I26Dot6::from_raw(metrics.horiAdvance as i32),
+            vert_bearing_x: I26Dot6::from_raw(metrics.vertBearingX as i32),
+            vert_bearing_y: I26Dot6::from_raw(metrics.vertBearingY as i32),
+            vert_advance: I26Dot6::from_raw(metrics.vertAdvance as i32),
         }
     }
 
@@ -723,8 +728,8 @@ impl Font {
             let scale6 = self.scale.into_raw();
 
             let (ox, oy) = (
-                IFixed26Dot6::from_raw((*slot).bitmap_left * scale6),
-                IFixed26Dot6::from_raw(-(*slot).bitmap_top * scale6),
+                I26Dot6::from_raw((*slot).bitmap_left * scale6),
+                I26Dot6::from_raw(-(*slot).bitmap_top * scale6),
             );
 
             let bitmap = &(*slot).bitmap;

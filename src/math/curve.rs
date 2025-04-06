@@ -75,10 +75,6 @@ macro_rules! define_curve {
             pub const fn from_ref(points: &[Point2f; $npoints]) -> &Self {
                 unsafe { &*(points as *const _ as *const Self) }
             }
-
-            pub const fn into_points(self) -> [Point2f; $npoints] {
-                self.0
-            }
         }
 
         impl Deref for $name {

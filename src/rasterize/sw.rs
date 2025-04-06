@@ -591,8 +591,8 @@ pub(super) struct TextureRenderTargetImpl {
     pub height: u32,
 }
 
-fn unwrap_sw_render_texture<'a, 'b>(
-    target: &'a mut super::RenderTarget<'b>,
+fn unwrap_sw_render_texture<'a>(
+    target: &'a mut super::RenderTarget,
 ) -> &'a mut TextureRenderTargetImpl {
     match &mut target.0 {
         super::RenderTargetInner::SoftwareTexture(target) => target,

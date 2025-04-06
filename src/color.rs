@@ -70,28 +70,6 @@ impl BGRA8 {
     }
 }
 
-pub trait BGRA8Slice {
-    fn as_bytes(&self) -> &[u8];
-    fn as_bytes_mut(&mut self) -> &mut [u8];
-}
-
-impl BGRA8Slice for [BGRA8] {
-    fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.as_ptr() as *const u8, std::mem::size_of_val(self))
-        }
-    }
-
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                self.as_mut_ptr() as *mut u8,
-                std::mem::size_of_val(self),
-            )
-        }
-    }
-}
-
 pub trait Premultiply: Debug + Clone + Copy {
     fn premultiply(self) -> Premultiplied<Self>;
 }
@@ -110,11 +88,6 @@ impl Premultiply for BGRA8 {
             a: self.a,
         })
     }
-}
-
-#[inline(always)]
-fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
-    src + (1.0 - alpha) * dst
 }
 
 // FIXME: RANT: The alpha compositing mess.

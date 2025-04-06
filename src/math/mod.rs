@@ -1,7 +1,7 @@
 use std::{
     fmt::{Debug, Display},
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
 mod curve;
@@ -360,63 +360,6 @@ impl<N: Number + Display> Rect2<N> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Line {
-    pub a: f32,
-    pub b: f32,
-    pub c: f32,
-}
-
-impl Line {
-    pub const fn new(a: f32, b: f32, c: f32) -> Self {
-        Self { a, b, c }
-    }
-
-    pub const fn from_points(start: Point2f, end: Point2f) -> Self {
-        let a = end.y - start.y;
-        let b = start.x - end.x;
-        let c = -(start.y * b + start.x * a);
-        Self::new(a, b, c)
-    }
-
-    pub fn signed_distance_to_point(self, Point2f { x, y }: Point2f) -> f32 {
-        let Self { a, b, c } = self;
-        (a * x + b * y + c) / (a * a + b * b).sqrt()
-    }
-
-    pub fn distance_to_point(self, p: Point2f) -> f32 {
-        self.signed_distance_to_point(p).abs()
-    }
-
-    pub fn sample_y(&self, x: f32) -> f32 {
-        (-x * self.a - self.c) / self.b
-    }
-}
-
-impl Mul<f32> for Line {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        Self::new(self.a * rhs, self.b * rhs, self.c * rhs)
-    }
-}
-
-impl MulAssign<f32> for Line {
-    fn mul_assign(&mut self, rhs: f32) {
-        self.a *= rhs;
-        self.b *= rhs;
-        self.c *= rhs;
-    }
-}
-
-fn lerp<S: Mul<f32, Output = S>, T: Clone + Add<S, Output = T> + Sub<T, Output = S>>(
-    a: T,
-    b: T,
-    t: f32,
-) -> T {
-    a.clone() + (b - a) * t
-}
-
 pub fn fast_divide_by_sqrt<O, T>(numerator: T, squared_denominator: f32) -> O
 where
     T: Div<f32, Output = O> + Mul<f32, Output = O>,
@@ -441,16 +384,5 @@ where
     #[cfg(not(target_feature = "sse"))]
     {
         numerator / squared_denominator.sqrt()
-    }
-}
-
-pub fn fast_mul_add(a: f32, b: f32, c: f32) -> f32 {
-    #[cfg(target_feature = "fma")]
-    {
-        a.mul_add(b, c)
-    }
-    #[cfg(not(target_feature = "fma"))]
-    {
-        a * b + c
     }
 }

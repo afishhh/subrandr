@@ -858,7 +858,7 @@ impl<'a> Renderer<'a> {
 
             for glyph in glyphs {
                 if let Some(outline) = fonts[glyph.font_index].glyph_outline(glyph.index) {
-                    let (one, two) = outline::stroke(&outline, border.x, border.y, 1.0);
+                    let (one, two) = outline.stroke(border.x, border.y, 1.0);
 
                     poly_rasterizer.reset();
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
@@ -1429,8 +1429,7 @@ impl<'a> Renderer<'a> {
                             }
 
                             if s.stroke_color.a > 0 && (s.stroke_x >= 0.01 || s.stroke_y >= 0.01) {
-                                let stroked = outline::stroke(
-                                    &outline,
+                                let stroked = outline.stroke(
                                     s.stroke_x * shape_scale / 2.0,
                                     s.stroke_y * shape_scale / 2.0,
                                     1.0,

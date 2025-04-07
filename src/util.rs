@@ -2,7 +2,10 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait Sealed {}
 
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit};
+use std::{
+    borrow::Borrow, cmp::Ordering, fmt::Debug, hash::Hash, mem::MaybeUninit, ops::Deref,
+    ptr::NonNull,
+};
 
 mod rcarray;
 pub use rcarray::*;
@@ -178,4 +181,65 @@ where
     F: Fn(&mut std::fmt::Formatter<'_>) -> std::fmt::Result,
 {
     FormatterFn(f)
+}
+
+pub struct ReadonlyAliasableBox<T>(NonNull<T>);
+
+impl<T> ReadonlyAliasableBox<T> {
+    pub fn new(value: T) -> Self {
+        Self(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(value))) })
+    }
+
+    pub fn as_nonnull(this: &Self) -> NonNull<T> {
+        this.0
+    }
+}
+
+impl<T: Hash> Hash for ReadonlyAliasableBox<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
+
+impl<T: PartialEq> PartialEq for ReadonlyAliasableBox<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl<T: Eq> Eq for ReadonlyAliasableBox<T> {}
+
+impl<T> Deref for ReadonlyAliasableBox<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+impl<T> Borrow<T> for ReadonlyAliasableBox<T> {
+    fn borrow(&self) -> &T {
+        self
+    }
+}
+
+impl<T> AsRef<T> for ReadonlyAliasableBox<T> {
+    fn as_ref(&self) -> &T {
+        self
+    }
+}
+
+impl<T> Drop for ReadonlyAliasableBox<T> {
+    fn drop(&mut self) {
+        unsafe { _ = Box::from_raw(self.0.as_ptr()) };
+    }
+}
+
+#[test]
+fn readonly_aliasable_box() {
+    _ = ReadonlyAliasableBox::new(String::from("hello"));
+    let boxed = ReadonlyAliasableBox::new(String::from("second"));
+    let aliasing = boxed.as_ptr();
+    _ = boxed;
+    _ = aliasing;
 }

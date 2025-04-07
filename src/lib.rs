@@ -14,7 +14,7 @@ use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
-    FontRequest, TextExtents,
+    FontArena, FontRequest, TextMetrics,
 };
 use vtt::VttEvent;
 
@@ -784,28 +784,23 @@ impl<'a> Renderer<'a> {
             .select_simple("monospace", 400., false)
             .unwrap()
             .with_size(size, self.dpi);
-        let shaped = text::shape_text(&font, text);
+        let font_arena = FontArena::new();
+        let shaped = text::shape_text(&font, &font_arena, text);
         let (ox, oy) = Self::translate_for_aligned_text(
             &font,
             true,
-            &text::compute_extents(true, std::slice::from_ref(&font), &shaped.glyphs),
+            &text::compute_extents_ex(true, &shaped.glyphs),
             alignment,
         );
 
-        let image = text::render(
-            rasterizer,
-            I32Fixed::ZERO,
-            I32Fixed::ZERO,
-            std::slice::from_ref(&font),
-            &shaped.glyphs,
-        );
+        let image = text::render(rasterizer, I32Fixed::ZERO, I32Fixed::ZERO, &shaped.glyphs);
         image.blit(rasterizer, target, x + ox, y + oy, color);
     }
 
     fn translate_for_aligned_text(
         font: &text::Font,
         horizontal: bool,
-        extents: &TextExtents,
+        extents: &TextMetrics,
         alignment: Alignment,
     ) -> (i32, i32) {
         assert!(horizontal);
@@ -814,8 +809,8 @@ impl<'a> Renderer<'a> {
 
         let ox = match horizontal {
             HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
-            HorizontalAlignment::Center => -extents.paint_width.trunc_to_inner() / 2,
-            HorizontalAlignment::Right => (-extents.paint_width
+            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
+            HorizontalAlignment::Right => (-extents.paint_size.x
                 + I32Fixed::from_raw(font.horizontal_extents().descender))
             .trunc_to_inner(),
         };
@@ -835,7 +830,6 @@ impl<'a> Renderer<'a> {
         target: &mut RenderTarget,
         x: I32Fixed<6>,
         y: I32Fixed<6>,
-        fonts: &[text::Font],
         glyphs: &[text::Glyph],
         color: BGRA8,
         decoration: &TextDecorations,
@@ -843,7 +837,7 @@ impl<'a> Renderer<'a> {
         scale: f32,
         ctx: &SubtitleContext,
     ) {
-        let image = text::render(rasterizer, x.fract(), y.fract(), fonts, glyphs);
+        let image = text::render(rasterizer, x.fract(), y.fract(), glyphs);
         let border = decoration.border * scale;
 
         // TODO: This should also draw an offset underline I think and possibly strike through
@@ -904,7 +898,7 @@ impl<'a> Renderer<'a> {
             let mut poly_rasterizer = NonZeroPolygonRasterizer::new();
 
             for glyph in glyphs {
-                if let Some(outline) = fonts[glyph.font_index].glyph_outline(glyph.index) {
+                if let Some(outline) = glyph.font.glyph_outline(glyph.index) {
                     let (one, two) = outline.stroke(border.x, border.y, 1.0);
 
                     poly_rasterizer.reset();
@@ -935,7 +929,7 @@ impl<'a> Renderer<'a> {
             let mut end_x = x;
             let mut it = glyphs.iter();
             if let Some(last) = it.next_back() {
-                end_x += fonts[last.font_index].glyph_extents(last.index).width;
+                end_x += last.font.glyph_extents(last.index).width;
             }
             for glyph in it {
                 end_x += glyph.x_advance;
@@ -958,7 +952,9 @@ impl<'a> Renderer<'a> {
 
         // TODO: This is actually in TT_OS2 table
         if decoration.strike_out {
-            let metrics = fonts[0].metrics();
+            // FIXME: This should use the main font for the segment, not the font
+            //        of the first glyph..
+            let metrics = glyphs[0].font.metrics();
             let strike_y =
                 (y - I32Fixed::from_ft((metrics.height >> 1) + metrics.descender)).trunc_to_inner();
             rasterizer.horizontal_line(
@@ -1195,6 +1191,7 @@ impl<'a> Renderer<'a> {
         let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
             let mut layouter = subs.class.create_layouter();
+            let font_arena = FontArena::new();
             for event in subs.events.iter() {
                 let r = unchanged_range.clone();
                 if (event.start..event.end).contains(&t) {
@@ -1273,6 +1270,7 @@ impl<'a> Renderer<'a> {
                         mode: event.text_wrap,
                         wrap_width,
                     },
+                    &font_arena,
                     &mut self.fonts,
                 );
 
@@ -1454,13 +1452,12 @@ impl<'a> Renderer<'a> {
 
                     match segment {
                         Segment::Text(t) => {
-                            let (glyphs, fonts) = shaped_segment.glyphs_and_fonts.as_ref().unwrap();
+                            let glyphs = shaped_segment.glyphs.as_ref().unwrap();
                             self.draw_text_full(
                                 rasterizer,
                                 target,
                                 x,
                                 y,
-                                fonts,
                                 glyphs,
                                 t.color,
                                 &t.decorations,

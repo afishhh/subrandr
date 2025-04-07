@@ -206,15 +206,10 @@ impl VttLayouter {
                 loop {
                     let mut done = true;
                     'check: for line in &lines[..] {
-                        let mut effective_rect = line.bounding_rect.translate(Vec2::new(
+                        let effective_rect = line.bounding_rect.translate(Vec2::new(
                             I26Dot6::from_f32(result.x),
                             I26Dot6::from_f32(result.y),
                         ));
-
-                        // HACK: because of trailing advance our bounding rects may be slightly
-                        //       larger than they should.
-                        //       clean up the trailing advance story instead of this hack.
-                        effective_rect.max.x -= 5.0;
 
                         if !title_area.includes(effective_rect) {
                             done = false;

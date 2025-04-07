@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     math::{I26Dot6, I32Fixed, Point2, Rect2, Vec2},
     text::{self},
@@ -7,7 +5,7 @@ use crate::{
     HorizontalAlignment, TextWrapMode,
 };
 
-use super::{FontSelect, TextExtents};
+use super::{FontArena, FontSelect, TextMetrics};
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
@@ -39,9 +37,8 @@ pub struct MultilineTextShaper {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedSegment {
-    // TODO: Make this Rc<[text::Font]>
-    pub glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
+pub struct ShapedSegment<'f> {
+    pub glyphs: Option<RcArray<text::Glyph<'f>>>,
     pub baseline_offset: Point2<I26Dot6>,
     pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
@@ -50,41 +47,31 @@ pub struct ShapedSegment {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedLine {
-    pub segments: Vec<ShapedSegment>,
+pub struct ShapedLine<'f> {
+    pub segments: Vec<ShapedSegment<'f>>,
     pub bounding_rect: Rect2<I26Dot6>,
 }
 
-struct SimpleShapedTextSegment {
-    glyphs: Vec<text::Glyph>,
-    fonts: Vec<text::Font>,
-    extents: TextExtents,
-    trailing_x_advance: I26Dot6,
-}
-
-impl SimpleShapedTextSegment {
-    fn shape(font: &text::Font, text: &str, font_select: &mut FontSelect) -> Self {
-        let mut fonts = Vec::new();
-        let glyphs = {
-            let mut buffer = text::ShapingBuffer::new();
-            buffer.reset();
-            buffer.add(text);
-            let direction = buffer.guess_properties();
-            if !direction.is_horizontal() {
-                buffer.set_direction(direction.to_horizontal());
-            }
-            buffer.shape(font, &mut fonts, font_select)
-        };
-
-        let (extents, (trailing_x_advance, _)) = text::compute_extents_ex(true, &fonts, &glyphs);
-
-        SimpleShapedTextSegment {
-            glyphs,
-            fonts,
-            extents,
-            trailing_x_advance,
+fn shape_simple_segment<'f>(
+    font: &text::Font,
+    text: &str,
+    font_arena: &'f FontArena,
+    font_select: &mut FontSelect,
+) -> (Vec<text::Glyph<'f>>, TextMetrics) {
+    let glyphs = {
+        let mut buffer = text::ShapingBuffer::new();
+        buffer.reset();
+        buffer.add(text);
+        let direction = buffer.guess_properties();
+        if !direction.is_horizontal() {
+            buffer.set_direction(direction.to_horizontal());
         }
-    }
+        buffer.shape(font, font_arena, font_select)
+    };
+
+    let metrics = text::compute_extents_ex(true, &glyphs);
+
+    (glyphs, metrics)
 }
 
 fn calculate_multi_font_metrics(fonts: &[text::Font]) -> (I26Dot6, I26Dot6, I26Dot6) {
@@ -252,10 +239,11 @@ impl MultilineTextShaper {
             .push((ShaperSegment::Shape(dim), self.text.len()))
     }
 
-    fn layout_line_ruby(
+    fn layout_line_ruby<'f>(
         &self,
-        segments: &mut Vec<ShapedSegment>,
+        segments: &mut Vec<ShapedSegment<'f>>,
         annotations: &[RubyAnnotationSegment],
+        font_arena: &'f FontArena,
         font_select: &mut FontSelect,
     ) {
         let ruby_segments_start = segments.len();
@@ -274,30 +262,26 @@ impl MultilineTextShaper {
 
                 let baseline_y = first_base.baseline_offset.y - first_base.max_ascender;
 
-                let shaped = SimpleShapedTextSegment::shape(
+                let (glyphs, extents) = shape_simple_segment(
                     &annotation.font,
                     &self.ruby_annotation_text[current_text_cursor..annotation.text_end],
+                    font_arena,
                     font_select,
                 );
 
-                let (max_asc, min_desc, _) = calculate_multi_font_metrics(&shaped.fonts);
-
                 segments.push(ShapedSegment {
-                    glyphs_and_fonts: Some((
-                        RcArray::from_boxed(shaped.glyphs.into_boxed_slice()),
-                        shaped.fonts.into(),
-                    )),
+                    glyphs: Some(RcArray::from_boxed(glyphs.into_boxed_slice())),
                     baseline_offset: Point2::new(
                         // This is only temporarily stored here, and read during the
                         // second pass below.
-                        shaped.extents.paint_width + shaped.trailing_x_advance,
+                        extents.paint_size.x + extents.trailing_advance,
                         baseline_y,
                     ),
                     logical_rect: Rect2::new(
-                        Point2::new(start_x, baseline_y - max_asc),
-                        Point2::new(end_x, baseline_y - min_desc),
+                        Point2::new(start_x, baseline_y - extents.max_ascender),
+                        Point2::new(end_x, baseline_y - extents.min_descender),
                     ),
-                    max_ascender: max_asc,
+                    max_ascender: extents.max_ascender,
                     corresponding_input_segment: annotation.input_index,
                 });
 
@@ -339,12 +323,13 @@ impl MultilineTextShaper {
         }
     }
 
-    pub fn shape(
+    pub fn shape<'f>(
         &self,
         line_alignment: HorizontalAlignment,
         wrap: TextWrapParams,
+        font_arena: &'f FontArena,
         font_select: &mut FontSelect,
-    ) -> (Vec<ShapedLine>, Rect2<I26Dot6>) {
+    ) -> (Vec<ShapedLine<'f>>, Rect2<I26Dot6>) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
             println!(
@@ -356,11 +341,7 @@ impl MultilineTextShaper {
         let wrap_width = I32Fixed::from_f32(wrap.wrap_width);
 
         let mut lines: Vec<ShapedLine> = vec![];
-        let mut total_extents = TextExtents {
-            paint_width: I32Fixed::ZERO,
-            paint_height: I32Fixed::ZERO,
-            max_bearing_y: I26Dot6::ZERO,
-        };
+        let mut current_line_y = I26Dot6::ZERO;
         let mut total_rect = Rect2::NOTHING;
 
         let mut current_explicit_line = 0;
@@ -376,11 +357,7 @@ impl MultilineTextShaper {
                 .copied()
                 .unwrap_or(self.text.len());
             let mut segments: Vec<ShapedSegment> = vec![];
-            let mut line_extents = TextExtents {
-                paint_height: I32Fixed::ZERO,
-                paint_width: I32Fixed::ZERO,
-                max_bearing_y: I26Dot6::ZERO,
-            };
+            let mut current_x = I26Dot6::ZERO;
 
             if MULTILINE_SHAPER_DEBUG_PRINT {
                 println!(
@@ -415,23 +392,19 @@ impl MultilineTextShaper {
                         font,
                         line_breaking_forbidden,
                     } => {
-                        let SimpleShapedTextSegment {
-                            glyphs,
-                            fonts: segment_fonts,
-                            extents,
-                            trailing_x_advance,
-                        } = SimpleShapedTextSegment::shape(
+                        let (glyphs, extents) = shape_simple_segment(
                             font,
                             &self.text[segment_slice],
+                            &font_arena,
                             font_select,
                         );
 
                         if !did_wrap
                             && wrap.mode == TextWrapMode::Normal
                             && !*line_breaking_forbidden
-                            && line_extents.paint_width + extents.paint_width > wrap_width
+                            && current_x + extents.paint_size.x > wrap_width
                         {
-                            let mut x = line_extents.paint_width;
+                            let mut x = extents.paint_size.x;
                             let mut glyph_it = glyphs.iter();
                             if let Some(first) = glyph_it.next() {
                                 x += first.x_advance;
@@ -440,9 +413,7 @@ impl MultilineTextShaper {
                             for glyph in glyph_it {
                                 let x_after = x
                                     + glyph.x_offset
-                                    + segment_fonts[glyph.font_index]
-                                        .glyph_extents(glyph.index)
-                                        .width;
+                                    + glyph.font.glyph_extents(glyph.index).width;
                                 // TODO: also ensure conformance with unicode line breaking
                                 //       this would ensure, for example, that no line
                                 //       breaks are inserted between a character and
@@ -490,7 +461,6 @@ impl MultilineTextShaper {
                             // split it up, go through with rendering it.
                         }
 
-                        let segment_fonts = Rc::new(segment_fonts);
                         let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
 
                         if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -500,15 +470,12 @@ impl MultilineTextShaper {
                             );
                         }
 
-                        let (local_max_ascender, local_min_descender, local_lineskip_descent) =
-                            calculate_multi_font_metrics(&segment_fonts);
-
-                        line_max_ascender = line_max_ascender.max(local_max_ascender);
-                        line_min_descender = line_min_descender.min(local_min_descender);
+                        line_max_ascender = line_max_ascender.max(extents.max_ascender);
+                        line_min_descender = line_min_descender.min(extents.min_descender);
                         line_max_lineskip_descent =
-                            line_max_lineskip_descent.max(local_lineskip_descent);
+                            line_max_lineskip_descent.max(extents.max_lineskip_descent);
 
-                        let logical_height = local_max_ascender - local_min_descender;
+                        let logical_height = extents.max_ascender - extents.min_descender;
 
                         if self
                             .intra_font_segment_splits
@@ -516,24 +483,21 @@ impl MultilineTextShaper {
                             .is_none_or(|split| *split >= end)
                         {
                             segments.push(ShapedSegment {
-                                glyphs_and_fonts: Some((rc_glyphs, segment_fonts)),
-                                baseline_offset: Point2::new(
-                                    line_extents.paint_width,
-                                    total_extents.paint_height,
-                                ),
+                                glyphs: Some(rc_glyphs),
+                                baseline_offset: Point2::new(current_x, current_line_y),
                                 logical_rect: Rect2::from_min_size(
                                     Point2::ZERO,
                                     Vec2::new(
-                                        extents.paint_width + trailing_x_advance,
+                                        extents.paint_size.x + extents.trailing_advance,
                                         logical_height,
                                     ),
                                 ),
-                                max_ascender: local_max_ascender,
+                                max_ascender: extents.max_ascender,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
+                            current_x += extents.paint_size.x + extents.trailing_advance;
                         } else {
                             let mut last_glyph_idx = 0;
-                            let mut x = line_extents.paint_width;
 
                             loop {
                                 let split_end = self
@@ -547,22 +511,25 @@ impl MultilineTextShaper {
                                     .unwrap_or(rc_glyphs.len());
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
                                 let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
-                                let (extents, (x_advance, _)) =
-                                    text::compute_extents_ex(true, &segment_fonts, &glyph_slice);
+                                let local_max_ascender = extents.max_ascender;
+                                let extents = text::compute_extents_ex(true, &glyph_slice);
 
                                 segments.push(ShapedSegment {
-                                    glyphs_and_fonts: Some((glyph_slice, segment_fonts.clone())),
-                                    baseline_offset: Point2::new(x, total_extents.paint_height),
+                                    glyphs: Some(glyph_slice),
+                                    baseline_offset: Point2::new(current_x, current_line_y),
                                     logical_rect: Rect2::from_min_size(
                                         Point2::ZERO,
-                                        Vec2::new(extents.paint_width + x_advance, logical_height),
+                                        Vec2::new(
+                                            extents.paint_size.x + extents.trailing_advance,
+                                            logical_height,
+                                        ),
                                     ),
                                     max_ascender: local_max_ascender,
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
                                 });
                                 last_glyph_idx = end_glyph_idx;
-                                x += extents.paint_width + x_advance;
+                                current_x += extents.paint_size.x + extents.trailing_advance;
 
                                 if split_end >= end {
                                     break;
@@ -571,21 +538,6 @@ impl MultilineTextShaper {
                                 }
                             }
                         }
-
-                        line_extents.paint_width += extents.paint_width;
-
-                        // FIXME: THIS IS WRONG!!
-                        //        It will add trailing advance when the last segments contains zero or only invisible glyphs.
-                        if end != line_boundary {
-                            line_extents.paint_width += trailing_x_advance;
-                        }
-
-                        if line_extents.paint_height < extents.paint_height {
-                            line_extents.paint_height = extents.paint_height;
-                        }
-
-                        line_extents.max_bearing_y =
-                            line_extents.max_bearing_y.max(extents.max_bearing_y);
                     }
                     // TODO: Figure out exactly how libass lays out shapes
                     ShaperSegment::Shape(dim) => {
@@ -593,11 +545,8 @@ impl MultilineTextShaper {
                         let logical_h = dim.height() - (-dim.min.y).min(0);
                         let segment_max_bearing_y = I32Fixed::new(logical_h);
                         segments.push(ShapedSegment {
-                            glyphs_and_fonts: None,
-                            baseline_offset: Point2::new(
-                                line_extents.paint_width,
-                                total_extents.paint_height,
-                            ),
+                            glyphs: None,
+                            baseline_offset: Point2::new(current_x, current_line_y),
                             logical_rect: Rect2::new(
                                 Point2::ZERO,
                                 Point2::new(I26Dot6::new(logical_w), I26Dot6::new(logical_h)),
@@ -605,10 +554,8 @@ impl MultilineTextShaper {
                             corresponding_input_segment: current_segment + current_intra_split,
                             max_ascender: segment_max_bearing_y,
                         });
-                        line_extents.paint_width += logical_w;
+                        current_x += logical_w;
                         line_max_ascender = line_max_ascender.max(segment_max_bearing_y);
-                        line_extents.paint_height =
-                            line_extents.paint_height.max(I32Fixed::new(logical_h));
                     }
                 }
 
@@ -629,22 +576,37 @@ impl MultilineTextShaper {
             last += post_wrap_skip;
             post_wrap_skip = 0;
 
+            for segment in segments.iter_mut().rev() {
+                match &segment.glyphs {
+                    Some(glyphs) => {
+                        if let Some(last) = glyphs.last() {
+                            let extents = last.font.glyph_extents(last.index);
+                            let trailing_advance = last.x_advance - extents.width;
+                            current_x -= trailing_advance;
+                            segment.logical_rect.max.x -= trailing_advance;
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+
             let aligning_x_offset = match line_alignment {
                 HorizontalAlignment::Left => I26Dot6::ZERO,
-                HorizontalAlignment::Center => -line_extents.paint_width / 2,
-                HorizontalAlignment::Right => -line_extents.paint_width,
+                HorizontalAlignment::Center => -current_x / 2,
+                HorizontalAlignment::Right => -current_x,
             };
 
             for segment in segments.iter_mut() {
                 segment.baseline_offset.x += aligning_x_offset;
-                if segment.glyphs_and_fonts.is_none() {
+                if segment.glyphs.is_none() {
                     segment.baseline_offset.y += line_max_ascender - segment.max_ascender;
                 } else {
                     segment.baseline_offset.y += line_max_ascender;
                 }
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
-                    total_extents.paint_height + line_max_ascender - segment.max_ascender,
+                    current_line_y + line_max_ascender - segment.max_ascender,
                 ));
             }
 
@@ -664,6 +626,7 @@ impl MultilineTextShaper {
                 self.layout_line_ruby(
                     &mut segments,
                     &self.ruby_annotations[line_ruby_annotations_start..current_ruby_annotation],
+                    &font_arena,
                     font_select,
                 );
             }
@@ -674,12 +637,7 @@ impl MultilineTextShaper {
                 line_rect.expand_to_rect(segment.logical_rect);
             }
 
-            total_extents.paint_height += line_max_ascender - line_min_descender;
-            if line_boundary != self.text.len() {
-                total_extents.paint_height += line_max_lineskip_descent;
-            }
-
-            total_extents.paint_width = total_extents.paint_width.max(line_extents.paint_width);
+            current_line_y += line_max_ascender - line_min_descender + line_max_lineskip_descent;
 
             lines.push(ShapedLine {
                 segments,

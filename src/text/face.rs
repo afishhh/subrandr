@@ -2,6 +2,7 @@ use std::{
     cell::{Cell, UnsafeCell},
     collections::HashMap,
     ffi::{CStr, CString},
+    hash::Hash,
     mem::MaybeUninit,
     path::Path,
     sync::Arc,
@@ -560,6 +561,15 @@ impl Clone for Font {
             fixed_size_index: self.fixed_size_index,
             scale: self.scale,
         }
+    }
+}
+
+impl Hash for Font {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.ft_face.addr());
+        state.write_i32(self.point_size.into_raw());
+        state.write_u32(self.dpi);
+        self.coords.hash(state);
     }
 }
 

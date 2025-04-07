@@ -1,4 +1,9 @@
-use std::{cell::OnceCell, mem::MaybeUninit, ops::Range};
+use std::{
+    cell::{OnceCell, UnsafeCell},
+    collections::HashSet,
+    mem::MaybeUninit,
+    ops::Range,
+};
 
 use text_sys::*;
 
@@ -13,7 +18,7 @@ use crate::{
     color::BGRA8,
     math::{I26Dot6, Vec2},
     rasterize::{Rasterizer, RenderTarget, Texture},
-    util::{AnyError, OrderedF32},
+    util::{AnyError, OrderedF32, ReadonlyAliasableBox},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,8 +67,37 @@ impl Direction {
     }
 }
 
+// This arena holds fonts and allows `Glyph` to safely store references
+// to its fonts instead of having to do reference counting.
+#[derive(Debug)]
+pub struct FontArena {
+    fonts: UnsafeCell<HashSet<ReadonlyAliasableBox<Font>>>,
+}
+
+impl FontArena {
+    pub fn new() -> Self {
+        Self {
+            fonts: UnsafeCell::new(HashSet::new()),
+        }
+    }
+
+    pub fn insert<'f>(&'f self, font: &Font) -> &'f Font {
+        let fonts = unsafe { &mut *self.fonts.get() };
+        if fonts.contains(font) {
+            unsafe { fonts.get(font).unwrap_unchecked() }
+        } else {
+            let boxed = ReadonlyAliasableBox::new(font.clone());
+            let ptr = ReadonlyAliasableBox::as_nonnull(&boxed);
+            unsafe {
+                fonts.insert(boxed);
+                ptr.as_ref()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Glyph {
+pub struct Glyph<'f> {
     pub index: hb_codepoint_t,
     /// Byte position where this glyph started in the original UTF-8 string
     pub cluster: usize,
@@ -71,16 +105,16 @@ pub struct Glyph {
     pub y_advance: I26Dot6,
     pub x_offset: I26Dot6,
     pub y_offset: I26Dot6,
-    pub font_index: usize,
+    pub font: &'f Font,
     flags: hb_glyph_flags_t,
 }
 
-impl Glyph {
+impl<'f> Glyph<'f> {
     fn from_info_and_position(
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
         original_cluster: usize,
-        font_index: usize,
+        font: &'f Font,
     ) -> Self {
         Self {
             index: info.codepoint,
@@ -89,7 +123,7 @@ impl Glyph {
             y_advance: I26Dot6::from_raw(position.y_advance),
             x_offset: I26Dot6::from_raw(position.x_offset),
             y_offset: I26Dot6::from_raw(position.y_offset),
-            font_index,
+            font,
             flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }
     }
@@ -103,54 +137,73 @@ impl Glyph {
     }
 }
 
-pub fn compute_extents_ex(
-    horizontal: bool,
-    fonts: &[Font],
-    glyphs: &[Glyph],
-) -> (TextExtents, (I26Dot6, I26Dot6)) {
-    let mut results = TextExtents {
-        paint_height: I26Dot6::ZERO,
-        paint_width: I26Dot6::ZERO,
+pub struct TextMetrics {
+    pub paint_size: Vec2<I26Dot6>,
+    pub trailing_advance: I26Dot6,
+    pub max_bearing_y: I26Dot6,
+    pub max_ascender: I26Dot6,
+    pub min_descender: I26Dot6,
+    pub max_lineskip_descent: I26Dot6,
+}
+
+impl TextMetrics {
+    fn extend_by_font(&mut self, font: &Font) {
+        // FIXME: Is this bad for perf when done on all glyphs instead of just the unique fonts?
+        let metrics = font.metrics();
+        self.max_ascender = self.max_ascender.max(I26Dot6::from_ft(metrics.ascender));
+        self.min_descender = self.min_descender.min(I26Dot6::from_ft(metrics.descender));
+        self.max_lineskip_descent = self
+            .max_lineskip_descent
+            .max(I26Dot6::from_ft(metrics.height - metrics.ascender));
+    }
+}
+
+pub fn compute_extents_ex(horizontal: bool, glyphs: &[Glyph]) -> TextMetrics {
+    let mut results = TextMetrics {
+        paint_size: Vec2::ZERO,
+        trailing_advance: I26Dot6::ZERO,
         max_bearing_y: I26Dot6::ZERO,
+        max_ascender: I26Dot6::ZERO,
+        min_descender: I26Dot6::MAX,
+        max_lineskip_descent: I26Dot6::ZERO,
     };
 
-    let trailing_advance;
+    if glyphs.len() == 0 {
+        results.min_descender = I26Dot6::ZERO;
+        return results;
+    }
 
     let mut glyphs = glyphs.iter();
 
     if let Some(glyph) = glyphs.next_back() {
-        let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
-        results.paint_height += extents.height.abs();
-        results.paint_width += extents.width;
+        let extents = glyph.font.glyph_extents(glyph.index);
+        results.paint_size.y += extents.height.abs();
+        results.paint_size.x += extents.width;
         if horizontal {
-            trailing_advance = ((glyph.x_advance - extents.width), I26Dot6::ZERO);
+            results.trailing_advance = glyph.x_advance - extents.width;
             results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
         } else {
-            trailing_advance = (I26Dot6::ZERO, (glyph.y_advance - extents.height));
+            results.trailing_advance = glyph.y_advance - extents.height;
             results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
-    } else {
-        trailing_advance = (I26Dot6::ZERO, I26Dot6::ZERO);
+        results.extend_by_font(glyph.font);
     }
 
     for glyph in glyphs {
-        let extents = fonts[glyph.font_index].as_ref().glyph_extents(glyph.index);
+        let extents = glyph.font.glyph_extents(glyph.index);
         if horizontal {
-            results.paint_height = results.paint_height.max(extents.height.abs());
-            results.paint_width += glyph.x_advance;
+            results.paint_size.y = results.paint_size.y.max(extents.height.abs());
+            results.paint_size.x += glyph.x_advance;
             results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
         } else {
-            results.paint_width = results.paint_width.max(extents.width.abs());
-            results.paint_height += glyph.y_advance;
+            results.paint_size.x = results.paint_size.x.max(extents.width.abs());
+            results.paint_size.y += glyph.y_advance;
             results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
+        results.extend_by_font(glyph.font);
     }
 
-    (results, trailing_advance)
-}
-
-pub fn compute_extents(horizontal: bool, fonts: &[Font], glyphs: &[Glyph]) -> TextExtents {
-    compute_extents_ex(horizontal, fonts, glyphs).0
+    results
 }
 
 impl AsRef<Self> for Font {
@@ -305,14 +358,14 @@ impl ShapingBuffer {
         (infos, positions)
     }
 
-    fn shape_rec(
+    fn shape_rec<'f>(
         &mut self,
-        result: &mut Vec<Glyph>,
-        fallbacks: &mut Vec<Font>,
-        font_index: usize,
+        result: &mut Vec<Glyph<'f>>,
+        font_arena: &'f FontArena,
+        initial_pass: bool,
         codepoints: &[(u32, u32)],
         properties: &hb_segment_properties_t,
-        font: &Font,
+        font: &'f Font,
         fallback: &mut impl FallbackFontProvider,
     ) {
         let (_, hb_font) = font.with_applied_size_and_hb();
@@ -330,12 +383,12 @@ impl ShapingBuffer {
                     info,
                     position,
                     codepoints[info.cluster as usize].1 as usize,
-                    font_index,
+                    font,
                 )
             };
             let mut reshape_with_fallback = |range: Range<usize>,
-                                             result: &mut Vec<Glyph>,
-                                             fallbacks: &mut Vec<Font>,
+                                             result: &mut Vec<Glyph<'f>>,
+                                             font_arena: &'f FontArena,
                                              passthrough: (
                 &[hb_glyph_info_t],
                 &[hb_glyph_position_t],
@@ -353,13 +406,14 @@ impl ShapingBuffer {
                     hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
                     hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
 
-                    // TODO: figure out a way to not clone this and still have corrent font_idx
-                    //       will require MaybeUninit?
-                    let new_idx = fallbacks.len();
-                    fallbacks.push(font.clone());
-
                     sub_buffer.shape_rec(
-                        result, fallbacks, new_idx, codepoints, properties, &font, fallback,
+                        result,
+                        font_arena,
+                        false,
+                        codepoints,
+                        properties,
+                        font_arena.insert(&font),
+                        fallback,
                     );
                 } else {
                     result.extend(
@@ -383,7 +437,7 @@ impl ShapingBuffer {
                     reshape_with_fallback(
                         infos[start].cluster as usize..info.cluster as usize,
                         result,
-                        fallbacks,
+                        font_arena,
                         (&infos[info_range.clone()], &positions[info_range]),
                     );
                 }
@@ -392,7 +446,7 @@ impl ShapingBuffer {
             }
 
             if let Some(start) = invalid_range_start {
-                if start == 0 && font_index != 0 {
+                if start == 0 && !initial_pass {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
                     }
@@ -403,19 +457,19 @@ impl ShapingBuffer {
                 reshape_with_fallback(
                     infos[start].cluster as usize..infos.last().unwrap().cluster as usize + 1,
                     result,
-                    fallbacks,
+                    font_arena,
                     (&infos[info_range.clone()], &positions[info_range]),
                 )
             }
         }
     }
 
-    pub fn shape(
+    pub fn shape<'f>(
         &mut self,
         font: &Font,
-        fonts_output: &mut Vec<Font>,
+        font_arena: &'f FontArena,
         fallback: &mut impl FallbackFontProvider,
-    ) -> Vec<Glyph> {
+    ) -> Vec<Glyph<'f>> {
         let codepoints: Vec<_> = self
             .glyphs()
             .0
@@ -436,16 +490,14 @@ impl ShapingBuffer {
             buf.assume_init()
         };
 
-        fonts_output.push(font.clone());
-
         let mut result = Vec::new();
         self.shape_rec(
             &mut result,
-            fonts_output,
-            0,
+            font_arena,
+            true,
             &codepoints,
             &properties,
-            font,
+            font_arena.insert(font),
             fallback,
         );
 
@@ -468,26 +520,19 @@ impl Drop for ShapingBuffer {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedText {
+pub struct ShapedText<'f> {
+    pub glyphs: Vec<Glyph<'f>>,
     pub direction: Direction,
-    pub glyphs: Vec<Glyph>,
 }
 
-pub fn shape_text(font: &Font, text: &str) -> ShapedText {
+pub fn shape_text<'f>(font: &Font, font_arena: &'f FontArena, text: &str) -> ShapedText<'f> {
     let mut buffer = ShapingBuffer::new();
     buffer.add(text);
-    let glyphs = buffer.shape(font, &mut Vec::new(), &mut NoopFallbackProvider);
+    let glyphs = buffer.shape(font, font_arena, &mut NoopFallbackProvider);
     ShapedText {
         direction: buffer.direction().unwrap(),
         glyphs,
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TextExtents {
-    pub paint_height: I26Dot6,
-    pub paint_width: I26Dot6,
-    pub max_bearing_y: I26Dot6,
 }
 
 struct GlyphBitmap {
@@ -620,7 +665,6 @@ pub fn render(
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
-    fonts: &[Font],
     glyphs: &[Glyph],
 ) -> Image {
     let mut result = Image {
@@ -634,7 +678,7 @@ pub fn render(
     let mut x = xf;
     let mut y = yf;
     for shaped_glyph in glyphs {
-        let font = &fonts[shaped_glyph.font_index];
+        let font = shaped_glyph.font;
         let cached = font.render_glyph(rasterizer, shaped_glyph.index);
 
         result.glyphs.push(GlyphBitmap {

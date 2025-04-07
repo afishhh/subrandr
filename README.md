@@ -7,6 +7,7 @@ The first goal is to achieve good rendering of YouTube's SRV3 format, currently 
 
 #### Supported subtitle formats:
 - SRV3 (incomplete, but works decently well)
+- WebVTT (incomplete, displays text only, no advanced features currently)
 
 #### WebAssembly library and extension
 

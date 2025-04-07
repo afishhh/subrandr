@@ -19,7 +19,7 @@ errdef_re = re.compile(
     r'FT_ERRORDEF_\(\s*([A-Za-z_]+),\s*([0-9x]+),\s*"([^"]+)"', re.DOTALL
 )
 
-print("pub const FREETYPE_ERRORS: &[(FT_Error, &'static str)] = &[")
+print("pub const FREETYPE_ERRORS: &[(FT_Error, &str)] = &[")
 
 for _ident, code, msg in errdef_re.findall(Path(ft_errdef_h).read_text()):
     print(f'\t({code}, "{msg}"),')

@@ -1071,12 +1071,23 @@ impl<'a> Renderer<'a> {
                 BGRA8::WHITE,
             );
 
-            let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
             self.debug_text(
                 rasterizer,
                 target,
                 0,
                 (20.0 * ctx.pixel_scale()) as i32,
+                &format!("subtitle class: {}", subs.class.get_name()),
+                Alignment::TopLeft,
+                16.0,
+                BGRA8::WHITE,
+            );
+
+            let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
+            self.debug_text(
+                rasterizer,
+                target,
+                0,
+                (40.0 * ctx.pixel_scale()) as i32,
                 &rasterizer_line,
                 Alignment::TopLeft,
                 16.0,
@@ -1088,7 +1099,7 @@ impl<'a> Renderer<'a> {
                     rasterizer,
                     target,
                     0,
-                    (40.0 * ctx.pixel_scale()) as i32,
+                    (60.0 * ctx.pixel_scale()) as i32,
                     &adapter_line,
                     Alignment::TopLeft,
                     16.0,

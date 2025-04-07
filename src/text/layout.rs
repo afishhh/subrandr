@@ -38,44 +38,21 @@ pub struct MultilineTextShaper {
     ruby_annotation_text: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct ShapedSegment {
     // TODO: Make this Rc<[text::Font]>
     pub glyphs_and_fonts: Option<(RcArray<text::Glyph>, Rc<Vec<text::Font>>)>,
-    pub baseline_offset: Point2<I32Fixed<6>>,
-    pub logical_rect: Rect2<I32Fixed<6>>,
+    pub baseline_offset: Point2<I26Dot6>,
+    pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
     // Implementation details
-    max_ascender: I32Fixed<6>,
+    max_ascender: I26Dot6,
 }
 
-impl std::fmt::Debug for ShapedSegment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShapedSegment")
-            .field(
-                "start_of_glyphs",
-                &self
-                    .glyphs_and_fonts
-                    .as_ref()
-                    .unwrap()
-                    .0
-                    .first()
-                    .unwrap()
-                    .index,
-            )
-            .field("baseline_offset", &self.baseline_offset)
-            .field("logical_rect", &self.logical_rect)
-            .field(
-                "corresponding_input_segment",
-                &self.corresponding_input_segment,
-            )
-            .field("max_ascender", &self.max_ascender)
-            .finish()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShapedLine {
     pub segments: Vec<ShapedSegment>,
+    pub bounding_rect: Rect2<I26Dot6>,
 }
 
 struct SimpleShapedTextSegment {
@@ -691,8 +668,10 @@ impl MultilineTextShaper {
                 );
             }
 
+            let mut line_rect = Rect2::NOTHING;
             for segment in &segments {
                 total_rect.expand_to_rect(segment.logical_rect);
+                line_rect.expand_to_rect(segment.logical_rect);
             }
 
             total_extents.paint_height += line_max_ascender - line_min_descender;
@@ -702,7 +681,10 @@ impl MultilineTextShaper {
 
             total_extents.paint_width = total_extents.paint_width.max(line_extents.paint_width);
 
-            lines.push(ShapedLine { segments });
+            lines.push(ShapedLine {
+                segments,
+                bounding_rect: line_rect,
+            });
         }
 
         if MULTILINE_SHAPER_DEBUG_PRINT {

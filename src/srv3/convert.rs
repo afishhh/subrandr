@@ -4,8 +4,8 @@
 use crate::{
     color::BGRA8,
     log::{log_once_state, warning},
-    math::Vec2f,
-    CssTextShadow, Event, EventExtra, EventLayout, Ruby, Subrandr, SubtitleClass, SubtitleContext,
+    math::{Point2, Point2f, Vec2f},
+    CssTextShadow, Event, EventExtra, Layouter, Ruby, Subrandr, SubtitleClass, SubtitleContext,
     Subtitles, TextDecorations, TextSegment,
 };
 
@@ -221,19 +221,9 @@ impl Srv3TextShadow {
 }
 
 #[derive(Debug, Clone)]
-pub struct Srv3Event {
+pub(crate) struct Srv3Event {
     x: f32,
     y: f32,
-}
-
-impl Srv3Event {
-    pub(crate) fn compute_layout(&self, ctx: &SubtitleContext, _event: &Event) -> EventLayout {
-        EventLayout {
-            x: self.x * ctx.player_width(),
-            y: self.y * ctx.player_height(),
-            wrap_width: ctx.player_width() * 0.96,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -245,6 +235,32 @@ impl SubtitleClass for Srv3SubtitleClass {
 
     fn get_font_size(&self, ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
         font_scale_from_ctx(ctx) * segment.font_size
+    }
+
+    fn create_layouter(&self) -> Box<dyn crate::Layouter> {
+        Box::new(Srv3Layouter)
+    }
+}
+
+struct Srv3Layouter;
+
+impl Layouter for Srv3Layouter {
+    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
+        ctx.player_width() * 0.96
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &SubtitleContext,
+        _lines: &mut Vec<crate::text::layout::ShapedLine>,
+        _total_rect: &mut crate::math::Rect2<crate::math::I26Dot6>,
+        event: &Event,
+    ) -> Point2f {
+        let EventExtra::Srv3(extra) = &event.extra else {
+            panic!("Srv3Layouter received foreign event {:?}", event);
+        };
+
+        Point2::new(extra.x * ctx.player_width(), extra.y * ctx.player_height())
     }
 }
 

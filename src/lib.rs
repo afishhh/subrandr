@@ -8,23 +8,26 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
+use math::{I26Dot6, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
-    layout::{MultilineTextShaper, TextWrapParams},
+    layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
     FontRequest, TextExtents,
 };
+use vtt::VttEvent;
 
 pub mod ass;
+pub mod srv3;
+pub mod vtt;
+
 mod capi;
 mod color;
 mod log;
 mod math;
 mod outline;
 pub mod rasterize;
-pub mod srv3;
 mod text;
 mod util;
 #[cfg(target_arch = "wasm32")]
@@ -44,6 +47,20 @@ enum Alignment {
 }
 
 impl Alignment {
+    pub const fn from_parts(horiz: HorizontalAlignment, vert: VerticalAlignment) -> Alignment {
+        match (horiz, vert) {
+            (HorizontalAlignment::Left, VerticalAlignment::Top) => Alignment::TopLeft,
+            (HorizontalAlignment::Left, VerticalAlignment::BaselineCentered) => Alignment::Left,
+            (HorizontalAlignment::Left, VerticalAlignment::Bottom) => Alignment::BottomLeft,
+            (HorizontalAlignment::Center, VerticalAlignment::Top) => Alignment::Top,
+            (HorizontalAlignment::Center, VerticalAlignment::BaselineCentered) => Alignment::Center,
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom) => Alignment::Bottom,
+            (HorizontalAlignment::Right, VerticalAlignment::Top) => Alignment::TopRight,
+            (HorizontalAlignment::Right, VerticalAlignment::BaselineCentered) => Alignment::Right,
+            (HorizontalAlignment::Right, VerticalAlignment::Bottom) => Alignment::BottomRight,
+        }
+    }
+
     pub const fn into_parts(self) -> (HorizontalAlignment, VerticalAlignment) {
         match self {
             Self::TopLeft => (HorizontalAlignment::Left, VerticalAlignment::Top),
@@ -87,23 +104,48 @@ enum TextWrapMode {
     None,
 }
 
+trait Layouter {
+    fn wrap_width(&self, ctx: &SubtitleContext, event: &Event) -> f32;
+
+    fn layout(
+        &mut self,
+        ctx: &SubtitleContext,
+        lines: &mut Vec<ShapedLine>,
+        total_rect: &mut Rect2<I26Dot6>,
+        event: &Event,
+    ) -> Point2f;
+}
+
+struct TestLayouter;
+
+impl Layouter for TestLayouter {
+    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
+        ctx.player_width()
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &SubtitleContext,
+        _lines: &mut Vec<ShapedLine>,
+        _total_rect: &mut Rect2<I26Dot6>,
+        event: &Event,
+    ) -> Point2f {
+        let EventExtra::Test { x, y } = &event.extra else {
+            panic!("TestLayouter received foreign event {:?}", event);
+        };
+
+        Point2f::new(
+            ctx.padding_left + (x * ctx.video_width),
+            ctx.padding_top + (y * ctx.video_height),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 enum EventExtra {
     Srv3(Srv3Event),
+    Vtt(VttEvent),
     Test { x: f32, y: f32 },
-}
-
-impl EventExtra {
-    fn compute_layout(&self, ctx: &SubtitleContext, event: &Event) -> EventLayout {
-        match self {
-            EventExtra::Srv3(srv3) => srv3.compute_layout(ctx, event),
-            &Self::Test { x, y } => EventLayout {
-                x: ctx.padding_left + (x * ctx.video_width),
-                y: ctx.padding_top + (y * ctx.video_height),
-                wrap_width: ctx.player_width(),
-            },
-        }
-    }
 }
 
 struct EventLayout {
@@ -266,6 +308,7 @@ impl SubtitleContext {
 trait SubtitleClass: Debug {
     fn get_name(&self) -> &'static str;
     fn get_font_size(&self, ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32;
+    fn create_layouter(&self) -> Box<dyn Layouter>;
 }
 
 // Font size passed through directly.
@@ -279,6 +322,10 @@ impl SubtitleClass for TestSubtitleClass {
 
     fn get_font_size(&self, _ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
         segment.font_size
+    }
+
+    fn create_layouter(&self) -> Box<dyn Layouter> {
+        Box::new(TestLayouter)
     }
 }
 
@@ -1136,6 +1183,7 @@ impl<'a> Renderer<'a> {
 
         let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
+            let mut layouter = subs.class.create_layouter();
             for event in subs.events.iter() {
                 let r = unchanged_range.clone();
                 if (event.start..event.end).contains(&t) {
@@ -1149,7 +1197,7 @@ impl<'a> Renderer<'a> {
                     continue;
                 }
 
-                let EventLayout { x, y, wrap_width } = event.extra.compute_layout(ctx, event);
+                let wrap_width = layouter.wrap_width(ctx, event);
 
                 let mut shaper = MultilineTextShaper::new();
                 let mut last_ruby_base = None;
@@ -1208,7 +1256,7 @@ impl<'a> Renderer<'a> {
                 }
 
                 let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
-                let (lines, total_rect) = shaper.shape(
+                let (mut lines, mut total_rect) = shaper.shape(
                     horizontal_alignment,
                     TextWrapParams {
                         mode: event.text_wrap,
@@ -1216,6 +1264,8 @@ impl<'a> Renderer<'a> {
                     },
                     &mut self.fonts,
                 );
+
+                let Point2 { x, y } = layouter.layout(ctx, &mut lines, &mut total_rect, event);
 
                 let x = x as i32;
                 let y = y as i32

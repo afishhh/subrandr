@@ -266,7 +266,7 @@ impl<N: Number + Display> Rect2<N> {
         max: Point2::ZERO,
     };
 
-    pub fn new(min: Point2<N>, max: Point2<N>) -> Self {
+    pub const fn new(min: Point2<N>, max: Point2<N>) -> Self {
         Self { min, max }
     }
 
@@ -305,6 +305,13 @@ impl<N: Number + Display> Rect2<N> {
             && self.max.x >= other.min.x
             && self.min.y <= other.max.y
             && self.max.y >= other.min.y
+    }
+
+    pub fn includes(&self, other: Rect2<N>) -> bool {
+        self.min.x <= other.min.x
+            && self.max.x >= other.max.x
+            && self.min.y <= other.min.y
+            && self.max.y >= other.max.y
     }
 
     pub fn size(&self) -> Vec2<N> {

@@ -1,5 +1,6 @@
 use crate::{
     color::BGRA8,
+    log::{log_once_state, warning, LogOnceSet},
     math::{I26Dot6, Point2, Rect2, Vec2},
     vtt, EventExtra, Layouter, Subrandr, SubtitleContext,
 };
@@ -348,13 +349,31 @@ impl Layouter for VttLayouter {
     }
 }
 
-pub fn convert(_sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
+pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
     let mut subtitles = crate::Subtitles {
         class: &Class,
         events: Vec::new(),
     };
 
+    let logset = LogOnceSet::new();
+    log_once_state!(in logset, region_unsupported: set);
+
+    if !captions.stylesheets.is_empty() {
+        warning!(
+            sbr,
+            "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
+        )
+    }
+
     for cue in captions.cues {
+        if cue.region.is_some() && !captions.regions.is_empty() {
+            warning!(
+                sbr,
+                once_set(region_unsupported, ()),
+                "WebVTT file makes use of regions, which are currently not supported and will be ignored."
+            )
+        }
+
         let computed_position = cue.computed_position();
         let computed_position_alignment = cue.computed_position_alignment(true);
         let maximum_size = match computed_position_alignment {

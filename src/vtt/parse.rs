@@ -17,9 +17,9 @@ pub enum Error {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Captions<'a> {
-    pub(super) style: Vec<&'a str>,
-    pub(super) region: Vec<&'a str>,
     pub(super) cues: Vec<Cue<'a>>,
+    pub(super) regions: Vec<Region<'a>>,
+    pub(super) stylesheets: Vec<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,15 +105,17 @@ pub(super) struct Cue<'a> {
     pub text: &'a str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Region<'a> {
     pub identifier: &'a str,
     pub width: f64,
-    pub lines: f64,
+    pub lines: u32,
     pub anchor_point: Point2<f64>,
     pub viewport_anchor_point: Point2<f64>,
     pub scroll_value: ScrollValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScrollValue {
     None,
     Up,
@@ -412,8 +414,78 @@ fn collect_cue_timings_and_settings<'a>(
     Some(())
 }
 
+// https://www.w3.org/TR/webvtt1/#region-settings-parsing
+fn collect_webvtt_region_settings<'a>(input: &'a str, region: &mut Region<'a>) {
+    let settings = input.split_ascii_whitespace();
+
+    for setting in settings {
+        let Some((name, value)) = setting.split_once(':') else {
+            continue;
+        };
+
+        if name.is_empty() || value.is_empty() {
+            continue;
+        }
+
+        match name {
+            "id" => {
+                region.identifier = value;
+            }
+            "width" => {
+                if let Some(percentage) = parse_percentage(value) {
+                    region.width = percentage;
+                }
+            }
+            "lines" => {
+                if value.contains(|c: char| !c.is_ascii_digit()) {
+                    continue;
+                }
+
+                // TODO: What do one out of range?
+                if let Ok(value) = value.parse::<u32>() {
+                    region.lines = value;
+                }
+            }
+            "regionanchor" => {
+                let Some((anchor_x, anchor_y)) = value.split_once(',') else {
+                    continue;
+                };
+
+                let (Some(x), Some(y)) = (parse_percentage(anchor_x), parse_percentage(anchor_y))
+                else {
+                    continue;
+                };
+
+                region.anchor_point = Point2::new(x, y);
+            }
+            "viewportanchor" => {
+                let Some((viewport_anchor_x, viewport_anchor_y)) = value.split_once(',') else {
+                    continue;
+                };
+
+                let (Some(x), Some(y)) = (
+                    parse_percentage(viewport_anchor_x),
+                    parse_percentage(viewport_anchor_y),
+                ) else {
+                    continue;
+                };
+
+                region.viewport_anchor_point = Point2::new(x, y);
+            }
+            "scroll" => {
+                if value == "up" {
+                    region.scroll_value = ScrollValue::Up;
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
 enum Block<'a> {
     Cue(Cue<'a>),
+    Region(Region<'a>),
+    Stylesheet(&'a str),
 }
 
 // https://www.w3.org/TR/webvtt1/#collect-a-webvtt-block
@@ -426,6 +498,7 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
     let mut previous_position = input.text;
     let mut cue = None;
     let mut region = None;
+    let mut stylesheet = None;
 
     loop {
         // 1. collect a sequence of code points that are not U+000A LINE FEED (LF) characters. Let line be those characters, if any.
@@ -439,7 +512,7 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
             seen_eof = true;
         }
 
-        // 4. If line contains the three-character substring "-->" (U+002D HYPHEN-MINUS, U+002D HYPHEN-MINUS, U+003E GREATER-THAN SIGN), then run these substeps:
+        // 4. If line contains the three-character substring "-->", then run these substeps:
         if line.contains("-->") {
             // 5. If in header is not set and at least one of the following conditions are true:
             if !in_header && /*rustfmt suppressor*/ (
@@ -448,25 +521,42 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
                 // line count is 2 and seen arrow is false
                 (line_count == 2 && !seen_arrow)
             ) {
+                // Let seen arrow be true.
                 seen_arrow = true;
+
+                // Let previous position be position.
                 previous_position = input.text;
 
+                // Cue creation: Let cue be a new WebVTT cue and initialize it as follows:
                 let mut cue_ = Cue {
+                    // Let cue’s text track cue identifier be buffer.
                     track_identifier: buffer,
+                    // Let cue’s text track cue pause-on-exit flag be false.
                     pause_on_exit: false,
+                    // Let cue’s WebVTT cue region be null.
                     region: None,
+                    // Let cue’s WebVTT cue writing direction be horizontal.
                     writing_direction: WritingDirection::Horizontal,
+                    // Let cue’s WebVTT cue snap-to-lines flag be true.
+                    // Let cue’s WebVTT cue line be auto.
                     line: Line::Auto,
+                    // Let cue’s WebVTT cue line alignment be start alignment.
                     line_alignment: LineAlignment::Start,
+                    // Let cue’s WebVTT cue position be auto.
                     position: Position::Auto,
+                    // Let cue’s WebVTT cue position alignment be auto.
                     position_alignment: PositionAlignment::Auto,
+                    // Let cue’s WebVTT cue size be 100.
                     size: 100.,
+                    // Let cue’s WebVTT cue text alignment be center alignment.
                     text_alignment: TextAlignment::Center,
                     start_time: 0,
                     end_time: 0,
+                    // Let cue’s cue text be the empty string.
                     text: "",
                 };
 
+                // Collect WebVTT cue timings and settings from line using regions for cue. If that fails, let cue be null. Otherwise, let buffer be the empty string and let seen cue be true.
                 if collect_cue_timings_and_settings(&mut ParsingBuffer::new(line), &mut cue_)
                     .is_some()
                 {
@@ -477,64 +567,96 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
                     cue = None;
                 }
             } else {
+                // Otherwise, let position be previous position and break out of loop.
                 input.text = previous_position;
                 break;
             }
         } else if line.is_empty() {
+            // Otherwise, if line is the empty string, break out of loop.
             break;
         } else {
+            // Otherwise, run these substeps:
+            // If in header is not set and line count is 2, run these substeps:
             if !in_header && line_count == 2 {
+                // If seen cue is false and buffer starts with the substring "STYLE", and the remaining characters in buffer (if any) are all ASCII whitespace, then run these substeps:
                 if !seen_cue
                     && buffer
                         .strip_prefix("STYLE")
                         .is_some_and(|remaining| remaining.bytes().all(|b| b.is_ascii_whitespace()))
                 {
-                    todo!("Let stylesheet be the result of creating a CSS style sheet, with the following properties: [CSSOM]");
-                    // buffer = "";
+                    // Let stylesheet be the result of creating a CSS style sheet, with the following properties:
+                    stylesheet = Some(());
+                    // Let buffer be the empty string.
+                    buffer = "";
                 } else if !seen_cue
                     && buffer
                         .strip_prefix("REGION")
                         .is_some_and(|remaining| remaining.bytes().all(|b| b.is_ascii_whitespace()))
                 {
+                    // Otherwise, if seen cue is false and buffer starts with the substring "REGION", and the remaining characters in buffer (if any) are all ASCII whitespace, then run these substeps:
+                    // Region creation: Let region be a new WebVTT region.
                     region = Some(Region {
+                        // Let region’s identifier be the empty string.
                         identifier: "",
+                        // Let region’s width be 100.
                         width: 100.,
-                        lines: 3.,
+                        // Let region’s lines be 3.
+                        lines: 3,
+                        // Let region’s anchor point be (0,100).
                         anchor_point: Point2::new(0., 100.),
+                        // Let region’s viewport anchor point be (0,100).
                         viewport_anchor_point: Point2::new(0., 100.),
+                        // Let region’s scroll value be none.
                         scroll_value: ScrollValue::None,
                     });
+                    // Let buffer be the empty string.
                     buffer = "";
                 }
             }
 
+            // If buffer is not the empty string, append a U+000A LINE FEED (LF) character to buffer.
+            // Append line to buffer.
+            // NOTE: This is handled somewhat differently from the standard to ensure content can still be
+            //       borrowed as a contigous slice of the input text. It should be fully equivalent though
+            //       because I can't see how control would have to flow through this function to make buffer
+            //       ever be a non-contigous snippet of the input text.
             if buffer.is_empty() {
                 buffer = line;
             } else {
                 // FIXME: Actually use indicies instead so this can be safe?
                 buffer = unsafe {
                     std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                        line.as_ptr(),
-                        input.text.as_bytes().as_ptr_range().end.addr()
-                            - line.as_bytes().as_ptr().addr(),
+                        buffer.as_ptr(),
+                        line.as_bytes().as_ptr_range().end.addr()
+                            - buffer.as_bytes().as_ptr().addr(),
                     ))
                 };
             }
+
+            // Let previous position be position.
             previous_position = input.text;
         }
 
+        // If seen EOF is true, break out of loop.
         if seen_eof {
             break;
         }
     }
 
+    // If cue is not null, let the cue text of cue be buffer, and return cue.
     if let Some(mut cue) = cue {
         cue.text = buffer;
         Some(Block::Cue(cue))
-    } else if let Some(region) = region {
-        _ = region;
-        todo!("parse region buffer")
+    } else if let Some(()) = stylesheet {
+        // Otherwise, if stylesheet is not null, then Parse a stylesheet from buffer. If it returned a list of rules, assign the list as stylesheet’s CSS rules; otherwise, set stylesheet’s CSS rules to an empty list. Finally, return stylesheet.
+        // NOTE: Currently stylesheets are not supported so they're just passed through as is.
+        Some(Block::Stylesheet(buffer))
+    } else if let Some(mut region) = region {
+        // Otherwise, if region is not null, then collect WebVTT region settings from buffer using region for the results. Construct a WebVTT Region Object from region, and return it.
+        collect_webvtt_region_settings(buffer, &mut region);
+        Some(Block::Region(region))
     } else {
+        // Otherwise, return null.
         None
     }
 }
@@ -555,9 +677,9 @@ pub fn parse<'a>(input: &'a str) -> Option<Captions<'a>> {
     }
 
     let mut output = Captions {
-        style: Vec::new(),
-        region: Vec::new(),
         cues: Vec::new(),
+        regions: Vec::new(),
+        stylesheets: Vec::new(),
     };
 
     if !input.take_linefeed() {
@@ -569,6 +691,8 @@ pub fn parse<'a>(input: &'a str) -> Option<Captions<'a>> {
     while !input.is_empty() {
         match collect_block(&mut input, false) {
             Some(Block::Cue(cue)) => output.cues.push(cue),
+            Some(Block::Region(region)) => output.regions.push(region),
+            Some(Block::Stylesheet(stylesheet)) => output.stylesheets.push(stylesheet),
             None => (),
         }
 

@@ -204,10 +204,10 @@ impl LogOnceSet {
 pub struct LogOnceRef<'a, K: LogOnceKey>(pub &'a LogOnceSet, pub K);
 
 macro_rules! log {
-    ($logger: expr, $level: expr, once_set($set: expr, $value: expr), $($fmt: tt)*) => {{
+    ($logger: expr, $level: expr, once($set: expr $(, $value: expr)?), $($fmt: tt)*) => {{
         let set = &$set;
-        let value = $value;
-        if !set.0.contains(set.1, value) {
+        let value = $crate::log::log!(@logset_value $($value)?);
+        if !set.0.contains(set.1 , value) {
             $crate::log::log!($logger, $level, $($fmt)*);
             set.0.insert(set.1, value);
         }
@@ -215,8 +215,11 @@ macro_rules! log {
     ($logger: expr, $level: expr, $($fmt: tt)*) => {
         $crate::log::AsLogger::as_logger(&$logger).log($level, format_args!($($fmt)*), module_path!())
     };
+    (@logset_value $value: expr) => { $value };
+    (@logset_value) => { () };
     (@mkmacro $dollar: tt, $name: ident, $level: ident) => {
         #[allow(unused_macros)]
+        #[clippy::format_args]
         macro_rules! $name {
             ($dollar logger: expr, $dollar ($dollar rest: tt)*) => {
                 $crate::log::log!($dollar logger, $crate::log::Level::$level, $dollar ($dollar rest)*)
@@ -226,7 +229,7 @@ macro_rules! log {
 }
 
 macro_rules! log_once_state {
-    (@mkkey $set: ident $ident: ident: set $(, $($rest: tt)*)?) => {
+    (@mkkey $set: ident $ident: ident $(, $($rest: tt)*)?) => {
         let $ident = {
             #[derive(Clone, Copy)]
             struct K; impl $crate::log::LogOnceKey for K {}
@@ -240,12 +243,12 @@ macro_rules! log_once_state {
     (@mkkey $($rest: tt)*) => {
         compile_error!("log_once_state: invalid syntax")
     };
-    (in $set: expr, $($tokens: tt)*) => {
+    (in $set: expr; $($tokens: tt)*) => {
         let set = $set;
         $crate::log::log_once_state!(@mkkey set $($tokens)*)
     };
     ($($tokens: tt)*) => {
-        $crate::log::log_once_state!(in $crate::log::LogOnceSet::new(), $($tokens)*)
+        $crate::log::log_once_state!(in $crate::log::LogOnceSet::new(); $($tokens)*)
     };
 }
 

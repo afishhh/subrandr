@@ -356,7 +356,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
     };
 
     let logset = LogOnceSet::new();
-    log_once_state!(in logset, region_unsupported: set);
+    log_once_state!(in logset; region_unsupported);
 
     if !captions.stylesheets.is_empty() {
         warning!(
@@ -369,7 +369,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
         if cue.region.is_some() && !captions.regions.is_empty() {
             warning!(
                 sbr,
-                once_set(region_unsupported, ()),
+                once(region_unsupported),
                 "WebVTT file makes use of regions, which are currently not supported and will be ignored."
             )
         }

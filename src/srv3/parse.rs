@@ -287,7 +287,7 @@ impl FromStr for Point {
 fn parse_pen(sbr: &Subrandr, attributes: Attributes, logset: &LogOnceSet) -> Result<Pen, Error> {
     let mut result = Pen::default();
 
-    log_once_state!(in logset, unknown_pen_attribute: set);
+    log_once_state!(in logset; unknown_pen_attribute);
 
     match_attributes! {
         attributes,
@@ -333,8 +333,7 @@ fn parse_pen(sbr: &Subrandr, attributes: Attributes, logset: &LogOnceSet) -> Res
         },
         else other => {
             warning!(
-                sbr,
-                once_set(unknown_pen_attribute, other),
+                sbr, once(unknown_pen_attribute, other),
                 "Unknown attribute encountered on pen: {}",
                 other,
             );
@@ -355,7 +354,7 @@ fn parse_wp(
 ) -> Result<WindowPos, Error> {
     let mut result = WindowPos::default();
 
-    log_once_state!(in logset, unknown_wp_attribute: set);
+    log_once_state!(in logset; unknown_wp_attribute);
 
     match_attributes! {
         attributes,
@@ -373,8 +372,7 @@ fn parse_wp(
         },
         else other => {
             warning!(
-                sbr,
-                once_set(unknown_wp_attribute, other),
+                sbr, once(unknown_wp_attribute, other),
                 "Unknown attribute encountered on wp: {}",
                 other,
             );
@@ -395,7 +393,7 @@ fn parse_head(
     let (mut pens, mut wps) = (vec![], vec![]);
 
     let logset = LogOnceSet::new();
-    log_once_state!(in &logset, unknown_elements_head: set);
+    log_once_state!(in &logset; unknown_elements_head);
 
     let mut depth = 0;
     loop {
@@ -412,7 +410,7 @@ fn parse_head(
                     name => {
                         warning!(
                             sbr,
-                            once_set(unknown_elements_head, name),
+                            once(unknown_elements_head, name),
                             "Unknown element encountered in head: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
                         );
@@ -448,13 +446,13 @@ fn parse_body(
     let mut events = vec![];
 
     log_once_state!(
-        unknown_attrs: set,
-        unknown_body_elements: set,
-        unknown_event_elements: set,
-        unknown_segment_attrs: set,
-        unknown_segment_elements: set,
-        non_existant_pen: set,
-        non_existant_wp: set
+        unknown_attrs,
+        unknown_body_elements,
+        unknown_event_elements,
+        unknown_segment_attrs,
+        unknown_segment_elements,
+        non_existant_pen,
+        non_existant_wp
     );
 
     macro_rules! set_or_log {
@@ -464,7 +462,7 @@ fn parse_body(
             } else {
                 warning!(
                     sbr,
-                    once_set($log_id, $id),
+                    once($log_id, $id),
                     concat!($what, " with ID {} does not exist but was referenced"),
                     $id
                 )
@@ -510,7 +508,7 @@ fn parse_body(
                             },
                             else other => {
                                 warning!(
-                                    sbr, once_set(unknown_attrs, other),
+                                    sbr, once(unknown_attrs, other),
                                     "Unknown event attribute {other}"
                                 )
                             }
@@ -521,7 +519,7 @@ fn parse_body(
                     name => {
                         warning!(
                             sbr,
-                            once_set(unknown_body_elements, name),
+                            once(unknown_body_elements, name),
                             "Unknown element encountered in body: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
                         );
@@ -548,8 +546,7 @@ fn parse_body(
                             },
                             else other => {
                                 warning!(
-                                    sbr,
-                                    once_set(unknown_segment_attrs, other),
+                                    sbr, once(unknown_segment_attrs, other),
                                     "Unknown segment attribute {other}"
                                 );
                             }
@@ -558,7 +555,7 @@ fn parse_body(
                     _ if current.is_some() => {
                         warning!(
                             sbr,
-                            once_set(unknown_event_elements, element.local_name().into_inner()),
+                            once(unknown_event_elements, element.local_name().into_inner()),
                             "Unknown element encountered in event: {}",
                             unsafe {
                                 std::str::from_utf8_unchecked(element.local_name().into_inner())
@@ -573,7 +570,7 @@ fn parse_body(
                 if current.is_some() {
                     warning!(
                         sbr,
-                        once_set(unknown_segment_elements, element.local_name().into_inner()),
+                        once(unknown_segment_elements, element.local_name().into_inner()),
                         "Unknown element encountered in segment: {}",
                         unsafe { std::str::from_utf8_unchecked(element.local_name().into_inner()) }
                     );
@@ -633,7 +630,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     reader.config_mut().check_comments = false;
     reader.config_mut().expand_empty_elements = true;
 
-    log_once_state!(unknown_toplevel_elements: set);
+    log_once_state!(unknown_toplevel_elements);
 
     loop {
         match reader.read_event()? {
@@ -700,7 +697,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                     name => {
                         warning!(
                             sbr,
-                            once_set(unknown_toplevel_elements, name),
+                            once(unknown_toplevel_elements, name),
                             "Non-head element encountered: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
                         );
@@ -771,7 +768,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                         name => {
                             warning!(
                                 sbr,
-                                once_set(unknown_toplevel_elements, name),
+                                once(unknown_toplevel_elements, name),
                                 "Non-body element encountered: {}",
                                 unsafe { std::str::from_utf8_unchecked(name) }
                             );

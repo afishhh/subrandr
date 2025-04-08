@@ -307,7 +307,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
         events: vec![],
     };
 
-    log_once_state!(ruby_under_unsupported: set);
+    log_once_state!(ruby_under_unsupported);
 
     for event in document.events() {
         let mut segments = vec![];
@@ -333,7 +333,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                         RubyPart::Under => {
                             warning!(
                                 sbr,
-                                once_set(ruby_under_unsupported, ()),
+                                once(ruby_under_unsupported),
                                 "Ruby `ruby-position: under`-style ruby text is not supported yet"
                             );
                             break 'ruby_failed;

@@ -55,13 +55,14 @@ pub struct ShapedLine<'f> {
 fn shape_simple_segment<'f>(
     font: &text::Font,
     text: &str,
+    range: impl text::ItemRange,
     font_arena: &'f FontArena,
     font_select: &mut FontSelect,
 ) -> (Vec<text::Glyph<'f>>, TextMetrics) {
     let glyphs = {
         let mut buffer = text::ShapingBuffer::new();
         buffer.reset();
-        buffer.add(text);
+        buffer.add(text, range);
         let direction = buffer.guess_properties();
         if !direction.is_horizontal() {
             buffer.set_direction(direction.to_horizontal());
@@ -265,6 +266,7 @@ impl MultilineTextShaper {
                 let (glyphs, extents) = shape_simple_segment(
                     &annotation.font,
                     &self.ruby_annotation_text[current_text_cursor..annotation.text_end],
+                    ..,
                     font_arena,
                     font_select,
                 );
@@ -394,7 +396,8 @@ impl MultilineTextShaper {
                     } => {
                         let (glyphs, extents) = shape_simple_segment(
                             font,
-                            &self.text[segment_slice],
+                            &self.text,
+                            segment_slice,
                             &font_arena,
                             font_select,
                         );
@@ -420,7 +423,7 @@ impl MultilineTextShaper {
                                 //       a combining mark and that word joiners are
                                 //       respected.
                                 if x_after > wrap_width {
-                                    let idx = last + glyph.cluster;
+                                    let idx = glyph.cluster;
                                     let break_at = {
                                         // FIXME: What to do about words that are partially rendered with
                                         //        different fonts? This will not handle those properly because
@@ -507,7 +510,7 @@ impl MultilineTextShaper {
                                     .unwrap_or(end);
                                 let end_glyph_idx = rc_glyphs
                                     .iter()
-                                    .position(|x| x.cluster >= split_end - last)
+                                    .position(|x| x.cluster >= split_end)
                                     .unwrap_or(rc_glyphs.len());
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
                                 let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);

@@ -2,7 +2,7 @@ use std::{
     cell::{OnceCell, UnsafeCell},
     collections::HashSet,
     mem::MaybeUninit,
-    ops::Range,
+    ops::{Range, RangeFrom, RangeFull},
 };
 
 use text_sys::*;
@@ -270,6 +270,62 @@ impl FallbackFontProvider for FontSelect {
     }
 }
 
+mod sealed {
+    use std::ops::{Range, RangeFrom, RangeFull};
+
+    pub trait Sealed {}
+    impl Sealed for Range<usize> {}
+    impl Sealed for RangeFrom<usize> {}
+    impl Sealed for RangeFull {}
+}
+
+pub trait ItemRange: sealed::Sealed {
+    fn bounds_check(&self, length: usize);
+    fn start(&self) -> u32;
+    fn length(&self) -> i32;
+}
+
+impl ItemRange for Range<usize> {
+    fn bounds_check(&self, length: usize) {
+        assert!(self.start <= self.end);
+        assert!(self.end <= length);
+    }
+
+    fn start(&self) -> u32 {
+        self.start as u32
+    }
+
+    fn length(&self) -> i32 {
+        (self.end - self.start) as i32
+    }
+}
+
+impl ItemRange for RangeFrom<usize> {
+    fn bounds_check(&self, length: usize) {
+        assert!(self.start <= length);
+    }
+
+    fn start(&self) -> u32 {
+        self.start as u32
+    }
+
+    fn length(&self) -> i32 {
+        -1
+    }
+}
+
+impl ItemRange for RangeFull {
+    fn bounds_check(&self, _length: usize) {}
+
+    fn start(&self) -> u32 {
+        0
+    }
+
+    fn length(&self) -> i32 {
+        -1
+    }
+}
+
 pub struct ShapingBuffer {
     buffer: *mut hb_buffer_t,
 }
@@ -287,26 +343,16 @@ impl ShapingBuffer {
         }
     }
 
-    pub fn add(&mut self, text: &str) {
-        unsafe {
-            hb_buffer_add_utf8(
-                self.buffer,
-                text.as_ptr() as *const _,
-                text.len() as i32,
-                0,
-                -1,
-            );
-        }
-    }
+    pub fn add(&mut self, text: &str, range: impl ItemRange) {
+        range.bounds_check(text.len());
 
-    pub fn add_with_context(&mut self, text: &str, range: Range<usize>) {
         unsafe {
             hb_buffer_add_utf8(
                 self.buffer,
                 text.as_ptr() as *const _,
                 text.len() as i32,
-                range.start as u32,
-                range.len() as i32,
+                range.start(),
+                range.length(),
             );
         }
     }
@@ -527,7 +573,7 @@ pub struct ShapedText<'f> {
 
 pub fn shape_text<'f>(font: &Font, font_arena: &'f FontArena, text: &str) -> ShapedText<'f> {
     let mut buffer = ShapingBuffer::new();
-    buffer.add(text);
+    buffer.add(text, ..);
     let glyphs = buffer.shape(font, font_arena, &mut NoopFallbackProvider);
     ShapedText {
         direction: buffer.direction().unwrap(),

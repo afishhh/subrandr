@@ -9,6 +9,7 @@ use std::{
 
 use crate::{color::BGRA8, text::Face, Renderer, Subrandr, SubtitleContext, Subtitles};
 
+#[expect(unused_macros)]
 macro_rules! c_enum {
     (
         #[repr($type: ident)]
@@ -187,15 +188,6 @@ macro_rules! ctrywrap {
     };
 }
 
-c_enum! {
-    #[repr(u16)]
-    #[try_from(InvalidArgument, "Invalid subtitle format: {value}")]
-    enum SubtitleFormat {
-        Ass = 1,
-        Srv3 = 2,
-    }
-}
-
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_init() -> *mut Subrandr {
     Box::into_raw(Box::new(Subrandr::init()))
@@ -211,16 +203,20 @@ unsafe extern "C" fn sbr_library_fini(sbr: *mut Subrandr) {
 unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subtitles {
     let str = CStr::from_ptr(path);
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
-    if bytes.ends_with(".ass") {
-        let text = ctry!(std::fs::read_to_string(bytes));
-        Box::into_raw(Box::new(crate::ass::convert(ctry!(crate::ass::parse(
-            &text
-        )))))
-    } else if bytes.ends_with(".srv3") {
+    if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
         Box::into_raw(Box::new(crate::srv3::convert(
             sbr,
             ctry!(crate::srv3::parse(sbr, &text)),
+        )))
+    } else if bytes.ends_with(".vtt") {
+        let text = ctry!(std::fs::read_to_string(bytes));
+        Box::into_raw(Box::new(crate::vtt::convert(
+            sbr,
+            match crate::vtt::parse(&text) {
+                Some(captions) => captions,
+                None => cthrow!(Other, "Invalid WebVTT"),
+            },
         )))
     } else {
         cthrow!(UnrecognizedFile, "Unrecognized file format")

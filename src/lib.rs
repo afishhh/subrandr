@@ -18,7 +18,6 @@ use text::{
 };
 use vtt::VttEvent;
 
-pub mod ass;
 pub mod srv3;
 pub mod vtt;
 

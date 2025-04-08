@@ -578,16 +578,17 @@ fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitle
             let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
             subrandr::srv3::convert(sbr, document)
         }
-        Some("ass") => {
-            let script = subrandr::ass::parse(&std::fs::read_to_string(path).unwrap())?;
-            subrandr::ass::convert(script)
+        Some("vtt") => {
+            let text = std::fs::read_to_string(path).unwrap();
+            let captions = subrandr::vtt::parse(&text).unwrap();
+            subrandr::vtt::convert(sbr, captions)
         }
         _ => bail!("Unrecognised subtitle file extension"),
     })
 }
 
 fn find_subs_near_path(sbr: &Subrandr, path: &Path) -> Result<Option<subrandr::Subtitles>> {
-    const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"ass"];
+    const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"vtt"];
 
     println!("Looking for subtitles files near {}", path.display());
 

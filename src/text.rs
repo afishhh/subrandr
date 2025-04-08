@@ -16,9 +16,9 @@ pub mod layout;
 
 use crate::{
     color::BGRA8,
-    math::{I26Dot6, Vec2},
+    math::{I16Dot16, I26Dot6, Vec2},
     rasterize::{Rasterizer, RenderTarget, Texture},
-    util::{AnyError, OrderedF32, ReadonlyAliasableBox},
+    util::{AnyError, ReadonlyAliasableBox},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,7 +231,7 @@ fn linear_to_srgb(color: f32) -> u8 {
 pub trait FallbackFontProvider {
     fn get_font_for_glyph(
         &mut self,
-        weight: f32,
+        weight: I16Dot16,
         italic: bool,
         codepoint: hb_codepoint_t,
     ) -> Result<Option<Face>, AnyError>;
@@ -241,7 +241,7 @@ pub struct NoopFallbackProvider;
 impl FallbackFontProvider for NoopFallbackProvider {
     fn get_font_for_glyph(
         &mut self,
-        _weight: f32,
+        _weight: I16Dot16,
         _italic: bool,
         _codepoint: hb_codepoint_t,
     ) -> Result<Option<Face>, AnyError> {
@@ -252,13 +252,13 @@ impl FallbackFontProvider for NoopFallbackProvider {
 impl FallbackFontProvider for FontSelect {
     fn get_font_for_glyph(
         &mut self,
-        weight: f32,
+        weight: I16Dot16,
         italic: bool,
         codepoint: hb_codepoint_t,
     ) -> Result<Option<Face>, AnyError> {
         let request = FontRequest {
             families: Vec::new(),
-            weight: OrderedF32(weight),
+            weight,
             italic,
             codepoint: Some(codepoint),
         };

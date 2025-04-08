@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_int, CStr, CString, OsString},
+    ffi::{c_char, c_int, CStr, CString, OsString},
     mem::MaybeUninit,
     os::unix::ffi::OsStringExt,
     path::PathBuf,
@@ -9,7 +9,11 @@ use text_sys::unix::*;
 use thiserror::Error;
 
 use crate::{
-    text::font_select::{FontInfo, FontProvider, FontRequest, FontSource, FontWeight},
+    math::I16Dot16,
+    text::{
+        font_select::{FontInfo, FontProvider, FontRequest, FontSource},
+        FontAxisValues,
+    },
     util::{AnyError, Sealed},
 };
 
@@ -25,6 +29,9 @@ pub struct NewError(());
 
 #[derive(Error, Debug)]
 pub enum LoadError {
+    #[error("Invalid weight")]
+    InvalidWeight,
+
     #[error("Failed to create pattern")]
     PatternCreate,
     #[error("Failed to set pattern key {0:?} to {1:?}")]
@@ -35,6 +42,11 @@ pub enum LoadError {
     Substitute,
     #[error("Failed to find matching font: {0:?}")]
     Match(FcResult),
+
+    #[error("Failed to create object set")]
+    ObjectSetBuild,
+    #[error("Failed to list fonts")]
+    FontList,
 }
 
 impl FontconfigFontProvider {
@@ -62,18 +74,247 @@ impl Drop for FontconfigFontProvider {
     }
 }
 
-const FONT_WEIGHTS: &[(f32, c_int)] = &[
-    (400.0, FC_WEIGHT_REGULAR as c_int),
-    (700.0, FC_WEIGHT_BOLD as c_int),
+// https://gitlab.freedesktop.org/fontconfig/fontconfig/-/blob/main/src/fcweight.c
+#[rustfmt::skip]
+const WEIGHT_MAP: &[(I16Dot16, I16Dot16)] = &[
+    (I16Dot16::new(FC_WEIGHT_THIN as i32), I16Dot16::new(100)),
+    (I16Dot16::new(FC_WEIGHT_EXTRALIGHT as i32), I16Dot16::new(200)),
+    (I16Dot16::new(FC_WEIGHT_LIGHT as i32), I16Dot16::new(300)),
+    (I16Dot16::new(FC_WEIGHT_DEMILIGHT as i32), I16Dot16::new(350)),
+    (I16Dot16::new(FC_WEIGHT_BOOK as i32), I16Dot16::new(380)),
+    (I16Dot16::new(FC_WEIGHT_REGULAR as i32), I16Dot16::new(400)),
+    (I16Dot16::new(FC_WEIGHT_MEDIUM as i32), I16Dot16::new(500)),
+    (I16Dot16::new(FC_WEIGHT_SEMIBOLD as i32), I16Dot16::new(600)),
+    (I16Dot16::new(FC_WEIGHT_BOLD as i32), I16Dot16::new(700)),
+    (I16Dot16::new(FC_WEIGHT_EXTRABOLD as i32), I16Dot16::new(800)),
+    (I16Dot16::new(FC_WEIGHT_BLACK as i32), I16Dot16::new(900)),
+    (I16Dot16::new(FC_WEIGHT_EXTRABLACK as i32), I16Dot16::new(1000)),
 ];
+
+fn map_fontconfig_weight_to_opentype(fc_weight: I16Dot16) -> Option<I16Dot16> {
+    if fc_weight < 0 || fc_weight > I16Dot16::new(FC_WEIGHT_EXTRABLACK as i32) {
+        return None;
+    }
+
+    let i = WEIGHT_MAP
+        .binary_search_by(|x| x.0.partial_cmp(&fc_weight).unwrap())
+        .map_or_else(std::convert::identity, std::convert::identity);
+
+    if WEIGHT_MAP[i].0 == fc_weight {
+        return Some(WEIGHT_MAP[i].1);
+    }
+
+    return Some({
+        let fc_start = WEIGHT_MAP[i - 1].0;
+        let fc_end = WEIGHT_MAP[i].0;
+        let ot_start = WEIGHT_MAP[i - 1].1;
+        let ot_end = WEIGHT_MAP[i].1;
+        let fc_diff = fc_end - fc_start;
+        let ot_diff = ot_end - ot_start;
+        ot_start + (fc_weight - fc_start) * ot_diff / fc_diff
+    });
+}
+
+fn map_opentype_weight_to_fontconfig(ot_weight: I16Dot16) -> Option<I16Dot16> {
+    if ot_weight < 0 || ot_weight > 1000 {
+        return None;
+    }
+
+    if ot_weight <= 100 {
+        return Some(I16Dot16::new(FC_WEIGHT_THIN as i32));
+    }
+
+    let i = WEIGHT_MAP
+        .binary_search_by(|x| x.1.partial_cmp(&ot_weight).unwrap())
+        .map_or_else(std::convert::identity, std::convert::identity);
+
+    if WEIGHT_MAP[i].1 == ot_weight {
+        return Some(WEIGHT_MAP[i].0);
+    }
+
+    return Some({
+        let fc_start = WEIGHT_MAP[i - 1].0;
+        let fc_end = WEIGHT_MAP[i].0;
+        let ot_start = WEIGHT_MAP[i - 1].1;
+        let ot_end = WEIGHT_MAP[i].1;
+        let fc_diff = fc_end - fc_start;
+        let ot_diff = ot_end - ot_start;
+        fc_start + (ot_weight - ot_start) * fc_diff / ot_diff
+    });
+}
+
+#[cfg(test)]
+mod test {
+    use std::ops::Range;
+
+    use super::*;
+
+    #[test]
+    fn test_fontconfig_to_opentype_weight_mapping() {
+        for &(fc, ot) in &WEIGHT_MAP[1..] {
+            assert_eq!(map_fontconfig_weight_to_opentype(fc), Some(ot));
+        }
+
+        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(-1)), None);
+        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(300)), None);
+
+        const LERP_CASES: &[(i32, Range<i32>)] = &[
+            (30, 100..200),
+            (60, 350..380),
+            (213, 900..1000),
+            (203, 700..800),
+        ];
+
+        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
+            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
+        }) {
+            println!("mapping {fc} to opentype, expecting a result in {ot_range:?}");
+            let result = map_fontconfig_weight_to_opentype(fc).unwrap();
+            println!("got: {result}");
+            assert!(ot_range.contains(&result));
+        }
+    }
+
+    #[test]
+    fn test_opentype_to_fontconfig_weight_mapping() {
+        for &(fc, ot) in WEIGHT_MAP {
+            dbg!(ot);
+            assert_eq!(map_opentype_weight_to_fontconfig(ot), Some(fc));
+        }
+
+        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(-1)), None);
+        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(1100)), None);
+
+        const LERP_CASES: &[(i32, Range<i32>)] = &[
+            (150, FC_WEIGHT_THIN as i32..FC_WEIGHT_EXTRALIGHT as i32),
+            (250, FC_WEIGHT_EXTRALIGHT as i32..FC_WEIGHT_LIGHT as i32),
+            (375, FC_WEIGHT_DEMILIGHT as i32..FC_WEIGHT_BOOK as i32),
+            (750, FC_WEIGHT_BOLD as i32..FC_WEIGHT_EXTRABOLD as i32),
+            (950, FC_WEIGHT_BLACK as i32..FC_WEIGHT_EXTRABLACK as i32),
+        ];
+
+        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
+            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
+        }) {
+            println!("mapping {fc} to fontconfig, expecting a result in {ot_range:?}");
+            let result = map_opentype_weight_to_fontconfig(fc).unwrap();
+            println!("got: {result}");
+            assert!(ot_range.contains(&result));
+        }
+    }
+}
+
+unsafe fn pattern_get_axis_values(
+    pattern: *mut FcPattern,
+    object: *const c_char,
+) -> Option<FontAxisValues> {
+    let mut wght = MaybeUninit::uninit();
+    let mut range = MaybeUninit::uninit();
+    if FcPatternGetInteger(pattern, object, 0, wght.as_mut_ptr()) == FcResultMatch {
+        Some(FontAxisValues::Fixed(I16Dot16::new(wght.assume_init())))
+    } else {
+        if FcPatternGetRange(pattern, object, 0, range.as_mut_ptr()) == FcResultMatch {
+            let range = range.assume_init();
+            let mut begin = MaybeUninit::uninit();
+            let mut end = MaybeUninit::uninit();
+            if FcRangeGetDouble(range, begin.as_mut_ptr(), end.as_mut_ptr()) == 0 {
+                None
+            } else {
+                let begin = begin.assume_init() as f32;
+                let end = end.assume_init() as f32;
+                Some(FontAxisValues::Range(
+                    I16Dot16::from_f32(begin),
+                    I16Dot16::from_f32(end),
+                ))
+            }
+        } else {
+            None
+        }
+    }
+}
+
+fn map_fontconfig_weight_axis_to_opentype(axis: FontAxisValues) -> Option<FontAxisValues> {
+    Some(match axis {
+        FontAxisValues::Fixed(value) => {
+            FontAxisValues::Fixed(map_fontconfig_weight_to_opentype(value)?)
+        }
+        FontAxisValues::Range(start, end) => FontAxisValues::Range(
+            map_fontconfig_weight_to_opentype(start)?,
+            map_opentype_weight_to_fontconfig(end)?,
+        ),
+    })
+}
+
+unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FontInfo> {
+    let family = unsafe {
+        let mut family = MaybeUninit::uninit();
+        if FcPatternGetString(
+            pattern,
+            FC_FAMILY.as_ptr() as *const i8,
+            0,
+            family.as_mut_ptr(),
+        ) != FcResultMatch
+        {
+            return None;
+        }
+
+        match CStr::from_ptr(family.assume_init() as *const i8).to_str() {
+            Ok(family) => family,
+            Err(_) => return None,
+        }
+    };
+
+    let width = unsafe { pattern_get_axis_values(pattern, FC_WIDTH.as_ptr() as *const i8)? };
+
+    let weight = unsafe {
+        pattern_get_axis_values(pattern, FC_WEIGHT.as_ptr() as *const i8)
+            .and_then(map_fontconfig_weight_axis_to_opentype)?
+    };
+
+    let italic = unsafe {
+        let mut slant = 0;
+        if FcPatternGetInteger(pattern, FC_SLANT.as_ptr() as *const i8, 0, &mut slant)
+            != FcResultMatch
+        {
+            return None;
+        }
+
+        if slant == FC_SLANT_OBLIQUE as i32 {
+            return None;
+        }
+
+        slant == FC_SLANT_ITALIC as i32
+    };
+
+    let path = unsafe {
+        let mut path = MaybeUninit::uninit();
+        if FcPatternGetString(pattern, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
+            != FcResultMatch
+        {
+            return None;
+        }
+
+        PathBuf::from(OsString::from_vec(
+            CStr::from_ptr(path.assume_init() as *const _)
+                .to_bytes()
+                .to_vec(),
+        ))
+    };
+
+    Some(FontInfo {
+        family: family.to_owned(),
+        width,
+        weight,
+        italic,
+        source: FontSource::File(path),
+    })
+}
 
 impl FontProvider for FontconfigFontProvider {
     fn query(
         &mut self,
         req: &FontRequest,
     ) -> Result<Vec<crate::text::font_select::FontInfo>, AnyError> {
-        assert!(req.weight.0.is_normal() && req.weight.0.is_sign_positive());
-
         // TODO: Free on error
         let pattern = unsafe { FcPatternCreate() };
         if pattern.is_null() {
@@ -94,11 +335,8 @@ impl FontProvider for FontconfigFontProvider {
         }
 
         // TODO: closest match
-        let Ok(fc_weight) = FONT_WEIGHTS
-            .binary_search_by(|x| x.0.partial_cmp(&req.weight.0).unwrap())
-            .map(|idx| FONT_WEIGHTS[idx].1)
-        else {
-            todo!();
+        let Some(fc_weight) = map_opentype_weight_to_fontconfig(req.weight) else {
+            return Err(LoadError::InvalidWeight.into());
         };
 
         for family in &req.families {
@@ -119,8 +357,8 @@ impl FontProvider for FontconfigFontProvider {
             FcPatternAddInteger,
             PatternAddInteger,
             FC_WEIGHT,
-            fc_weight,
-            fc_weight
+            fc_weight.round_to_inner(),
+            fc_weight.round_to_inner()
         );
 
         let slant = if req.italic {
@@ -185,112 +423,74 @@ impl FontProvider for FontconfigFontProvider {
                 }
             }
 
-            let family = unsafe {
-                let mut family = MaybeUninit::uninit();
-                if FcPatternGetString(
-                    font,
-                    FC_FAMILY.as_ptr() as *const i8,
-                    0,
-                    family.as_mut_ptr(),
-                ) != FcResultMatch
-                {
-                    continue;
-                }
-
-                match CStr::from_ptr(family.assume_init() as *const i8).to_str() {
-                    Ok(family) => family,
-                    Err(_) => continue,
-                }
+            let Some(info) = (unsafe { font_info_from_pattern(font) }) else {
+                continue;
             };
 
-            let weight = unsafe {
-                let mut wght = MaybeUninit::uninit();
-                let mut range = MaybeUninit::uninit();
-                if FcPatternGetInteger(font, FC_WEIGHT.as_ptr() as *const i8, 0, wght.as_mut_ptr())
-                    == FcResultMatch
-                {
-                    let wght = wght.assume_init();
-
-                    if let Some(weight) = FONT_WEIGHTS
-                        .iter()
-                        .find_map(|&(ot, fc)| (fc == wght).then_some(ot))
-                        .map(FontWeight::Static)
-                    {
-                        weight
-                    } else {
-                        continue;
-                    }
-                } else {
-                    let is_variable = if FcPatternGetRange(
-                        font,
-                        FC_WEIGHT.as_ptr() as *const i8,
-                        0,
-                        range.as_mut_ptr(),
-                    ) == FcResultMatch
-                    {
-                        let range = range.assume_init();
-                        let mut begin = MaybeUninit::uninit();
-                        let mut end = MaybeUninit::uninit();
-                        if FcRangeGetDouble(range, begin.as_mut_ptr(), end.as_mut_ptr()) == 0 {
-                            false
-                        } else {
-                            let begin = begin.assume_init();
-                            let end = end.assume_init();
-                            begin.abs() < f64::EPSILON && (210.0 - end).abs() < f64::EPSILON
-                        }
-                    } else {
-                        false
-                    };
-
-                    if is_variable {
-                        FontWeight::Variable
-                    } else {
-                        continue;
-                    }
-                }
-            };
-
-            let italic = unsafe {
-                let mut slant = 0;
-                if FcPatternGetInteger(font, FC_SLANT.as_ptr() as *const i8, 0, &mut slant)
-                    != FcResultMatch
-                {
-                    continue;
-                }
-
-                if slant == FC_SLANT_OBLIQUE as i32 {
-                    continue;
-                }
-
-                slant == FC_SLANT_ITALIC as i32
-            };
-
-            let path = unsafe {
-                let mut path = MaybeUninit::uninit();
-                if FcPatternGetString(font, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
-                    != FcResultMatch
-                {
-                    continue;
-                }
-
-                PathBuf::from(OsString::from_vec(
-                    CStr::from_ptr(path.assume_init() as *const _)
-                        .to_bytes()
-                        .to_vec(),
-                ))
-            };
-
-            results.push(FontInfo {
-                family: family.to_owned(),
-                weight,
-                italic,
-                source: FontSource::File(path),
-            });
+            results.push(info);
         }
 
         unsafe {
             FcPatternDestroy(pattern);
             FcFontSetDestroy(font_set);
+        };
+
+        Ok(results)
+    }
+
+    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError> {
+        // TODO: Free on error
+        let pattern = unsafe { FcPatternCreate() };
+        if pattern.is_null() {
+            return Err(LoadError::PatternCreate.into());
+        }
+
+        let object_set = unsafe {
+            FcObjectSetBuild(
+                FC_FAMILY.as_ptr().cast::<i8>(),
+                FC_SLANT,
+                FC_WIDTH,
+                FC_WEIGHT,
+                FC_FILE,
+            )
+        };
+
+        if object_set.is_null() {
+            unsafe { FcPatternDestroy(pattern) };
+            return Err(LoadError::ObjectSetBuild.into());
+        }
+
+        let font_set = unsafe { FcFontList(self.config, pattern, object_set) };
+
+        if font_set.is_null() {
+            unsafe {
+                FcPatternDestroy(pattern);
+                FcObjectSetDestroy(object_set)
+            };
+            return Err(LoadError::FontList.into());
+        }
+
+        let fonts = unsafe {
+            std::slice::from_raw_parts(
+                (*font_set).fonts as *const *mut FcPattern,
+                (*font_set).nfont as usize,
+            )
+        };
+
+        let mut results = Vec::new();
+
+        for font in fonts.iter().copied() {
+            let Some(info) = (unsafe { font_info_from_pattern(font) }) else {
+                continue;
+            };
+
+            results.push(info);
+        }
+
+        unsafe {
+            FcPatternDestroy(pattern);
+            FcFontSetDestroy(font_set);
+            FcObjectSetDestroy(object_set);
         };
 
         Ok(results)

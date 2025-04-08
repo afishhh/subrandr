@@ -3,8 +3,9 @@ use std::{collections::HashMap, hash::Hash, path::PathBuf};
 use thiserror::Error;
 
 use crate::{
+    math::I16Dot16,
     text,
-    util::{AnyError, OrderedF32, Sealed},
+    util::{AnyError, Sealed},
     Subrandr,
 };
 
@@ -13,7 +14,7 @@ use super::{Face, WEIGHT_AXIS};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontRequest {
     pub families: Vec<String>,
-    pub weight: OrderedF32,
+    pub weight: I16Dot16,
     pub italic: bool,
     pub codepoint: Option<u32>,
 }
@@ -21,15 +22,16 @@ pub struct FontRequest {
 #[derive(Debug, Clone)]
 pub struct FontInfo {
     pub family: String,
-    pub weight: FontWeight,
+    pub width: FontAxisValues,
+    pub weight: FontAxisValues,
     pub italic: bool,
     pub source: FontSource,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum FontWeight {
-    Static(f32),
-    Variable,
+#[derive(Debug, Clone)]
+pub enum FontAxisValues {
+    Fixed(I16Dot16),
+    Range(I16Dot16, I16Dot16),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -60,11 +62,16 @@ fn choose<'a>(fonts: &'a [FontInfo], request: &FontRequest) -> Option<&'a FontIn
             this_score += 1;
         }
 
-        match font.weight {
-            FontWeight::Static(weight) => {
-                this_score += (weight - request.weight.0).abs() as u32 / 100;
+        match &font.weight {
+            &FontAxisValues::Fixed(weight) => {
+                this_score += (weight - request.weight).unsigned_abs().round_to_inner() / 100;
             }
-            FontWeight::Variable => (),
+            &FontAxisValues::Range(start, end) => {
+                if request.weight < start || request.weight > end {
+                    this_score += ((start - request.weight).unsigned_abs().round_to_inner() / 100)
+                        .min((end - request.weight).unsigned_abs().round_to_inner() / 100);
+                }
+            }
         }
 
         if this_score < score {
@@ -78,6 +85,7 @@ fn choose<'a>(fonts: &'a [FontInfo], request: &FontRequest) -> Option<&'a FontIn
 
 trait FontProvider: Sealed + std::fmt::Debug {
     fn query(&mut self, request: &FontRequest) -> Result<Vec<FontInfo>, AnyError>;
+    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError>;
 }
 
 #[derive(Debug)]
@@ -87,6 +95,10 @@ impl Sealed for NullFontProvider {}
 
 impl FontProvider for NullFontProvider {
     fn query(&mut self, _request: &FontRequest) -> Result<Vec<FontInfo>, AnyError> {
+        Ok(Vec::new())
+    }
+
+    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError> {
         Ok(Vec::new())
     }
 }
@@ -142,7 +154,7 @@ pub struct FontSelect {
     custom: Vec<FontInfo>,
 }
 
-fn set_weight_if_variable(face: &mut Face, weight: f32) {
+fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
     if let Some(axis) = face.axis(WEIGHT_AXIS) {
         face.set_axis(axis.index, weight)
     }
@@ -207,7 +219,7 @@ impl FontSelect {
                 .transpose()?;
 
             if let Some(ref mut face) = result {
-                set_weight_if_variable(face, request.weight.0);
+                set_weight_if_variable(face, request.weight);
             }
 
             self.request_cache.insert(request.clone(), result.clone());
@@ -216,10 +228,15 @@ impl FontSelect {
         .ok_or(Error::NotFound)
     }
 
-    pub fn select_simple(&mut self, name: &str, weight: f32, italic: bool) -> Result<Face, Error> {
+    pub fn select_simple(
+        &mut self,
+        name: &str,
+        weight: I16Dot16,
+        italic: bool,
+    ) -> Result<Face, Error> {
         self.select(&FontRequest {
             families: vec![name.to_owned()],
-            weight: OrderedF32(weight),
+            weight,
             italic,
             codepoint: None,
         })

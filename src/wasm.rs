@@ -2,7 +2,8 @@ use std::{alloc::Layout, sync::Arc};
 
 use crate::{
     color::BGRA8,
-    text::{Face, FontInfo, FontWeight},
+    math::I16Dot16,
+    text::{Face, FontAxisValues, FontInfo, WEIGHT_AXIS},
     Renderer, Subrandr, Subtitles,
 };
 
@@ -92,10 +93,14 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
     let renderer = unsafe { &mut *renderer };
     renderer.fonts.add_extra(FontInfo {
         family: name.to_owned(),
+        width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: if weight.is_sign_negative() {
-            FontWeight::Variable
+            (*font).axis(WEIGHT_AXIS).map_or_else(
+                || FontAxisValues::Fixed((*font).weight()),
+                |axis| FontAxisValues::Range(axis.minimum(), axis.maximum()),
+            )
         } else {
-            FontWeight::Static(weight)
+            crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(weight))
         },
         italic,
         source: crate::text::FontSource::Memory((*font).clone()),

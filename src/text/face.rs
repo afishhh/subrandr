@@ -4,6 +4,7 @@ use std::{
     ffi::{CStr, CString},
     hash::Hash,
     mem::MaybeUninit,
+    ops::RangeInclusive,
     path::Path,
     sync::Arc,
 };
@@ -195,9 +196,9 @@ impl Face {
         self.axes().iter().find(|x| x.tag == tag).copied()
     }
 
-    pub fn set_axis(&mut self, index: usize, value: f32) {
+    pub fn set_axis(&mut self, index: usize, value: I16Dot16) {
         assert!(self.shared_data().axes[index].is_value_in_range(value));
-        self.coords[index] = I16Dot16::from_f32(value).into_ft();
+        self.coords[index] = value.into_ft();
     }
 
     fn os2_weight(&self) -> Option<u16> {
@@ -207,7 +208,7 @@ impl Face {
         }
     }
 
-    pub fn weight(&self) -> f32 {
+    pub fn weight(&self) -> I16Dot16 {
         SharedFaceData::get_ref(self.face)
             .axes
             .iter()
@@ -215,16 +216,16 @@ impl Face {
             .map_or_else(
                 || {
                     if let Some(weight) = self.os2_weight() {
-                        weight as f32
+                        I16Dot16::new(weight as i32)
                     } else {
                         let has_bold_flag = unsafe {
                             (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0
                         };
 
-                        (300 + 400 * has_bold_flag as i32) as f32
+                        I16Dot16::new(300 + 400 * has_bold_flag as i32)
                     }
                 },
-                |idx| I16Dot16::from_ft(self.coords[idx]).into_f32(),
+                |idx| I16Dot16::from_ft(self.coords[idx]),
             )
     }
 
@@ -295,23 +296,23 @@ fn debug_tag(tag: u32) -> impl std::fmt::Debug {
 impl Axis {
     // TODO: Switch these APIs to I16Dot16 instead.
     #[inline(always)]
-    pub fn minimum(&self) -> f32 {
-        self.minimum.into_f32()
+    pub fn minimum(&self) -> I16Dot16 {
+        self.minimum
     }
 
     #[inline(always)]
-    pub fn maximum(&self) -> f32 {
-        self.maximum.into_f32()
+    pub fn maximum(&self) -> I16Dot16 {
+        self.maximum
     }
 
     #[inline(always)]
-    fn is_fixed_value_in_range(&self, fixed: I16Dot16) -> bool {
-        self.minimum <= fixed && fixed <= self.maximum
+    pub fn range(&self) -> RangeInclusive<I16Dot16> {
+        self.minimum..=self.maximum
     }
 
     #[inline(always)]
-    pub fn is_value_in_range(&self, value: f32) -> bool {
-        self.is_fixed_value_in_range(I16Dot16::from_f32(value))
+    pub fn is_value_in_range(&self, value: I16Dot16) -> bool {
+        self.range().contains(&value)
     }
 }
 
@@ -531,7 +532,7 @@ impl Font {
         self.point_size
     }
 
-    pub fn weight(&self) -> f32 {
+    pub fn weight(&self) -> I16Dot16 {
         self.face().weight()
     }
 

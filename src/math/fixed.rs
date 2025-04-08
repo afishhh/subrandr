@@ -68,6 +68,7 @@ macro_rules! define_fixed_for_type {
         signedness = $signedness: tt,
         inner = $type: ty,
         widen = $wide: ty
+        $(, unsigned = $unsigned: ty)?
     ) => {
         impl<const P: u32> Fixed<P, $type> {
             pub const fn new(value: $type) -> Self {
@@ -117,7 +118,7 @@ macro_rules! define_fixed_for_type {
             const WHOLE_MASK: $type = !Self::FRACTIONAL_MASK;
         }
 
-        define_fixed_for_type!(@$signedness $type, $wide);
+        define_fixed_for_type!(@$signedness $type, $wide $(, $unsigned)?);
 
         impl<const P: u32> Mul for Fixed<P, $type> {
             type Output = Self;
@@ -204,7 +205,7 @@ macro_rules! define_fixed_for_type {
             }
         }
     };
-    (@signed $type: ty, $wide: ty) => {
+    (@signed $type: ty, $wide: ty, $unsigned: ty) => {
         impl<const P: u32> Fixed<P, $type> {
             const SIGN_MASK: $type = 1 << (<$type>::BITS - 1);
 
@@ -240,6 +241,10 @@ macro_rules! define_fixed_for_type {
 
             pub const fn abs(self) -> Self {
                 Self(self.0.abs())
+            }
+
+            pub const fn unsigned_abs(self) -> Fixed<P, $unsigned> {
+                Fixed(self.0.unsigned_abs())
             }
         }
 
@@ -279,7 +284,12 @@ macro_rules! define_fixed_for_type {
     };
 }
 
-define_fixed_for_type!(signedness = signed, inner = i32, widen = i64);
+define_fixed_for_type!(
+    signedness = signed,
+    inner = i32,
+    widen = i64,
+    unsigned = u32
+);
 define_fixed_for_type!(signedness = unsigned, inner = u32, widen = u64);
 define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 

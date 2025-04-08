@@ -8,7 +8,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I26Dot6, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
+use math::{I16Dot16, I26Dot6, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -780,7 +780,7 @@ impl<'a> Renderer<'a> {
     ) {
         let font = self
             .fonts
-            .select_simple("monospace", 400., false)
+            .select_simple("monospace", I16Dot16::new(400), false)
             .unwrap()
             .with_size(size, self.dpi);
         let font_arena = FontArena::new();
@@ -1213,7 +1213,7 @@ impl<'a> Renderer<'a> {
                         Segment::Text(segment) => {
                             let font_request = FontRequest {
                                 families: segment.font.clone(),
-                                weight: util::OrderedF32(segment.font_weight as f32),
+                                weight: I16Dot16::new(segment.font_weight as i32),
                                 italic: segment.italic,
                                 codepoint: None,
                             };

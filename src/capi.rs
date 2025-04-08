@@ -7,7 +7,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::{color::BGRA8, text::Face, Renderer, Subrandr, SubtitleContext, Subtitles};
+use crate::{
+    color::BGRA8,
+    math::I16Dot16,
+    text::{Face, FontAxisValues, WEIGHT_AXIS},
+    Renderer, Subrandr, SubtitleContext, Subtitles,
+};
 
 #[expect(unused_macros)]
 macro_rules! c_enum {
@@ -297,6 +302,7 @@ unsafe extern "C" fn sbr_renderer_clear_fonts(renderer: *mut Renderer<'static>) 
 // This is very unstable: the variable font handling will probably have to change in the future
 // to hold a supported weight range
 // TODO: add to header and test
+// TODO: add width
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_add_font(
     renderer: *mut Renderer<'static>,
@@ -311,9 +317,15 @@ unsafe extern "C" fn sbr_renderer_add_font(
     );
     (*renderer).fonts.add_extra(crate::text::FontInfo {
         family: family.to_owned(),
+        width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: match weight {
-            f if f.is_nan() => crate::text::FontWeight::Variable,
-            f if (0.0..1000.0).contains(&f) => crate::text::FontWeight::Static(f),
+            f if f.is_nan() => (*font).axis(WEIGHT_AXIS).map_or_else(
+                || FontAxisValues::Fixed((*font).weight()),
+                |axis| FontAxisValues::Range(axis.minimum(), axis.maximum()),
+            ),
+            f if (0.0..1000.0).contains(&f) => {
+                crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(f))
+            }
             _ => cthrow!(InvalidArgument, "Font weight out of range"),
         },
         italic,

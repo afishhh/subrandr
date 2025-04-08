@@ -399,7 +399,7 @@ impl Font {
 
             // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
             let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
-            let ppem = map_to_ppem(point_size.into_ft(), dpi.into());
+            let ppem = map_to_ppem(point_size.into_raw().into(), dpi.into());
 
             // First size larger than requested, or the largest size if not found
             let mut picked_size_index = 0usize;

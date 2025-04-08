@@ -31,7 +31,7 @@ pub unsafe extern "C" fn sbr_wasm_load_subtitles(
     let bytes = unsafe { std::slice::from_raw_parts(text, len) };
     let text = std::str::from_utf8(bytes).unwrap();
     match crate::srv3::parse(sbr, text) {
-        Ok(document) => Box::into_raw(Box::new(crate::srv3::convert(document))),
+        Ok(document) => Box::into_raw(Box::new(crate::srv3::convert(sbr, document))),
         Err(_) => std::ptr::null_mut(),
     }
 }

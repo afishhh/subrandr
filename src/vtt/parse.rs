@@ -1,19 +1,7 @@
-use thiserror::Error;
-
 use crate::math::Point2;
 
 // TODO: Subrandr parsing errors are currently not very useful,
 //       they could be improved significantly.
-
-#[derive(Debug, Clone, Error)]
-pub enum Error {
-    #[error("missing \"WEBVTT\" magic")]
-    MissingMagic,
-    #[error("insufficient line terminators")]
-    InsufficientLineTerminators,
-    #[error("trailing characters")]
-    TrailingCharacters,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Captions<'a> {

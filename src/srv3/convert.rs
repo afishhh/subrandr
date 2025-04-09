@@ -202,7 +202,7 @@ impl Srv3TextShadow {
                 // it results in a slightly different blur than actually repeated blur
                 // but browsers seem to give a result that is closer to this anyway?
                 // although firefox and chromium don't even agree on how a blur should look sooo
-                blur_radius: (t * t + t * t / 4.0).sqrt() * 2.0,
+                blur_radius: f32::sqrt(5.0) * t,
                 color: self.color,
             }),
             EdgeType::SoftShadow => {

@@ -150,11 +150,11 @@ impl TextMetrics {
     fn extend_by_font(&mut self, font: &Font) {
         // FIXME: Is this bad for perf when done on all glyphs instead of just the unique fonts?
         let metrics = font.metrics();
-        self.max_ascender = self.max_ascender.max(I26Dot6::from_ft(metrics.ascender));
-        self.min_descender = self.min_descender.min(I26Dot6::from_ft(metrics.descender));
+        self.max_ascender = self.max_ascender.max(metrics.ascender);
+        self.min_descender = self.min_descender.min(metrics.descender);
         self.max_lineskip_descent = self
             .max_lineskip_descent
-            .max(I26Dot6::from_ft(metrics.height - metrics.ascender));
+            .max(metrics.height - metrics.ascender);
     }
 }
 

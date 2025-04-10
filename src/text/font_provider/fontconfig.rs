@@ -177,7 +177,6 @@ mod test {
     #[test]
     fn test_opentype_to_fontconfig_weight_mapping() {
         for &(fc, ot) in WEIGHT_MAP {
-            dbg!(ot);
             assert_eq!(map_opentype_weight_to_fontconfig(ot), Some(fc));
         }
 

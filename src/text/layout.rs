@@ -82,12 +82,10 @@ fn calculate_multi_font_metrics(fonts: &[text::Font]) -> (I26Dot6, I26Dot6, I26D
 
     for font in fonts {
         let metrics = font.metrics();
-        let ascender = I26Dot6::from_ft(metrics.ascender);
-        let descender = I26Dot6::from_ft(metrics.descender);
-        let lineskip_descent = I26Dot6::from_ft(metrics.height - metrics.ascender);
+        let lineskip_descent = metrics.height - metrics.ascender;
 
-        max_ascender = max_ascender.max(ascender);
-        min_descender = min_descender.min(descender);
+        max_ascender = max_ascender.max(metrics.ascender);
+        min_descender = min_descender.min(metrics.descender);
         max_lineskip_descent = max_lineskip_descent.max(lineskip_descent);
     }
 

@@ -172,7 +172,12 @@ impl Face {
     }
 
     pub fn with_size_from(&self, other: &Font) -> Font {
-        Font::create(self.face, self.coords, other.point_size, other.dpi)
+        Font::create(
+            self.face,
+            self.coords,
+            other.size.point_size,
+            other.size.dpi,
+        )
     }
 
     pub fn family_name(&self) -> &str {
@@ -269,8 +274,8 @@ impl std::fmt::Debug for Face {
 pub struct Axis {
     pub tag: u32,
     pub index: usize,
-    minimum: I16Dot16,
-    maximum: I16Dot16,
+    pub minimum: I16Dot16,
+    pub maximum: I16Dot16,
 }
 
 fn debug_tag(tag: u32) -> impl std::fmt::Debug {
@@ -294,17 +299,6 @@ fn debug_tag(tag: u32) -> impl std::fmt::Debug {
 }
 
 impl Axis {
-    // TODO: Switch these APIs to I16Dot16 instead.
-    #[inline(always)]
-    pub fn minimum(&self) -> I16Dot16 {
-        self.minimum
-    }
-
-    #[inline(always)]
-    pub fn maximum(&self) -> I16Dot16 {
-        self.maximum
-    }
-
     #[inline(always)]
     pub fn range(&self) -> RangeInclusive<I16Dot16> {
         self.minimum..=self.maximum
@@ -321,8 +315,8 @@ impl std::fmt::Debug for Axis {
         f.debug_struct("Axis")
             .field("tag", &debug_tag(self.tag))
             .field("index", &self.index)
-            .field("minimum", &self.minimum())
-            .field("maximum", &self.maximum())
+            .field("minimum", &self.minimum)
+            .field("maximum", &self.maximum)
             .finish()
     }
 }
@@ -360,23 +354,85 @@ pub struct GlyphMetrics {
     pub vert_advance: I26Dot6,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct FontMetrics {
+    pub x_scale: I26Dot6,
+    pub y_scale: I26Dot6,
+    pub ascender: I26Dot6,
+    pub descender: I26Dot6,
+    pub height: I26Dot6,
+    pub max_advance: I26Dot6,
+}
+
+impl FontMetrics {
+    fn from_ft(metrics: &FT_Size_Metrics_) -> FontMetrics {
+        FontMetrics {
+            x_scale: I26Dot6::from_ft(metrics.x_scale),
+            y_scale: I26Dot6::from_ft(metrics.y_scale),
+            ascender: I26Dot6::from_ft(metrics.ascender),
+            descender: I26Dot6::from_ft(metrics.descender),
+            height: I26Dot6::from_ft(metrics.height),
+            max_advance: I26Dot6::from_ft(metrics.max_advance),
+        }
+    }
+
+    fn from_ft_scaled(metrics: &FT_Size_Metrics_, scale: I26Dot6) -> FontMetrics {
+        macro_rules! scale_field {
+            ($name: ident, $intermediate: ident, $final: ident) => {{
+                ((metrics.$name as $intermediate * scale.into_raw() as $intermediate) >> 6)
+                    as $final
+            }};
+        }
+
+        FontMetrics {
+            x_scale: I26Dot6::from_ft(scale_field!(x_scale, i64, FT_Long)),
+            y_scale: I26Dot6::from_ft(scale_field!(y_scale, i64, FT_Long)),
+            ascender: I26Dot6::from_ft(scale_field!(ascender, i64, FT_Long)),
+            descender: I26Dot6::from_ft(scale_field!(descender, i64, FT_Long)),
+            height: I26Dot6::from_ft(scale_field!(height, i64, FT_Long)),
+            max_advance: I26Dot6::from_ft(scale_field!(max_advance, i64, FT_Long)),
+        }
+    }
+}
+
+struct Size {
+    ft_size: FT_Size,
+    metrics: FontMetrics,
+    scale: I26Dot6,
+    point_size: I26Dot6,
+    dpi: u32,
+}
+
+impl Drop for Size {
+    fn drop(&mut self) {
+        unsafe {
+            FT_Done_Size(self.ft_size);
+        }
+    }
+}
+
 #[repr(C)]
 pub struct Font {
     // owned by hb_font
     ft_face: FT_Face,
     coords: MmCoords,
     hb_font: *mut hb_font_t,
-    point_size: I26Dot6,
-    dpi: u32,
-
-    /// -1 = not fixed size
-    fixed_size_index: i32,
-    pub(super) scale: I26Dot6,
+    size: Arc<Size>,
 }
 
 impl Font {
     fn create(face: FT_Face, coords: MmCoords, point_size: I26Dot6, dpi: u32) -> Self {
-        let (fixed_size_index, scale) = if unsafe {
+        let size = unsafe {
+            let mut size = MaybeUninit::uninit();
+            fttry!(FT_New_Size(face, size.as_mut_ptr()));
+            size.assume_init()
+        };
+
+        unsafe {
+            fttry!(FT_Activate_Size(size));
+        }
+
+        let (metrics, scale) = if unsafe {
             (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0
         } {
             unsafe {
@@ -389,7 +445,10 @@ impl Font {
                 ));
             }
 
-            (-1, I26Dot6::ONE)
+            (
+                FontMetrics::from_ft(unsafe { &(*size).metrics }),
+                I26Dot6::ONE,
+            )
         } else {
             let sizes = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -417,51 +476,29 @@ impl Font {
                 fttry!(FT_Select_Size(face, picked_size_index as i32));
             }
 
-            (picked_size_index as i32, scale)
+            (
+                FontMetrics::from_ft_scaled(unsafe { &(*size).metrics }, scale),
+                scale,
+            )
         };
 
         Self {
             ft_face: face,
             coords,
+            size: Arc::new(Size {
+                ft_size: size,
+                metrics,
+                scale,
+                point_size,
+                dpi,
+            }),
             hb_font: unsafe { hb_ft_font_create_referenced(face) },
-            point_size,
-            dpi,
-            fixed_size_index,
-            scale,
         }
     }
 
     pub(super) fn with_applied_size(&self) -> FT_Face {
         unsafe {
-            if self.fixed_size_index != -1 {
-                fttry!(FT_Select_Size(self.ft_face, self.fixed_size_index));
-
-                let metrics = &mut (*(*self.ft_face).size).metrics;
-                macro_rules! scale_field {
-                    ($name: ident, $intermediate: ident, $final: ident) => {
-                        metrics.$name = ((metrics.$name as $intermediate
-                            * self.scale.into_raw() as $intermediate)
-                            >> 6) as $final;
-                    };
-                }
-
-                scale_field!(x_ppem, u32, u16);
-                scale_field!(y_ppem, u32, u16);
-                scale_field!(x_scale, i64, FT_Long);
-                scale_field!(y_scale, i64, FT_Long);
-                scale_field!(ascender, i64, FT_Long);
-                scale_field!(descender, i64, FT_Long);
-                scale_field!(height, i64, FT_Long);
-                scale_field!(max_advance, i64, FT_Long);
-            } else {
-                fttry!(FT_Set_Char_Size(
-                    self.ft_face,
-                    self.point_size.into_ft(),
-                    self.point_size.into_ft(),
-                    self.dpi,
-                    self.dpi,
-                ));
-            }
+            fttry!(FT_Activate_Size(self.size.ft_size));
         }
 
         if FaceMmVar::has(self.ft_face) {
@@ -469,7 +506,7 @@ impl Font {
                 fttry!(FT_Set_Var_Design_Coordinates(
                     self.ft_face,
                     SharedFaceData::get_ref(self.ft_face).axes.len() as u32,
-                    std::mem::transmute(self.coords.as_ptr())
+                    self.coords.as_ptr().cast_mut()
                 ));
             }
         }
@@ -480,6 +517,10 @@ impl Font {
     pub(super) fn with_applied_size_and_hb(&self) -> (FT_Face, *mut hb_font_t) {
         let ft_face = self.with_applied_size();
         (ft_face, self.hb_font)
+    }
+
+    pub(super) fn bitmap_scale(&self) -> I26Dot6 {
+        self.size.scale
     }
 
     /// Gets the Outline associated with the glyph at `index`.
@@ -495,16 +536,15 @@ impl Font {
                 return None;
             }
 
-            // TODO: return none if the glyph does not exist in the fonot
+            // TODO: return none if the glyph does not exist in the font
             fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32));
 
             Some(Outline::from_freetype(&(*(*face).glyph).outline))
         }
     }
 
-    pub fn metrics(&self) -> FT_Size_Metrics {
-        let face = self.with_applied_size();
-        unsafe { (*(*face).size).metrics }
+    pub fn metrics(&self) -> &FontMetrics {
+        &self.size.metrics
     }
 
     // TODO: Make these result in Fixed<> values
@@ -529,7 +569,7 @@ impl Font {
     }
 
     pub fn point_size(&self) -> I26Dot6 {
-        self.point_size
+        self.size.point_size
     }
 
     pub fn weight(&self) -> I16Dot16 {
@@ -546,7 +586,7 @@ impl std::fmt::Debug for Font {
         f.debug_struct("Font")
             .field("face", self.face())
             .field("point_size", &self.point_size())
-            .field("dpi", &self.dpi)
+            .field("dpi", &self.size.dpi)
             .finish()
     }
 }
@@ -555,12 +595,9 @@ impl Clone for Font {
     fn clone(&self) -> Self {
         Self {
             ft_face: self.ft_face,
-            hb_font: { unsafe { hb_font_reference(self.hb_font) } },
-            point_size: self.point_size,
-            dpi: self.dpi,
             coords: self.coords,
-            fixed_size_index: self.fixed_size_index,
-            scale: self.scale,
+            hb_font: { unsafe { hb_font_reference(self.hb_font) } },
+            size: self.size.clone(),
         }
     }
 }
@@ -568,17 +605,17 @@ impl Clone for Font {
 impl Hash for Font {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_usize(self.ft_face.addr());
-        state.write_i32(self.point_size.into_raw());
-        state.write_u32(self.dpi);
         self.coords.hash(state);
+        state.write_i32(self.size.point_size.into_raw());
+        state.write_u32(self.size.dpi);
     }
 }
 
 impl PartialEq for Font {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.ft_face, other.ft_face)
-            && self.point_size == other.point_size
-            && self.dpi == other.dpi
+            && self.size.point_size == other.size.point_size
+            && self.size.dpi == other.size.dpi
             && self.coords == other.coords
     }
 }
@@ -643,8 +680,8 @@ impl GlyphCache {
         let glyphs = unsafe { &mut *self.glyphs.get() };
         let size_info = SizeInfo {
             coords: font.coords,
-            point_size: font.point_size,
-            dpi: font.dpi,
+            point_size: font.size.point_size,
+            dpi: font.size.dpi,
         };
 
         let slot = glyphs
@@ -691,7 +728,8 @@ impl Font {
             (*(*face).glyph).metrics
         };
 
-        if let Some(scale) = Some(self.scale).filter(|s| *s != 1) {
+        let scale = self.size.scale;
+        if scale != I26Dot6::ONE {
             macro_rules! scale_field {
                 ($name: ident) => {
                     metrics.$name = (metrics.$name * scale.into_raw() as FT_Long) >> 6;
@@ -736,7 +774,7 @@ impl Font {
             let slot = (*face).glyph;
             fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL));
 
-            let scale6 = self.scale.into_raw();
+            let scale6 = self.size.scale.into_raw();
 
             let (ox, oy) = (
                 I26Dot6::from_raw((*slot).bitmap_left * scale6),

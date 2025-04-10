@@ -3,7 +3,7 @@ use std::{alloc::Layout, sync::Arc};
 use crate::{
     color::BGRA8,
     math::I16Dot16,
-    text::{Face, FontAxisValues, FontInfo, WEIGHT_AXIS},
+    text::{Face, FaceInfo, FontAxisValues, WEIGHT_AXIS},
     Renderer, Subrandr, Subtitles,
 };
 
@@ -91,13 +91,13 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
     let name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)).unwrap();
 
     let renderer = unsafe { &mut *renderer };
-    renderer.fonts.add_extra(FontInfo {
-        family: name.to_owned(),
+    renderer.fonts.add_extra(FaceInfo {
+        family: name.into(),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: if weight.is_sign_negative() {
             (*font).axis(WEIGHT_AXIS).map_or_else(
                 || FontAxisValues::Fixed((*font).weight()),
-                |axis| FontAxisValues::Range(axis.minimum(), axis.maximum()),
+                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
             )
         } else {
             crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(weight))

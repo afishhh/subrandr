@@ -179,7 +179,6 @@ macro_rules! define_fixed_for_type {
             }
         }
 
-
         define_simple_fixed_operator!(
             $type, @all Add, add, +, AddAssign, add_assign, +=
         );

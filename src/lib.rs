@@ -947,8 +947,7 @@ impl<'a> Renderer<'a> {
             // FIXME: This should use the main font for the segment, not the font
             //        of the first glyph..
             let metrics = glyphs[0].font.metrics();
-            let strike_y =
-                (y - I32Fixed::from_ft((metrics.height >> 1) + metrics.descender)).trunc_to_inner();
+            let strike_y = (y - (metrics.height / 2) + metrics.descender).trunc_to_inner();
             rasterizer.horizontal_line(
                 target,
                 strike_y as f32,

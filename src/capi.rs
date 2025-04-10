@@ -321,7 +321,7 @@ unsafe extern "C" fn sbr_renderer_add_font(
         weight: match weight {
             f if f.is_nan() => (*font).axis(WEIGHT_AXIS).map_or_else(
                 || FontAxisValues::Fixed((*font).weight()),
-                |axis| FontAxisValues::Range(axis.minimum(), axis.maximum()),
+                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
             ),
             f if (0.0..1000.0).contains(&f) => {
                 crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(f))

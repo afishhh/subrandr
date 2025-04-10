@@ -1212,9 +1212,9 @@ pub const HB_BUFFER_REPLACEMENT_CODEPOINT_DEFAULT: u32 = 65533;
 pub const HB_UNICODE_COMBINING_CLASS_CCC133: u32 = 133;
 pub const HB_UNICODE_MAX_DECOMPOSITION_LEN: u32 = 19;
 pub const HB_VERSION_MAJOR: u32 = 10;
-pub const HB_VERSION_MINOR: u32 = 0;
-pub const HB_VERSION_MICRO: u32 = 1;
-pub const HB_VERSION_STRING: &[u8; 7] = b"10.0.1\0";
+pub const HB_VERSION_MINOR: u32 = 1;
+pub const HB_VERSION_MICRO: u32 = 0;
+pub const HB_VERSION_STRING: &[u8; 7] = b"10.1.0\0";
 pub type wchar_t = ::std::os::raw::c_int;
 #[repr(C)]
 #[repr(align(16))]
@@ -3927,6 +3927,15 @@ extern "C" {
 extern "C" {
     pub fn FT_Face_SetUnpatentedHinting(face: FT_Face, value: FT_Bool) -> FT_Bool;
 }
+extern "C" {
+    pub fn FT_New_Size(face: FT_Face, size: *mut FT_Size) -> FT_Error;
+}
+extern "C" {
+    pub fn FT_Done_Size(size: FT_Size) -> FT_Error;
+}
+extern "C" {
+    pub fn FT_Activate_Size(size: FT_Size) -> FT_Error;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct FT_Glyph_Class_ {
@@ -5364,6 +5373,18 @@ pub struct hb_face_t {
 }
 extern "C" {
     pub fn hb_face_create(blob: *mut hb_blob_t, index: ::std::os::raw::c_uint) -> *mut hb_face_t;
+}
+extern "C" {
+    pub fn hb_face_create_or_fail(
+        blob: *mut hb_blob_t,
+        index: ::std::os::raw::c_uint,
+    ) -> *mut hb_face_t;
+}
+extern "C" {
+    pub fn hb_face_create_from_file_or_fail(
+        file_name: *const ::std::os::raw::c_char,
+        index: ::std::os::raw::c_uint,
+    ) -> *mut hb_face_t;
 }
 pub type hb_reference_table_func_t = ::std::option::Option<
     unsafe extern "C" fn(
@@ -7654,6 +7675,12 @@ extern "C" {
 }
 extern "C" {
     pub fn hb_ft_face_create_referenced(ft_face: FT_Face) -> *mut hb_face_t;
+}
+extern "C" {
+    pub fn hb_ft_face_create_from_file_or_fail(
+        file_name: *const ::std::os::raw::c_char,
+        index: ::std::os::raw::c_uint,
+    ) -> *mut hb_face_t;
 }
 extern "C" {
     pub fn hb_ft_font_create(ft_face: FT_Face, destroy: hb_destroy_func_t) -> *mut hb_font_t;

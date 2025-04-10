@@ -315,8 +315,8 @@ unsafe extern "C" fn sbr_renderer_add_font(
         InvalidArgument("Path is not valid UTF-8"),
         CStr::from_ptr(family).to_str()
     );
-    (*renderer).fonts.add_extra(crate::text::FontInfo {
-        family: family.to_owned(),
+    (*renderer).fonts.add_extra(crate::text::FaceInfo {
+        family: family.into(),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: match weight {
             f if f.is_nan() => (*font).axis(WEIGHT_AXIS).map_or_else(

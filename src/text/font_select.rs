@@ -13,15 +13,15 @@ use super::{Face, WEIGHT_AXIS};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontRequest {
-    pub families: Vec<String>,
+    pub families: Vec<Box<str>>,
     pub weight: I16Dot16,
     pub italic: bool,
     pub codepoint: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
-pub struct FontInfo {
-    pub family: String,
+pub struct FaceInfo {
+    pub family: Box<str>,
     pub width: FontAxisValues,
     pub weight: FontAxisValues,
     pub italic: bool,
@@ -49,7 +49,7 @@ impl FontSource {
     }
 }
 
-fn choose<'a>(fonts: &'a [FontInfo], request: &FontRequest) -> Option<&'a FontInfo> {
+fn choose<'a>(fonts: &'a [FaceInfo], request: &FontRequest) -> Option<&'a FaceInfo> {
     let mut score = u32::MAX;
     let mut result = None;
 
@@ -84,8 +84,8 @@ fn choose<'a>(fonts: &'a [FontInfo], request: &FontRequest) -> Option<&'a FontIn
 }
 
 trait FontProvider: Sealed + std::fmt::Debug {
-    fn query(&mut self, request: &FontRequest) -> Result<Vec<FontInfo>, AnyError>;
-    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError>;
+    fn query(&mut self, request: &FontRequest) -> Result<Vec<FaceInfo>, AnyError>;
+    fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError>;
 }
 
 #[derive(Debug)]
@@ -94,11 +94,11 @@ struct NullFontProvider;
 impl Sealed for NullFontProvider {}
 
 impl FontProvider for NullFontProvider {
-    fn query(&mut self, _request: &FontRequest) -> Result<Vec<FontInfo>, AnyError> {
+    fn query(&mut self, _request: &FontRequest) -> Result<Vec<FaceInfo>, AnyError> {
         Ok(Vec::new())
     }
 
-    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError> {
+    fn query_family(&mut self, _family: &str) -> Result<Vec<FaceInfo>, AnyError> {
         Ok(Vec::new())
     }
 }
@@ -149,9 +149,10 @@ pub enum Error {
 #[derive(Debug)]
 pub struct FontSelect {
     source_cache: HashMap<FontSource, Face>,
+    family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
     request_cache: HashMap<FontRequest, Option<Face>>,
     provider: Box<dyn FontProvider>,
-    custom: Vec<FontInfo>,
+    custom: Vec<FaceInfo>,
 }
 
 fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
@@ -167,6 +168,7 @@ impl FontSelect {
 
         Ok(Self {
             source_cache: HashMap::new(),
+            family_cache: HashMap::new(),
             request_cache: HashMap::new(),
             provider,
             custom: Vec::new(),
@@ -177,13 +179,24 @@ impl FontSelect {
         self.custom.clear();
     }
 
-    pub fn add_extra(&mut self, font: FontInfo) {
+    pub fn add_extra(&mut self, font: FaceInfo) {
         self.custom.push(font);
     }
 
     pub fn advance_cache_generation(&mut self) {
         for face in self.request_cache.values().filter_map(Option::as_ref) {
             face.glyph_cache().advance_generation();
+        }
+    }
+
+    pub fn open(&mut self, face: &FaceInfo) -> Result<Face, Error> {
+        if let Some(cached) = self.source_cache.get(&face.source) {
+            Ok(cached.clone())
+        } else {
+            let loaded = face.source.load().map_err(Error::FailedToLoadFont)?;
+            self.source_cache
+                .insert(face.source.clone(), loaded.clone());
+            Ok(loaded)
         }
     }
 
@@ -207,15 +220,7 @@ impl FontSelect {
             });
 
             let mut result = choose(&choices, request)
-                .map(|x| {
-                    if let Some(cached) = self.source_cache.get(&x.source) {
-                        Ok(cached.clone())
-                    } else {
-                        let loaded = x.source.load().map_err(Error::FailedToLoadFont)?;
-                        self.source_cache.insert(x.source.clone(), loaded.clone());
-                        Ok(loaded)
-                    }
-                })
+                .map(|x| self.open(x))
                 .transpose()?;
 
             if let Some(ref mut face) = result {
@@ -235,10 +240,26 @@ impl FontSelect {
         italic: bool,
     ) -> Result<Face, Error> {
         self.select(&FontRequest {
-            families: vec![name.to_owned()],
+            families: vec![name.into()],
             weight,
             italic,
             codepoint: None,
+        })
+    }
+
+    pub fn query_by_name(&mut self, name: &str) -> Result<&[FaceInfo], Error> {
+        // NLL problem case 3 again
+        let family_cache = &raw mut self.family_cache;
+        if let Some(existing) = unsafe { (*family_cache).get(name) } {
+            return Ok(existing);
+        }
+
+        let result = self.provider.query_family(name).map_err(Error::Provider)?;
+        Ok(unsafe {
+            (*family_cache)
+                .entry(name.into())
+                .insert_entry(result)
+                .into_mut()
         })
     }
 }

@@ -11,13 +11,12 @@ use thiserror::Error;
 use crate::{
     math::I16Dot16,
     text::{
-        font_select::{FontInfo, FontProvider, FontRequest, FontSource},
+        font_select::{FaceInfo, FontProvider, FontRequest, FontSource},
         FontAxisValues,
     },
     util::{AnyError, Sealed},
 };
 
-// TODO: FcFini
 #[derive(Debug)]
 pub struct FontconfigFontProvider {
     config: *mut FcConfig,
@@ -25,7 +24,7 @@ pub struct FontconfigFontProvider {
 
 #[derive(Error, Debug)]
 #[error("Failed to initialize fontconfig")]
-pub struct NewError(());
+pub struct NewError;
 
 #[derive(Error, Debug)]
 pub enum LoadError {
@@ -54,7 +53,7 @@ impl FontconfigFontProvider {
         unsafe {
             let config = FcInitLoadConfigAndFonts();
             if config.is_null() {
-                return Err(NewError(()));
+                return Err(NewError);
             }
             Ok(Self { config })
         }
@@ -69,7 +68,7 @@ impl Drop for FontconfigFontProvider {
     fn drop(&mut self) {
         unsafe {
             FcConfigDestroy(self.config);
-            FcFini()
+            FcFini();
         };
     }
 }
@@ -240,12 +239,12 @@ fn map_fontconfig_weight_axis_to_opentype(axis: FontAxisValues) -> Option<FontAx
         }
         FontAxisValues::Range(start, end) => FontAxisValues::Range(
             map_fontconfig_weight_to_opentype(start)?,
-            map_opentype_weight_to_fontconfig(end)?,
+            map_fontconfig_weight_to_opentype(end)?,
         ),
     })
 }
 
-unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FontInfo> {
+unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
     let family = unsafe {
         let mut family = MaybeUninit::uninit();
         if FcPatternGetString(
@@ -301,8 +300,8 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FontInfo> {
         ))
     };
 
-    Some(FontInfo {
-        family: family.to_owned(),
+    Some(FaceInfo {
+        family: family.into(),
         width,
         weight,
         italic,
@@ -310,11 +309,85 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FontInfo> {
     })
 }
 
+impl FontconfigFontProvider {
+    fn query_by_param(
+        &mut self,
+        param_name: *const i8,
+        value: &CStr,
+    ) -> Result<Vec<FaceInfo>, AnyError> {
+        let pattern = unsafe { FcPatternCreate() };
+        if pattern.is_null() {
+            return Err(LoadError::PatternCreate.into());
+        }
+
+        unsafe { FcPatternAddString(pattern, param_name, value.as_ptr() as *const u8) };
+
+        let object_set = unsafe {
+            FcObjectSetBuild(
+                FC_FAMILY.as_ptr().cast::<i8>(),
+                FC_SLANT,
+                FC_WIDTH,
+                FC_WEIGHT,
+                FC_FILE,
+            )
+        };
+
+        if object_set.is_null() {
+            unsafe { FcPatternDestroy(pattern) };
+            return Err(LoadError::ObjectSetBuild.into());
+        }
+
+        let font_set = unsafe { FcFontList(self.config, pattern, object_set) };
+
+        if font_set.is_null() {
+            unsafe {
+                FcPatternDestroy(pattern);
+                FcObjectSetDestroy(object_set)
+            };
+            return Err(LoadError::FontList.into());
+        }
+
+        if unsafe { (*font_set).nfont } == 0 {
+            unsafe {
+                FcPatternDestroy(pattern);
+                FcFontSetDestroy(font_set);
+                FcObjectSetDestroy(object_set)
+            };
+            return Ok(Vec::new());
+        }
+
+        let fonts = unsafe {
+            std::slice::from_raw_parts(
+                (*font_set).fonts as *const *mut FcPattern,
+                (*font_set).nfont as usize,
+            )
+        };
+
+        let mut results = Vec::new();
+
+        for font in fonts.iter().copied() {
+            let Some(info) = (unsafe { font_info_from_pattern(font) }) else {
+                continue;
+            };
+
+            results.push(info);
+        }
+
+        unsafe {
+            FcPatternDestroy(pattern);
+            FcFontSetDestroy(font_set);
+            FcObjectSetDestroy(object_set);
+        };
+
+        Ok(results)
+    }
+}
+
 impl FontProvider for FontconfigFontProvider {
     fn query(
         &mut self,
         req: &FontRequest,
-    ) -> Result<Vec<crate::text::font_select::FontInfo>, AnyError> {
+    ) -> Result<Vec<crate::text::font_select::FaceInfo>, AnyError> {
         // TODO: Free on error
         let pattern = unsafe { FcPatternCreate() };
         if pattern.is_null() {
@@ -334,13 +407,12 @@ impl FontProvider for FontconfigFontProvider {
             };
         }
 
-        // TODO: closest match
         let Some(fc_weight) = map_opentype_weight_to_fontconfig(req.weight) else {
             return Err(LoadError::InvalidWeight.into());
         };
 
         for family in &req.families {
-            let Ok(cname) = CString::new(family.clone()) else {
+            let Ok(cname) = CString::new(family.clone().into_string()) else {
                 continue;
             };
 
@@ -438,62 +510,20 @@ impl FontProvider for FontconfigFontProvider {
         Ok(results)
     }
 
-    fn query_all(&mut self) -> Result<Vec<FontInfo>, AnyError> {
-        // TODO: Free on error
-        let pattern = unsafe { FcPatternCreate() };
-        if pattern.is_null() {
-            return Err(LoadError::PatternCreate.into());
-        }
-
-        let object_set = unsafe {
-            FcObjectSetBuild(
-                FC_FAMILY.as_ptr().cast::<i8>(),
-                FC_SLANT,
-                FC_WIDTH,
-                FC_WEIGHT,
-                FC_FILE,
-            )
+    fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError> {
+        let Ok(cfamily) = CString::new(family) else {
+            return Ok(Vec::new());
         };
 
-        if object_set.is_null() {
-            unsafe { FcPatternDestroy(pattern) };
-            return Err(LoadError::ObjectSetBuild.into());
+        let properties: [&[u8]; 3] = [FC_FAMILY, FC_POSTSCRIPT_NAME, FC_FULLNAME];
+        for property in properties {
+            let result = self.query_by_param(property.as_ptr() as *const i8, &cfamily)?;
+            if !result.is_empty() {
+                return Ok(result);
+            }
         }
 
-        let font_set = unsafe { FcFontList(self.config, pattern, object_set) };
-
-        if font_set.is_null() {
-            unsafe {
-                FcPatternDestroy(pattern);
-                FcObjectSetDestroy(object_set)
-            };
-            return Err(LoadError::FontList.into());
-        }
-
-        let fonts = unsafe {
-            std::slice::from_raw_parts(
-                (*font_set).fonts as *const *mut FcPattern,
-                (*font_set).nfont as usize,
-            )
-        };
-
-        let mut results = Vec::new();
-
-        for font in fonts.iter().copied() {
-            let Some(info) = (unsafe { font_info_from_pattern(font) }) else {
-                continue;
-            };
-
-            results.push(info);
-        }
-
-        unsafe {
-            FcPatternDestroy(pattern);
-            FcFontSetDestroy(font_set);
-            FcObjectSetDestroy(object_set);
-        };
-
-        Ok(results)
+        Ok(Vec::new())
     }
 }
 

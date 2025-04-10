@@ -14,7 +14,7 @@ use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
-    FontArena, FontRequest, TextMetrics,
+    FontArena, TextMetrics,
 };
 use vtt::VttEvent;
 
@@ -1204,8 +1204,13 @@ impl<'a> Renderer<'a> {
                 for segment in event.segments.iter() {
                     match segment {
                         Segment::Text(segment) => {
-                            let font_request = FontRequest {
-                                families: segment.font.clone(),
+                            let font_request = text::FontRequest {
+                                families: segment
+                                    .font
+                                    .iter()
+                                    .map(AsRef::as_ref)
+                                    .map(Into::into)
+                                    .collect(),
                                 weight: I16Dot16::new(segment.font_weight as i32),
                                 italic: segment.italic,
                                 codepoint: None,

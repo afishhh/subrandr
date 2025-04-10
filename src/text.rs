@@ -148,7 +148,6 @@ pub struct TextMetrics {
 
 impl TextMetrics {
     fn extend_by_font(&mut self, font: &Font) {
-        // FIXME: Is this bad for perf when done on all glyphs instead of just the unique fonts?
         let metrics = font.metrics();
         self.max_ascender = self.max_ascender.max(metrics.ascender);
         self.min_descender = self.min_descender.min(metrics.descender);

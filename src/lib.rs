@@ -21,6 +21,8 @@ use vtt::VttEvent;
 pub mod srv3;
 pub mod vtt;
 
+mod layout;
+
 mod capi;
 mod color;
 mod log;
@@ -1176,6 +1178,21 @@ impl<'a> Renderer<'a> {
                 );
             }
         }
+
+        let mut list = layout::FontList::new();
+        dbg!(layout::match_fonts_for_text(
+            &mut list,
+            0,
+            "hello 世界!😭",
+            &["JetBrains Mono", "sans-serif"],
+            &layout::FontStyle {
+                weight: I16Dot16::new(500),
+                italic: true,
+            },
+            I16Dot16::new(160),
+            &mut self.fonts,
+        ));
+        dbg!(list);
 
         let shape_scale = ctx.pixel_scale();
 

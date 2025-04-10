@@ -34,6 +34,29 @@ pub enum FontAxisValues {
     Range(I16Dot16, I16Dot16),
 }
 
+impl FontAxisValues {
+    pub fn minimum(&self) -> I16Dot16 {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed,
+            &FontAxisValues::Range(start, _) => start,
+        }
+    }
+
+    pub fn maximum(&self) -> I16Dot16 {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed,
+            &FontAxisValues::Range(_, end) => end,
+        }
+    }
+
+    pub fn contains(&self, value: I16Dot16) -> bool {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed == value,
+            &FontAxisValues::Range(start, end) => start <= value && value <= end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
     File(PathBuf),
@@ -155,7 +178,7 @@ pub struct FontSelect {
     custom: Vec<FaceInfo>,
 }
 
-fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
+pub fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
     if let Some(axis) = face.axis(WEIGHT_AXIS) {
         face.set_axis(axis.index, weight)
     }
@@ -200,13 +223,14 @@ impl FontSelect {
         }
     }
 
-    pub fn select(&mut self, request: &FontRequest) -> Result<Face, Error> {
-        if let Some(cached) = self.request_cache.get(request) {
+    pub fn try_select(&mut self, request: &FontRequest) -> Result<Option<Face>, Error> {
+        Ok(if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
             let mut choices = self.provider.query(request).map_err(Error::Provider)?;
 
             let custom_start = choices.len();
+            // TODO: This should check whether request.codepoint exists in the font
             choices.extend(self.custom.iter().cloned());
 
             choices[custom_start..].sort_by_cached_key(|font| {
@@ -229,8 +253,11 @@ impl FontSelect {
 
             self.request_cache.insert(request.clone(), result.clone());
             result
-        }
-        .ok_or(Error::NotFound)
+        })
+    }
+
+    pub fn select(&mut self, request: &FontRequest) -> Result<Face, Error> {
+        self.try_select(request)?.ok_or(Error::NotFound)
     }
 
     pub fn select_simple(

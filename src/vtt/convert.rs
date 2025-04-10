@@ -2,7 +2,7 @@ use crate::{
     color::BGRA8,
     log::{log_once_state, warning, LogOnceSet},
     math::{I26Dot6, Point2, Rect2, Vec2},
-    vtt, EventExtra, Layouter, Subrandr, SubtitleContext,
+    vtt, EventExtra, Layouter, Subrandr, SubtitleClass, SubtitleContext,
 };
 
 #[derive(Debug)]
@@ -96,28 +96,6 @@ pub(crate) struct VttEvent {
     size: f64,
     x: f64,
     y: f64,
-}
-
-impl crate::SubtitleClass for Class {
-    fn get_name(&self) -> &'static str {
-        "vtt"
-    }
-
-    fn get_font_size(
-        &self,
-        ctx: &crate::SubtitleContext,
-        _event: &crate::Event,
-        _segment: &crate::TextSegment,
-    ) -> f32 {
-        // Standard says 5vh, but browser engines use 5vmin.
-        // See https://github.com/w3c/webvtt/issues/529
-        let pixels = ctx.player_height().min(ctx.player_width()) * 0.05 * 96.0 / ctx.ppi() as f32;
-        pixels * 96.0 / 72.0
-    }
-
-    fn create_layouter(&self) -> Box<dyn crate::Layouter> {
-        Box::new(VttLayouter { output: Vec::new() })
-    }
 }
 
 struct VttLayouter {
@@ -351,7 +329,17 @@ impl Layouter for VttLayouter {
 
 pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
     let mut subtitles = crate::Subtitles {
-        class: &Class,
+        class: &SubtitleClass {
+            name: "vtt",
+            get_font_size: |ctx, _event, _segment| -> f32 {
+                // Standard says 5vh, but browser engines use 5vmin.
+                // See https://github.com/w3c/webvtt/issues/529
+                let pixels =
+                    ctx.player_height().min(ctx.player_width()) * 0.05 * 96.0 / ctx.ppi() as f32;
+                pixels * 96.0 / 72.0
+            },
+            create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
+        },
         events: Vec::new(),
     };
 

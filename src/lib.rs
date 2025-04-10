@@ -304,40 +304,33 @@ impl SubtitleContext {
     }
 }
 
-trait SubtitleClass: Debug {
-    fn get_name(&self) -> &'static str;
-    fn get_font_size(&self, ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32;
-    fn create_layouter(&self) -> Box<dyn Layouter>;
+#[derive(Debug)]
+struct SubtitleClass {
+    name: &'static str,
+    get_font_size: fn(ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32,
+    create_layouter: fn() -> Box<dyn Layouter>,
 }
 
 // Font size passed through directly.
 // Coordinate system 0.0-1.0 percentages
-#[derive(Debug)]
-struct TestSubtitleClass;
-impl SubtitleClass for TestSubtitleClass {
-    fn get_name(&self) -> &'static str {
-        "<test>"
-    }
-
-    fn get_font_size(&self, _ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
+const TEST_SUBTITLE_CLASS: SubtitleClass = SubtitleClass {
+    name: "<test>",
+    get_font_size: |_ctx: &SubtitleContext, _event: &Event, segment: &TextSegment| -> f32 {
         segment.font_size
-    }
-
-    fn create_layouter(&self) -> Box<dyn Layouter> {
-        Box::new(TestLayouter)
-    }
-}
+    },
+    create_layouter: || Box::new(TestLayouter),
+};
 
 #[derive(Debug)]
 pub struct Subtitles {
-    class: &'static dyn SubtitleClass,
+    class: &'static SubtitleClass,
     events: Vec<Event>,
 }
 
 impl Subtitles {
     pub const fn empty() -> Self {
         Self {
-            class: &TestSubtitleClass,
+            class: &TEST_SUBTITLE_CLASS,
             events: vec![],
         }
     }
@@ -345,7 +338,7 @@ impl Subtitles {
     #[doc(hidden)]
     pub fn test_new() -> Self {
         Self {
-            class: &TestSubtitleClass,
+            class: &TEST_SUBTITLE_CLASS,
             events: vec![
                 Event {
                     start: 0,
@@ -991,7 +984,7 @@ impl<'a> Renderer<'a> {
                 self.sbr,
                 "rendering skipped: frame hasn't changed {:?} (class={} ctx={ctx:?} t={t}ms)",
                 self.unchanged_range,
-                subs.class.get_name()
+                subs.class.name
             );
             return;
         }
@@ -1046,7 +1039,7 @@ impl<'a> Renderer<'a> {
         trace!(
             self.sbr,
             "rendering frame (class={} ctx={ctx:?} t={t}ms)",
-            subs.class.get_name()
+            subs.class.name
         );
 
         if DRAW_VERSION_STRING {
@@ -1071,7 +1064,7 @@ impl<'a> Renderer<'a> {
                 target,
                 0,
                 (20.0 * ctx.pixel_scale()) as i32,
-                &format!("subtitle class: {}", subs.class.get_name()),
+                &format!("subtitle class: {}", subs.class.name),
                 Alignment::TopLeft,
                 16.0,
                 BGRA8::WHITE,
@@ -1189,7 +1182,7 @@ impl<'a> Renderer<'a> {
 
         let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
-            let mut layouter = subs.class.create_layouter();
+            let mut layouter = (subs.class.create_layouter)();
             let font_arena = FontArena::new();
             for event in subs.events.iter() {
                 let r = unchanged_range.clone();
@@ -1217,11 +1210,10 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let font = self
-                                .fonts
-                                .select(&font_request)
-                                .unwrap()
-                                .with_size(subs.class.get_font_size(ctx, event, segment), ctx.dpi);
+                            let font = self.fonts.select(&font_request).unwrap().with_size(
+                                (subs.class.get_font_size)(ctx, event, segment),
+                                ctx.dpi,
+                            );
 
                             match segment.ruby {
                                 Ruby::None => {
@@ -1426,7 +1418,7 @@ impl<'a> Renderer<'a> {
                             final_logical_box.max.x as i32,
                             final_logical_box.min.y as i32,
                             &if let Segment::Text(segment) = segment {
-                                format!("{:.0}pt", subs.class.get_font_size(ctx, event, segment))
+                                format!("{:.0}pt", (subs.class.get_font_size)(ctx, event, segment))
                             } else {
                                 "shape".to_owned()
                             },

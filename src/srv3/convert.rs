@@ -226,22 +226,6 @@ pub(crate) struct Srv3Event {
     y: f32,
 }
 
-#[derive(Debug)]
-struct Srv3SubtitleClass;
-impl SubtitleClass for Srv3SubtitleClass {
-    fn get_name(&self) -> &'static str {
-        "srv3"
-    }
-
-    fn get_font_size(&self, ctx: &SubtitleContext, _event: &Event, segment: &TextSegment) -> f32 {
-        font_scale_from_ctx(ctx) * segment.font_size
-    }
-
-    fn create_layouter(&self) -> Box<dyn crate::Layouter> {
-        Box::new(Srv3Layouter)
-    }
-}
-
 struct Srv3Layouter;
 
 impl Layouter for Srv3Layouter {
@@ -303,7 +287,13 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
 
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut result = Subtitles {
-        class: &Srv3SubtitleClass,
+        class: &SubtitleClass {
+            name: "srv3",
+            get_font_size: |ctx, _event, segment| -> f32 {
+                font_scale_from_ctx(ctx) * segment.font_size
+            },
+            create_layouter: || Box::new(Srv3Layouter),
+        },
         events: vec![],
     };
 

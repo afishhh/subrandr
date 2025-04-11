@@ -9,30 +9,38 @@ use super::{FontArena, FontSelect, TextMetrics};
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
-enum ShaperSegment {
-    Text {
-        font: text::Font,
-        line_breaking_forbidden: bool,
-    },
+enum Content<'a> {
+    Text(TextContent<'a>),
     Shape(Rect2<i32>),
-    Skipped,
+    None,
 }
 
-struct RubyAnnotationSegment {
-    starting_base_segment_index: usize,
-    font: text::Font,
+struct ShaperSegment<'a> {
+    content: Content<'a>,
+    end: usize,
+}
+
+struct TextContent<'a> {
+    font: &'a text::Font,
+    internal_breaks_allowed: bool,
+    ruby_annotation: Option<Box<RubyAnnotation<'a>>>,
+}
+
+struct RubyAnnotation<'a> {
+    font: &'a text::Font,
     input_index: usize,
-    text_end: usize,
-    next_continues_container: bool,
+    // Note: Text does not shape or form ligatures across ruby annotations or bases, even merged ones, due to bidi isolation. See § 3.5 Bidi Reordering and CSS Text 3 § 7.3 Shaping Across Element Boundaries.
+    // ^^ This means we can treat all ruby annotation as completely separate pieces of text.
+    text: &'a str,
 }
 
-pub struct MultilineTextShaper {
+pub struct MultilineTextShaper<'a> {
     text: String,
     explicit_line_bounaries: Vec</* end of line i */ usize>,
-    segment_boundaries: Vec<(ShaperSegment, /* end of segment i */ usize)>,
+    segments: Vec<ShaperSegment<'a>>,
     intra_font_segment_splits: Vec<usize>,
 
-    ruby_annotations: Vec<RubyAnnotationSegment>,
+    ruby_annotations: Vec<RubyAnnotation<'a>>,
     ruby_annotation_text: String,
 }
 
@@ -118,30 +126,20 @@ pub struct RubyBaseId(usize);
 // Chromium seems to lay out ruby text at the top of the current entire line box,
 // *when the whole thing is in one block* but youtube uses inline-block so the sane
 // layout is correct.
-// TODO: Currently annotations are not taken into account when line wrapping,
-//       and ruby bases are not centered when annotations overflow them.
-// TODO: Overlapping rubies are currently handled by joining and centering the
-//       text above them, this is not the correct solution.
-//       Instead the underlying bases should be spaced out, all this means that ruby
-//       layout in general should be integrated into the main loop somehow.
-//       Possibly by actually having the "we're laying out *multiple rows of text at once*"
-//       concept going.
-//       Note that the currently solution also works only one way, i.e. annotations are only
-//       merged in a single pass towards the right, which misses some cases.
 
-impl MultilineTextShaper {
+impl<'a> MultilineTextShaper<'a> {
     pub const fn new() -> Self {
         Self {
             text: String::new(),
             explicit_line_bounaries: Vec::new(),
-            segment_boundaries: Vec::new(),
+            segments: Vec::new(),
             intra_font_segment_splits: Vec::new(),
             ruby_annotation_text: String::new(),
             ruby_annotations: Vec::new(),
         }
     }
 
-    pub fn add_text(&mut self, mut text: &str, font: &text::Font) {
+    pub fn add_text(&mut self, mut text: &str, font: &'a text::Font) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 INPUT TEXT: {:?} {:?}", text, font);
         }
@@ -153,13 +151,15 @@ impl MultilineTextShaper {
         }
         self.text.push_str(text);
 
-        if let Some((
-            ShaperSegment::Text {
-                font: ref last_font,
-                line_breaking_forbidden: false,
-            },
-            ref mut last_end,
-        )) = self.segment_boundaries.last_mut()
+        if let Some(&mut ShaperSegment {
+            content:
+                Content::Text(TextContent {
+                    font: last_font,
+                    internal_breaks_allowed: true,
+                    ruby_annotation: None,
+                }),
+            end: ref mut last_end,
+        }) = self.segments.last_mut()
         {
             if last_font == font {
                 self.intra_font_segment_splits.push(*last_end);
@@ -168,63 +168,74 @@ impl MultilineTextShaper {
             }
         }
 
-        self.segment_boundaries.push((
-            ShaperSegment::Text {
-                font: font.clone(),
-                line_breaking_forbidden: false,
-            },
-            self.text.len(),
-        ));
+        self.segments.push(ShaperSegment {
+            content: Content::Text(TextContent {
+                font,
+                internal_breaks_allowed: true,
+                ruby_annotation: None,
+            }),
+            end: self.text.len(),
+        });
     }
 
     // TODO: Maybe a better system should be devised than this.
     //       Potentially just track an arbitrary `usize` provided as input for each segment,
     //       would require some restructuring.
     pub fn skip_segment_for_output(&mut self) {
-        self.segment_boundaries
-            .push((ShaperSegment::Skipped, self.text.len()));
+        self.segments.push(ShaperSegment {
+            content: Content::None,
+            end: self.text.len(),
+        });
     }
 
-    pub fn add_ruby_base(&mut self, text: &str, font: &text::Font) -> RubyBaseId {
-        let id = self.segment_boundaries.len() + self.intra_font_segment_splits.len();
+    pub fn add_ruby_base(&mut self, text: &str, font: &'a text::Font) -> RubyBaseId {
+        let id = self.segments.len();
+
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 INPUT RUBY BASE[{id}]: {:?} {:?}", text, font);
         }
 
         self.text.push_str(text);
-        self.segment_boundaries.push((
-            ShaperSegment::Text {
-                font: font.clone(),
-                line_breaking_forbidden: true,
-            },
-            self.text.len(),
-        ));
+        self.segments.push(ShaperSegment {
+            content: Content::Text(TextContent {
+                font,
+                internal_breaks_allowed: false,
+                ruby_annotation: None,
+            }),
+            end: self.text.len(),
+        });
 
         RubyBaseId(id)
     }
 
-    pub fn add_ruby_annotation(
-        &mut self,
-        base: RubyBaseId,
-        text: &str,
-        font: &text::Font,
-        next_continues_container: bool,
-    ) {
+    pub fn add_ruby_annotation(&mut self, base: RubyBaseId, text: &'a str, font: &'a text::Font) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!(
-                "SHAPING V2 INPUT RUBY ANNOTATION AT {}: {:?} {:?}",
+                "SHAPING V2 INPUT RUBY ANNOTATION FOR {}: {:?} {:?}",
                 base.0, text, font
             );
         }
 
-        self.ruby_annotation_text.push_str(text);
-        self.ruby_annotations.push(RubyAnnotationSegment {
-            font: font.clone(),
-            starting_base_segment_index: base.0,
-            input_index: self.segment_boundaries.len() + self.intra_font_segment_splits.len(),
-            text_end: self.ruby_annotation_text.len(),
-            next_continues_container,
-        });
+        let index = self.segments.len() + self.intra_font_segment_splits.len();
+
+        let ShaperSegment {
+            content:
+                Content::Text(TextContent {
+                    font: _,
+                    internal_breaks_allowed: false,
+                    ruby_annotation: ref mut ruby_annotation @ None,
+                }),
+            ..
+        } = self.segments[base.0]
+        else {
+            panic!("ruby annotation placed on non-ruby base segment or one that already has an annotation in multiline shaper");
+        };
+
+        *ruby_annotation = Some(Box::new(RubyAnnotation {
+            font,
+            input_index: index,
+            text,
+        }));
         self.skip_segment_for_output();
     }
 
@@ -234,93 +245,10 @@ impl MultilineTextShaper {
         }
 
         self.text.push('\0');
-        self.segment_boundaries
-            .push((ShaperSegment::Shape(dim), self.text.len()))
-    }
-
-    fn layout_line_ruby<'f>(
-        &self,
-        segments: &mut Vec<ShapedSegment<'f>>,
-        annotations: &[RubyAnnotationSegment],
-        font_arena: &'f FontArena,
-        font_select: &mut FontSelect,
-    ) {
-        let ruby_segments_start = segments.len();
-
-        let mut current_segment = 0;
-        let mut current_text_cursor = 0;
-        let mut current_annotation = 0;
-        while current_segment < segments.len() && current_annotation < annotations.len() {
-            let first_base = &segments[current_segment];
-            let annotation = &annotations[current_annotation];
-            if segments[current_segment].corresponding_input_segment
-                == annotation.starting_base_segment_index
-            {
-                let start_x = first_base.logical_rect.min.x;
-                let end_x = first_base.logical_rect.max.x;
-
-                let baseline_y = first_base.baseline_offset.y - first_base.max_ascender;
-
-                let (glyphs, extents) = shape_simple_segment(
-                    &annotation.font,
-                    &self.ruby_annotation_text[current_text_cursor..annotation.text_end],
-                    ..,
-                    font_arena,
-                    font_select,
-                );
-
-                segments.push(ShapedSegment {
-                    glyphs: Some(RcArray::from_boxed(glyphs.into_boxed_slice())),
-                    baseline_offset: Point2::new(
-                        // This is only temporarily stored here, and read during the
-                        // second pass below.
-                        extents.paint_size.x + extents.trailing_advance,
-                        baseline_y,
-                    ),
-                    logical_rect: Rect2::new(
-                        Point2::new(start_x, baseline_y - extents.max_ascender),
-                        Point2::new(end_x, baseline_y - extents.min_descender),
-                    ),
-                    max_ascender: extents.max_ascender,
-                    corresponding_input_segment: annotation.input_index,
-                });
-
-                current_annotation += 1;
-                current_text_cursor = annotation.text_end;
-            }
-            current_segment += 1;
-        }
-
-        let mut current = ruby_segments_start;
-        while let Some(first) = segments.get(current) {
-            let start_x = first.logical_rect.min.x;
-            let mut total_width = I26Dot6::ZERO;
-
-            let merged_start = current;
-            loop {
-                let segment = &segments[current];
-                total_width += segment.baseline_offset.x;
-                let centered_end = (start_x + segment.logical_rect.max.x) / 2 + total_width / 2;
-                current += 1;
-                if current >= segments.len() || centered_end < segments[current].logical_rect.min.x
-                {
-                    break;
-                }
-            }
-
-            let merged = &mut segments[merged_start..current];
-            let total_space = merged.last().unwrap().logical_rect.max.x - start_x;
-            let centering_pad = (total_space - total_width) / 2;
-
-            let mut last_end = start_x + centering_pad;
-            for next in merged {
-                let width = next.baseline_offset.x;
-                next.baseline_offset.x = last_end;
-                next.logical_rect.min.x = next.logical_rect.min.x.min(last_end);
-                last_end += width;
-                next.logical_rect.max.x = next.logical_rect.max.x.max(last_end);
-            }
-        }
+        self.segments.push(ShaperSegment {
+            content: Content::Shape(dim),
+            end: self.text.len(),
+        })
     }
 
     pub fn shape<'f>(
@@ -347,7 +275,6 @@ impl MultilineTextShaper {
         let mut current_explicit_line = 0;
         let mut current_segment = 0;
         let mut current_intra_split = 0;
-        let mut current_ruby_annotation = 0;
         let mut last = 0;
         let mut post_wrap_skip = 0;
         while current_explicit_line <= self.explicit_line_bounaries.len() {
@@ -356,15 +283,16 @@ impl MultilineTextShaper {
                 .get(current_explicit_line)
                 .copied()
                 .unwrap_or(self.text.len());
-            let mut segments: Vec<ShapedSegment> = vec![];
+            let mut annotation_segments: Vec<ShapedSegment> = Vec::new();
+            let mut segments: Vec<ShapedSegment> = Vec::new();
             let mut current_x = I26Dot6::ZERO;
 
             if MULTILINE_SHAPER_DEBUG_PRINT {
                 println!(
-                    "last: {last}, font boundaries: {:?}, current segment: {}",
-                    self.segment_boundaries
+                    "last: {last}, segment boundaries: {:?}, current segment: {}",
+                    self.segments
                         .iter()
-                        .map(|(_, s)| s)
+                        .map(|ShaperSegment { end, .. }| end)
                         .collect::<Vec<_>>(),
                     current_segment
                 );
@@ -374,24 +302,28 @@ impl MultilineTextShaper {
             let mut line_min_descender = I32Fixed::ZERO;
             let mut line_max_lineskip_descent = I32Fixed::ZERO;
 
-            while self.segment_boundaries[current_segment].1 <= last {
+            while self.segments[current_segment].end <= last {
                 current_segment += 1;
             }
 
             let mut did_wrap = false;
 
             'segment_shaper: loop {
-                let (ref segment, font_boundary) = self.segment_boundaries[current_segment];
+                let ShaperSegment {
+                    content: ref segment,
+                    end: font_boundary,
+                } = self.segments[current_segment];
 
                 let end = font_boundary.min(line_boundary);
                 let segment_slice = last..end;
 
                 match segment {
-                    ShaperSegment::Skipped => {}
-                    ShaperSegment::Text {
+                    Content::None => {}
+                    &Content::Text(TextContent {
                         font,
-                        line_breaking_forbidden,
-                    } => {
+                        internal_breaks_allowed,
+                        ref ruby_annotation,
+                    }) => {
                         let (glyphs, extents) = shape_simple_segment(
                             font,
                             &self.text,
@@ -402,7 +334,8 @@ impl MultilineTextShaper {
 
                         if !did_wrap
                             && wrap.mode == TextWrapMode::Normal
-                            && !*line_breaking_forbidden
+                            // TODO: breaking before a box is always legal
+                            && internal_breaks_allowed
                             && current_x + extents.paint_size.x > wrap_width
                         {
                             let mut x = extents.paint_size.x;
@@ -478,26 +411,80 @@ impl MultilineTextShaper {
 
                         let logical_height = extents.max_ascender - extents.min_descender;
 
+                        let ruby_padding = if let Some(annotation) = ruby_annotation {
+                            let (glyphs, ruby_metrics) = shape_simple_segment(
+                                annotation.font,
+                                annotation.text,
+                                ..,
+                                font_arena,
+                                font_select,
+                            );
+
+                            let base_width = extents.paint_size.x + extents.trailing_advance;
+                            let ruby_width =
+                                ruby_metrics.paint_size.x + ruby_metrics.trailing_advance;
+                            let (base_padding, ruby_padding) = if ruby_width > base_width {
+                                ((ruby_width - base_width) / 2, I26Dot6::ZERO)
+                            } else {
+                                (I26Dot6::ZERO, (base_width - ruby_width) / 2)
+                            };
+
+                            // FIXME: Annotations seem to be slightly above where they should and
+                            //        the logical rects also appear to be slightly to high.
+                            annotation_segments.push(ShapedSegment {
+                                glyphs: Some(RcArray::from_boxed(glyphs.into_boxed_slice())),
+                                baseline_offset: Point2::new(
+                                    current_x + ruby_padding,
+                                    current_line_y - extents.max_ascender,
+                                ),
+                                logical_rect: Rect2::from_min_size(
+                                    Point2::new(-ruby_padding, I26Dot6::ZERO),
+                                    Vec2::new(
+                                        ruby_metrics.paint_size.x
+                                            + ruby_metrics.trailing_advance
+                                            + ruby_padding * 2,
+                                        current_line_y
+                                            - extents.max_ascender
+                                            - ruby_metrics.max_ascender,
+                                    ),
+                                ),
+                                corresponding_input_segment: annotation.input_index,
+                                max_ascender: ruby_metrics.max_ascender,
+                            });
+
+                            base_padding
+                        } else {
+                            I26Dot6::ZERO
+                        };
+
                         if self
                             .intra_font_segment_splits
                             .get(current_intra_split)
                             .is_none_or(|split| *split >= end)
                         {
+                            let logical_width =
+                                extents.paint_size.x + extents.trailing_advance + ruby_padding * 2;
                             segments.push(ShapedSegment {
                                 glyphs: Some(rc_glyphs),
-                                baseline_offset: Point2::new(current_x, current_line_y),
+                                baseline_offset: Point2::new(
+                                    current_x + ruby_padding,
+                                    current_line_y,
+                                ),
                                 logical_rect: Rect2::from_min_size(
-                                    Point2::ZERO,
-                                    Vec2::new(
-                                        extents.paint_size.x + extents.trailing_advance,
-                                        logical_height,
-                                    ),
+                                    Point2::new(-ruby_padding, I26Dot6::ZERO),
+                                    Vec2::new(logical_width, logical_height),
                                 ),
                                 max_ascender: extents.max_ascender,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
-                            current_x += extents.paint_size.x + extents.trailing_advance;
+                            current_x += logical_width;
                         } else {
+                            assert_eq!(
+                                ruby_padding,
+                                I26Dot6::ZERO,
+                                "ruby bases cannot have internal segment splits"
+                            );
+
                             let mut last_glyph_idx = 0;
 
                             loop {
@@ -540,8 +527,8 @@ impl MultilineTextShaper {
                             }
                         }
                     }
-                    // TODO: Figure out exactly how libass lays out shapes
-                    ShaperSegment::Shape(dim) => {
+                    // TODO: Figure out exactly how ass shape layout should work
+                    Content::Shape(dim) => {
                         let logical_w = dim.width() - (-dim.min.x).min(0);
                         let logical_h = dim.height() - (-dim.min.y).min(0);
                         let segment_max_bearing_y = I32Fixed::new(logical_h);
@@ -611,25 +598,12 @@ impl MultilineTextShaper {
                 ));
             }
 
-            {
-                let line_ruby_annotations_start = current_ruby_annotation;
-                while self
-                    .ruby_annotations
-                    .get(current_ruby_annotation)
-                    .is_some_and(|annotation| {
-                        annotation.starting_base_segment_index
-                            <= current_segment + current_intra_split
-                    })
-                {
-                    current_ruby_annotation += 1;
-                }
-
-                self.layout_line_ruby(
-                    &mut segments,
-                    &self.ruby_annotations[line_ruby_annotations_start..current_ruby_annotation],
-                    &font_arena,
-                    font_select,
-                );
+            for segment in annotation_segments.iter_mut() {
+                segment.baseline_offset.x += aligning_x_offset;
+                segment.baseline_offset.y += line_max_ascender;
+                segment.logical_rect = segment
+                    .logical_rect
+                    .translate(Vec2::new(segment.baseline_offset.x, line_max_ascender));
             }
 
             let mut line_rect = Rect2::NOTHING;
@@ -639,6 +613,8 @@ impl MultilineTextShaper {
             }
 
             current_line_y += line_max_ascender - line_min_descender + line_max_lineskip_descent;
+
+            segments.append(&mut annotation_segments);
 
             lines.push(ShapedLine {
                 segments,

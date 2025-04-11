@@ -1214,9 +1214,11 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let font = self.fonts.select(&font_request).unwrap().with_size(
-                                (subs.class.get_font_size)(ctx, event, segment),
-                                ctx.dpi,
+                            let font = font_arena.insert(
+                                &self.fonts.select(&font_request).unwrap().with_size(
+                                    (subs.class.get_font_size)(ctx, event, segment),
+                                    ctx.dpi,
+                                ),
                             );
 
                             match segment.ruby {
@@ -1232,8 +1234,7 @@ impl<'a> Renderer<'a> {
                                         last_ruby_base
                                             .expect("Ruby::Over without preceding Ruby::Base"),
                                         &segment.text,
-                                        &font,
-                                        false,
+                                        font,
                                     );
                                     last_ruby_base = None;
                                 }
@@ -1364,7 +1365,6 @@ impl<'a> Renderer<'a> {
                         }
                     }
 
-                    // FIXME: Sometimes background boxes which shouldn't be visible (zero sized) are shown.
                     // FIXME: Background boxes should have corner radius
                     if last_segment_index != usize::MAX {
                         match &event.segments[last_segment_index] {

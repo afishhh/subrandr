@@ -356,42 +356,86 @@ pub struct GlyphMetrics {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FontMetrics {
-    pub x_scale: I26Dot6,
-    pub y_scale: I26Dot6,
     pub ascender: I26Dot6,
     pub descender: I26Dot6,
     pub height: I26Dot6,
     pub max_advance: I26Dot6,
+
+    pub underline_top_offset: I26Dot6,
+    pub underline_thickness: I26Dot6,
+    pub strikeout_top_offset: I26Dot6,
+    pub strikeout_thickness: I26Dot6,
 }
 
-impl FontMetrics {
-    fn from_ft(metrics: &FT_Size_Metrics_) -> FontMetrics {
-        FontMetrics {
-            x_scale: I26Dot6::from_ft(metrics.x_scale),
-            y_scale: I26Dot6::from_ft(metrics.y_scale),
-            ascender: I26Dot6::from_ft(metrics.ascender),
-            descender: I26Dot6::from_ft(metrics.descender),
-            height: I26Dot6::from_ft(metrics.height),
-            max_advance: I26Dot6::from_ft(metrics.max_advance),
-        }
+unsafe fn get_table<T>(face: FT_Face, tag: FT_Sfnt_Tag) -> Option<&'static T> {
+    unsafe { FT_Get_Sfnt_Table(face, tag).cast::<T>().as_ref() }
+}
+
+unsafe fn build_font_metrics(
+    face: FT_Face,
+    metrics: &FT_Size_Metrics,
+    scale: I26Dot6,
+    dpi_scale: I26Dot6,
+) -> FontMetrics {
+    macro_rules! scale {
+        ($value: expr) => {{
+            I26Dot6::from_ft((($value as i64 * i64::from(scale.into_raw())) >> 6) as FT_Long)
+        }};
     }
 
-    fn from_ft_scaled(metrics: &FT_Size_Metrics_, scale: I26Dot6) -> FontMetrics {
-        macro_rules! scale_field {
-            ($name: ident, $intermediate: ident, $final: ident) => {{
-                ((metrics.$name as $intermediate * scale.into_raw() as $intermediate) >> 6)
-                    as $final
-            }};
-        }
+    let units_per_em = unsafe { (*face).units_per_EM };
+    let y_ppem = metrics.y_ppem;
 
-        FontMetrics {
-            x_scale: I26Dot6::from_ft(scale_field!(x_scale, i64, FT_Long)),
-            y_scale: I26Dot6::from_ft(scale_field!(y_scale, i64, FT_Long)),
-            ascender: I26Dot6::from_ft(scale_field!(ascender, i64, FT_Long)),
-            descender: I26Dot6::from_ft(scale_field!(descender, i64, FT_Long)),
-            height: I26Dot6::from_ft(scale_field!(height, i64, FT_Long)),
-            max_advance: I26Dot6::from_ft(scale_field!(max_advance, i64, FT_Long)),
-        }
+    macro_rules! scale_font_units {
+        ($value: expr) => {
+            I26Dot6::from_wide_quotient($value as i64 * y_ppem as i64, units_per_em as i64)
+        };
+    }
+
+    let max_advance = scale!(metrics.max_advance);
+
+    let ascender;
+    let descender;
+    let height;
+    let strikeout_top_offset;
+    let strikeout_thickness;
+
+    if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2) } {
+        ascender = scale_font_units!(os2.sTypoAscender);
+        descender = scale_font_units!(os2.sTypoDescender);
+        height = scale_font_units!(os2.sTypoLineGap);
+
+        strikeout_top_offset = scale_font_units!(-os2.yStrikeoutPosition);
+        strikeout_thickness = scale_font_units!(os2.yStrikeoutSize);
+    } else {
+        ascender = scale!(metrics.ascender);
+        descender = scale!(metrics.descender);
+        height = scale!(metrics.height);
+
+        strikeout_top_offset = (ascender - descender) / 2 - ascender - scale / 2;
+        strikeout_thickness = scale;
+    }
+
+    let underline_top_offset;
+    let underline_thickness;
+
+    if let Some(postscript) = unsafe { get_table::<TT_Postscript>(face, FT_SFNT_POST) } {
+        underline_top_offset = scale_font_units!(-postscript.underlinePosition);
+        underline_thickness = scale_font_units!(postscript.underlineThickness);
+    } else {
+        underline_top_offset = (descender - dpi_scale) / 2;
+        underline_thickness = dpi_scale;
+    };
+
+    FontMetrics {
+        ascender,
+        descender,
+        height,
+        max_advance,
+        underline_top_offset,
+        underline_thickness,
+        strikeout_top_offset,
+        strikeout_thickness,
     }
 }
 
@@ -432,6 +476,8 @@ impl Font {
             fttry!(FT_Activate_Size(size));
         }
 
+        let dpi_scale = I26Dot6::from_quotient(dpi as i32, 72);
+
         let (metrics, scale) = if unsafe {
             (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0
         } {
@@ -446,7 +492,7 @@ impl Font {
             }
 
             (
-                FontMetrics::from_ft(unsafe { &(*size).metrics }),
+                unsafe { build_font_metrics(face, &(*size).metrics, I26Dot6::ONE, dpi_scale) },
                 I26Dot6::ONE,
             )
         } else {
@@ -477,7 +523,7 @@ impl Font {
             }
 
             (
-                FontMetrics::from_ft_scaled(unsafe { &(*size).metrics }, scale),
+                unsafe { build_font_metrics(face, &(*size).metrics, scale, dpi_scale) },
                 scale,
             )
         };

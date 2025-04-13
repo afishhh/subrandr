@@ -930,32 +930,30 @@ impl<'a> Renderer<'a> {
             end_x
         };
 
-        // TODO: This is actually in TT_Postscript table
+        // FIXME: This should use the main font for the segment, not the font
+        //        of the first glyph..
+        let font_metrics = glyphs[0].font.metrics();
+
         if decoration.underline {
-            let thickness = ctx.pixel_scale();
+            let thickness = font_metrics.underline_thickness;
             rasterizer.fill_axis_aligned_antialias_rect(
                 target,
                 Rect2::new(
-                    Point2::new(x.into_f32(), y.into_f32() - thickness / 2.),
-                    Point2::new(text_end_x.into_f32(), y.into_f32() + thickness / 2.),
+                    Point2::new(x.into_f32(), y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
                 ),
                 decoration.underline_color,
             );
         }
 
-        // TODO: This is actually in TT_OS2 table
         if decoration.strike_out {
-            // FIXME: This should use the main font for the segment, not the font
-            //        of the first glyph..
-            let metrics = glyphs[0].font.metrics();
-            let strike_y =
-                (y + (metrics.ascender - metrics.descender) / 2 - metrics.ascender).into_f32();
-            let thickness = ctx.pixel_scale();
+            let strike_y = y + font_metrics.strikeout_top_offset;
+            let thickness = font_metrics.strikeout_thickness;
             rasterizer.fill_axis_aligned_antialias_rect(
                 target,
                 Rect2::new(
-                    Point2::new(x.into_f32(), strike_y - thickness / 2.),
-                    Point2::new(text_end_x.into_f32(), strike_y + thickness / 2.),
+                    Point2::new(x.into_f32(), strike_y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
                 ),
                 decoration.strike_out_color,
             );

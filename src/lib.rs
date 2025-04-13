@@ -172,7 +172,9 @@ enum Segment {
 #[derive(Debug, Clone)]
 struct TextSegment {
     font: Vec<String>,
+    // TODO: Move to Extra
     font_size: f32,
+    // TODO: I16Dot16
     font_weight: u32,
     italic: bool,
     decorations: TextDecorations,

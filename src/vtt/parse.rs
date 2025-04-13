@@ -1,7 +1,7 @@
 use crate::math::Point2;
 
-// TODO: Subrandr parsing errors are currently not very useful,
-//       they could be improved significantly.
+mod text;
+pub(super) use text::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Captions<'a> {

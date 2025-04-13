@@ -160,6 +160,9 @@ impl Event {
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
+// TODO: Subrandr parsing errors are currently not very useful,
+//       they could be improved significantly.
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]

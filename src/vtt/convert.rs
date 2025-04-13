@@ -240,7 +240,6 @@ impl VttLayouter {
                     } else {
                         // Switch direction: If switched is true, then remove all the boxes in boxes, and jump to the step labeled done positioning below.
                         if switched {
-                            println!("gave up!");
                             lines.clear();
                             return;
                         }
@@ -325,6 +324,111 @@ impl Layouter for VttLayouter {
 
         result
     }
+}
+
+#[derive(Debug, Clone)]
+struct Style {
+    color: BGRA8,
+    background_color: BGRA8,
+    fonts: Vec<String>,
+    font_size: f32,
+    font_weight: f32,
+    italic: bool,
+    underline: bool,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            fonts: vec!["sans-serif".to_owned()],
+            font_size: f32::INFINITY,
+            font_weight: 400.,
+            color: BGRA8::WHITE,
+            background_color: BGRA8::ZERO,
+            italic: false,
+            underline: false,
+        }
+    }
+}
+
+// TODO: Ruby
+struct TextConverter {
+    style: Style,
+    segments: Vec<crate::Segment>,
+}
+
+impl TextConverter {
+    fn process_node(&mut self, node: &vtt::Node) {
+        match node {
+            vtt::Node::Internal(internal) => {
+                let old = self.style.clone();
+                match internal.kind {
+                    vtt::InternalNodeKind::Italic => self.style.italic = true,
+                    vtt::InternalNodeKind::Bold => self.style.font_weight = 700.,
+                    vtt::InternalNodeKind::Underline => self.style.underline = true,
+                    _ => (),
+                }
+
+                for class in internal.classes.iter() {
+                    match class {
+                        "white" => self.style.color = BGRA8::WHITE,
+                        "lime" => self.style.color = BGRA8::LIME,
+                        "cyan" => self.style.color = BGRA8::CYAN,
+                        "red" => self.style.color = BGRA8::RED,
+                        "yellow" => self.style.color = BGRA8::YELLOW,
+                        "magenta" => self.style.color = BGRA8::MAGENTA,
+                        "blue" => self.style.color = BGRA8::BLUE,
+                        "black" => self.style.color = BGRA8::BLACK,
+                        "bg_white" => self.style.background_color = BGRA8::WHITE,
+                        "bg_lime" => self.style.background_color = BGRA8::LIME,
+                        "bg_cyan" => self.style.background_color = BGRA8::CYAN,
+                        "bg_red" => self.style.background_color = BGRA8::RED,
+                        "bg_yellow" => self.style.background_color = BGRA8::YELLOW,
+                        "bg_magenta" => self.style.background_color = BGRA8::MAGENTA,
+                        "bg_blue" => self.style.background_color = BGRA8::BLUE,
+                        "bg_black" => self.style.background_color = BGRA8::BLACK,
+                        _ => (),
+                    }
+                }
+
+                for child in &internal.children {
+                    self.process_node(child);
+                }
+
+                self.style = old;
+            }
+            vtt::Node::Text(text) => self.segments.push(crate::Segment::Text(crate::TextSegment {
+                font: self.style.fonts.clone(),
+                font_size: self.style.font_size,
+                font_weight: self.style.font_weight as u32,
+                italic: self.style.italic,
+                decorations: crate::TextDecorations {
+                    underline: self.style.underline,
+                    underline_color: self.style.color,
+                    ..Default::default()
+                },
+                color: self.style.color,
+                background_color: self.style.background_color,
+                text: text.content().into_owned(),
+                shadows: Vec::new(),
+                ruby: crate::Ruby::None,
+            })),
+            vtt::Node::Timestamp(_) => (),
+        }
+    }
+}
+
+fn convert_text(text: &str) -> Vec<crate::Segment> {
+    let mut converter = TextConverter {
+        style: Style::default(),
+        segments: Vec::new(),
+    };
+
+    for node in vtt::parse_cue_text(text) {
+        converter.process_node(&node);
+    }
+
+    converter.segments
 }
 
 pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
@@ -427,19 +531,8 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
             // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
             // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
             alignment,
+            segments: convert_text(cue.text),
             text_wrap: crate::TextWrapMode::Normal,
-            segments: vec![crate::Segment::Text(crate::TextSegment {
-                font: vec!["sans-serif".to_owned()],
-                font_size: f32::INFINITY,
-                font_weight: 400,
-                italic: false,
-                decorations: crate::TextDecorations::default(),
-                color: BGRA8::WHITE,
-                background_color: BGRA8::ZERO,
-                text: cue.text.into(),
-                shadows: Vec::new(),
-                ruby: crate::Ruby::None,
-            })],
             extra: crate::EventExtra::Vtt(VttEvent {
                 writing_direction: cue.writing_direction,
                 text_alignment: cue.text_alignment,

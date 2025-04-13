@@ -437,15 +437,13 @@ impl<'a> MultilineTextShaper<'a> {
                                     current_x + ruby_padding,
                                     current_line_y - extents.max_ascender,
                                 ),
-                                logical_rect: Rect2::from_min_size(
-                                    Point2::new(-ruby_padding, I26Dot6::ZERO),
-                                    Vec2::new(
+                                logical_rect: Rect2::new(
+                                    Point2::new(-ruby_padding, -ruby_metrics.max_ascender),
+                                    Point2::new(
                                         ruby_metrics.paint_size.x
                                             + ruby_metrics.trailing_advance
-                                            + ruby_padding * 2,
-                                        current_line_y
-                                            - extents.max_ascender
-                                            - ruby_metrics.max_ascender,
+                                            + ruby_padding,
+                                        -ruby_metrics.min_descender,
                                     ),
                                 ),
                                 corresponding_input_segment: annotation.input_index,
@@ -603,7 +601,7 @@ impl<'a> MultilineTextShaper<'a> {
                 segment.baseline_offset.y += line_max_ascender;
                 segment.logical_rect = segment
                     .logical_rect
-                    .translate(Vec2::new(segment.baseline_offset.x, line_max_ascender));
+                    .translate(segment.baseline_offset.to_vec());
             }
 
             let mut line_rect = Rect2::NOTHING;

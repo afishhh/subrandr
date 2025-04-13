@@ -147,7 +147,7 @@ pub struct TextMetrics {
 }
 
 impl TextMetrics {
-    fn extend_by_font(&mut self, font: &Font) {
+    pub fn extend_by_font(&mut self, font: &Font) {
         let metrics = font.metrics();
         self.max_ascender = self.max_ascender.max(metrics.ascender);
         self.min_descender = self.min_descender.min(metrics.descender);

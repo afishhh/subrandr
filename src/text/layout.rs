@@ -78,7 +78,8 @@ fn shape_simple_segment<'f>(
         buffer.shape(font, font_arena, font_select)
     };
 
-    let metrics = text::compute_extents_ex(true, &glyphs);
+    let mut metrics = text::compute_extents_ex(true, &glyphs);
+    metrics.extend_by_font(font);
 
     (glyphs, metrics)
 }

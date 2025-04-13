@@ -172,10 +172,8 @@ enum Segment {
 #[derive(Debug, Clone)]
 struct TextSegment {
     font: Vec<String>,
-    // TODO: Move to Extra
-    font_size: f32,
-    // TODO: I16Dot16
-    font_weight: u32,
+    font_size: I26Dot6,
+    font_weight: I16Dot16,
     italic: bool,
     decorations: TextDecorations,
     color: BGRA8,
@@ -309,7 +307,7 @@ impl SubtitleContext {
 #[derive(Debug)]
 struct SubtitleClass {
     name: &'static str,
-    get_font_size: fn(ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> f32,
+    get_font_size: fn(ctx: &SubtitleContext, event: &Event, segment: &TextSegment) -> I26Dot6,
     create_layouter: fn() -> Box<dyn Layouter>,
 }
 
@@ -317,7 +315,7 @@ struct SubtitleClass {
 // Coordinate system 0.0-1.0 percentages
 const TEST_SUBTITLE_CLASS: SubtitleClass = SubtitleClass {
     name: "<test>",
-    get_font_size: |_ctx: &SubtitleContext, _event: &Event, segment: &TextSegment| -> f32 {
+    get_font_size: |_ctx: &SubtitleContext, _event: &Event, segment: &TextSegment| -> I26Dot6 {
         segment.font_size
     },
     create_layouter: || Box::new(TestLayouter),
@@ -351,8 +349,8 @@ impl Subtitles {
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
-                            font_size: 64.0,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
@@ -363,8 +361,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
-                            font_size: 64.0,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x0000FFFF),
@@ -375,8 +373,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["Liberation Sans".to_string()],
-                            font_size: 64.0,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF0000FF),
@@ -387,8 +385,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["monospace".to_string()],
-                            font_size: 48.0,
-                            font_weight: 700,
+                            font_size: I26Dot6::new(48),
+                            font_weight: I16Dot16::new(700),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFF00FF),
@@ -399,8 +397,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["Arial".to_string()],
-                            font_size: 80.0,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(80),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF00FFFF),
@@ -436,8 +434,8 @@ impl Subtitles {
                     text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["monospace".to_string()],
-                        font_size: 64.0,
-                        font_weight: 400,
+                        font_size: I26Dot6::new(64),
+                        font_weight: I16Dot16::new(400),
                         italic: false,
                         decorations: TextDecorations {
                             border: Vec2f::new(2.0, 2.0),
@@ -463,8 +461,8 @@ impl Subtitles {
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
-                            font_size: 26.6,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(26),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x00FF00AA),
@@ -475,8 +473,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
-                            font_size: 26.6,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(26),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFF00AA),
@@ -495,8 +493,8 @@ impl Subtitles {
                     text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["sans-serif".to_string()],
-                        font_size: 26.6,
-                        font_weight: 400,
+                        font_size: I26Dot6::new(26),
+                        font_weight: I16Dot16::new(400),
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0x0000FFAA),
@@ -514,8 +512,8 @@ impl Subtitles {
                     text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["sans-serif".to_string()],
-                        font_size: 64.0,
-                        font_weight: 400,
+                        font_size: I26Dot6::new(64),
+                        font_weight: I16Dot16::new(400),
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0x00FF0099),
@@ -544,8 +542,8 @@ impl Subtitles {
                     text_wrap: TextWrapMode::None,
                     segments: vec![Segment::Text(TextSegment {
                         font: vec!["monospace".to_string()],
-                        font_size: 64.0,
-                        font_weight: 700,
+                        font_size: I26Dot6::new(64),
+                        font_weight: I16Dot16::new(700),
                         italic: false,
                         decorations: TextDecorations::none(),
                         color: BGRA8::from_rgba32(0xFFFFFFFF),
@@ -564,8 +562,8 @@ impl Subtitles {
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
-                            font_size: 64. * 96. / 72.,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64) * 96 / 72,
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0x00000000),
@@ -580,8 +578,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["sans-serif".to_string()],
-                            font_size: 64. * 96. / 72.,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64) * 96 / 72,
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFF000099),
@@ -605,8 +603,8 @@ impl Subtitles {
                     segments: vec![
                         Segment::Text(TextSegment {
                             font: vec!["emoji".to_string()],
-                            font_size: 32.,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(32),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
@@ -617,8 +615,8 @@ impl Subtitles {
                         }),
                         Segment::Text(TextSegment {
                             font: vec!["emoji".to_string()],
-                            font_size: 64.,
-                            font_weight: 400,
+                            font_size: I26Dot6::new(64),
+                            font_weight: I16Dot16::new(400),
                             italic: false,
                             decorations: TextDecorations::none(),
                             color: BGRA8::from_rgba32(0xFFFFFFFF),
@@ -777,7 +775,7 @@ impl<'a> Renderer<'a> {
             .fonts
             .select_simple("monospace", I16Dot16::new(400), false)
             .unwrap()
-            .with_size(size, self.dpi);
+            .with_size(size.into(), self.dpi);
         let font_arena = FontArena::new();
         let shaped = text::shape_text(&font, &font_arena, text);
         let (ox, oy) = Self::translate_for_aligned_text(
@@ -1212,7 +1210,7 @@ impl<'a> Renderer<'a> {
                                     .map(AsRef::as_ref)
                                     .map(Into::into)
                                     .collect(),
-                                weight: I16Dot16::new(segment.font_weight as i32),
+                                weight: segment.font_weight,
                                 italic: segment.italic,
                                 codepoint: None,
                             };

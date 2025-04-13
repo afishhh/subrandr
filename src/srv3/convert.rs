@@ -4,7 +4,7 @@
 use crate::{
     color::BGRA8,
     log::{log_once_state, warning},
-    math::{Point2, Point2f, Vec2f},
+    math::{I16Dot16, I26Dot6, Point2, Point2f, Vec2f},
     CssTextShadow, Event, EventExtra, Layouter, Ruby, Subrandr, SubtitleClass, SubtitleContext,
     Subtitles, TextDecorations, TextSegment,
 };
@@ -270,9 +270,13 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
             if matches!(ruby, Ruby::Over) {
                 base /= 2.0;
             }
-            base
+            I26Dot6::from_f32(base)
         },
-        font_weight: if segment.pen().bold { 700 } else { 400 },
+        font_weight: if segment.pen().bold {
+            I16Dot16::new(700)
+        } else {
+            I16Dot16::new(400)
+        },
         italic: segment.pen().italic,
         decorations: TextDecorations {
             ..Default::default()
@@ -289,8 +293,8 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut result = Subtitles {
         class: &SubtitleClass {
             name: "srv3",
-            get_font_size: |ctx, _event, segment| -> f32 {
-                font_scale_from_ctx(ctx) * segment.font_size
+            get_font_size: |ctx, _event, segment| -> I26Dot6 {
+                segment.font_size * font_scale_from_ctx(ctx)
             },
             create_layouter: || Box::new(Srv3Layouter),
         },

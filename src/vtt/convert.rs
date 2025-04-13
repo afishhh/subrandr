@@ -1,7 +1,7 @@
 use crate::{
     color::BGRA8,
     log::{log_once_state, warning, LogOnceSet},
-    math::{I26Dot6, Point2, Rect2, Vec2},
+    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
     vtt, EventExtra, Layouter, Subrandr, SubtitleClass, SubtitleContext,
 };
 
@@ -399,8 +399,8 @@ impl TextConverter {
             }
             vtt::Node::Text(text) => self.segments.push(crate::Segment::Text(crate::TextSegment {
                 font: self.style.fonts.clone(),
-                font_size: self.style.font_size,
-                font_weight: self.style.font_weight as u32,
+                font_size: I26Dot6::from_f32(self.style.font_size),
+                font_weight: I16Dot16::from_f32(self.style.font_weight),
                 italic: self.style.italic,
                 decorations: crate::TextDecorations {
                     underline: self.style.underline,
@@ -435,12 +435,12 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
     let mut subtitles = crate::Subtitles {
         class: &SubtitleClass {
             name: "vtt",
-            get_font_size: |ctx, _event, _segment| -> f32 {
+            get_font_size: |ctx, _event, _segment| -> I26Dot6 {
                 // Standard says 5vh, but browser engines use 5vmin.
                 // See https://github.com/w3c/webvtt/issues/529
                 let pixels =
                     ctx.player_height().min(ctx.player_width()) * 0.05 * 96.0 / ctx.ppi() as f32;
-                pixels * 96.0 / 72.0
+                I26Dot6::from_f32(pixels) * 96.0 / 72.0
             },
             create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
         },

@@ -167,8 +167,8 @@ impl Face {
     }
 
     #[inline(always)]
-    pub fn with_size(&self, point_size: f32, dpi: u32) -> Font {
-        Font::create(self.face, self.coords, I26Dot6::from_f32(point_size), dpi)
+    pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Font {
+        Font::create(self.face, self.coords, point_size, dpi)
     }
 
     pub fn with_size_from(&self, other: &Font) -> Font {

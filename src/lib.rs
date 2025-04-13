@@ -919,25 +919,26 @@ impl<'a> Renderer<'a> {
 
         let text_end_x = {
             let mut end_x = x;
-            let mut it = glyphs.iter();
-            if let Some(last) = it.next_back() {
-                end_x += last.font.glyph_extents(last.index).width;
-            }
-            for glyph in it {
+
+            // TODO: Should this somehow ignore trailing advance?
+            //       The issue with that is that it causes issues with cross-segment decorations
+            //       so it would have to take those into account.
+            for glyph in glyphs.iter() {
                 end_x += glyph.x_advance;
             }
 
-            // TODO: ceil_to_inner
-            end_x.round_to_inner()
+            end_x
         };
 
         // TODO: This is actually in TT_Postscript table
         if decoration.underline {
-            rasterizer.horizontal_line(
+            let thickness = ctx.pixel_scale();
+            rasterizer.fill_axis_aligned_antialias_rect(
                 target,
-                y.into_f32(),
-                x.into_f32(),
-                text_end_x as f32,
+                Rect2::new(
+                    Point2::new(x.into_f32(), y.into_f32() - thickness / 2.),
+                    Point2::new(text_end_x.into_f32(), y.into_f32() + thickness / 2.),
+                ),
                 decoration.underline_color,
             );
         }
@@ -947,12 +948,15 @@ impl<'a> Renderer<'a> {
             // FIXME: This should use the main font for the segment, not the font
             //        of the first glyph..
             let metrics = glyphs[0].font.metrics();
-            let strike_y = (y - (metrics.height / 2) + metrics.descender).trunc_to_inner();
-            rasterizer.horizontal_line(
+            let strike_y =
+                (y + (metrics.ascender - metrics.descender) / 2 - metrics.ascender).into_f32();
+            let thickness = ctx.pixel_scale();
+            rasterizer.fill_axis_aligned_antialias_rect(
                 target,
-                strike_y as f32,
-                x.into_f32(),
-                text_end_x as f32,
+                Rect2::new(
+                    Point2::new(x.into_f32(), strike_y - thickness / 2.),
+                    Point2::new(text_end_x.into_f32(), strike_y + thickness / 2.),
+                ),
                 decoration.strike_out_color,
             );
         }

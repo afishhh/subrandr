@@ -202,6 +202,14 @@ pub(crate) trait Rasterizer {
         )
     }
     fn fill_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8);
+    fn fill_axis_aligned_antialias_rect(
+        &mut self,
+        target: &mut RenderTarget,
+        rect: Rect2f,
+        color: BGRA8,
+    ) {
+        self.fill_axis_aligned_rect(target, rect, color);
+    }
 
     fn blit(
         &mut self,

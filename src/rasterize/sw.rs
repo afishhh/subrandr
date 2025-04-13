@@ -371,6 +371,72 @@ pub fn fill_axis_aligned_rect(
     }
 }
 
+pub fn fill_axis_aligned_antialias_rect(
+    x0: i32,
+    y0: f32,
+    x1: i32,
+    y1: f32,
+    buffer: &mut [BGRA8],
+    width: u32,
+    height: u32,
+    color: BGRA8,
+) {
+    check_buffer!("fill_axis_aligned_antialias_rect", buffer, width, height);
+
+    debug_assert!(x0 <= x1);
+    debug_assert!(y0 <= y1);
+
+    let y0i = if (y0 - y0.round()).abs() > 0.01 {
+        let top_fill = 1.0 - y0.fract();
+        let top_y = y0.floor() as i32;
+        if top_y >= 0 && top_y < height as i32 {
+            unsafe {
+                horizontal_line_unchecked(
+                    x0,
+                    x1,
+                    &mut buffer[top_y as usize * width as usize..],
+                    width as i32,
+                    color.mul_alpha((top_fill * 255.) as u8),
+                );
+            }
+        }
+        y0.ceil() as i32
+    } else {
+        y0.round() as i32
+    };
+
+    let y1i = if (y1 - y1.round()).abs() > 0.01 {
+        let bottom_fill = y1.fract();
+        let bottom_y = y1.ceil() as i32;
+        if bottom_y >= 0 && bottom_y < height as i32 {
+            unsafe {
+                horizontal_line_unchecked(
+                    x0,
+                    x1,
+                    &mut buffer[bottom_y as usize * width as usize..],
+                    width as i32,
+                    color.mul_alpha((bottom_fill * 255.) as u8),
+                );
+            }
+        }
+        y1.ceil() as i32
+    } else {
+        y1.round() as i32
+    };
+
+    for y in y0i.clamp(0, height as i32)..y1i.clamp(0, height as i32) {
+        unsafe {
+            horizontal_line_unchecked(
+                x0,
+                x1,
+                &mut buffer[y as usize * width as usize..],
+                width as i32,
+                color,
+            );
+        }
+    }
+}
+
 pub fn stroke_triangle(
     x0: i32,
     y0: i32,
@@ -851,6 +917,26 @@ impl super::Rasterizer for Rasterizer {
             rect.min.y as i32,
             rect.max.x as i32,
             rect.max.y as i32,
+            target.buffer,
+            target.width,
+            target.height,
+            color,
+        );
+    }
+
+    fn fill_axis_aligned_antialias_rect(
+        &mut self,
+        target: &mut super::RenderTarget,
+        rect: crate::math::Rect2f,
+        color: BGRA8,
+    ) {
+        let target = unwrap_sw_render_target(target);
+
+        fill_axis_aligned_antialias_rect(
+            rect.min.x as i32,
+            rect.min.y,
+            rect.max.x as i32,
+            rect.max.y,
             target.buffer,
             target.width,
             target.height,

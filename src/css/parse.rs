@@ -1,0 +1,609 @@
+use std::rc::Rc;
+
+use tokenizer::{HashToken, HashTypeFlag, InputStream, Token, TokenKind};
+
+pub mod tokenizer;
+
+pub struct TokenParser<'a> {
+    input: InputStream<'a>,
+    reconsumed: Option<Token<'a>>,
+    temporary_buffer: Vec<ComponentValue<'a>>,
+}
+
+impl<'a> TokenParser<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            input: InputStream::new(text),
+            reconsumed: None,
+            temporary_buffer: Vec::new(),
+        }
+    }
+
+    fn take_component_buffer(&mut self, start: usize) -> ComponentStream<'a> {
+        assert!(start <= self.temporary_buffer.len());
+
+        let mut out =
+            Rc::<[ComponentValue<'a>]>::new_uninit_slice(self.temporary_buffer.len() - start);
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.temporary_buffer.as_ptr().add(start),
+                Rc::get_mut(&mut out).unwrap_unchecked().as_mut_ptr().cast(),
+                self.temporary_buffer.len() - start,
+            );
+            self.temporary_buffer.set_len(start);
+
+            ComponentStream {
+                components: Rc::<[_]>::assume_init(out),
+            }
+        }
+    }
+
+    fn reconsume(&mut self, token: Token<'a>) {
+        self.reconsumed = Some(token);
+    }
+
+    fn consume_token(&mut self) -> Option<Token<'a>> {
+        if let Some(token) = self.reconsumed.take() {
+            return Some(token);
+        }
+
+        self.input.consume_token()
+    }
+
+    fn consume_simple_block(&mut self, block_token: BlockToken) -> Block<'a> {
+        let start = self.temporary_buffer.len();
+
+        loop {
+            match self.consume_token() {
+                Some(token) if block_token.is_ending_token(&token.kind) => break,
+                Some(token) => {
+                    self.reconsume(token);
+                    let component = self.consume_component_value();
+                    self.temporary_buffer.push(component);
+                }
+                None => break,
+            }
+        }
+
+        Block {
+            associated_token: block_token,
+            value: self.take_component_buffer(start),
+        }
+    }
+
+    fn consume_function(&mut self, name: Box<str>) -> Function<'a> {
+        let start = self.temporary_buffer.len();
+
+        loop {
+            match self.consume_token() {
+                Some(token) => match token.kind {
+                    TokenKind::RParen => break,
+                    _ => {
+                        self.reconsume(token);
+                        let component = self.consume_component_value();
+                        self.temporary_buffer.push(component);
+                    }
+                },
+                None => break,
+            }
+        }
+
+        Function {
+            name,
+            value: self.take_component_buffer(start),
+        }
+    }
+
+    fn consume_component_value(&mut self) -> ComponentValue<'a> {
+        match self.try_consume_component_value() {
+            Some(value) => value,
+            None => unreachable!("consume_component_value called on empty parser"),
+        }
+    }
+
+    fn try_consume_component_value(&mut self) -> Option<ComponentValue<'a>> {
+        match self.consume_token() {
+            Some(token) => Some(match token.kind {
+                TokenKind::LParen => {
+                    ComponentValue::Block(self.consume_simple_block(BlockToken::Paren))
+                }
+                TokenKind::LBracket => {
+                    ComponentValue::Block(self.consume_simple_block(BlockToken::Bracket))
+                }
+                TokenKind::LBrace => {
+                    ComponentValue::Block(self.consume_simple_block(BlockToken::Brace))
+                }
+                TokenKind::Function(name) => ComponentValue::Function(self.consume_function(name)),
+                _ => ComponentValue::PreservedToken(token),
+            }),
+            None => None,
+        }
+    }
+
+    pub fn parse_component_stream(&mut self) -> ComponentStream<'a> {
+        while let Some(value) = self.try_consume_component_value() {
+            self.temporary_buffer.push(value);
+        }
+
+        self.take_component_buffer(0)
+    }
+
+    fn consume_qualified_rule(&mut self) -> Option<Rule<'a>> {
+        let start = self.temporary_buffer.len();
+
+        loop {
+            match self.consume_token() {
+                Some(token) => match token.kind {
+                    TokenKind::LBrace => {
+                        return Some(Rule {
+                            prelude: self.take_component_buffer(start),
+                            kind: RuleKind::Qualified(self.consume_simple_block(BlockToken::Brace)),
+                        })
+                    }
+                    _ => {
+                        self.reconsume(token);
+                        let component = self.consume_component_value();
+                        self.temporary_buffer.push(component);
+                    }
+                },
+                None => return None,
+            }
+        }
+    }
+
+    fn consume_at_rule(&mut self, name: Box<str>) -> Rule<'a> {
+        let start = self.temporary_buffer.len();
+        let prelude;
+        let mut block = None;
+
+        loop {
+            match self.consume_token() {
+                Some(token) => match token.kind {
+                    TokenKind::Semicolon => {
+                        prelude = self.take_component_buffer(start);
+                        break;
+                    }
+                    TokenKind::LBrace => {
+                        prelude = self.take_component_buffer(start);
+                        block = Some(self.consume_simple_block(BlockToken::Brace));
+                        break;
+                    }
+                    _ => {
+                        self.reconsume(token);
+                        let component = self.consume_component_value();
+                        self.temporary_buffer.push(component);
+                    }
+                },
+                None => {
+                    prelude = self.take_component_buffer(start);
+                    break;
+                }
+            }
+        }
+
+        Rule {
+            prelude,
+            kind: RuleKind::AtRule(AtRule { name, block }),
+        }
+    }
+
+    fn consume_list_of_rules(&mut self, top_level: bool, output: &mut Vec<Rule<'a>>) {
+        match self.consume_token() {
+            Some(token) => match token.kind {
+                TokenKind::Whitespace => (),
+                TokenKind::Cdo | TokenKind::Cdc => {
+                    if !top_level {
+                        self.reconsume(token);
+                        if let Some(rule) = self.consume_qualified_rule() {
+                            output.push(rule);
+                        }
+                    }
+                }
+                TokenKind::AtKeyword(name) => {
+                    output.push(self.consume_at_rule(name));
+                }
+                _ => {
+                    self.reconsume(token);
+                    if let Some(rule) = self.consume_qualified_rule() {
+                        output.push(rule);
+                    }
+                }
+            },
+            None => return,
+        }
+    }
+
+    pub fn parse_stylesheet(mut self) -> Vec<Rule<'a>> {
+        let mut result = Vec::new();
+        self.consume_list_of_rules(true, &mut result);
+        result
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockToken {
+    Paren,
+    Bracket,
+    Brace,
+}
+
+impl BlockToken {
+    fn is_ending_token(&self, token: &TokenKind) -> bool {
+        matches!(
+            (self, token),
+            (Self::Paren, TokenKind::RParen)
+                | (Self::Bracket, TokenKind::RBracket)
+                | (Self::Brace, TokenKind::RBrace)
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block<'a> {
+    pub associated_token: BlockToken,
+    pub value: ComponentStream<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function<'a> {
+    pub name: Box<str>,
+    pub value: ComponentStream<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentValue<'a> {
+    PreservedToken(Token<'a>),
+    Function(Function<'a>),
+    Block(Block<'a>),
+}
+
+#[derive(Debug, Clone)]
+pub struct QualifiedRule<'a> {
+    pub block: Block<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AtRule<'a> {
+    pub name: Box<str>,
+    pub block: Option<Block<'a>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RuleKind<'a> {
+    Qualified(Block<'a>),
+    AtRule(AtRule<'a>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Rule<'a> {
+    pub prelude: ComponentStream<'a>,
+    pub kind: RuleKind<'a>,
+}
+
+// TODO: Implement parse errers
+#[derive(Debug)]
+pub struct ParseError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentStream<'a> {
+    components: Rc<[ComponentValue<'a>]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseStream<'a> {
+    stream: ComponentStream<'a>,
+    position: usize,
+}
+
+impl<'a> ParseStream<'a> {
+    pub fn new(tokens: ComponentStream<'a>) -> Self {
+        Self {
+            stream: tokens,
+            position: 0,
+        }
+    }
+
+    fn next_token(&mut self) -> Option<&ComponentValue<'a>> {
+        if let Some(component) = self.stream.components.get(self.position) {
+            self.position += 1;
+            Some(component)
+        } else {
+            None
+        }
+    }
+
+    fn peek_token(&mut self) -> Option<&ComponentValue<'a>> {
+        self.stream.components.get(self.position)
+    }
+
+    pub fn parse<T: Parse<'a>>(&mut self) -> Result<T, ParseError> {
+        T::parse(self)
+    }
+
+    pub fn peek<T: AtomicParse<'a>>(&self) -> bool {
+        Self::peek_n::<0, T>(self).is_some()
+    }
+
+    pub fn peek2<T: AtomicParse<'a>>(&self) -> bool {
+        Self::peek_n::<1, T>(self).is_some()
+    }
+
+    pub fn peek3<T: AtomicParse<'a>>(&self) -> bool {
+        Self::peek_n::<2, T>(self).is_some()
+    }
+
+    fn advance_by(&mut self, count: usize) {
+        self.position += count;
+    }
+
+    fn peek_n<const OFF: usize, T: AtomicParse<'a>>(&self) -> Option<T> {
+        T::matches(self.stream.components.get(self.position + OFF))
+    }
+
+    pub fn lookahead1(&self) -> Lookahead1<'a, '_> {
+        Lookahead1 { stream: self }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stream.components.len() == self.position
+    }
+
+    pub fn fork(&self) -> Self {
+        Self {
+            stream: self.stream.clone(),
+            position: self.position,
+        }
+    }
+}
+
+pub struct Lookahead1<'a, 'p> {
+    stream: &'p ParseStream<'a>,
+}
+
+impl<'a, 'p> Lookahead1<'a, 'p> {
+    pub fn peek<T: AtomicParse<'a>>(&mut self) -> bool {
+        self.stream.peek::<T>()
+    }
+
+    pub fn error(self) -> ParseError {
+        ParseError {}
+    }
+}
+
+pub trait Parse<'a>: Sized {
+    fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError>;
+}
+
+pub fn parse_whole<'a, T: Parse<'a>>(mut stream: ParseStream<'a>) -> Result<T, ParseError> {
+    let result = stream.parse::<T>()?;
+    if stream.is_empty() {
+        Ok(result)
+    } else {
+        Err(ParseError {})
+    }
+}
+
+pub trait AtomicParse<'a>: Sized {
+    fn matches(token: Option<&ComponentValue<'a>>) -> Option<Self>;
+}
+
+impl<'a, T: AtomicParse<'a>> Parse<'a> for T {
+    fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        if let Some(parsed) = T::matches(stream.peek_token()) {
+            stream.advance_by(1);
+            Ok(parsed)
+        } else {
+            Err(ParseError {})
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdHash {
+    pub value: Box<str>,
+}
+
+impl IdHash {
+    #[cfg(test)]
+    pub fn new_unspanned(value: impl Into<Box<str>>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl AtomicParse<'_> for IdHash {
+    fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+        match token {
+            Some(ComponentValue::PreservedToken(Token {
+                kind:
+                    TokenKind::Hash(HashToken {
+                        value,
+                        type_flag: HashTypeFlag::Id,
+                    }),
+                representation: _,
+            })) => Some(Self {
+                value: value.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ident {
+    pub value: Box<str>,
+}
+
+impl Ident {
+    #[cfg(test)]
+    pub fn new_unspanned(value: impl Into<Box<str>>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl AtomicParse<'_> for Ident {
+    fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+        match token {
+            Some(ComponentValue::PreservedToken(Token {
+                kind: TokenKind::Ident(value),
+                representation: _,
+            })) => Some(Self {
+                value: value.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+pub trait BlockLikeToken<'a> {
+    fn parse_content(&self) -> ParseStream<'a>;
+}
+
+#[doc(hidden)]
+pub mod tokens {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Colon {}
+
+    impl Colon {
+        #[cfg(test)]
+        pub fn new_unspanned() -> Self {
+            Self {}
+        }
+    }
+
+    impl AtomicParse<'_> for Colon {
+        fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+            match token {
+                Some(ComponentValue::PreservedToken(Token {
+                    kind: TokenKind::Colon,
+                    representation: _,
+                })) => Some(Self {}),
+                _ => None,
+            }
+        }
+    }
+
+    macro_rules! delimiter_atomic {
+        ($name: ident, $chr: literal, $display_str: literal) => {
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub struct $name {}
+
+            #[automatically_derived]
+            impl $name {
+                #[cfg(test)]
+                pub fn new_unspanned() -> Self {
+                    Self {}
+                }
+            }
+
+            #[automatically_derived]
+            impl AtomicParse<'_> for $name {
+                fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+                    match token {
+                        Some(ComponentValue::PreservedToken(Token {
+                            kind: TokenKind::Delim($chr),
+                            representation: _,
+                        })) => Some(Self {}),
+                        _ => None,
+                    }
+                }
+            }
+        };
+    }
+
+    delimiter_atomic!(Dot, '.', ".");
+
+    macro_rules! make_keyword {
+        ($name: ident, $value: literal) => {
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub struct $name {}
+
+            #[automatically_derived]
+            impl $name {
+                #[cfg(test)]
+                pub fn new_unspanned() -> Self {
+                    Self {}
+                }
+            }
+
+            #[automatically_derived]
+            impl AtomicParse<'_> for $name {
+                fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+                    match token {
+                        Some(ComponentValue::PreservedToken(Token {
+                            kind: TokenKind::Ident(value),
+                            representation: _,
+                        })) if &**value == $value => Some(Self {}),
+                        _ => None,
+                    }
+                }
+            }
+        };
+    }
+
+    make_keyword!(Past, "past");
+    make_keyword!(Future, "future");
+    make_keyword!(Cue, "cue");
+
+    macro_rules! make_function_keyword {
+        ($name: ident, $fname: literal) => {
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub struct $name<'a> {
+                pub value: ComponentStream<'a>,
+            }
+
+            #[automatically_derived]
+            impl<'a> $name<'a> {
+                #[cfg(test)]
+                pub fn new_unspanned(value: ComponentStream<'a>) -> Self {
+                    Self { value }
+                }
+            }
+
+            #[automatically_derived]
+            impl<'a> AtomicParse<'a> for $name<'a> {
+                fn matches(token: Option<&ComponentValue<'a>>) -> Option<Self> {
+                    match token {
+                        Some(ComponentValue::Function(Function { name, value }))
+                            if &**name == $fname =>
+                        {
+                            Some(Self {
+                                value: value.clone(),
+                            })
+                        }
+                        _ => None,
+                    }
+                }
+            }
+
+            #[automatically_derived]
+            impl<'a> BlockLikeToken<'a> for $name<'a> {
+                fn parse_content(&self) -> ParseStream<'a> {
+                    ParseStream::new(self.value.clone())
+                }
+            }
+        };
+    }
+
+    make_function_keyword!(LangFunction, "lang");
+    make_function_keyword!(CueFunction, "cue");
+}
+
+#[rustfmt::skip]
+macro_rules! token_macro {
+    (:) => { $crate::css::parse::tokens::Colon };
+    (.) => { $crate::css::parse::tokens::Dot };
+    (past) => { $crate::css::parse::tokens::Past };
+    (future) => { $crate::css::parse::tokens::Future };
+    (lang(..)) => { $crate::css::parse::tokens::LangFunction };
+    (cue) => { $crate::css::parse::tokens::Cue };
+    (cue(..)) => { $crate::css::parse::tokens::CueFunction };
+}
+
+pub(crate) use token_macro as Token;

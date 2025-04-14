@@ -544,7 +544,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                     let deadline = if self.player_connection.is_none() {
                         let next_change = self.start
                             + Duration::from_secs_f32(
-                                self.renderer.unchanged_inside().end as f32
+                                (self.renderer.unchanged_inside().end - self.args.start_at) as f32
                                     / 1000.
                                     / self.args.speed,
                             );

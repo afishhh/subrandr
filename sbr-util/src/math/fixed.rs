@@ -101,6 +101,10 @@ macro_rules! define_fixed_for_type {
                 Self((value * (1 << P) as f32) as $type)
             }
 
+            pub const fn from_f64(value: f64) -> Self {
+                Self((value * (1 << P) as f64) as $type)
+            }
+
             pub const fn into_f32(self) -> f32 {
                 self.0 as f32 / (1 << P) as f32
             }

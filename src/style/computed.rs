@@ -35,6 +35,10 @@ impl Length {
         Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
     }
 
+    pub const fn to_unscaled_pixels(self) -> FixedL {
+        self.0
+    }
+
     pub const fn to_f32(self) -> f32 {
         self.0.into_f32()
     }

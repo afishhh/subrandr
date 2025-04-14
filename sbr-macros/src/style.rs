@@ -1,4 +1,4 @@
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{parse::ParseStream, spanned::Spanned, Token};
 
 use crate::{
@@ -228,6 +228,8 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
     let mut create_child_impl = TokenStream2::new();
     let mut default_const_impl = TokenStream2::new();
     let mut debug_fields_impl = TokenStream2::new();
+    let mut properties_module = TokenStream2::new();
+
     for group in &input.groups {
         let group_name = &group.name;
         let group_type_name = snake_case_to_pascal_case(&group.name);
@@ -245,7 +247,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
         for prop in &group.properties {
             let name = &prop.name;
-            let make_mut_name = syn::Ident::new(&format!("make_{name}_mut"), name.span());
+            let make_mut_name = format_ident!("make_{name}_mut");
             let type_ = &prop.value_type;
 
             let ampersand = proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone);
@@ -254,6 +256,23 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             } else {
                 Some(ampersand.clone())
             };
+
+            let meta_name = format_ident!("Computed{}", snake_case_to_pascal_case(name));
+            let inherited = prop.inherit;
+            properties_module.extend(quote! {
+                pub(super) struct #meta_name(());
+
+                impl ComputedProperty for #meta_name {
+                    type Value = #type_;
+                    const INHERITED: bool = #inherited;
+                    fn get(style: &ComputedStyle) -> &Self::Value {
+                        &style.#group_name.#name
+                    }
+                    fn set(style: &mut ComputedStyle, value: Self::Value) {
+                        *style.#make_mut_name() = value;
+                    }
+                }
+            });
 
             computed_style_impl.extend(quote! {
                 pub fn #name(&self) -> #ampersand_if_not_copy #type_ {
@@ -328,6 +347,12 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                     #debug_fields_impl
                     .finish()
             }
+        }
+
+        mod properties {
+            use super::*;
+
+            #properties_module
         }
     });
 

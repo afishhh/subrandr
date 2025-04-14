@@ -377,6 +377,13 @@ impl<R: Refcount, T: Default> Default for RcBase<R, T> {
     }
 }
 
+impl<R: Refcount, T: 'static> Default for RcBase<R, [T]> {
+    #[inline]
+    fn default() -> Self {
+        rc_static!([])
+    }
+}
+
 impl<R: Refcount, T: PartialEq + ?Sized> PartialEq for RcBase<R, T> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {

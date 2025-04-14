@@ -18,6 +18,8 @@ pub trait ToPhysicalPixels {
 pub struct Length(FixedL);
 
 impl Length {
+    pub const MIN: Self = Self(FixedL::MIN);
+    pub const MAX: Self = Self(FixedL::MAX);
     pub const ONE: Self = Self(FixedL::ONE);
     pub const HALF: Length = Length::from_pixels(FixedL::HALF);
     pub const ZERO: Self = Self(FixedL::ZERO);
@@ -33,6 +35,10 @@ impl Length {
     pub const fn from_points(pixels: FixedL) -> Self {
         // 96 / 72 = 4/3
         Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
+    }
+
+    pub const fn to_unscaled_pixels(self) -> FixedL {
+        self.0
     }
 
     pub const fn to_f32(self) -> f32 {
@@ -147,7 +153,7 @@ pub enum FontSlant {
     Italic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextShadow {
     pub offset: Vec2<Length>,
     pub blur_radius: Length,
@@ -173,7 +179,7 @@ impl Default for TextDecorationLines {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontFeatureSettings(BTreeMap<OpenTypeTag, u32>);
 
 impl FontFeatureSettings {
@@ -213,10 +219,6 @@ pub enum Direction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum WhiteSpaceCollapse {
-    #[cfg_attr(
-        not(all(test, feature = "_layout_tests")),
-        expect(dead_code, reason = "not exposed yet")
-    )]
     Collapse,
     PreserveBreaks,
     Preserve,

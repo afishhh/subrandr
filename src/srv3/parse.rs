@@ -66,9 +66,9 @@ impl Pen {
         edge_color: None,
         ruby_part: RubyPart::None,
         foreground_color: 0xFFFFFFFF,
-        // The default opacity is 0.75
-        // round(0.75 * 255) = 0xBF
-        background_color: 0x080808BF,
+        // The default opacity is 0.75 and ceil(0.75 * 255) = 0xBF
+        // (CSS color components are rounded towards +∞).
+        background_color: 0x080808C0,
     };
 }
 

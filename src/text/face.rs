@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     color::BGRA8,
-    math::{I16Dot16, I26Dot6},
+    math::{I16Dot16, I26Dot6, Vec2},
     outline::Outline,
     rasterize::{PixelFormat, Rasterizer, Texture},
     util::fmt_from_fn,
@@ -757,7 +757,7 @@ impl GlyphCache {
 
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
-    pub offset: (I26Dot6, I26Dot6),
+    pub offset: Vec2<I26Dot6>,
     pub texture: Texture<'static>,
 }
 
@@ -944,7 +944,7 @@ impl Font {
             );
 
             SingleGlyphBitmap {
-                offset: (ox, oy),
+                offset: Vec2::new(ox, oy),
                 texture,
             }
         }

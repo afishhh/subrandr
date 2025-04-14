@@ -728,8 +728,8 @@ pub fn render(
 
         result.glyphs.push(GlyphBitmap {
             offset: (
-                (x + cached.offset.0 + shaped_glyph.x_offset).trunc_to_inner(),
-                (y + cached.offset.1 + shaped_glyph.y_offset).trunc_to_inner(),
+                (x + cached.offset.x + shaped_glyph.x_offset).trunc_to_inner(),
+                (y + cached.offset.y + shaped_glyph.y_offset).trunc_to_inner(),
             ),
             texture: cached.texture.clone(),
         });

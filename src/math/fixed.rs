@@ -99,12 +99,28 @@ macro_rules! define_fixed_for_type {
                 self.0 as f32 / (1 << P) as f32
             }
 
-            pub const fn trunc_to_inner(self) -> $type {
+            pub const fn floor(self) -> Self {
+                Self((self.0 >> P) << P)
+            }
+
+            pub const fn floor_to_inner(self) -> $type {
                 self.0 >> P
             }
 
+            pub const fn trunc_to_inner(self) -> $type {
+                self.trunc().0 >> P
+            }
+
             pub const fn round_to_inner(self) -> $type {
-                self.round().trunc_to_inner()
+                self.round().0 >> P
+            }
+
+            pub fn ceil(self) -> Self {
+                Self(self.0 + (Self::ONE.0 - 1)).floor()
+            }
+
+            pub fn ceil_to_inner(self) -> $type {
+                self.ceil().0 >> P
             }
 
             pub const ONE: Self = Self(1 << P);
@@ -314,7 +330,6 @@ impl<const P: u32> I32Fixed<P> {
 macro_rules! test_module {
     ($fixed_type: ty, signed = $signed: tt) => {
         use super::*;
-        use crate::util::ArrayVec;
 
         type TestFixed = $fixed_type;
 
@@ -389,41 +404,40 @@ macro_rules! test_module {
             }
         }
 
-        const TRUNC_FRACT_DATA: &[(f32, f32, f32)] = &[
-            (0.0, 0.0, 0.0),
-            (0.5, 0.0, 0.5),
-            (1.0, 1.0, 0.0),
-            (0.59765625, 0.0, 0.59765625),
-            (230.115, 230.0, 0.115),
-            (1.0 + 2.0 * EPS, 1.0, 2.0 * EPS),
-            (1.0 + EPS, 1.0, EPS),
-            (2.0 * EPS, 0.0, 2.0 * EPS),
-            (EPS, 0.0, EPS),
+        const ROUND_DATA: &[f32] = &[
+            0.0, 0.5, 0.6, 0.495, 0.499, 1.0, 5.3,
+            5.7, 5.5, 5.0, 100.2, 300., 0.59765625,
+            230.115, 1.0 + 2.0 * EPS, 1.0 + EPS,
+            2.0 * EPS, EPS,
         ];
 
         #[test]
         fn trunc_fract() {
-            for (n, w, f) in TRUNC_FRACT_DATA
-                .iter()
-                .flat_map(|&(n, w, f)| {
-                    let mut result = ArrayVec::<2, _>::from_array([(n, w, f)]);
-                    if $signed {
-                        result.push((-n, -w, -f));
-                    }
-                    result.into_iter()
-                })
-                .map(|(a, b, c)| (TestFixed::from_f32(a), b, c))
-            {
-                let rw = n.trunc().into_f32();
-                let rf = n.fract().into_f32();
+            for &n in ROUND_DATA {
+                let rw = TestFixed::from_f32(n).trunc().into_f32();
+                let rf = TestFixed::from_f32(n).fract().into_f32();
                 println!("{n}.trunc() = {rw}");
                 println!("{n}.fract() = {rf}");
-                assert!((rw - w).abs() < EPS);
-                assert!((rf - f).abs() < EPS);
+                assert!((rw - n.trunc()).abs() < EPS);
+                assert!((rf - n.fract()).abs() < EPS);
             }
         }
 
-        const ROUND_DATA: &[f32] = &[0.0, 0.5, 0.6, 0.495, 0.499, 1.0];
+        #[test]
+        fn floor() {
+            for &d in ROUND_DATA {
+                let ep = d.floor();
+                let rp = TestFixed::from_f32(d).floor().into_f32();
+                println!("{d}.floor() = {rp}");
+                assert!((ep - rp).abs() < EPS);
+                if $signed {
+                    let en = (-d).floor();
+                    let rn = TestFixed::from_f32(-d).floor().into_f32();
+                    println!("{}.floor() = {rn}", -d);
+                    assert!((rn - en).abs() < EPS);
+                }
+            }
+        }
 
         #[test]
         fn round() {
@@ -436,6 +450,22 @@ macro_rules! test_module {
                     let en = (-d).round();
                     let rn = TestFixed::from_f32(-d).round().into_f32();
                     println!("{}.round() = {rn}", -d);
+                    assert!((rn - en).abs() < EPS);
+                }
+            }
+        }
+
+        #[test]
+        fn ceil() {
+            for &d in ROUND_DATA {
+                let ep = d.ceil();
+                let rp = TestFixed::from_f32(d).ceil().into_f32();
+                println!("{d}.ceil() = {rp}");
+                assert!((ep - rp).abs() < EPS);
+                if $signed {
+                    let en = (-d).ceil();
+                    let rn = TestFixed::from_f32(-d).ceil().into_f32();
+                    println!("{}.ceil() = {rn}", -d);
                     assert!((rn - en).abs() < EPS);
                 }
             }

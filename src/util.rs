@@ -9,9 +9,9 @@ use std::{
 
 mod rcarray;
 pub use rcarray::*;
-#[cfg_attr(not(test), expect(dead_code))]
+#[expect(dead_code)]
 mod array_vec;
-#[cfg_attr(not(test), expect(unused_imports))]
+#[expect(unused_imports)]
 pub use array_vec::ArrayVec;
 
 pub const unsafe fn array_assume_init_ref<const N: usize, T>(

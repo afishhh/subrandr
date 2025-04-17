@@ -932,11 +932,20 @@ impl super::Rasterizer for Rasterizer {
     ) {
         let target = unwrap_sw_render_target(target);
 
+        // FIXME: GPU rasterization seems to treat all these rects as edge-exclusive
+        //        which approach is correct/which should we settle on for Rasterizer?
+        let y0 = rect.min.y + 1.;
+        let y1 = rect.max.y - 1.;
+
+        if y0 > y1 {
+            return;
+        }
+
         fill_axis_aligned_antialias_rect(
             rect.min.x as i32,
-            rect.min.y,
+            y0,
             rect.max.x as i32,
-            rect.max.y,
+            y1,
             target.buffer,
             target.width,
             target.height,

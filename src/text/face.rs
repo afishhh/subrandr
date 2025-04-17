@@ -383,9 +383,11 @@ unsafe fn build_font_metrics(
         }};
     }
 
-    let units_per_em = unsafe { (*face).units_per_EM };
+    let scalable = ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) != 0;
+    let units_per_em = (*face).units_per_EM;
     let y_ppem = metrics.y_ppem;
 
+    // NOTE: Do not use when `scalable` is false, no idea how to make these metrics make sense in that case.
     macro_rules! scale_font_units {
         ($value: expr) => {
             I26Dot6::from_wide_quotient($value as i64 * y_ppem as i64, units_per_em as i64)
@@ -400,7 +402,7 @@ unsafe fn build_font_metrics(
     let strikeout_top_offset;
     let strikeout_thickness;
 
-    if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2) } {
+    if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2).filter(|_| scalable) } {
         ascender = scale_font_units!(os2.sTypoAscender);
         descender = scale_font_units!(os2.sTypoDescender);
         height = scale_font_units!(os2.sTypoLineGap);
@@ -419,7 +421,9 @@ unsafe fn build_font_metrics(
     let underline_top_offset;
     let underline_thickness;
 
-    if let Some(postscript) = unsafe { get_table::<TT_Postscript>(face, FT_SFNT_POST) } {
+    if let Some(postscript) =
+        unsafe { get_table::<TT_Postscript>(face, FT_SFNT_POST).filter(|_| scalable) }
+    {
         underline_top_offset = scale_font_units!(-postscript.underlinePosition);
         underline_thickness = scale_font_units!(postscript.underlineThickness);
     } else {

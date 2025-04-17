@@ -6,8 +6,8 @@ subrandr is a subtitle rendering library that aims to fill the gap in open-sourc
 The first goal is to achieve good rendering of YouTube's SRV3 format, currently the library does a pretty good job of it if I do say so myself, but it is not perfect and still under heavy development.
 
 #### Supported subtitle formats:
-- SRV3 (incomplete, but works decently well)
-- WebVTT (incomplete, displays text only, no advanced features currently)
+- SRV3 (incomplete, no window style (justification, vertical text) support, some rarer attributes may be currently unsupported)
+- WebVTT (incomplete, no css, ruby or vertical text support)
 
 #### WebAssembly library and extension
 
@@ -37,7 +37,9 @@ The C API is defined in the `subrandr.h` header, items marked there as unstable 
 > FreeType (or HarfBuzz) returns ANY kind of error. This will be improved in the future, but due to the
 > experimental nature of the library it's not currently high on the priority list.
 
-The library performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
+Although a wgpu based rasterizer is present in subrandr, it is currently not exposed via the C API due to the complexity of integrating with external instances of graphics APIs. You must use `sbr_renderer_render` which performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
+
+In the future you should be able to pass in an initialized Vulkan or OpenGL context and render to a texture of your choice.
 
 ```c
 #include <stdio.h>

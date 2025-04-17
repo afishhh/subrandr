@@ -13,8 +13,6 @@ The first goal is to achieve good rendering of YouTube's SRV3 format, currently 
 
 There's a WebAssembly library being worked on in the `wasi32` directory and a webextension that is able to successfully render subtitles over YouTube videos on youtube.com in the `webextension` directory.
 
-Currently it uses pure software rendering so it is slow in certain blur-heavy scenarios, work is underway to make subrandr support GPU acceleration.
-
 #### `sbr-overlay`
 
 An example program is also present in this repository. It allows testing this library by rendering subtitles onto a transparent window. To aid in this testing it also provides functionality that allows you to overlay the window on an existing video player (or even the YouTube website).
@@ -22,6 +20,12 @@ An example program is also present in this repository. It allows testing this li
 Subtitles can be synchronized with video playback in the mpv video player by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (created using `--input-ipc-server` mpv option). You can also synchronize and overlay over a YouTube tab using `--connect youtube-cdp:<CDP_URL>` which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.
 
 The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target.
+
+#### Hardware acceleration
+
+subrandr supports hardware accelerated rasterization via `wgpu`. This is mainly useful on HiDPI displays where, especially with large blurs, the bitmap is very large and the CPU may struggle with a severe memory bottleneck.
+
+Currently, though, this `wgpu` rasterizer is not exposed in either the C API or the WASM module. This is due to the complexity of integrating with external instances of graphics APIs on the C side, and due to subrandr's WASM approach being not trivially compatible with `wgpu`'s on the WASM side.
 
 #### Usage
 
@@ -37,9 +41,7 @@ The C API is defined in the `subrandr.h` header, items marked there as unstable 
 > FreeType (or HarfBuzz) returns ANY kind of error. This will be improved in the future, but due to the
 > experimental nature of the library it's not currently high on the priority list.
 
-Although a wgpu based rasterizer is present in subrandr, it is currently not exposed via the C API due to the complexity of integrating with external instances of graphics APIs. You must use `sbr_renderer_render` which performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
-
-In the future you should be able to pass in an initialized Vulkan or OpenGL context and render to a texture of your choice.
+Although a wgpu based rasterizer is present in subrandr, it is currently not exposed via the C API so you must use `sbr_renderer_render` which performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
 
 ```c
 #include <stdio.h>

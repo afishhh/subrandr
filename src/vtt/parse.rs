@@ -355,7 +355,26 @@ fn parse_cue_settings<'a>(remainder: &'a str, cue: &mut Cue<'a>) {
                 cue.line = number;
                 cue.region = None;
             }
-            "position" => todo!(),
+            "position" => {
+                let (colpos, colalign) = match value.split_once(',') {
+                    Some((before, after)) => (before, Some(after)),
+                    None => (value, None),
+                };
+
+                let Some(number) = parse_percentage(colpos) else {
+                    continue;
+                };
+
+                match colalign {
+                    Some("line-left") => cue.position_alignment = PositionAlignment::LineLeft,
+                    Some("center") => cue.position_alignment = PositionAlignment::Center,
+                    Some("line-right") => cue.position_alignment = PositionAlignment::LineRight,
+                    Some(_) => continue,
+                    None => (),
+                }
+
+                cue.position = Position::Percentage(number);
+            }
             "size" => {
                 if let Some(number) = parse_percentage(value) {
                     cue.size = number;
@@ -429,7 +448,7 @@ fn collect_webvtt_region_settings<'a>(input: &'a str, region: &mut Region<'a>) {
                     continue;
                 }
 
-                // TODO: What do one out of range?
+                // TODO: What do when out of range?
                 if let Ok(value) = value.parse::<u32>() {
                     region.lines = value;
                 }

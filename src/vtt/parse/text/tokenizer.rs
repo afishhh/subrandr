@@ -219,6 +219,11 @@ impl<'a> Annotation<'a> {
 pub struct ClassList<'a>(&'a str);
 
 impl<'a> ClassList<'a> {
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn new(value: &'a str) -> Self {
+        Self(value)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &'a str> {
         self.0.split('.').filter(|class| !class.is_empty())
     }

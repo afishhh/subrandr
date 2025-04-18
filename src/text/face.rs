@@ -774,7 +774,11 @@ impl Font {
     fn glyph_extents_uncached(&self, index: u32) -> GlyphMetrics {
         let face = self.with_applied_size();
         let mut metrics = unsafe {
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
+            fttry!(FT_Load_Glyph(
+                face,
+                index,
+                (FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
+            ));
             (*(*face).glyph).metrics
         };
 

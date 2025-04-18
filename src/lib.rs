@@ -634,14 +634,38 @@ impl Subtitles {
     }
 }
 
-const DRAW_VERSION_STRING: bool = true;
-const DRAW_PERF_DEBUG_INFO: bool = true;
-const DRAW_LAYOUT_DEBUG_INFO: bool = false;
-const DEBUG_STROKE_SHAPE_OUTLINES: bool = false;
+#[derive(Default, Debug, Clone)]
+struct DebugFlags {
+    draw_version_string: bool,
+    draw_perf_info: bool,
+    draw_layout_info: bool,
+    stroke_shape_outlines: bool,
+}
+
+impl DebugFlags {
+    fn from_env() -> Self {
+        let mut result = Self::default();
+
+        if let Ok(s) = std::env::var("SBR_DEBUG") {
+            for token in s.split(",") {
+                match token {
+                    "draw_version" => result.draw_version_string = true,
+                    "draw_perf" => result.draw_perf_info = true,
+                    "draw_layout" => result.draw_layout_info = true,
+                    "draw_shape_outlines" => result.stroke_shape_outlines = true,
+                    _ => (),
+                }
+            }
+        }
+
+        result
+    }
+}
 
 pub struct Subrandr {
     logger: log::Logger,
     did_log_version: Cell<bool>,
+    debug: DebugFlags,
 }
 
 impl Subrandr {
@@ -649,6 +673,7 @@ impl Subrandr {
         Self {
             logger: log::Logger::Default,
             did_log_version: Cell::new(false),
+            debug: DebugFlags::from_env(),
         }
     }
 }
@@ -1037,7 +1062,7 @@ impl<'a> Renderer<'a> {
         let debug_font_size = I26Dot6::new(16);
         let debug_line_height = I26Dot6::new(20) * ctx.pixel_scale();
 
-        if DRAW_VERSION_STRING {
+        if self.sbr.debug.draw_version_string {
             self.debug_text(
                 rasterizer,
                 target,
@@ -1091,7 +1116,7 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        if DRAW_PERF_DEBUG_INFO {
+        if self.sbr.debug.draw_perf_info {
             self.debug_text(
                 rasterizer,
                 target,
@@ -1284,7 +1309,7 @@ impl<'a> Renderer<'a> {
 
                 let final_total_rect = total_rect.translate(Vec2::new(x, y));
 
-                if DRAW_LAYOUT_DEBUG_INFO {
+                if self.sbr.debug.draw_layout_info {
                     rasterizer.stroke_axis_aligned_rect(
                         target,
                         Rect2::new(
@@ -1309,7 +1334,7 @@ impl<'a> Renderer<'a> {
                     VerticalAlignment::Bottom => (I32Fixed::new(-24), Alignment::Bottom),
                 };
 
-                if DRAW_LAYOUT_DEBUG_INFO {
+                if self.sbr.debug.draw_layout_info {
                     self.debug_text(
                         rasterizer,
                         target,
@@ -1389,7 +1414,7 @@ impl<'a> Renderer<'a> {
                     let final_logical_box = convert_rect(shaped_segment.logical_rect)
                         .translate(Vec2::new(x as f32, y as f32));
 
-                    if DRAW_LAYOUT_DEBUG_INFO {
+                    if self.sbr.debug.draw_layout_info {
                         self.debug_text(
                             rasterizer,
                             target,
@@ -1509,7 +1534,7 @@ impl<'a> Renderer<'a> {
                                     );
                                 }
 
-                                if DEBUG_STROKE_SHAPE_OUTLINES {
+                                if self.sbr.debug.stroke_shape_outlines {
                                     rasterize::polygon::debug_stroke_outline(
                                         rasterizer,
                                         target,
@@ -1539,7 +1564,7 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = unchanged_range;
 
         let time = self.perf.end_frame();
-        if DRAW_PERF_DEBUG_INFO {
+        if self.sbr.debug.draw_perf_info {
             trace!(self.sbr, "frame took {:.2}ms to render", time);
         }
     }

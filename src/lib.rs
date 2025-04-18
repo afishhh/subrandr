@@ -1,7 +1,12 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
+use std::{
+    cell::Cell,
+    collections::{HashMap, VecDeque},
+    fmt::Debug,
+    ops::Range,
+};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
@@ -201,7 +206,7 @@ enum TextShadow {
 #[derive(Debug, Clone)]
 struct CssTextShadow {
     offset: Vec2f,
-    blur_radius: f32,
+    blur_radius: I26Dot6,
     color: BGRA8,
 }
 
@@ -515,12 +520,12 @@ impl Subtitles {
                         shadows: vec![
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::new(80.0, 80.0),
-                                blur_radius: 7.5,
+                                blur_radius: I26Dot6::from_f32(7.5),
                                 color: BGRA8::new(0, 0, 255, 255),
                             }),
                             TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::new(48.0, 48.0),
-                                blur_radius: 20.0,
+                                blur_radius: I26Dot6::from_f32(20.0),
                                 color: BGRA8::new(255, 255, 255, 255),
                             }),
                         ],
@@ -564,7 +569,7 @@ impl Subtitles {
                             text: "嗚呼ー".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::ZERO,
-                                blur_radius: 15.0,
+                                blur_radius: I26Dot6::from_f32(15.0),
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
                             ruby: Ruby::None,
@@ -580,7 +585,7 @@ impl Subtitles {
                             text: "helloworld".to_string(),
                             shadows: vec![TextShadow::Css(CssTextShadow {
                                 offset: Vec2f::ZERO,
-                                blur_radius: 15.0,
+                                blur_radius: I26Dot6::from_f32(15.0),
                                 color: BGRA8::new(0, 0, 255, 255),
                             })],
                             ruby: Ruby::None,
@@ -859,27 +864,33 @@ impl<'a> Renderer<'a> {
         let image = text::render(rasterizer, x.fract(), y.fract(), glyphs);
         let border = decoration.border * scale;
 
-        // TODO: This should also draw an offset underline I think and possibly strike through
+        let mut blurs = HashMap::new();
+
+        // TODO: This should also draw an offset underline I think and possibly strike through?
         let mut draw_css_shadow = |shadow: &CssTextShadow| {
             if shadow.color.a > 0 {
-                if shadow.blur_radius > f32::EPSILON {
+                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
                     // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
                     // A non-zero blur radius indicates that the resulting shadow should be blurred,
                     // ... by applying to the shadow a Gaussian blur with a standard deviation
                     // equal to half the blur radius.
-                    let sigma = shadow.blur_radius / 2.0;
-                    let monochrome = image.monochrome(rasterizer);
-                    rasterizer.blur_prepare(
-                        monochrome.texture.width(),
-                        monochrome.texture.height(),
-                        sigma,
-                    );
-                    rasterizer.blur_buffer_blit(0, 0, &monochrome.texture);
-                    rasterizer.blur_execute(
+                    let sigma = shadow.blur_radius / 2;
+
+                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
+                        let offset = image.prepare_for_blur(rasterizer, sigma.into_f32());
+                        let padding = rasterizer.blur_padding();
+                        (
+                            rasterizer.blur_to_mono_texture(),
+                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
+                        )
+                    });
+
+                    rasterizer.blit(
                         target,
-                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
-                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
-                        shadow.color.to_bgr_bytes(),
+                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
+                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
+                        blurred,
+                        shadow.color,
                     );
                 } else {
                     let monochrome = image.monochrome(rasterizer);

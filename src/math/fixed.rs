@@ -129,7 +129,7 @@ macro_rules! define_fixed_for_type {
             pub const MIN: Self = Self(<$type>::MIN);
             pub const MAX: Self = Self(<$type>::MAX);
             pub const HALF: Self = Self(1 << (P - 1));
-            const EPS: Self = Self(1);
+            pub const EPS: Self = Self(1);
 
             const FRACTIONAL_MASK: $type = (1 << P) - 1;
             const WHOLE_MASK: $type = !Self::FRACTIONAL_MASK;

@@ -661,6 +661,33 @@ impl Image {
             glyph.blit(rasterizer, target, dx, dy, color);
         }
     }
+
+    pub fn prepare_for_blur(&self, rasterizer: &mut dyn Rasterizer, sigma: f32) -> Vec2<i32> {
+        let mut offset = Vec2::new(0, 0);
+        let (mut width, mut height) = (0, 0);
+
+        for glyph in &self.glyphs {
+            offset.x = offset.x.min(glyph.offset.0);
+            offset.y = offset.y.min(glyph.offset.1);
+
+            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
+            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
+        }
+
+        width += (-offset.x).max(0) as u32;
+        height += (-offset.y).max(0) as u32;
+
+        rasterizer.blur_prepare(width, height, sigma);
+
+        for bitmap in &self.glyphs {
+            let offx = bitmap.offset.0 - offset.x;
+            let offy = bitmap.offset.1 - offset.y;
+
+            rasterizer.blur_buffer_blit(offx, offy, &bitmap.texture);
+        }
+
+        offset
+    }
 }
 
 pub fn render(

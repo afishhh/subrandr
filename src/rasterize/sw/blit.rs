@@ -124,8 +124,8 @@ make_blitter!(
     BGRA8 [over] BGRA8, alpha: u8
 );
 
-pub unsafe fn blit_monochrome_float_unchecked(
-    dst: &mut [BGRA8],
+pub unsafe fn copy_monochrome_float_to_mono_u8_unchecked(
+    dst: &mut [u8],
     dst_stride: usize,
     dx: i32,
     dy: i32,
@@ -133,7 +133,6 @@ pub unsafe fn blit_monochrome_float_unchecked(
     ys: Range<usize>,
     src_source: &[f32],
     src_stride: usize,
-    color: [u8; 3],
 ) {
     for y in ys {
         let fy = dy + y as i32;
@@ -141,13 +140,12 @@ pub unsafe fn blit_monochrome_float_unchecked(
             let fx = dx + x as i32;
 
             let si = y * src_stride + x;
-            let sv = (*unsafe { src_source.get_unchecked(si) }).clamp(0.0, 1.0);
+            let sv = *unsafe { src_source.get_unchecked(si) };
 
             let di = (fx as usize) + (fy as usize) * dst_stride;
             let d = unsafe { dst.get_unchecked_mut(di) };
 
-            let c = BGRA8::from_bytes([color[0], color[1], color[2], (sv * 255.0) as u8]);
-            *d = c.blend_over(*d).0;
+            *d = (sv * 255.0) as u8;
         }
     }
 }

@@ -980,34 +980,30 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blur_execute(&mut self, target: &mut super::RenderTarget, dx: i32, dy: i32, color: [u8; 3]) {
+    fn blur_padding(&mut self) -> Vec2f {
+        let state = self
+            .blur_state
+            .as_ref()
+            .expect("Rasterizer::blur_padding called without an active blur pass");
+        let pad = (2 * state.radius) as f32;
+        Vec2::new(pad, pad)
+    }
+
+    fn blur_to_mono_texture(&mut self) -> super::Texture {
         let mut state = self
             .blur_state
             .take()
-            .expect("Rasterizer::blur_buffer_blit called without an active blur pass");
+            .expect("Rasterizer::blur_to_mono_texture called without an active blur pass");
 
         drop(state.blit_pass);
-
-        let Some(target) = unwrap_wgpu_render_target(target) else {
-            return;
-        };
 
         self.do_blur(&mut state.encoder, &state.front_texture, state.radius);
 
         self.queue.submit([state.encoder.finish()]);
 
-        self.blitter.do_blit(
-            &self.device,
-            &mut target.pass,
-            PixelFormat::Bgra,
-            target.tex.width(),
-            target.tex.height(),
-            dx - (2 * state.radius) as i32,
-            dy - (2 * state.radius) as i32,
-            &state.front_texture,
-            PixelFormat::Mono,
-            BGRA8::new(color[2], color[1], color[0], 255),
-        );
+        super::Texture(super::TextureInner::Wgpu(TextureImpl {
+            tex: Some(state.front_texture),
+        }))
     }
 }
 

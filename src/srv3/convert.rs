@@ -177,7 +177,7 @@ impl Srv3TextShadow {
                 while x <= t {
                     out.push(CssTextShadow {
                         offset: Vec2f::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
-                        blur_radius: 0.0,
+                        blur_radius: I26Dot6::ZERO,
                         color: self.color,
                     });
                     x += step;
@@ -187,19 +187,19 @@ impl Srv3TextShadow {
                 let offset = Vec2f::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
                 out.push(CssTextShadow {
                     offset,
-                    blur_radius: 0.0,
+                    blur_radius: I26Dot6::ZERO,
                     color: self.color,
                 });
                 out.push(CssTextShadow {
                     offset: -offset,
-                    blur_radius: 0.0,
+                    blur_radius: I26Dot6::ZERO,
                     color: self.color,
                 });
             }
             EdgeType::Glow => out.extend(std::iter::repeat_n(
                 CssTextShadow {
                     offset: Vec2f::ZERO,
-                    blur_radius: t,
+                    blur_radius: I26Dot6::from_f32(t),
                     color: self.color,
                 },
                 5,
@@ -209,7 +209,7 @@ impl Srv3TextShadow {
                 while t <= c {
                     out.push(CssTextShadow {
                         offset,
-                        blur_radius: t,
+                        blur_radius: I26Dot6::from_f32(t),
                         color: self.color,
                     });
                     t += a;

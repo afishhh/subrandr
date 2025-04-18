@@ -2,7 +2,10 @@ use std::{mem::MaybeUninit, sync::Arc};
 
 use blur::gaussian_sigma_to_box_radius;
 
-use crate::{color::BGRA8, math::Point2f};
+use crate::{
+    color::BGRA8,
+    math::{Point2f, Vec2f},
+};
 
 mod blit;
 pub(super) mod blur;
@@ -930,11 +933,14 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blur_execute(&mut self, target: &mut super::RenderTarget, dx: i32, dy: i32, color: [u8; 3]) {
-        let target = unwrap_sw_render_target(target);
-        let dx = dx - self.blurer.padding() as i32;
-        let dy = dy - self.blurer.padding() as i32;
+    fn blur_padding(&mut self) -> crate::math::Vec2f {
+        Vec2f::new(self.blurer.padding() as f32, self.blurer.padding() as f32)
+    }
 
+    // PERF: Evaluate whether storing an f32 texture would be better
+    //       or maybe make the last box_blur_vertical blur directly
+    //       into a u8 buffer to avoid the floats and copy entirely
+    fn blur_to_mono_texture(&mut self) -> super::Texture {
         self.blurer.box_blur_horizontal();
         self.blurer.box_blur_horizontal();
         self.blurer.box_blur_horizontal();
@@ -942,29 +948,22 @@ impl super::Rasterizer for Rasterizer {
         self.blurer.box_blur_vertical();
         self.blurer.box_blur_vertical();
 
-        let Some((xs, ys)) = blit::calculate_blit_rectangle(
-            dx,
-            dy,
-            target.width as usize,
-            target.height as usize,
-            self.blurer.width(),
-            self.blurer.height(),
-        ) else {
-            return;
-        };
+        let mut target = self
+            .create_mono_texture_rendered(self.blurer.width() as u32, self.blurer.height() as u32);
 
         unsafe {
-            blit::blit_monochrome_float_unchecked(
-                target.buffer,
-                target.width as usize,
-                dx,
-                dy,
-                xs,
-                ys,
+            blit::copy_monochrome_float_to_mono_u8_unchecked(
+                &mut Arc::get_mut(&mut unwrap_sw_render_texture(&mut target).buffer).unwrap(),
+                self.blurer.width(),
+                0,
+                0,
+                0..self.blurer.width(),
+                0..self.blurer.height(),
                 self.blurer.front(),
                 self.blurer.width(),
-                color,
             );
         }
+
+        self.finalize_texture_render(target)
     }
 }

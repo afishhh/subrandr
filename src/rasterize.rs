@@ -229,5 +229,6 @@ pub(crate) trait Rasterizer {
 
     fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
     fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);
-    fn blur_execute(&mut self, target: &mut RenderTarget, dx: i32, dy: i32, color: [u8; 3]);
+    fn blur_padding(&mut self) -> Vec2f;
+    fn blur_to_mono_texture(&mut self) -> Texture;
 }

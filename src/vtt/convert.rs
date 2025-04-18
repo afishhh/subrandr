@@ -341,7 +341,7 @@ impl Default for Style {
             font_size: f32::INFINITY,
             font_weight: 400.,
             color: BGRA8::WHITE,
-            background_color: BGRA8::ZERO,
+            background_color: BGRA8::new(0, 0, 0, (0.8 * 255.0) as u8),
             italic: false,
             underline: false,
         }

@@ -1571,8 +1571,6 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = unchanged_range;
 
         let time = self.perf.end_frame();
-        if self.sbr.debug.draw_perf_info {
-            trace!(self.sbr, "frame took {:.2}ms to render", time);
-        }
+        trace!(self.sbr, "frame took {:.2}ms to render", time);
     }
 }

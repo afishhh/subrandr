@@ -669,6 +669,9 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
 }
 
 fn consume_magic(input: &mut ParsingBuffer) -> bool {
+    // Optional UTF-8 BOM
+    _ = input.take('\u{feff}');
+
     if !input.take_str("WEBVTT") {
         return false;
     }

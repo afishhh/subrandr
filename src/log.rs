@@ -254,13 +254,7 @@ macro_rules! log_once_state {
 
 pub(crate) use {log, log_once_state};
 
-#[cfg(debug_assertions)]
 log!(@mkmacro $, trace, Trace);
-#[cfg(not(debug_assertions))]
-macro_rules! trace {
-    ($($anything: tt)*) => {};
-}
-
 log!(@mkmacro $, debug, Debug);
 log!(@mkmacro $, warning, Warn);
 log!(@mkmacro $, info, Info);

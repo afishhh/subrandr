@@ -439,8 +439,8 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
                 // Standard says 5vh, but browser engines use 5vmin.
                 // See https://github.com/w3c/webvtt/issues/529
                 let pixels =
-                    ctx.player_height().min(ctx.player_width()) * 0.05 * 96.0 / ctx.ppi() as f32;
-                I26Dot6::from_f32(pixels) * 96.0 / 72.0
+                    ctx.player_height().min(ctx.player_width()) * 0.05 / ctx.pixel_scale() as f32;
+                I26Dot6::from_f32(pixels)
             },
             create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
         },

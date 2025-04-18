@@ -80,12 +80,6 @@ fn convert_coordinate(coord: f32) -> f32 {
     0.02 + coord * 0.0096
 }
 
-// NWG = function (p, C, V, N) {
-//   var H = C / 360 * 16;
-//   C >= p &&
-//   (p = 640, N > V * 1.3 && (p = 480), H = V / p * 16);
-//   return H
-// },
 fn calculate_font_scale(
     mut video_width: f32,
     video_height: f32,
@@ -126,9 +120,6 @@ fn font_size_to_pixels(size: u16) -> f32 {
     c
 }
 
-// this.maxWidth = playerWidth * 0.96
-// this.maxHeight = playerHeight * 0.96
-
 trait SubtitleContextCssExt {
     // 1px = 1/96in
     fn pixels_to_css(&self, physical_pixels: f32) -> f32;
@@ -137,11 +128,11 @@ trait SubtitleContextCssExt {
 
 impl SubtitleContextCssExt for SubtitleContext {
     fn pixels_to_css(&self, physical_pixels: f32) -> f32 {
-        physical_pixels * 96.0 / self.ppi() as f32
+        physical_pixels / self.pixel_scale()
     }
 
     fn pixels_from_css(&self, css_pixels: f32) -> f32 {
-        css_pixels * self.ppi() as f32 / 96.0
+        css_pixels * self.pixel_scale()
     }
 }
 
@@ -199,7 +190,7 @@ impl Srv3TextShadow {
             EdgeType::Glow => out.extend(std::iter::repeat_n(
                 CssTextShadow {
                     offset: Vec2f::ZERO,
-                    blur_radius: I26Dot6::from_f32(t),
+                    blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(l)),
                     color: self.color,
                 },
                 5,
@@ -209,7 +200,7 @@ impl Srv3TextShadow {
                 while t <= c {
                     out.push(CssTextShadow {
                         offset,
-                        blur_radius: I26Dot6::from_f32(t),
+                        blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(t)),
                         color: self.color,
                     });
                     t += a;

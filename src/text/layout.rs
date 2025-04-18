@@ -431,7 +431,7 @@ impl<'a> MultilineTextShaper<'a> {
                             };
 
                             // FIXME: Annotations seem to be slightly above where they should and
-                            //        the logical rects also appear to be slightly to high.
+                            //        the logical rects also appear to be slightly too high.
                             annotation_segments.push(ShapedSegment {
                                 glyphs: Some(RcArray::from_boxed(glyphs.into_boxed_slice())),
                                 baseline_offset: Point2::new(
@@ -562,21 +562,6 @@ impl<'a> MultilineTextShaper<'a> {
 
             last += post_wrap_skip;
             post_wrap_skip = 0;
-
-            for segment in segments.iter_mut().rev() {
-                match &segment.glyphs {
-                    Some(glyphs) => {
-                        if let Some(last) = glyphs.last() {
-                            let extents = last.font.glyph_extents(last.index);
-                            let trailing_advance = last.x_advance - extents.width;
-                            current_x -= trailing_advance;
-                            segment.logical_rect.max.x -= trailing_advance;
-                            break;
-                        }
-                    }
-                    None => break,
-                }
-            }
 
             let aligning_x_offset = match line_alignment {
                 HorizontalAlignment::Left => I26Dot6::ZERO,

@@ -325,6 +325,16 @@ impl ItemRange for RangeFull {
     }
 }
 
+// Right to left text will have clusters monotonically decreasing instead of increasing,
+// so we need to fixup cluster ranges so we don't crash when slicing with them.
+fn fixup_range(a: usize, b: usize) -> Range<usize> {
+    if a > b {
+        b..a
+    } else {
+        a..b
+    }
+}
+
 pub struct ShapingBuffer {
     buffer: *mut hb_buffer_t,
 }
@@ -480,7 +490,7 @@ impl ShapingBuffer {
                 } else if let Some(start) = invalid_range_start.take() {
                     let info_range = start..i;
                     reshape_with_fallback(
-                        infos[start].cluster as usize..info.cluster as usize,
+                        fixup_range(infos[start].cluster as usize, info.cluster as usize),
                         result,
                         font_arena,
                         (&infos[info_range.clone()], &positions[info_range]),
@@ -500,7 +510,10 @@ impl ShapingBuffer {
 
                 let info_range = start..infos.len();
                 reshape_with_fallback(
-                    infos[start].cluster as usize..infos.last().unwrap().cluster as usize + 1,
+                    fixup_range(
+                        infos[start].cluster as usize,
+                        infos.last().unwrap().cluster as usize + 1,
+                    ),
                     result,
                     font_arena,
                     (&infos[info_range.clone()], &positions[info_range]),

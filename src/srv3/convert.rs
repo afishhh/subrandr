@@ -105,10 +105,10 @@ fn calculate_font_scale(
 
 fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     calculate_font_scale(
-        ctx.pixels_to_css(ctx.video_width),
-        ctx.pixels_to_css(ctx.video_height),
-        ctx.pixels_to_css(ctx.player_width()),
-        ctx.pixels_to_css(ctx.player_height()),
+        ctx.pixels_to_css(ctx.video_width.into_f32()),
+        ctx.pixels_to_css(ctx.video_height.into_f32()),
+        ctx.pixels_to_css(ctx.player_width().into_f32()),
+        ctx.pixels_to_css(ctx.player_height().into_f32()),
     )
 }
 
@@ -230,7 +230,7 @@ struct Srv3Layouter;
 
 impl Layouter for Srv3Layouter {
     fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
-        ctx.player_width() * 0.96
+        ctx.player_width().into_f32() * 0.96
     }
 
     fn layout(
@@ -244,7 +244,10 @@ impl Layouter for Srv3Layouter {
             panic!("Srv3Layouter received foreign event {:?}", event);
         };
 
-        Point2::new(extra.x * ctx.player_width(), extra.y * ctx.player_height())
+        Point2::new(
+            extra.x * ctx.player_width().into_f32(),
+            extra.y * ctx.player_height().into_f32(),
+        )
     }
 }
 

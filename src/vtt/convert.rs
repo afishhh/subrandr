@@ -173,13 +173,8 @@ impl VttLayouter {
                 let mut specified_position = lines.to_vec();
 
                 // Let title area be a box that covers all of the video’s rendering area.
-                let title_area = Rect2::new(
-                    Point2::ZERO,
-                    Point2::new(
-                        I26Dot6::from_f32(ctx.video_width),
-                        I26Dot6::from_f32(ctx.video_height),
-                    ),
-                );
+                let title_area =
+                    Rect2::new(Point2::ZERO, Point2::new(ctx.video_width, ctx.video_height));
 
                 let mut switched = false;
                 loop {
@@ -267,7 +262,7 @@ impl Layouter for VttLayouter {
             panic!("VttLayouter::wrap_width received foreign event {:?}", event);
         };
 
-        ctx.video_width * extra.size as f32 / 100.
+        ctx.video_width.into_f32() * extra.size as f32 / 100.
     }
 
     fn layout(
@@ -286,26 +281,28 @@ impl Layouter for VttLayouter {
         }
 
         let mut result = Point2::new(
-            extra.x as f32 * ctx.video_width,
-            extra.y as f32 * ctx.video_height,
+            extra.x as f32 * ctx.video_width.into_f32(),
+            extra.y as f32 * ctx.video_height.into_f32(),
         );
 
         if extra.writing_direction.is_horizontal() {
             // emulate width = size vw
             result.x += match extra.text_alignment {
                 vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => ctx.video_width * extra.size as f32 / 200.,
+                vtt::TextAlignment::Center => ctx.video_width.into_f32() * extra.size as f32 / 200.,
                 vtt::TextAlignment::End | vtt::TextAlignment::Right => {
-                    ctx.video_width * extra.size as f32 / 100.
+                    ctx.video_width.into_f32() * extra.size as f32 / 100.
                 }
             };
         } else {
             // emulate height = size vh
             result.y += match extra.text_alignment {
                 vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => ctx.video_height * extra.size as f32 / 200.,
+                vtt::TextAlignment::Center => {
+                    ctx.video_height.into_f32() * extra.size as f32 / 200.
+                }
                 vtt::TextAlignment::End | vtt::TextAlignment::Right => {
-                    ctx.video_height * extra.size as f32 / 100.
+                    ctx.video_height.into_f32() * extra.size as f32 / 100.
                 }
             };
         }
@@ -319,8 +316,8 @@ impl Layouter for VttLayouter {
             )));
         }
 
-        result.x += ctx.padding_left;
-        result.y += ctx.padding_top;
+        result.x += ctx.padding_left.into_f32();
+        result.y += ctx.padding_top.into_f32();
 
         result
     }
@@ -438,9 +435,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
             get_font_size: |ctx, _event, _segment| -> I26Dot6 {
                 // Standard says 5vh, but browser engines use 5vmin.
                 // See https://github.com/w3c/webvtt/issues/529
-                let pixels =
-                    ctx.player_height().min(ctx.player_width()) * 0.05 / ctx.pixel_scale() as f32;
-                I26Dot6::from_f32(pixels)
+                ctx.player_height().min(ctx.player_width()) * 0.05 / ctx.pixel_scale()
             },
             create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
         },

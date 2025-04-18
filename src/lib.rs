@@ -8,7 +8,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I16Dot16, I26Dot6, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
+use math::{I16Dot16, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -119,7 +119,7 @@ struct TestLayouter;
 
 impl Layouter for TestLayouter {
     fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
-        ctx.player_width()
+        ctx.player_width().into_f32()
     }
 
     fn layout(
@@ -129,13 +129,13 @@ impl Layouter for TestLayouter {
         _total_rect: &mut Rect2<I26Dot6>,
         event: &Event,
     ) -> Point2f {
-        let EventExtra::Test { x, y } = &event.extra else {
+        let &EventExtra::Test { x, y } = &event.extra else {
             panic!("TestLayouter received foreign event {:?}", event);
         };
 
         Point2f::new(
-            ctx.padding_left + (x * ctx.video_width),
-            ctx.padding_top + (y * ctx.video_height),
+            (ctx.padding_left + (ctx.video_width * x)).into_f32(),
+            (ctx.padding_top + (ctx.video_height * y)).into_f32(),
         )
     }
 }
@@ -270,13 +270,15 @@ impl ShapeSegment {
 // TODO: Maybe call this a viewport or have a field called "viewport"
 pub struct SubtitleContext {
     pub dpi: u32,
-    pub video_width: f32,
-    pub video_height: f32,
-    pub padding_left: f32,
-    pub padding_right: f32,
-    pub padding_top: f32,
-    pub padding_bottom: f32,
+    pub video_width: I26Dot6,
+    pub video_height: I26Dot6,
+    pub padding_left: I26Dot6,
+    pub padding_right: I26Dot6,
+    pub padding_top: I26Dot6,
+    pub padding_bottom: I26Dot6,
 }
+
+pub use math::I26Dot6;
 
 impl SubtitleContext {
     pub fn ppi(&self) -> u32 {
@@ -287,19 +289,19 @@ impl SubtitleContext {
         self.dpi as f32 / 72.0
     }
 
-    pub fn padding_width(&self) -> f32 {
+    pub fn padding_width(&self) -> I26Dot6 {
         self.padding_left + self.padding_right
     }
 
-    pub fn padding_height(&self) -> f32 {
+    pub fn padding_height(&self) -> I26Dot6 {
         self.padding_top + self.padding_bottom
     }
 
-    pub fn player_width(&self) -> f32 {
+    pub fn player_width(&self) -> I26Dot6 {
         self.video_width + self.padding_width()
     }
 
-    pub fn player_height(&self) -> f32 {
+    pub fn player_height(&self) -> I26Dot6 {
         self.video_height + self.padding_height()
     }
 }
@@ -737,12 +739,12 @@ impl<'a> Renderer<'a> {
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
                 dpi: 0,
-                video_width: 0.0,
-                video_height: 0.0,
-                padding_left: 0.0,
-                padding_right: 0.0,
-                padding_top: 0.0,
-                padding_bottom: 0.0,
+                video_width: I26Dot6::ZERO,
+                video_height: I26Dot6::ZERO,
+                padding_left: I26Dot6::ZERO,
+                padding_right: I26Dot6::ZERO,
+                padding_top: I26Dot6::ZERO,
+                padding_bottom: I26Dot6::ZERO,
             },
             previous_output_size: (0, 0),
         }
@@ -772,14 +774,14 @@ impl<'a> Renderer<'a> {
         y: i32,
         text: &str,
         alignment: Alignment,
-        size: f32,
+        size: I26Dot6,
         color: BGRA8,
     ) {
         let font = self
             .fonts
             .select_simple("monospace", I16Dot16::new(400), false)
             .unwrap()
-            .with_size(size.into(), self.dpi);
+            .with_size(size, self.dpi);
         let font_arena = FontArena::new();
         let shaped = text::shape_text(&font, &font_arena, text);
         let (ox, oy) = Self::translate_for_aligned_text(
@@ -1034,6 +1036,11 @@ impl<'a> Renderer<'a> {
             subs.class.name
         );
 
+        // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
+        //        to a subtitle renderer so this doesn't work.
+        let debug_font_size = I26Dot6::new(16);
+        let debug_line_height = I26Dot6::new(20) * ctx.pixel_scale();
+
         if DRAW_VERSION_STRING {
             self.debug_text(
                 rasterizer,
@@ -1047,7 +1054,7 @@ impl<'a> Renderer<'a> {
                     env!("BUILD_REV")
                 ),
                 Alignment::TopLeft,
-                16.0,
+                debug_font_size,
                 BGRA8::WHITE,
             );
 
@@ -1055,10 +1062,10 @@ impl<'a> Renderer<'a> {
                 rasterizer,
                 target,
                 0,
-                (20.0 * ctx.pixel_scale()) as i32,
+                debug_line_height.round_to_inner(),
                 &format!("subtitle class: {}", subs.class.name),
                 Alignment::TopLeft,
-                16.0,
+                debug_font_size,
                 BGRA8::WHITE,
             );
 
@@ -1067,10 +1074,10 @@ impl<'a> Renderer<'a> {
                 rasterizer,
                 target,
                 0,
-                (40.0 * ctx.pixel_scale()) as i32,
+                (debug_line_height * 2).round_to_inner(),
                 &rasterizer_line,
                 Alignment::TopLeft,
-                16.0,
+                debug_font_size,
                 BGRA8::WHITE,
             );
 
@@ -1079,10 +1086,10 @@ impl<'a> Renderer<'a> {
                     rasterizer,
                     target,
                     0,
-                    (60.0 * ctx.pixel_scale()) as i32,
+                    (debug_line_height * 3).round_to_inner(),
                     &adapter_line,
                     Alignment::TopLeft,
-                    16.0,
+                    debug_font_size,
                     BGRA8::WHITE,
                 );
             }
@@ -1092,28 +1099,28 @@ impl<'a> Renderer<'a> {
             self.debug_text(
                 rasterizer,
                 target,
-                (ctx.padding_left + ctx.video_width) as i32,
+                (ctx.padding_left + ctx.video_width).round_to_inner(),
                 0,
                 &format!(
                     "{:.2}x{:.2} dpi:{}",
                     ctx.video_width, ctx.video_height, ctx.dpi
                 ),
                 Alignment::TopRight,
-                16.0,
+                debug_font_size,
                 BGRA8::WHITE,
             );
 
             self.debug_text(
                 rasterizer,
                 target,
-                (ctx.padding_left + ctx.video_width) as i32,
-                (20.0 * ctx.pixel_scale()) as i32,
+                (ctx.padding_left + ctx.video_width).round_to_inner(),
+                debug_line_height.round_to_inner(),
                 &format!(
                     "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                     ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                 ),
                 Alignment::TopRight,
-                16.0,
+                debug_font_size,
                 BGRA8::WHITE,
             );
 
@@ -1124,8 +1131,8 @@ impl<'a> Renderer<'a> {
                 self.debug_text(
                     rasterizer,
                     target,
-                    (ctx.padding_left + ctx.video_width) as i32,
-                    (40.0 * ctx.pixel_scale()) as i32,
+                    (ctx.padding_left + ctx.video_width).round_to_inner(),
+                    (debug_line_height * 2).round_to_inner(),
                     &format!(
                         "min={:.1}ms avg={:.1}ms ({:.1}fps) max={:.1}ms ({:.1}fps)",
                         min,
@@ -1135,7 +1142,7 @@ impl<'a> Renderer<'a> {
                         1000.0 / max
                     ),
                     Alignment::TopRight,
-                    16.0,
+                    debug_font_size,
                     BGRA8::WHITE,
                 );
 
@@ -1143,27 +1150,31 @@ impl<'a> Renderer<'a> {
                     self.debug_text(
                         rasterizer,
                         target,
-                        (ctx.padding_left + ctx.video_width) as i32,
-                        (60.0 * ctx.pixel_scale()) as i32,
+                        (ctx.padding_left + ctx.video_width).round_to_inner(),
+                        (debug_line_height * 3).round_to_inner(),
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
                         Alignment::TopRight,
-                        16.0,
+                        debug_font_size,
                         BGRA8::WHITE,
                     );
                 }
 
-                let graph_width = 300.0 * ctx.pixel_scale();
-                let graph_height = 50.0 * ctx.pixel_scale();
-                let offx = (ctx.padding_left + ctx.video_width - graph_width) as i32;
+                let graph_width = I26Dot6::new(300) * ctx.pixel_scale();
+                let graph_height = I26Dot6::new(50) * ctx.pixel_scale();
+                let offx = (ctx.padding_left + ctx.video_width - graph_width).round_to_inner();
                 let mut polyline = vec![];
                 for (i, time) in self.perf.times.iter().copied().enumerate() {
-                    let x = (i as f32 / self.perf.times.len() as f32) * graph_width;
-                    polyline.push(Point2f::new(x, -(time / max) * graph_height));
+                    let x = (graph_width * i as i32 / self.perf.times.len() as i32).into_f32();
+                    let y = -(graph_height * time / max).into_f32();
+                    polyline.push(Point2f::new(x, y));
                 }
 
                 rasterizer.stroke_polyline(
                     target,
-                    Vec2::new(offx as f32, 80.0 * ctx.pixel_scale() + graph_height),
+                    Vec2::new(
+                        offx as f32,
+                        ((debug_line_height * 4.5) + graph_height).into_f32(),
+                    ),
                     &polyline,
                     BGRA8::new(255, 255, 0, 255),
                 );
@@ -1316,7 +1327,7 @@ impl<'a> Renderer<'a> {
                             final_total_rect.height()
                         ),
                         total_position_debug_pos.1,
-                        16.0,
+                        debug_font_size,
                         BGRA8::MAGENTA,
                     );
                 }
@@ -1394,7 +1405,7 @@ impl<'a> Renderer<'a> {
                                 shaped_segment.logical_rect.min.y + y
                             ),
                             Alignment::BottomLeft,
-                            16.0,
+                            debug_font_size,
                             BGRA8::RED,
                         );
 
@@ -1405,7 +1416,7 @@ impl<'a> Renderer<'a> {
                             final_logical_box.max.y as i32,
                             &format!("{:.1}", shaped_segment.baseline_offset.x),
                             Alignment::TopLeft,
-                            16.0,
+                            debug_font_size,
                             BGRA8::RED,
                         );
 
@@ -1420,7 +1431,7 @@ impl<'a> Renderer<'a> {
                                 "shape".to_owned()
                             },
                             Alignment::BottomRight,
-                            16.0,
+                            debug_font_size,
                             BGRA8::GOLD,
                         );
 

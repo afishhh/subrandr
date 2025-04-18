@@ -417,12 +417,12 @@ impl winit::application::ApplicationHandler for App<'_> {
                             DpiMode::Automatic => (state.window().scale_factor() * 72.) as u32,
                             DpiMode::Override(dpi) => dpi,
                         },
-                        video_width: geometry.width as f32,
-                        video_height: geometry.height as f32,
-                        padding_left: 0.0,
-                        padding_right: 0.0,
-                        padding_top: 0.0,
-                        padding_bottom: 0.0,
+                        video_width: subrandr::I26Dot6::new(geometry.width as i32),
+                        video_height: subrandr::I26Dot6::new(geometry.height as i32),
+                        padding_left: subrandr::I26Dot6::new(0),
+                        padding_right: subrandr::I26Dot6::new(0),
+                        padding_top: subrandr::I26Dot6::new(0),
+                        padding_bottom: subrandr::I26Dot6::new(0),
                     };
 
                     let (mut s_width, mut s_height) = (geometry.width, geometry.height);
@@ -464,12 +464,12 @@ impl winit::application::ApplicationHandler for App<'_> {
                         {
                             let padding_x = (player_width - video_width) / 2.0;
                             let padding_y = (player_height - video_height) / 2.0;
-                            ctx.video_width = video_width;
-                            ctx.video_height = video_height;
-                            ctx.padding_left = padding_x;
-                            ctx.padding_right = padding_x;
-                            ctx.padding_top = padding_y;
-                            ctx.padding_bottom = padding_y;
+                            ctx.video_width = subrandr::I26Dot6::from_f32(video_width);
+                            ctx.video_height = subrandr::I26Dot6::from_f32(video_height);
+                            ctx.padding_left = subrandr::I26Dot6::from_f32(padding_x);
+                            ctx.padding_right = subrandr::I26Dot6::from_f32(padding_x);
+                            ctx.padding_top = subrandr::I26Dot6::from_f32(padding_y);
+                            ctx.padding_bottom = subrandr::I26Dot6::from_f32(padding_y);
                             s_width = s_width.min(player_width.ceil() as u32);
                             s_height = s_height.min(player_height.ceil() as u32);
                         }

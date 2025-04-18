@@ -14,20 +14,21 @@ extern "C" {
 #define SBR_UNSTABLE
 #else
 #define SBR_UNSTABLE                                                           \
-  __attribute__((unavailable(                                                  \
-      "This item is not part of subrandr's stable API yet.\n"                  \
-      "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "              \
-      "you still want to use it."                                              \
-  )))
+  __attribute__((                                                              \
+      unavailable("This item is not part of subrandr's stable API yet.\n"      \
+                  "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
+                  "you still want to use it.")                                 \
+  ))
 #endif
 
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
 typedef struct sbr_renderer sbr_renderer;
+typedef int32_t sbr_26dot6;
 typedef struct sbr_subtitle_context {
   uint32_t dpi;
-  float video_width, video_height;
-  float padding_left, padding_right, padding_top, padding_bottom;
+  sbr_26dot6 video_width, video_height;
+  sbr_26dot6 padding_left, padding_right, padding_top, padding_bottom;
 } sbr_subtitle_context;
 
 sbr_library *sbr_library_init(void);
@@ -38,22 +39,22 @@ typedef uint16_t SBR_UNSTABLE sbr_subtitle_format;
 #define SBR_SUBTITLE_FORMAT_SRV3 (sbr_subtitle_format)2
 
 sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
-void sbr_subtitles_destroy(sbr_subtitles *subs);
+void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
 bool sbr_renderer_did_change(
-    sbr_renderer *renderer, sbr_subtitle_context const *ctx, uint32_t t
+    sbr_renderer *, sbr_subtitle_context const *, uint32_t t
 );
 int sbr_renderer_render(
-    sbr_renderer *renderer, sbr_subtitle_context const *ctx,
+    sbr_renderer *, sbr_subtitle_context const *,
     // subtitles to render, on change invalidate the cache before rendering
-    sbr_subtitles *subs,
+    sbr_subtitles *,
     // current time value in milliseconds
     uint32_t t,
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height
 );
-void sbr_renderer_destroy(sbr_renderer *renderer);
+void sbr_renderer_destroy(sbr_renderer *);
 
 typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_OTHER (sbr_error_code)1

@@ -981,19 +981,6 @@ impl<'a> Renderer<'a> {
         width: u32,
         height: u32,
     ) {
-        if self.unchanged_range.contains(&t)
-            && self.previous_output_size == (width, height)
-            && self.previous_context == *ctx
-        {
-            trace!(
-                self.sbr,
-                "rendering skipped: frame hasn't changed {:?} (class={} ctx={ctx:?} t={t}ms)",
-                self.unchanged_range,
-                subs.class.name
-            );
-            return;
-        }
-
         self.previous_context = *ctx;
         self.previous_output_size = (width, height);
 

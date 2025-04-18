@@ -860,6 +860,11 @@ impl<'a> Renderer<'a> {
         scale: f32,
         ctx: &SubtitleContext,
     ) {
+        if glyphs.is_empty() {
+            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
+            return;
+        }
+
         let image = text::render(rasterizer, x.fract(), y.fract(), glyphs);
         let border = decoration.border * scale;
 

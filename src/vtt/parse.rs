@@ -24,18 +24,8 @@ impl WritingDirection {
     }
 
     #[must_use]
-    pub(super) fn is_vertical(&self) -> bool {
-        matches!(self, Self::VerticalGrowingLeft | Self::VerticalGrowingRight)
-    }
-
-    #[must_use]
     pub(super) fn is_vertical_growing_left(&self) -> bool {
         matches!(self, Self::VerticalGrowingLeft)
-    }
-
-    #[must_use]
-    pub(super) fn is_vertical_growing_right(&self) -> bool {
-        matches!(self, Self::VerticalGrowingRight)
     }
 }
 
@@ -107,29 +97,6 @@ pub(super) struct Region<'a> {
 pub(super) enum ScrollValue {
     None,
     Up,
-}
-
-fn take_line_terminator(text: &mut &str) -> bool {
-    if let Some(stext) = text.strip_prefix('\r') {
-        *text = stext.strip_prefix('\n').unwrap_or(stext);
-        true
-    } else {
-        if let Some(stest) = text.strip_prefix('\n') {
-            *text = stest;
-            true
-        } else {
-            false
-        }
-    }
-}
-
-fn take_str(text: &mut &[u8], pattern: &[u8]) -> bool {
-    if let Some(stext) = text.strip_prefix(pattern) {
-        *text = stext;
-        true
-    } else {
-        false
-    }
 }
 
 struct ParsingBuffer<'a> {

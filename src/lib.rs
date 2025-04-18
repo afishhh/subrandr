@@ -1,6 +1,3 @@
-// The library is still under active development
-#![allow(dead_code)]
-// #![cfg_attr(test, feature(test))]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::missing_transmute_annotations)]
 
@@ -8,7 +5,7 @@ use std::{cell::Cell, collections::VecDeque, fmt::Debug, ops::Range};
 
 use color::BGRA8;
 use log::{info, trace, Logger};
-use math::{I16Dot16, I32Fixed, Point2, Point2f, Rect2, Vec2, Vec2f};
+use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
 use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
@@ -145,12 +142,6 @@ enum EventExtra {
     Srv3(Srv3Event),
     Vtt(VttEvent),
     Test { x: f32, y: f32 },
-}
-
-struct EventLayout {
-    x: f32,
-    y: f32,
-    wrap_width: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -808,15 +799,15 @@ impl<'a> Renderer<'a> {
             .unwrap()
             .with_size(size, self.dpi);
         let font_arena = FontArena::new();
-        let shaped = text::shape_text(&font, &font_arena, text);
+        let glyphs = text::simple_shape_text(&font, &font_arena, text);
         let (ox, oy) = Self::translate_for_aligned_text(
             &font,
             true,
-            &text::compute_extents_ex(true, &shaped.glyphs),
+            &text::compute_extents_ex(true, &glyphs),
             alignment,
         );
 
-        let image = text::render(rasterizer, I32Fixed::ZERO, I32Fixed::ZERO, &shaped.glyphs);
+        let image = text::render(rasterizer, I26Dot6::ZERO, I26Dot6::ZERO, &glyphs);
         image.blit(rasterizer, target, x + ox, y + oy, color);
     }
 
@@ -834,7 +825,7 @@ impl<'a> Renderer<'a> {
             HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
             HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
             HorizontalAlignment::Right => (-extents.paint_size.x
-                + I32Fixed::from_raw(font.horizontal_extents().descender))
+                + I26Dot6::from_raw(font.horizontal_extents().descender))
             .trunc_to_inner(),
         };
 
@@ -851,8 +842,8 @@ impl<'a> Renderer<'a> {
         &mut self,
         rasterizer: &mut dyn Rasterizer,
         target: &mut RenderTarget,
-        x: I32Fixed<6>,
-        y: I32Fixed<6>,
+        x: I26Dot6,
+        y: I26Dot6,
         glyphs: &[text::Glyph],
         color: BGRA8,
         decoration: &TextDecorations,
@@ -1336,7 +1327,7 @@ impl<'a> Renderer<'a> {
                     VerticalAlignment::BaselineCentered => {
                         (total_rect.height() + 20, Alignment::Top)
                     }
-                    VerticalAlignment::Bottom => (I32Fixed::new(-24), Alignment::Bottom),
+                    VerticalAlignment::Bottom => (I26Dot6::new(-24), Alignment::Bottom),
                 };
 
                 if self.sbr.debug.draw_layout_info {
@@ -1359,7 +1350,7 @@ impl<'a> Renderer<'a> {
                 }
 
                 // TODO: A trait for casting these types?
-                fn convert_rect(rect: Rect2<I32Fixed<6>>) -> Rect2<f32> {
+                fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
                     Rect2::new(
                         Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
                         Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
@@ -1367,7 +1358,7 @@ impl<'a> Renderer<'a> {
                 }
 
                 for line in &lines {
-                    let mut current_background_box = Rect2::<I32Fixed<6>>::NOTHING;
+                    let mut current_background_box = Rect2::<I26Dot6>::NOTHING;
                     let mut last_segment_index = usize::MAX;
 
                     for shaped_segment in &line.segments {

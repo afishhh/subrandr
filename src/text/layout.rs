@@ -1,5 +1,5 @@
 use crate::{
-    math::{I26Dot6, I32Fixed, Point2, Rect2, Vec2},
+    math::{I26Dot6, Point2, Rect2, Vec2},
     text::{self},
     util::RcArray,
     HorizontalAlignment, TextWrapMode,
@@ -39,9 +39,6 @@ pub struct MultilineTextShaper<'a> {
     explicit_line_bounaries: Vec</* end of line i */ usize>,
     segments: Vec<ShaperSegment<'a>>,
     intra_font_segment_splits: Vec<usize>,
-
-    ruby_annotations: Vec<RubyAnnotation<'a>>,
-    ruby_annotation_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -84,23 +81,6 @@ fn shape_simple_segment<'f>(
     (glyphs, metrics)
 }
 
-fn calculate_multi_font_metrics(fonts: &[text::Font]) -> (I26Dot6, I26Dot6, I26Dot6) {
-    let mut max_ascender = I26Dot6::MIN;
-    let mut min_descender = I26Dot6::MAX;
-    let mut max_lineskip_descent = I26Dot6::MIN;
-
-    for font in fonts {
-        let metrics = font.metrics();
-        let lineskip_descent = metrics.height - metrics.ascender;
-
-        max_ascender = max_ascender.max(metrics.ascender);
-        min_descender = min_descender.min(metrics.descender);
-        max_lineskip_descent = max_lineskip_descent.max(lineskip_descent);
-    }
-
-    (max_ascender, min_descender, max_lineskip_descent)
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct TextWrapParams {
     pub mode: TextWrapMode,
@@ -135,8 +115,6 @@ impl<'a> MultilineTextShaper<'a> {
             explicit_line_bounaries: Vec::new(),
             segments: Vec::new(),
             intra_font_segment_splits: Vec::new(),
-            ruby_annotation_text: String::new(),
-            ruby_annotations: Vec::new(),
         }
     }
 
@@ -271,7 +249,7 @@ impl<'a> MultilineTextShaper<'a> {
             return (Vec::new(), Rect2::ZERO);
         }
 
-        let wrap_width = I32Fixed::from_f32(wrap.wrap_width);
+        let wrap_width = I26Dot6::from_f32(wrap.wrap_width);
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut current_line_y = I26Dot6::ZERO;
@@ -536,7 +514,7 @@ impl<'a> MultilineTextShaper<'a> {
                     Content::Shape(dim) => {
                         let logical_w = dim.width() - (-dim.min.x).min(0);
                         let logical_h = dim.height() - (-dim.min.y).min(0);
-                        let segment_max_bearing_y = I32Fixed::new(logical_h);
+                        let segment_max_bearing_y = I26Dot6::new(logical_h);
                         segments.push(ShapedSegment {
                             glyphs: None,
                             baseline_offset: Point2::new(current_x, current_line_y),

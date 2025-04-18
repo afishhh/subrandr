@@ -6,10 +6,8 @@ use crate::{
 };
 
 #[derive(Debug)]
-struct Class;
-
-#[derive(Debug)]
 enum ComputedLine {
+    #[expect(dead_code, reason = "percentage line layout not implemented yet")]
     Percentage(f64),
     Lines(f64),
 }
@@ -36,13 +34,6 @@ impl vtt::Line {
 }
 
 impl vtt::Cue<'_> {
-    fn snap_to_lines(&self) -> bool {
-        match self.line {
-            vtt::Line::Auto | vtt::Line::Lines(_) => true,
-            vtt::Line::Percentage(_) => false,
-        }
-    }
-
     // https://www.w3.org/TR/webvtt1/#cue-computed-position
     fn computed_position(&self) -> f64 {
         match self.position {

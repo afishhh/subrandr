@@ -22,6 +22,10 @@ pub struct FontRequest {
 #[derive(Debug, Clone)]
 pub struct FaceInfo {
     pub family: Box<str>,
+    // TODO: Implement font width support
+    //       SRV3 (I think) and WebVTT-without-CSS don't need this but will be
+    //       necessary in the future
+    #[expect(dead_code)]
     pub width: FontAxisValues,
     pub weight: FontAxisValues,
     pub italic: bool,
@@ -89,6 +93,8 @@ trait FontProvider: Sealed + std::fmt::Debug {
 }
 
 #[derive(Debug)]
+// This is only used on platforms where no native font provider is available.
+#[cfg_attr(target_family = "unix", expect(dead_code))]
 struct NullFontProvider;
 
 impl Sealed for NullFontProvider {}
@@ -247,6 +253,9 @@ impl FontSelect {
         })
     }
 
+    // Currently unused, but will be if we ever integrate the CSS-complaint font
+    // selection from the `css-layout` branch.
+    #[expect(dead_code)]
     pub fn query_by_name(&mut self, name: &str) -> Result<&[FaceInfo], Error> {
         // NLL problem case 3 again
         let family_cache = &raw mut self.family_cache;

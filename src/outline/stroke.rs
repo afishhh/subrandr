@@ -87,7 +87,6 @@ struct Stroker {
     split_cos: f32,
     min_len: f32,
     err_q: f32,
-    err_c: f32,
     err_a: f32,
 }
 
@@ -730,7 +729,6 @@ pub fn stroke(outline: &Outline, x: f32, y: f32, eps: f32) -> (Outline, Outline)
         split_cos: 1.0 + 8.0 * relative_err - 4.0 * (1.0 + relative_err) * e,
         min_len: relative_err / 4.0,
         err_q: 8.0 * (1.0 + relative_err) * (1.0 + relative_err),
-        err_c: 390.0 * relative_err * relative_err,
         err_a: e,
     };
 

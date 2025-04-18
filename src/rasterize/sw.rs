@@ -2,10 +2,7 @@ use std::{mem::MaybeUninit, sync::Arc};
 
 use blur::gaussian_sigma_to_box_radius;
 
-use crate::{
-    color::BGRA8,
-    math::{Point2, Point2f},
-};
+use crate::{color::BGRA8, math::Point2f};
 
 mod blit;
 pub(super) mod blur;
@@ -128,13 +125,6 @@ impl Bresenham {
             } else {
                 (Self::new_high(x0, y0, x1, y1), BresenhamKind::High)
             }
-        }
-    }
-
-    pub const fn is_done(&self, kind: BresenhamKind) -> bool {
-        match kind {
-            BresenhamKind::Low => self.is_done_low(),
-            BresenhamKind::High => self.is_done_high(),
         }
     }
 
@@ -269,80 +259,6 @@ macro_rules! check_buffer {
     };
 }
 
-pub fn horizontal_line(
-    y: i32,
-    x0: i32,
-    x1: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("horizontal_line", buffer, width, height);
-
-    if y < 0 || y >= height as i32 {
-        return;
-    }
-
-    unsafe {
-        horizontal_line_unchecked(
-            x0,
-            x1,
-            &mut buffer[y as usize * width as usize..],
-            width as i32,
-            color,
-        )
-    }
-}
-
-pub fn stroke_polygon(
-    points: impl IntoIterator<Item = Point2<i32>>,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("stroke_rectangle", buffer, width, height);
-
-    let mut it = points.into_iter();
-    let Some(first) = it.next() else {
-        return;
-    };
-
-    let mut last = first;
-    for next in it {
-        unsafe {
-            line_unchecked(
-                last.x,
-                last.y,
-                next.x,
-                next.y,
-                buffer,
-                width as usize,
-                width as i32,
-                height as i32,
-                color,
-            );
-        }
-
-        last = next;
-    }
-
-    unsafe {
-        line_unchecked(
-            last.x,
-            last.y,
-            first.x,
-            first.y,
-            buffer,
-            width as usize,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-}
-
 pub fn fill_axis_aligned_rect(
     x0: i32,
     y0: i32,
@@ -434,64 +350,6 @@ pub fn fill_axis_aligned_antialias_rect(
                 color,
             );
         }
-    }
-}
-
-pub fn stroke_triangle(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    color: BGRA8,
-) {
-    check_buffer!("stroke_triangle", buffer, width, height);
-
-    let stride = width as usize;
-    unsafe {
-        line_unchecked(
-            x0,
-            y0,
-            x1,
-            y1,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-
-    unsafe {
-        line_unchecked(
-            x1,
-            y1,
-            x2,
-            y2,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
-    }
-
-    unsafe {
-        line_unchecked(
-            x0,
-            y0,
-            x2,
-            y2,
-            buffer,
-            stride,
-            width as i32,
-            height as i32,
-            color,
-        );
     }
 }
 
@@ -670,38 +528,16 @@ fn unwrap_sw_render_texture<'a>(
 }
 
 #[derive(Clone)]
-pub(super) enum TextureData<'a> {
-    BorrowedMono(&'a [u8]),
-    BorrowedBGRA(&'a [BGRA8]),
+pub(super) enum TextureData {
     OwnedMono(Arc<[u8]>),
     OwnedBgra(Arc<[BGRA8]>),
 }
 
 #[derive(Clone)]
-pub(super) struct TextureImpl<'a> {
+pub(super) struct TextureImpl {
     pub width: u32,
     pub height: u32,
-    pub data: TextureData<'a>,
-}
-
-pub fn as_mono_texture(pixels: &[u8], width: u32, height: u32) -> super::Texture {
-    assert_eq!(pixels.len(), width as usize * height as usize);
-
-    super::Texture(super::TextureInner::Software(TextureImpl {
-        width,
-        height,
-        data: TextureData::BorrowedMono(pixels),
-    }))
-}
-
-pub fn as_bgra_texture(pixels: &[BGRA8], width: u32, height: u32) -> super::Texture {
-    assert_eq!(pixels.len(), width as usize * height as usize);
-
-    super::Texture(super::TextureInner::Software(TextureImpl {
-        width,
-        height,
-        data: TextureData::BorrowedBGRA(pixels),
-    }))
+    pub data: TextureData,
 }
 
 enum UnwrappedTextureData<'a> {
@@ -722,10 +558,8 @@ fn unwrap_sw_texture<'a>(texture: &'a super::Texture) -> UnwrappedTexture<'a> {
             width: texture.width,
             height: texture.height,
             data: match &texture.data {
-                TextureData::BorrowedMono(mono) => UnwrappedTextureData::Mono(mono),
-                TextureData::BorrowedBGRA(bgra) => UnwrappedTextureData::Bgra(bgra),
-                TextureData::OwnedMono(mono) => UnwrappedTextureData::Mono(mono),
-                TextureData::OwnedBgra(bgra) => UnwrappedTextureData::Bgra(bgra),
+                TextureData::OwnedMono(mono) => UnwrappedTextureData::Mono(&mono),
+                TextureData::OwnedBgra(bgra) => UnwrappedTextureData::Bgra(&bgra),
             },
         },
         target => panic!(
@@ -762,7 +596,7 @@ impl super::Rasterizer for Rasterizer {
         height: u32,
         format: super::PixelFormat,
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
-    ) -> super::Texture<'static> {
+    ) -> super::Texture {
         let n_pixels = width as usize * height as usize;
         match format {
             super::PixelFormat::Mono => {
@@ -818,10 +652,7 @@ impl super::Rasterizer for Rasterizer {
         ))
     }
 
-    fn finalize_texture_render(
-        &mut self,
-        target: super::RenderTarget<'static>,
-    ) -> super::Texture<'static> {
+    fn finalize_texture_render(&mut self, target: super::RenderTarget<'static>) -> super::Texture {
         match target.0 {
             super::RenderTargetInner::SoftwareTexture(texture) => {
                 super::Texture(super::TextureInner::Software(TextureImpl {

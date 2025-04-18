@@ -649,7 +649,7 @@ impl super::Rasterizer for Rasterizer {
         format: super::PixelFormat,
         // FIXME: ugly box...
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
-    ) -> super::Texture<'static> {
+    ) -> super::Texture {
         if width == 0 || height == 0 {
             callback(&mut [], 0);
             return super::Texture(super::TextureInner::Wgpu(TextureImpl { tex: None }));
@@ -752,10 +752,7 @@ impl super::Rasterizer for Rasterizer {
         }))
     }
 
-    fn finalize_texture_render(
-        &mut self,
-        target: super::RenderTarget<'static>,
-    ) -> super::Texture<'static> {
+    fn finalize_texture_render(&mut self, target: super::RenderTarget<'static>) -> super::Texture {
         let Some(target) = unwrap_wgpu_render_target_owned(target) else {
             return super::Texture(super::TextureInner::Wgpu(TextureImpl { tex: None }));
         };

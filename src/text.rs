@@ -52,10 +52,6 @@ impl Direction {
         matches!(self, Self::Ltr | Self::Rtl)
     }
 
-    pub const fn is_vertical(self) -> bool {
-        !self.is_horizontal()
-    }
-
     #[must_use]
     pub const fn to_horizontal(self) -> Self {
         match self {
@@ -128,10 +124,13 @@ impl<'f> Glyph<'f> {
         }
     }
 
+    // TODO: These will be useful for improving the correctness and performance of line breaking
+    #[expect(dead_code)]
     pub fn unsafe_to_break(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_BREAK) != 0
     }
 
+    #[expect(dead_code)]
     pub fn unsafe_to_concat(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_CONCAT) != 0
     }
@@ -209,22 +208,6 @@ impl AsRef<Self> for Font {
     fn as_ref(&self) -> &Self {
         self
     }
-}
-
-// TODO: exact lookup table instead of this approximation?
-#[inline(always)]
-fn srgb_to_linear(color: u8) -> f32 {
-    (color as f32 / 255.0).powf(1.0 / 2.2)
-}
-
-#[inline(always)]
-fn blend_over(dst: f32, src: f32, alpha: f32) -> f32 {
-    alpha * src + (1.0 - alpha) * dst
-}
-
-#[inline(always)]
-fn linear_to_srgb(color: f32) -> u8 {
-    (color.powf(2.2 / 1.0) * 255.0).round() as u8
 }
 
 pub trait FallbackFontProvider {
@@ -364,10 +347,6 @@ impl ShapingBuffer {
                 range.length(),
             );
         }
-    }
-
-    pub fn len(&self) -> usize {
-        unsafe { hb_buffer_get_length(self.buffer) as usize }
     }
 
     pub fn direction(&self) -> Option<Direction> {
@@ -577,31 +556,21 @@ impl Drop for ShapingBuffer {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ShapedText<'f> {
-    pub glyphs: Vec<Glyph<'f>>,
-    pub direction: Direction,
-}
-
-pub fn shape_text<'f>(font: &Font, font_arena: &'f FontArena, text: &str) -> ShapedText<'f> {
+pub fn simple_shape_text<'f>(font: &Font, font_arena: &'f FontArena, text: &str) -> Vec<Glyph<'f>> {
     let mut buffer = ShapingBuffer::new();
     buffer.add(text, ..);
-    let glyphs = buffer.shape(font, font_arena, &mut NoopFallbackProvider);
-    ShapedText {
-        direction: buffer.direction().unwrap(),
-        glyphs,
-    }
+    buffer.shape(font, font_arena, &mut NoopFallbackProvider)
 }
 
 struct GlyphBitmap {
     offset: (i32, i32),
-    texture: Texture<'static>,
+    texture: Texture,
 }
 
 /// Merged monochrome bitmap of the whole text string, useful for shadows.
 pub struct MonochromeImage {
     pub offset: Vec2<i32>,
-    pub texture: Texture<'static>,
+    pub texture: Texture,
 }
 
 impl MonochromeImage {
@@ -690,31 +659,6 @@ impl Image {
     ) {
         for glyph in &self.glyphs {
             glyph.blit(rasterizer, target, dx, dy, color);
-        }
-    }
-
-    pub fn blit_for_blur(&self, rasterizer: &mut dyn Rasterizer, sigma: f32) {
-        let mut offset = (0, 0);
-        let (mut width, mut height) = (0, 0);
-
-        for glyph in &self.glyphs {
-            offset.0 = offset.0.min(glyph.offset.0);
-            offset.1 = offset.1.min(glyph.offset.1);
-
-            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
-            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
-        }
-
-        width += (-offset.0).max(0) as u32;
-        height += (-offset.1).max(0) as u32;
-
-        rasterizer.blur_prepare(width, height, sigma);
-
-        for bitmap in &self.glyphs {
-            let offx = bitmap.offset.0 - offset.0;
-            let offy = bitmap.offset.1 - offset.1;
-
-            rasterizer.blur_buffer_blit(offx, offy, &bitmap.texture);
         }
     }
 }

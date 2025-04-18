@@ -179,10 +179,6 @@ impl Blurer {
         &self.front
     }
 
-    pub fn radius(&self) -> usize {
-        self.radius
-    }
-
     pub fn padding(&self) -> usize {
         self.radius * PADDING_RADIUS
     }

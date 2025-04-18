@@ -63,6 +63,7 @@ impl RenderTarget<'_> {
         }
     }
 
+    #[expect(dead_code, reason = "how can I have a width without a height")]
     pub(crate) fn height(&self) -> u32 {
         match &self.0 {
             // TODO: Make these fields private and have all the impls define accessors for them
@@ -77,13 +78,13 @@ impl RenderTarget<'_> {
 }
 
 #[derive(Clone)]
-enum TextureInner<'a> {
-    Software(sw::TextureImpl<'a>),
+enum TextureInner {
+    Software(sw::TextureImpl),
     #[cfg(feature = "wgpu")]
     Wgpu(wgpu::TextureImpl),
 }
 
-impl TextureInner<'_> {
+impl TextureInner {
     fn variant_name(&self) -> &'static str {
         match self {
             TextureInner::Software(_) => "software",
@@ -94,9 +95,9 @@ impl TextureInner<'_> {
 }
 
 #[derive(Clone)]
-pub(crate) struct Texture<'a>(TextureInner<'a>);
+pub(crate) struct Texture(TextureInner);
 
-impl Texture<'_> {
+impl Texture {
     pub(crate) fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width,
@@ -131,10 +132,10 @@ pub(crate) trait Rasterizer {
         format: PixelFormat,
         // FIXME: ugly box...
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
-    ) -> Texture<'static>;
+    ) -> Texture;
 
     fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
-    fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture<'static>;
+    fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture;
 
     fn line(&mut self, target: &mut RenderTarget, p0: Point2f, p1: Point2f, color: BGRA8);
 
@@ -147,15 +148,6 @@ pub(crate) trait Rasterizer {
         color: BGRA8,
     ) {
         self.line(target, Point2f::new(x0, y), Point2f::new(x1, y), color);
-    }
-
-    fn stroke_triangle(
-        &mut self,
-        target: &mut RenderTarget,
-        vertices: &[Point2f; 3],
-        color: BGRA8,
-    ) {
-        self.stroke_polygon(target, Vec2f::ZERO, vertices, color);
     }
 
     fn fill_triangle(&mut self, target: &mut RenderTarget, vertices: &[Point2f; 3], color: BGRA8);

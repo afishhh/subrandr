@@ -1,17 +1,17 @@
 use crate::{
     color::BGRA8,
-    math::{I32Fixed, Point2f, Vec2},
+    math::{Fixed, Point2f, Vec2},
     outline::Outline,
 };
 
 const POLYGON_RASTERIZER_DEBUG_PRINT: bool = false;
 
-type IFixed18Dot14 = I32Fixed<14>;
+type I18Dot14 = Fixed<14, i32>;
 
 #[derive(Debug)]
 struct Profile {
-    current: IFixed18Dot14,
-    step: IFixed18Dot14,
+    current: I18Dot14,
+    step: I18Dot14,
     end_y: u32,
 }
 
@@ -45,12 +45,12 @@ impl NonZeroPolygonRasterizer {
         invert_winding: bool,
     ) {
         let istart = (
-            IFixed18Dot14::from_f32(start.x) + offset.0,
-            IFixed18Dot14::from_f32(start.y) + offset.1,
+            I18Dot14::from_f32(start.x) + offset.0,
+            I18Dot14::from_f32(start.y) + offset.1,
         );
         let iend = (
-            IFixed18Dot14::from_f32(end.x) + offset.0,
-            IFixed18Dot14::from_f32(end.y) + offset.1,
+            I18Dot14::from_f32(end.x) + offset.0,
+            I18Dot14::from_f32(end.y) + offset.1,
         );
 
         let direction = match iend.1.cmp(&istart.1) {
@@ -63,7 +63,7 @@ impl NonZeroPolygonRasterizer {
         };
 
         let step = if istart.0 == iend.0 {
-            IFixed18Dot14::ZERO
+            I18Dot14::ZERO
         } else {
             (iend.0 - istart.0) / (iend.1 - istart.1)
         };
@@ -201,7 +201,7 @@ impl NonZeroPolygonRasterizer {
             for i in 0..self.left.len() {
                 let (left, right) = (&self.left[i], &self.right[i]);
 
-                let round_clamp = |f: IFixed18Dot14| (f.round_to_inner().max(0) as u32).min(width);
+                let round_clamp = |f: I18Dot14| (f.round_to_inner().max(0) as u32).min(width);
                 let mut x0 = round_clamp(left.current);
                 let mut x1 = round_clamp(right.current);
                 // TODO: is this necessary? can this be removed?

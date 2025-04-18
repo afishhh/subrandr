@@ -25,18 +25,8 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    pub fn contour_points(&self) -> &[Point2f] {
-        &self.outline.points()[self.first_point_of_contour..]
-    }
-
-    #[inline(always)]
     pub fn contour_points_mut(&mut self) -> &mut [Point2f] {
         &mut self.outline.points[self.first_point_of_contour..]
-    }
-
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.outline.is_empty()
     }
 
     pub fn is_closed(&self) -> bool {
@@ -331,16 +321,6 @@ impl Debug for Outline {
         }
         list.finish()
     }
-}
-
-#[inline(always)]
-fn b_spline_to_bezier(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> [Point2f; 4] {
-    [
-        ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),
-        ((b1.to_vec() * 2.0 + b2.to_vec()) / 3.0).to_point(),
-        ((b2.to_vec() * 2.0 + b1.to_vec()) / 3.0).to_point(),
-        ((b1.to_vec() + b2.to_vec() * 4.0 + b3.to_vec()) / 6.0).to_point(),
-    ]
 }
 
 mod stroke;

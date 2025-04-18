@@ -70,6 +70,7 @@ macro_rules! define_fixed_for_type {
         widen = $wide: ty
         $(, unsigned = $unsigned: ty)?
     ) => {
+        #[allow(dead_code)]
         impl<const P: u32> Fixed<P, $type> {
             pub const fn new(value: $type) -> Self {
                 Self(value << P)
@@ -308,13 +309,10 @@ define_fixed_for_type!(
 define_fixed_for_type!(signedness = unsigned, inner = u32, widen = u64);
 define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 
-pub type I32Fixed<const P: u32> = Fixed<P, i32>;
-pub type U32Fixed<const P: u32> = Fixed<P, u32>;
-
 pub type I26Dot6 = Fixed<6, i32>;
 pub type I16Dot16 = Fixed<16, i32>;
 
-impl<const P: u32> I32Fixed<P> {
+impl<const P: u32> Fixed<P, i32> {
     #[allow(clippy::unnecessary_cast)]
     pub fn into_ft(self) -> FT_Fixed {
         Self::into_raw(self) as FT_Fixed
@@ -489,10 +487,10 @@ macro_rules! test_module {
 
 #[cfg(test)]
 mod test_signed_24_dot_8 {
-    test_module!(I32Fixed<8>, signed = true);
+    test_module!(Fixed<8, i32>, signed = true);
 }
 
 #[cfg(test)]
 mod test_unsigned_24_dot_8 {
-    test_module!(U32Fixed<8>, signed = false);
+    test_module!(Fixed<8, u32>, signed = false);
 }

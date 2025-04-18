@@ -14,7 +14,6 @@ use crate::{
     Renderer, Subrandr, SubtitleContext, Subtitles,
 };
 
-#[expect(unused_macros)]
 macro_rules! c_enum {
     (
         #[repr($type: ident)]

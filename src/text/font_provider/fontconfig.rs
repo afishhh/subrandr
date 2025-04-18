@@ -58,10 +58,6 @@ impl FontconfigFontProvider {
             Ok(Self { config })
         }
     }
-
-    pub fn fallback_font(&self) -> String {
-        "sans-serif".to_string()
-    }
 }
 
 impl Drop for FontconfigFontProvider {

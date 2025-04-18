@@ -2,7 +2,7 @@ use std::{mem::MaybeUninit, ops::Deref};
 
 use crate::util::slice_assume_init_mut;
 
-use super::{Point2f, Rect2f, Vec2f};
+use super::{Point2f, Vec2f};
 
 const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
@@ -45,20 +45,8 @@ pub trait Bezier {
     fn subcurve(&self, t0: f32, t1: f32) -> Self
     where
         Self: Sized;
-    fn split_at(&self, t: f32) -> (Self, Self)
-    where
-        Self: Sized;
 
-    fn flatten(&self, tolerance: f32) -> Vec<Point2f> {
-        let mut output = vec![self.points()[0]];
-        self.flatten_into(tolerance, &mut output);
-        output
-    }
     fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>);
-
-    fn bounding_box(&self) -> Rect2f {
-        Rect2f::bounding_from_points(self.points())
-    }
 }
 
 macro_rules! define_curve {
@@ -95,27 +83,6 @@ impl Bezier for QuadraticBezier {
         &self.0
     }
 
-    // FIXME: This is actually broken
-    fn split_at(&self, t: f32) -> (Self, Self)
-    where
-        Self: Sized,
-    {
-        let mid = self.sample(t);
-
-        let d = [
-            (self[1] - self[0]).to_point(),
-            (self[2] - self[1]).to_point(),
-        ];
-
-        let vl = super::evaluate_bezier(&d, t).to_vec() * t;
-        let pr = mid + vl;
-
-        (
-            Self([self[0], vl.to_point(), mid]),
-            Self([mid, pr, self[2]]),
-        )
-    }
-
     fn subcurve(&self, t0: f32, t1: f32) -> Self
     where
         Self: Sized,
@@ -142,38 +109,6 @@ impl Bezier for QuadraticBezier {
 impl Bezier for CubicBezier {
     fn points(&self) -> &[Point2f] {
         &self.0
-    }
-
-    // FIXME: This is actually broken
-    fn split_at(&self, t: f32) -> (Self, Self)
-    where
-        Self: Sized,
-    {
-        let mid = self.sample(t);
-
-        let d = [
-            (self[1] - self[0]).to_point(),
-            (self[2] - self[1]).to_point(),
-            (self[3] - self[2]).to_point(),
-        ];
-
-        let offmid = super::evaluate_bezier(&d, t).to_vec() * t;
-
-        let left = {
-            let p1 = d[0].to_vec() * t;
-            let p2 = mid - offmid;
-
-            Self([self[0], p1.to_point(), p2, mid])
-        };
-
-        let right = {
-            let p1 = mid + offmid;
-            let p2 = self[3] - d[2].to_vec() * t;
-
-            Self([mid, p1, p2, self[3]])
-        };
-
-        (left, right)
     }
 
     fn subcurve(&self, t0: f32, t1: f32) -> Self
@@ -206,6 +141,7 @@ impl CubicBezier {
         flatten::cubic_to_quadratics(self, tolerance)
     }
 
+    #[expect(dead_code, reason = "useful for ASS")]
     pub fn from_b_spline(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> Self {
         Self([
             ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),

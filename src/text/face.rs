@@ -10,7 +10,6 @@ use std::{
 };
 
 use crate::{
-    color::BGRA8,
     math::{I16Dot16, I26Dot6, Vec2},
     outline::Outline,
     rasterize::{PixelFormat, Rasterizer, Texture},
@@ -71,6 +70,9 @@ type MmCoords = [FT_Fixed; T1_MAX_MM_AXIS as usize];
 struct SharedFaceData {
     axes: Vec<Axis>,
     glyph_cache: GlyphCache,
+    // This is only here to ensure the memory backing the font doesn't get
+    // deallocated while FreeType is still using it.
+    #[expect(dead_code)]
     memory: Option<Arc<[u8]>>,
 }
 
@@ -343,6 +345,7 @@ impl Drop for Face {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[expect(dead_code)]
 pub struct GlyphMetrics {
     pub width: I26Dot6,
     pub height: I26Dot6,
@@ -355,6 +358,7 @@ pub struct GlyphMetrics {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[expect(dead_code)]
 pub struct FontMetrics {
     pub ascender: I26Dot6,
     pub descender: I26Dot6,
@@ -569,10 +573,6 @@ impl Font {
         (ft_face, self.hb_font)
     }
 
-    pub(super) fn bitmap_scale(&self) -> I26Dot6 {
-        self.size.scale
-    }
-
     /// Gets the Outline associated with the glyph at `index`.
     ///
     /// Returns [`None`] if the glyph does not exist in this font, or it is not
@@ -606,6 +606,8 @@ impl Font {
         }
     }
 
+    // TODO: Vertical text is not supported yet
+    #[expect(dead_code)]
     pub fn vertical_extents(&self) -> hb_font_extents_t {
         let mut result = MaybeUninit::uninit();
         unsafe {
@@ -762,12 +764,7 @@ impl GlyphCache {
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
     pub offset: Vec2<I26Dot6>,
-    pub texture: Texture<'static>,
-}
-
-pub enum BufferData {
-    Monochrome(Vec<u8>),
-    Color(Vec<BGRA8>),
+    pub texture: Texture,
 }
 
 impl Font {

@@ -21,6 +21,8 @@ pub enum Level {
 
 pub enum Logger {
     Default,
+    // TODO: Allow overriding logger in C API
+    #[expect(dead_code)]
     C {
         fun: extern "C" fn(Level, *const c_char, usize, *const c_void),
         user_data: *const c_void,

@@ -628,6 +628,10 @@ fn parse_body(
     Ok(events)
 }
 
+pub fn probe(text: &str) -> bool {
+    text.contains("<timedtext") && text.contains("format=\"3\"")
+}
+
 pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().check_comments = false;

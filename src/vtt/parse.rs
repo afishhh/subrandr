@@ -668,18 +668,30 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
     }
 }
 
-// https://www.w3.org/TR/webvtt1/#webvtt-parser-algorithm
-pub fn parse<'a>(input: &'a str) -> Option<Captions<'a>> {
-    let mut input = ParsingBuffer::new(input);
-
+fn consume_magic(input: &mut ParsingBuffer) -> bool {
     if !input.take_str("WEBVTT") {
-        return None;
+        return false;
     }
 
     if input.take_any([' ', '\t']) {
         input.collect_line_and_linefeed();
     } else if input.take_linefeed() {
     } else {
+        return false;
+    }
+
+    true
+}
+
+pub fn probe(content: &str) -> bool {
+    consume_magic(&mut ParsingBuffer::new(content))
+}
+
+// https://www.w3.org/TR/webvtt1/#webvtt-parser-algorithm
+pub fn parse<'a>(input: &'a str) -> Option<Captions<'a>> {
+    let mut input = ParsingBuffer::new(input);
+
+    if !consume_magic(&mut input) {
         return None;
     }
 

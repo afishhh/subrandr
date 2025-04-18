@@ -55,7 +55,7 @@ enum ErrorKind {
     InvalidArgument = 2,
     Io = 3,
 
-    UnrecognizedFile = 10,
+    UnrecognizedFormat = 10,
 }
 
 #[derive(Debug)]
@@ -155,9 +155,43 @@ impl<T> From<CErrorValue> for *const T {
     }
 }
 
-impl From<CErrorValue> for c_int {
+impl From<CErrorValue> for i64 {
     fn from(_: CErrorValue) -> Self {
         -1
+    }
+}
+
+impl From<CErrorValue> for i32 {
+    fn from(_: CErrorValue) -> Self {
+        -1
+    }
+}
+
+impl From<CErrorValue> for i16 {
+    fn from(_: CErrorValue) -> Self {
+        -1
+    }
+}
+
+c_enum! {
+    #[repr(i16)]
+    #[try_from(InvalidArgument, "{value} is not a valid subtitle format")]
+    enum SubtitleFormat {
+        Unknown = 0,
+        Srv3 = 1,
+        WebVTT = 2
+    }
+}
+
+// TODO: This should be pulled out into the main module if a Rust API is desired
+//       in the future.
+fn probe(content: &str) -> SubtitleFormat {
+    if crate::srv3::probe(content) {
+        SubtitleFormat::Srv3
+    } else if crate::vtt::probe(content) {
+        SubtitleFormat::WebVTT
+    } else {
+        SubtitleFormat::Unknown
     }
 }
 
@@ -224,7 +258,62 @@ unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subt
             },
         )))
     } else {
-        cthrow!(UnrecognizedFile, "Unrecognized file format")
+        cthrow!(UnrecognizedFormat, "Unrecognized file format")
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_probe_text(
+    content: *const std::ffi::c_char,
+    content_len: usize,
+) -> SubtitleFormat {
+    let Ok(content) = std::str::from_utf8(std::slice::from_raw_parts(
+        content.cast::<u8>(),
+        content_len,
+    )) else {
+        return SubtitleFormat::Unknown;
+    };
+
+    probe(content)
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_load_text(
+    sbr: &Subrandr,
+    content: *const std::ffi::c_char,
+    content_len: usize,
+    format: i16,
+    language_hint: *const std::ffi::c_char,
+) -> *mut Subtitles {
+    let mut format = ctry!(SubtitleFormat::try_from_value(format));
+    let content = ctrywrap!(
+        Other("Invalid UTF-8"),
+        std::str::from_utf8(std::slice::from_raw_parts(
+            content.cast::<u8>(),
+            content_len
+        ))
+    );
+    let _language_hint = CStr::from_ptr(language_hint);
+
+    if format == SubtitleFormat::Unknown {
+        format = probe(content);
+    }
+
+    match format {
+        SubtitleFormat::Srv3 => Box::into_raw(Box::new(crate::srv3::convert(
+            sbr,
+            ctry!(crate::srv3::parse(sbr, content)),
+        ))),
+        SubtitleFormat::WebVTT => Box::into_raw(Box::new(crate::vtt::convert(
+            sbr,
+            match crate::vtt::parse(content) {
+                Some(captions) => captions,
+                None => cthrow!(Other, "Invalid WebVTT"),
+            },
+        ))),
+        SubtitleFormat::Unknown => {
+            cthrow!(UnrecognizedFormat, "Unrecognized subtitle format")
+        }
     }
 }
 
@@ -232,11 +321,6 @@ unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subt
 unsafe extern "C" fn sbr_subtitles_destroy(subtitles: *mut Subtitles) {
     drop(Box::from_raw(subtitles));
 }
-
-// #[unsafe(no_mangle)]
-// unsafe extern "C" fn sbr_subtitles_get_class_name(subtitles: *mut Subtitles) -> *const i8 {
-//   TODO: SubtitleClass::get_name_cstr()
-// }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_get_last_error_string() -> *const i8 {

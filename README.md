@@ -47,7 +47,7 @@ Although a wgpu based rasterizer is present in subrandr, it is currently not exp
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "subrandr.h"
+#include <subrandr/subrandr.h>
 
 int main() {
   sbr_library *sbr = sbr_library_init();
@@ -68,15 +68,16 @@ int main() {
     // this is **dots per inch**, not **pixels per inch**
     // if you have pixels per inch: dpi = ppi * 72 / 96
     .dpi = 144,
-    .video_width = 1920.0,
-    .video_height = 1080.0,
+    // video dimensions and padding are in 26.6 fixed point format
+    .video_width = 1920 << 6,
+    .video_height = 1080 << 6,
     // if your player has additional padding around the video (for example black bars)
     // you should provide it here, srv3 subtitles are laid out differently depending
     // on this padding
-    .padding_left = 0.0,
-    .padding_right = 0.0,
-    .padding_top = 0.0,
-    .padding_bottom = 0.0,
+    .padding_left = 0,
+    .padding_right = 0,
+    .padding_top = 0,
+    .padding_bottom = 0,
   };
 
   uint32_t t = 2424 /* milliseconds */;

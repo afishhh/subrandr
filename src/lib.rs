@@ -895,11 +895,11 @@ impl<'a> Renderer<'a> {
             let mut x = x;
             let mut poly_rasterizer = NonZeroPolygonRasterizer::new();
 
+            poly_rasterizer.reset();
             for glyph in glyphs {
                 if let Some(outline) = glyph.font.glyph_outline(glyph.index) {
                     let (one, two) = outline.stroke(border.x, border.y, 1.0);
 
-                    poly_rasterizer.reset();
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
                         poly_rasterizer.append_polyline(
                             (x.trunc_to_inner(), y.trunc_to_inner()),
@@ -912,15 +912,11 @@ impl<'a> Renderer<'a> {
                             true,
                         );
                     }
-                    rasterizer.blit_cpu_polygon(
-                        target,
-                        &mut poly_rasterizer,
-                        decoration.border_color,
-                    );
                 }
 
                 x += glyph.x_advance;
             }
+            rasterizer.blit_cpu_polygon(target, &mut poly_rasterizer, decoration.border_color);
         }
 
         let text_end_x = {
@@ -1369,7 +1365,7 @@ impl<'a> Renderer<'a> {
                         }
                     }
 
-                    // FIXME: Background boxes should have corner radius
+                    // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
                     if last_segment_index != usize::MAX {
                         match &event.segments[last_segment_index] {
                             Segment::Text(text) => {

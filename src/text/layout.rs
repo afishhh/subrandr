@@ -339,16 +339,14 @@ impl<'a> MultilineTextShaper<'a> {
                             && internal_breaks_allowed
                             && current_x + extents.paint_size.x > wrap_width
                         {
-                            let mut x = extents.paint_size.x;
+                            let mut x = current_x;
                             let mut glyph_it = glyphs.iter();
                             if let Some(first) = glyph_it.next() {
                                 x += first.x_advance;
                             }
 
                             for glyph in glyph_it {
-                                let x_after = x
-                                    + glyph.x_offset
-                                    + glyph.font.glyph_extents(glyph.index).width;
+                                let x_after = x + glyph.x_advance;
                                 // TODO: also ensure conformance with unicode line breaking
                                 //       this would ensure, for example, that no line
                                 //       breaks are inserted between a character and

@@ -6,6 +6,7 @@
 
 extern "C" {
 #else
+#include <stdbool.h>
 #include <stdint.h>
 #endif
 
@@ -29,7 +30,7 @@ typedef struct sbr_subtitle_context {
   float padding_left, padding_right, padding_top, padding_bottom;
 } sbr_subtitle_context;
 
-sbr_library *sbr_library_init();
+sbr_library *sbr_library_init(void);
 void sbr_library_fini(sbr_library *);
 
 typedef uint16_t SBR_UNSTABLE sbr_subtitle_format;
@@ -40,12 +41,15 @@ sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
 void sbr_subtitles_destroy(sbr_subtitles *subs);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
+bool sbr_renderer_did_change(
+    sbr_renderer *renderer, sbr_subtitle_context const *ctx, uint32_t t
+);
 int sbr_renderer_render(
     sbr_renderer *renderer, sbr_subtitle_context const *ctx,
-    // current time value in milliseconds
-    uint32_t t,
     // subtitles to render, on change invalidate the cache before rendering
     sbr_subtitles *subs,
+    // current time value in milliseconds
+    uint32_t t,
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height
 );
@@ -57,8 +61,8 @@ typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_INVALID_ARGUMENT (sbr_error_code)3
 #define SBR_ERR_UNRECOGNIZED_FILE (sbr_error_code)10
 
-char const *sbr_get_last_error_string();
-SBR_UNSTABLE uint32_t sbr_get_last_error_code();
+char const *sbr_get_last_error_string(void);
+SBR_UNSTABLE uint32_t sbr_get_last_error_code(void);
 
 #undef SBR_UNSTABLE
 

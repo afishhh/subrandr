@@ -92,8 +92,8 @@ int main() {
   if(sbr_renderer_render(
     renderer,
     &ctx,
-    t,
     subs,
+    t,
     pixel_buffer,
     width,
     height

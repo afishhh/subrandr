@@ -280,11 +280,20 @@ unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut Renderer<'s
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_render(
+unsafe extern "C" fn sbr_renderer_did_change(
     renderer: *mut Renderer<'static>,
     ctx: *const SubtitleContext,
     t: u32,
+) -> bool {
+    (*renderer).did_change(&*ctx, t)
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_render(
+    renderer: *mut Renderer<'static>,
+    ctx: *const SubtitleContext,
     subs: *const Subtitles,
+    t: u32,
     buffer: *mut BGRA8,
     width: u32,
     height: u32,

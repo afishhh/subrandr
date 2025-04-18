@@ -202,8 +202,8 @@ export class Renderer {
     g.mod.exports.sbr_renderer_render(
       this.__ptr,
       this.__ctxptr,
-      t,
       subs.__ptr,
+      t,
       back.ptr,
       fb._width,
       fb._height,

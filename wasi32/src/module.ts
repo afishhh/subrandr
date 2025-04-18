@@ -32,8 +32,8 @@ export interface SubrandrExports {
 	sbr_renderer_render(
 		renderer: RendererPtr,
 		subtitle_context: WasmPtr,
-		t: number,
 		subs: SubtitlesPtr,
+		t: number,
 		buf_ptr: WasmPtr,
 		buf_width: number,
 		buf_height: number

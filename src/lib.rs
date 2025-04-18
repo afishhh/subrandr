@@ -756,8 +756,12 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = 0..0;
     }
 
-    pub fn unchanged_inside(&mut self) -> Range<u32> {
+    pub fn unchanged_inside(&self) -> Range<u32> {
         self.unchanged_range.clone()
+    }
+
+    pub fn did_change(&self, ctx: &SubtitleContext, t: u32) -> bool {
+        self.previous_context != *ctx || !self.unchanged_range.contains(&t)
     }
 
     fn debug_text(

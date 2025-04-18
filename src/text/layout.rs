@@ -267,6 +267,10 @@ impl<'a> MultilineTextShaper<'a> {
             );
         }
 
+        if self.segments.is_empty() {
+            return (Vec::new(), Rect2::ZERO);
+        }
+
         let wrap_width = I32Fixed::from_f32(wrap.wrap_width);
 
         let mut lines: Vec<ShapedLine> = vec![];

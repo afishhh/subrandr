@@ -1533,7 +1533,7 @@ impl<'a> Renderer<'a> {
 
         let time = self.perf.end_frame();
         if DRAW_PERF_DEBUG_INFO {
-            log::info!(self.sbr, "frame took {:.2}ms to render", time);
+            trace!(self.sbr, "frame took {:.2}ms to render", time);
         }
     }
 }

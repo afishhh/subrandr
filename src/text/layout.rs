@@ -303,9 +303,10 @@ impl<'a> MultilineTextShaper<'a> {
                 );
             }
 
-            let mut line_max_ascender = I32Fixed::ZERO;
-            let mut line_min_descender = I32Fixed::ZERO;
-            let mut line_max_lineskip_descent = I32Fixed::ZERO;
+            let mut line_max_ascender = I26Dot6::ZERO;
+            let mut line_min_descender = I26Dot6::ZERO;
+            let mut line_max_lineskip_descent = I26Dot6::ZERO;
+            let mut annotations_max_ascender = I26Dot6::ZERO;
 
             while self.segments[current_segment].end <= last {
                 current_segment += 1;
@@ -431,6 +432,9 @@ impl<'a> MultilineTextShaper<'a> {
                             } else {
                                 (I26Dot6::ZERO, (base_width - ruby_width) / 2)
                             };
+
+                            annotations_max_ascender =
+                                annotations_max_ascender.max(ruby_metrics.max_ascender);
 
                             // FIXME: Annotations seem to be slightly above where they should and
                             //        the logical rects also appear to be slightly too high.
@@ -571,12 +575,21 @@ impl<'a> MultilineTextShaper<'a> {
                 HorizontalAlignment::Right => -current_x,
             };
 
+            let annotation_y_adjustment = if current_line_y == I26Dot6::ZERO {
+                I26Dot6::ZERO
+            } else {
+                annotations_max_ascender
+            };
+
+            current_line_y += annotation_y_adjustment;
+
             for segment in segments.iter_mut() {
                 segment.baseline_offset.x += aligning_x_offset;
                 if segment.glyphs.is_none() {
-                    segment.baseline_offset.y += line_max_ascender - segment.max_ascender;
+                    segment.baseline_offset.y +=
+                        line_max_ascender - segment.max_ascender + annotation_y_adjustment;
                 } else {
-                    segment.baseline_offset.y += line_max_ascender;
+                    segment.baseline_offset.y += line_max_ascender + annotation_y_adjustment;
                 }
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
@@ -586,7 +599,7 @@ impl<'a> MultilineTextShaper<'a> {
 
             for segment in annotation_segments.iter_mut() {
                 segment.baseline_offset.x += aligning_x_offset;
-                segment.baseline_offset.y += line_max_ascender;
+                segment.baseline_offset.y += line_max_ascender + annotation_y_adjustment;
                 segment.logical_rect = segment
                     .logical_rect
                     .translate(segment.baseline_offset.to_vec());

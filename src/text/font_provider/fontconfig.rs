@@ -295,12 +295,30 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
         ))
     };
 
+    let index = unsafe {
+        let mut index = MaybeUninit::uninit();
+        if FcPatternGetInteger(
+            pattern,
+            FC_INDEX.as_ptr() as *const i8,
+            0,
+            index.as_mut_ptr(),
+        ) == FcResultMatch
+        {
+            #[allow(clippy::unnecessary_cast)]
+            {
+                index.assume_init() as i32
+            }
+        } else {
+            0
+        }
+    };
+
     Some(FaceInfo {
         family: family.into(),
         width,
         weight,
         italic,
-        source: FontSource::File(path),
+        source: FontSource::File { path, index },
     })
 }
 

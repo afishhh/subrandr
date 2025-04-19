@@ -355,7 +355,7 @@ unsafe extern "C" fn sbr_library_open_font_from_memory(
         .copy_from_slice(std::slice::from_raw_parts(data, data_len));
     }
     let bytes = Arc::<[MaybeUninit<u8>]>::assume_init(uninit);
-    Box::into_raw(Box::new(ctry!(Face::load_from_bytes(bytes))))
+    Box::into_raw(Box::new(ctry!(Face::load_from_bytes(bytes, 0))))
 }
 
 #[unsafe(no_mangle)]

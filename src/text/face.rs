@@ -104,30 +104,37 @@ pub const WIDTH_AXIS: u32 = create_freetype_tag(*b"wdth");
 pub const ITALIC_AXIS: u32 = create_freetype_tag(*b"ital");
 
 impl Face {
-    pub fn load_from_file(path: impl AsRef<Path>) -> Result<Self, FreeTypeError> {
+    pub fn load_from_file(path: impl AsRef<Path>, index: i32) -> Result<Self, FreeTypeError> {
         let library = Library::get_or_init()?;
         let _guard = library.face_mutation_mutex.lock().unwrap();
         let cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
         let mut face = std::ptr::null_mut();
         unsafe {
-            fttry!(FT_New_Face(library.ptr, cstr.as_ptr(), 0, &mut face))?;
+            #[allow(clippy::unnecessary_cast)]
+            fttry!(FT_New_Face(
+                library.ptr,
+                cstr.as_ptr(),
+                index as FT_Long,
+                &mut face
+            ))?;
         }
 
         unsafe { Self::adopt_ft(face, None) }
     }
 
-    pub fn load_from_bytes(bytes: Arc<[u8]>) -> Result<Self, FreeTypeError> {
+    pub fn load_from_bytes(bytes: Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
         let library = Library::get_or_init()?;
         let _guard = library.face_mutation_mutex.lock().unwrap();
 
         let mut face = std::ptr::null_mut();
         unsafe {
+            #[allow(clippy::unnecessary_cast)]
             fttry!(FT_New_Memory_Face(
                 library.ptr,
                 bytes.as_ptr(),
                 bytes.len() as FT_Long,
-                0,
+                index as FT_Long,
                 &mut face
             ))?;
         }

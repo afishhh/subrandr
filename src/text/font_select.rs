@@ -40,14 +40,14 @@ pub enum FontAxisValues {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
-    File(PathBuf),
+    File { path: PathBuf, index: i32 },
     Memory(text::Face),
 }
 
 impl FontSource {
     pub fn load(&self) -> Result<Face, FreeTypeError> {
         match self {
-            Self::File(file) => Ok(Face::load_from_file(file)?),
+            &Self::File { ref path, index } => Ok(Face::load_from_file(path, index)?),
             Self::Memory(face) => Ok(face.clone()),
         }
     }

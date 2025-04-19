@@ -22,6 +22,11 @@ wgpu = { version = "24", optional = true }
 [profile.release]
 panic = "abort"
 
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true
+
 [workspace]
 members = [
   "sbr-overlay"

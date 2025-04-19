@@ -658,6 +658,7 @@ impl DebugFlags {
     }
 }
 
+#[derive(Debug)]
 pub struct Subrandr {
     logger: log::Logger,
     did_log_version: Cell<bool>,
@@ -730,7 +731,7 @@ impl PerfStats {
 
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
-    fonts: text::FontSelect,
+    fonts: text::FontSelect<'a>,
     dpi: u32,
     perf: PerfStats,
 

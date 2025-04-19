@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     math::I16Dot16,
-    text,
+    text, trace,
     util::{AnyError, Sealed},
     Subrandr,
 };
@@ -154,7 +154,8 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct FontSelect {
+pub struct FontSelect<'a> {
+    sbr: &'a Subrandr,
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
     request_cache: HashMap<FontRequest, Option<Face>>,
@@ -168,12 +169,13 @@ fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
     }
 }
 
-impl FontSelect {
-    pub fn new(sbr: &Subrandr) -> Result<FontSelect, Error> {
+impl<'a> FontSelect<'a> {
+    pub fn new(sbr: &'a Subrandr) -> Result<FontSelect<'a>, Error> {
         let provider: Box<dyn FontProvider> =
             provider::platform_default(sbr).map_err(Error::Provider)?;
 
         Ok(Self {
+            sbr,
             source_cache: HashMap::new(),
             family_cache: HashMap::new(),
             request_cache: HashMap::new(),
@@ -211,6 +213,10 @@ impl FontSelect {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
+            trace!(
+                self.sbr,
+                "Querying font provider for font matching {request:?}"
+            );
             let mut choices = self.provider.query(request).map_err(Error::Provider)?;
 
             let custom_start = choices.len();
@@ -234,6 +240,11 @@ impl FontSelect {
                 set_weight_if_variable(face, request.weight);
             }
 
+            trace!(
+                self.sbr,
+                "Picked face {result:?} from {} choices",
+                choices.len()
+            );
             self.request_cache.insert(request.clone(), result.clone());
             result
         }

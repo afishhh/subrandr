@@ -228,7 +228,7 @@ impl FallbackFontProvider for NoopFallbackProvider {
     }
 }
 
-impl FallbackFontProvider for FontSelect {
+impl FallbackFontProvider for FontSelect<'_> {
     fn get_font_for_glyph(
         &mut self,
         weight: I16Dot16,

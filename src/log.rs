@@ -19,6 +19,7 @@ pub enum Level {
     Error,
 }
 
+#[derive(Debug)]
 pub enum Logger {
     Default,
     // TODO: Allow overriding logger in C API

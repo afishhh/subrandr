@@ -13,7 +13,6 @@ use thiserror::Error;
 use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
-use outline::{OutlineBuilder, SegmentDegree};
 use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
@@ -102,7 +101,6 @@ enum HorizontalAlignment {
 enum TextWrapMode {
     /// Greedy line breaking.
     Normal,
-    None,
 }
 
 trait Layouter {
@@ -117,36 +115,10 @@ trait Layouter {
     ) -> Point2f;
 }
 
-struct TestLayouter;
-
-impl Layouter for TestLayouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
-        ctx.player_width().into_f32()
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &SubtitleContext,
-        _lines: &mut Vec<ShapedLine>,
-        _total_rect: &mut Rect2<I26Dot6>,
-        event: &Event,
-    ) -> Point2f {
-        let &EventExtra::Test { x, y } = &event.extra else {
-            panic!("TestLayouter received foreign event {:?}", event);
-        };
-
-        Point2f::new(
-            (ctx.padding_left + (ctx.video_width * x)).into_f32(),
-            (ctx.padding_top + (ctx.video_height * y)).into_f32(),
-        )
-    }
-}
-
 #[derive(Debug, Clone)]
 enum EventExtra {
     Srv3(Srv3Event),
     Vtt(VttEvent),
-    Test { x: f32, y: f32 },
 }
 
 #[derive(Debug, Clone)]
@@ -155,14 +127,8 @@ struct Event {
     end: u32,
     alignment: Alignment,
     text_wrap: TextWrapMode,
-    segments: Vec<Segment>,
+    segments: Vec<TextSegment>,
     extra: EventExtra,
-}
-
-#[derive(Debug, Clone)]
-enum Segment {
-    Text(TextSegment),
-    Shape(ShapeSegment),
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +165,7 @@ struct TextDecorations {
 
 #[derive(Debug, Clone)]
 enum TextShadow {
+    #[expect(dead_code, reason = "for WebVTT")]
     Css(CssTextShadow),
     Srv3(Srv3TextShadow),
 }
@@ -226,38 +193,6 @@ impl TextDecorations {
 impl Default for TextDecorations {
     fn default() -> Self {
         Self::none()
-    }
-}
-
-// Shape segment behaviour:
-// Treated as constant-sized block during text layout
-// Size does not take into account negative coordinates
-#[derive(Debug, Clone)]
-pub struct ShapeSegment {
-    outline: outline::Outline,
-    bounding_box: math::Rect2f,
-    stroke_x: f32,
-    stroke_y: f32,
-    stroke_color: BGRA8,
-    fill_color: BGRA8,
-}
-
-impl ShapeSegment {
-    pub fn new(
-        outline: outline::Outline,
-        stroke_x: f32,
-        stroke_y: f32,
-        stroke_color: BGRA8,
-        fill_color: BGRA8,
-    ) -> Self {
-        Self {
-            bounding_box: { outline.control_box().clamp_to_positive() },
-            outline,
-            stroke_x,
-            stroke_y,
-            stroke_color,
-            fill_color,
-        }
     }
 }
 
@@ -309,325 +244,10 @@ struct SubtitleClass {
     create_layouter: fn() -> Box<dyn Layouter>,
 }
 
-// Font size passed through directly.
-// Coordinate system 0.0-1.0 percentages
-const TEST_SUBTITLE_CLASS: SubtitleClass = SubtitleClass {
-    name: "<test>",
-    get_font_size: |_ctx: &SubtitleContext, _event: &Event, segment: &TextSegment| -> I26Dot6 {
-        segment.font_size
-    },
-    create_layouter: || Box::new(TestLayouter),
-};
-
 #[derive(Debug)]
 pub struct Subtitles {
     class: &'static SubtitleClass,
     events: Vec<Event>,
-}
-
-impl Subtitles {
-    pub const fn empty() -> Self {
-        Self {
-            class: &TEST_SUBTITLE_CLASS,
-            events: vec![],
-        }
-    }
-
-    #[doc(hidden)]
-    pub fn test_new() -> Self {
-        Self {
-            class: &TEST_SUBTITLE_CLASS,
-            events: vec![
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.5, y: 0.2 },
-                    alignment: Alignment::Top,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![
-                        Segment::Text(TextSegment {
-                            font: vec!["monospace".to_string()],
-                            font_size: I26Dot6::new(64),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF0000FF),
-                            background_color: BGRA8::ZERO,
-                            text: "this ".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["monospace".to_string()],
-                            font_size: I26Dot6::new(64),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0x0000FFFF),
-                            background_color: BGRA8::ZERO,
-                            text: "is\n".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["Liberation Sans".to_string()],
-                            font_size: I26Dot6::new(64),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF0000FF),
-                            background_color: BGRA8::ZERO,
-                            text: "mu".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["monospace".to_string()],
-                            font_size: I26Dot6::new(48),
-                            font_weight: I16Dot16::new(700),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFFFF00FF),
-                            background_color: BGRA8::ZERO,
-                            text: "ltil".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["Arial".to_string()],
-                            font_size: I26Dot6::new(80),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF00FFFF),
-                            background_color: BGRA8::ZERO,
-                            text: "iね❌".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Shape(ShapeSegment::new(
-                            {
-                                let mut b = OutlineBuilder::new();
-                                b.add_point(Point2f::new(0.0, 0.0));
-                                b.add_point(Point2f::new(30.0, 120.));
-                                b.add_point(Point2f::new(120.0, 120.));
-                                b.add_segment(SegmentDegree::Linear);
-                                b.add_segment(SegmentDegree::Linear);
-                                b.add_segment(SegmentDegree::Linear);
-                                b.close_contour();
-                                b.build()
-                            },
-                            2.0,
-                            5.0,
-                            BGRA8::from_rgba32(0x00FF00FF),
-                            BGRA8::from_rgba32(0x00FFFFFF),
-                        )),
-                    ],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.5, y: 0.1 },
-                    alignment: Alignment::Top,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![Segment::Text(TextSegment {
-                        font: vec!["monospace".to_string()],
-                        font_size: I26Dot6::new(64),
-                        font_weight: I16Dot16::new(400),
-                        italic: false,
-                        decorations: TextDecorations {
-                            border: Vec2f::new(2.0, 2.0),
-                            border_color: BGRA8::new(255, 0, 0, 255),
-                            underline: true,
-                            underline_color: BGRA8::new(255, 255, 255, 255),
-                            strike_out: true,
-                            strike_out_color: BGRA8::new(255, 255, 255, 255),
-                        },
-                        color: BGRA8::from_rgba32(0x00FF00AA),
-                        background_color: BGRA8::ZERO,
-                        text: "this is for comparison".to_string(),
-                        shadows: Vec::new(),
-                        ruby: Ruby::None,
-                    })],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.8, y: 0.9 },
-                    alignment: Alignment::Top,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![
-                        Segment::Text(TextSegment {
-                            font: vec!["sans-serif".to_string()],
-                            font_size: I26Dot6::new(26),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0x00FF00AA),
-                            background_color: BGRA8::ZERO,
-                            text: "mo".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["sans-serif".to_string()],
-                            font_size: I26Dot6::new(26),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFFFF00AA),
-                            background_color: BGRA8::ZERO,
-                            text: "ment".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                    ],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.8, y: 0.8 },
-                    alignment: Alignment::Top,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![Segment::Text(TextSegment {
-                        font: vec!["sans-serif".to_string()],
-                        font_size: I26Dot6::new(26),
-                        font_weight: I16Dot16::new(400),
-                        italic: false,
-                        decorations: TextDecorations::none(),
-                        color: BGRA8::from_rgba32(0x0000FFAA),
-                        background_color: BGRA8::ZERO,
-                        text: "moment".to_string(),
-                        shadows: Vec::new(),
-                        ruby: Ruby::None,
-                    })],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.2, y: 0.9 },
-                    alignment: Alignment::BottomLeft,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![Segment::Text(TextSegment {
-                        font: vec!["sans-serif".to_string()],
-                        font_size: I26Dot6::new(64),
-                        font_weight: I16Dot16::new(400),
-                        italic: false,
-                        decorations: TextDecorations::none(),
-                        color: BGRA8::from_rgba32(0x00FF0099),
-                        background_color: BGRA8::ZERO,
-                        text: "with shadows".to_string(),
-                        shadows: vec![
-                            TextShadow::Css(CssTextShadow {
-                                offset: Vec2f::new(80.0, 80.0),
-                                blur_radius: I26Dot6::from_f32(7.5),
-                                color: BGRA8::new(0, 0, 255, 255),
-                            }),
-                            TextShadow::Css(CssTextShadow {
-                                offset: Vec2f::new(48.0, 48.0),
-                                blur_radius: I26Dot6::from_f32(20.0),
-                                color: BGRA8::new(255, 255, 255, 255),
-                            }),
-                        ],
-                        ruby: Ruby::None,
-                    })],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.5, y: 0.8 },
-                    alignment: Alignment::Bottom,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![Segment::Text(TextSegment {
-                        font: vec!["monospace".to_string()],
-                        font_size: I26Dot6::new(64),
-                        font_weight: I16Dot16::new(700),
-                        italic: false,
-                        decorations: TextDecorations::none(),
-                        color: BGRA8::from_rgba32(0xFFFFFFFF),
-                        background_color: BGRA8::ZERO,
-                        text: "this is bold..".to_string(),
-                        shadows: Vec::new(),
-                        ruby: Ruby::None,
-                    })],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.5, y: 0.5 },
-                    alignment: Alignment::Center,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![
-                        Segment::Text(TextSegment {
-                            font: vec!["sans-serif".to_string()],
-                            font_size: I26Dot6::new(64) * 96 / 72,
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0x00000000),
-                            background_color: BGRA8::ZERO,
-                            text: "嗚呼ー".to_string(),
-                            shadows: vec![TextShadow::Css(CssTextShadow {
-                                offset: Vec2f::ZERO,
-                                blur_radius: I26Dot6::from_f32(15.0),
-                                color: BGRA8::new(0, 0, 255, 255),
-                            })],
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["sans-serif".to_string()],
-                            font_size: I26Dot6::new(64) * 96 / 72,
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFF000099),
-                            background_color: BGRA8::ZERO,
-                            text: "helloworld".to_string(),
-                            shadows: vec![TextShadow::Css(CssTextShadow {
-                                offset: Vec2f::ZERO,
-                                blur_radius: I26Dot6::from_f32(15.0),
-                                color: BGRA8::new(0, 0, 255, 255),
-                            })],
-                            ruby: Ruby::None,
-                        }),
-                    ],
-                },
-                Event {
-                    start: 0,
-                    end: 600000,
-                    extra: EventExtra::Test { x: 0.5, y: 0.6 },
-                    alignment: Alignment::Bottom,
-                    text_wrap: TextWrapMode::None,
-                    segments: vec![
-                        Segment::Text(TextSegment {
-                            font: vec!["emoji".to_string()],
-                            font_size: I26Dot6::new(32),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFFFFFFFF),
-                            background_color: BGRA8::ZERO,
-                            text: "😭".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                        Segment::Text(TextSegment {
-                            font: vec!["emoji".to_string()],
-                            font_size: I26Dot6::new(64),
-                            font_weight: I16Dot16::new(400),
-                            italic: false,
-                            decorations: TextDecorations::none(),
-                            color: BGRA8::from_rgba32(0xFFFFFFFF),
-                            background_color: BGRA8::ZERO,
-                            text: "😭".to_string(),
-                            shadows: Vec::new(),
-                            ruby: Ruby::None,
-                        }),
-                    ],
-                },
-            ],
-        }
-    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -1228,8 +848,6 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        let shape_scale = ctx.pixel_scale();
-
         let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
             let mut layouter = (subs.class.create_layouter)();
@@ -1252,59 +870,38 @@ impl<'a> Renderer<'a> {
                 let mut shaper = MultilineTextShaper::new();
                 let mut last_ruby_base = None;
                 for segment in event.segments.iter() {
-                    match segment {
-                        Segment::Text(segment) => {
-                            let font_request = text::FontRequest {
-                                families: segment
-                                    .font
-                                    .iter()
-                                    .map(AsRef::as_ref)
-                                    .map(Into::into)
-                                    .collect(),
-                                weight: segment.font_weight,
-                                italic: segment.italic,
-                                codepoint: None,
-                            };
-                            let font =
-                                font_arena.insert(&self.fonts.select(&font_request)?.with_size(
-                                    (subs.class.get_font_size)(ctx, event, segment),
-                                    ctx.dpi,
-                                )?);
+                    let font_request = text::FontRequest {
+                        families: segment
+                            .font
+                            .iter()
+                            .map(AsRef::as_ref)
+                            .map(Into::into)
+                            .collect(),
+                        weight: segment.font_weight,
+                        italic: segment.italic,
+                        codepoint: None,
+                    };
+                    let font = font_arena.insert(
+                        &self
+                            .fonts
+                            .select(&font_request)?
+                            .with_size((subs.class.get_font_size)(ctx, event, segment), ctx.dpi)?,
+                    );
 
-                            match segment.ruby {
-                                Ruby::None => {
-                                    shaper.add_text(&segment.text, &font);
-                                }
-                                Ruby::Base => {
-                                    last_ruby_base =
-                                        Some(shaper.add_ruby_base(&segment.text, &font));
-                                }
-                                Ruby::Over => {
-                                    shaper.add_ruby_annotation(
-                                        last_ruby_base
-                                            .expect("Ruby::Over without preceding Ruby::Base"),
-                                        &segment.text,
-                                        font,
-                                    );
-                                    last_ruby_base = None;
-                                }
-                            }
+                    match segment.ruby {
+                        Ruby::None => {
+                            shaper.add_text(&segment.text, &font);
                         }
-                        Segment::Shape(shape) => {
-                            shaper.add_shape(Rect2::new(
-                                Point2::new(
-                                    (shape.bounding_box.min.x * shape_scale).floor() as i32,
-                                    (shape.bounding_box.min.y * shape_scale).floor() as i32,
-                                ),
-                                Point2::new(
-                                    ((shape.bounding_box.max.x + shape.stroke_x / 2.0)
-                                        * shape_scale)
-                                        .ceil() as i32,
-                                    ((shape.bounding_box.max.y + shape.stroke_y / 2.0)
-                                        * shape_scale)
-                                        .ceil() as i32,
-                                ),
-                            ));
+                        Ruby::Base => {
+                            last_ruby_base = Some(shaper.add_ruby_base(&segment.text, &font));
+                        }
+                        Ruby::Over => {
+                            shaper.add_ruby_annotation(
+                                last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
+                                &segment.text,
+                                font,
+                            );
+                            last_ruby_base = None;
                         }
                     }
                 }
@@ -1393,18 +990,14 @@ impl<'a> Renderer<'a> {
                     for shaped_segment in &line.segments {
                         if shaped_segment.corresponding_input_segment != last_segment_index {
                             if last_segment_index != usize::MAX {
-                                match &event.segments[last_segment_index] {
-                                    Segment::Text(text) => {
-                                        if text.background_color.a != 0 {
-                                            rasterizer.fill_axis_aligned_rect(
-                                                target,
-                                                convert_rect(current_background_box)
-                                                    .translate(Vec2::new(x as f32, y as f32)),
-                                                text.background_color,
-                                            );
-                                        }
-                                    }
-                                    Segment::Shape(_) => {}
+                                let segment = &event.segments[last_segment_index];
+                                if segment.background_color.a != 0 {
+                                    rasterizer.fill_axis_aligned_rect(
+                                        target,
+                                        convert_rect(current_background_box)
+                                            .translate(Vec2::new(x as f32, y as f32)),
+                                        segment.background_color,
+                                    );
                                 }
                             }
 
@@ -1417,18 +1010,14 @@ impl<'a> Renderer<'a> {
 
                     // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
                     if last_segment_index != usize::MAX {
-                        match &event.segments[last_segment_index] {
-                            Segment::Text(text) => {
-                                if text.background_color.a != 0 {
-                                    rasterizer.fill_axis_aligned_rect(
-                                        target,
-                                        convert_rect(current_background_box)
-                                            .translate(Vec2::new(x as f32, y as f32)),
-                                        text.background_color,
-                                    );
-                                }
-                            }
-                            Segment::Shape(_) => (),
+                        let segment = &event.segments[last_segment_index];
+                        if segment.background_color.a != 0 {
+                            rasterizer.fill_axis_aligned_rect(
+                                target,
+                                convert_rect(current_background_box)
+                                    .translate(Vec2::new(x as f32, y as f32)),
+                                segment.background_color,
+                            );
                         }
                     }
                 }
@@ -1471,11 +1060,7 @@ impl<'a> Renderer<'a> {
                             target,
                             final_logical_box.max.x as i32,
                             final_logical_box.min.y as i32,
-                            &if let Segment::Text(segment) = segment {
-                                format!("{:.0}pt", (subs.class.get_font_size)(ctx, event, segment))
-                            } else {
-                                "shape".to_owned()
-                            },
+                            &format!("{:.0}pt", (subs.class.get_font_size)(ctx, event, segment)),
                             Alignment::BottomRight,
                             debug_font_size,
                             BGRA8::GOLD,
@@ -1495,93 +1080,19 @@ impl<'a> Renderer<'a> {
                     let x = shaped_segment.baseline_offset.x + x;
                     let y = shaped_segment.baseline_offset.y + y;
 
-                    match segment {
-                        Segment::Text(t) => {
-                            let glyphs = shaped_segment.glyphs.as_ref().unwrap();
-                            self.draw_text_full(
-                                rasterizer,
-                                target,
-                                x,
-                                y,
-                                glyphs,
-                                t.color,
-                                &t.decorations,
-                                &t.shadows,
-                                ctx.pixel_scale(),
-                                ctx,
-                            )?;
-                        }
-                        Segment::Shape(s) => {
-                            let mut outline = s.outline.clone();
-                            outline.scale(shape_scale);
-
-                            let mut poly_rasterizer = NonZeroPolygonRasterizer::new();
-                            if s.fill_color.a > 0 {
-                                for c in outline.iter_contours() {
-                                    poly_rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &outline.flatten_contour(c),
-                                        false,
-                                    );
-                                    rasterizer.blit_cpu_polygon(
-                                        target,
-                                        &mut poly_rasterizer,
-                                        s.fill_color,
-                                    );
-                                }
-                            }
-
-                            if s.stroke_color.a > 0 && (s.stroke_x >= 0.01 || s.stroke_y >= 0.01) {
-                                let stroked = outline.stroke(
-                                    s.stroke_x * shape_scale / 2.0,
-                                    s.stroke_y * shape_scale / 2.0,
-                                    1.0,
-                                );
-
-                                for (a, b) in
-                                    stroked.0.iter_contours().zip(stroked.1.iter_contours())
-                                {
-                                    poly_rasterizer.reset();
-                                    poly_rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &stroked.0.flatten_contour(a),
-                                        false,
-                                    );
-                                    poly_rasterizer.append_polyline(
-                                        (x.trunc_to_inner(), y.trunc_to_inner()),
-                                        &stroked.1.flatten_contour(b),
-                                        true,
-                                    );
-                                    rasterizer.blit_cpu_polygon(
-                                        target,
-                                        &mut poly_rasterizer,
-                                        s.stroke_color,
-                                    );
-                                }
-
-                                if self.sbr.debug.stroke_shape_outlines {
-                                    rasterize::polygon::debug_stroke_outline(
-                                        rasterizer,
-                                        target,
-                                        x.into_f32(),
-                                        y.into_f32(),
-                                        &stroked.0,
-                                        BGRA8::from_rgba32(0xFF0000FF),
-                                        false,
-                                    );
-                                    rasterize::polygon::debug_stroke_outline(
-                                        rasterizer,
-                                        target,
-                                        x.into_f32(),
-                                        y.into_f32(),
-                                        &stroked.1,
-                                        BGRA8::from_rgba32(0x0000FFFF),
-                                        true,
-                                    );
-                                }
-                            }
-                        }
-                    }
+                    let glyphs = shaped_segment.glyphs.as_ref();
+                    self.draw_text_full(
+                        rasterizer,
+                        target,
+                        x,
+                        y,
+                        glyphs,
+                        segment.color,
+                        &segment.decorations,
+                        &segment.shadows,
+                        ctx.pixel_scale(),
+                        ctx,
+                    )?;
                 }
             }
         }

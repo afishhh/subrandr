@@ -241,6 +241,7 @@ impl NonZeroPolygonRasterizer {
     }
 }
 
+#[expect(dead_code, reason = "tessellation")]
 pub fn debug_stroke_outline(
     rasterizer: &mut dyn super::Rasterizer,
     target: &mut super::RenderTarget,

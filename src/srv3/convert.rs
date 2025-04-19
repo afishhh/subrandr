@@ -241,7 +241,7 @@ impl Layouter for Srv3Layouter {
     }
 }
 
-fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
+fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::TextSegment {
     let mut shadows = Vec::new();
 
     if segment.pen().edge_type != EdgeType::None {
@@ -252,7 +252,7 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
         }));
     }
 
-    crate::Segment::Text(TextSegment {
+    TextSegment {
         font: font_style_to_name(segment.pen().font_style)
             .iter()
             .copied()
@@ -279,7 +279,7 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::Segment {
         text: segment.text.clone(),
         shadows,
         ruby,
-    })
+    }
 }
 
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {

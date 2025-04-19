@@ -342,7 +342,7 @@ impl Default for Style {
 // TODO: Ruby
 struct TextConverter {
     style: Style,
-    segments: Vec<crate::Segment>,
+    segments: Vec<crate::TextSegment>,
 }
 
 impl TextConverter {
@@ -385,7 +385,7 @@ impl TextConverter {
 
                 self.style = old;
             }
-            vtt::Node::Text(text) => self.segments.push(crate::Segment::Text(crate::TextSegment {
+            vtt::Node::Text(text) => self.segments.push(crate::TextSegment {
                 font: self.style.fonts.clone(),
                 font_size: I26Dot6::from_f32(self.style.font_size),
                 font_weight: I16Dot16::from_f32(self.style.font_weight),
@@ -400,13 +400,13 @@ impl TextConverter {
                 text: text.content().into_owned(),
                 shadows: Vec::new(),
                 ruby: crate::Ruby::None,
-            })),
+            }),
             vtt::Node::Timestamp(_) => (),
         }
     }
 }
 
-fn convert_text(text: &str) -> Vec<crate::Segment> {
+fn convert_text(text: &str) -> Vec<crate::TextSegment> {
     let mut converter = TextConverter {
         style: Style::default(),
         segments: Vec::new(),

@@ -701,7 +701,10 @@ fn main() {
     {
         find_subs_near_path(&sbr, &path).unwrap()
     } else {
-        Some(Subtitles::test_new())
+        println!(
+            "No subtitle file was provided and one couldn't be acquired via player connection"
+        );
+        None
     };
 
     let display_supports_overlay = matches!(display_handle, Some(DisplayHandle::X11(_)));

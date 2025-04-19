@@ -13,7 +13,6 @@ const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
 enum Content<'a> {
     Text(TextContent<'a>),
-    Shape(Rect2<i32>),
     None,
 }
 
@@ -45,7 +44,7 @@ pub struct MultilineTextShaper<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ShapedSegment<'f> {
-    pub glyphs: Option<RcArray<text::Glyph<'f>>>,
+    pub glyphs: RcArray<text::Glyph<'f>>,
     pub baseline_offset: Point2<I26Dot6>,
     pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
@@ -226,18 +225,6 @@ impl<'a> MultilineTextShaper<'a> {
             text,
         }));
         self.skip_segment_for_output();
-    }
-
-    pub fn add_shape(&mut self, dim: Rect2<i32>) {
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT SHAPE: {dim:?}",);
-        }
-
-        self.text.push('\0');
-        self.segments.push(ShaperSegment {
-            content: Content::Shape(dim),
-            end: self.text.len(),
-        })
     }
 
     pub fn shape<'f>(
@@ -427,7 +414,7 @@ impl<'a> MultilineTextShaper<'a> {
                             // FIXME: Annotations seem to be slightly above where they should and
                             //        the logical rects also appear to be slightly too high.
                             annotation_segments.push(ShapedSegment {
-                                glyphs: Some(RcArray::from_boxed(glyphs.into_boxed_slice())),
+                                glyphs: RcArray::from_boxed(glyphs.into_boxed_slice()),
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
                                     current_line_y - extents.max_ascender,
@@ -458,7 +445,7 @@ impl<'a> MultilineTextShaper<'a> {
                             let logical_width =
                                 extents.paint_size.x + extents.trailing_advance + ruby_padding * 2;
                             segments.push(ShapedSegment {
-                                glyphs: Some(rc_glyphs),
+                                glyphs: rc_glyphs,
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
                                     current_line_y,
@@ -496,7 +483,7 @@ impl<'a> MultilineTextShaper<'a> {
                                 let extents = text::compute_extents_ex(true, &glyph_slice)?;
 
                                 segments.push(ShapedSegment {
-                                    glyphs: Some(glyph_slice),
+                                    glyphs: glyph_slice,
                                     baseline_offset: Point2::new(current_x, current_line_y),
                                     logical_rect: Rect2::from_min_size(
                                         Point2::ZERO,
@@ -519,24 +506,6 @@ impl<'a> MultilineTextShaper<'a> {
                                 }
                             }
                         }
-                    }
-                    // TODO: Figure out exactly how ass shape layout should work
-                    Content::Shape(dim) => {
-                        let logical_w = dim.width() - (-dim.min.x).min(0);
-                        let logical_h = dim.height() - (-dim.min.y).min(0);
-                        let segment_max_bearing_y = I26Dot6::new(logical_h);
-                        segments.push(ShapedSegment {
-                            glyphs: None,
-                            baseline_offset: Point2::new(current_x, current_line_y),
-                            logical_rect: Rect2::new(
-                                Point2::ZERO,
-                                Point2::new(I26Dot6::new(logical_w), I26Dot6::new(logical_h)),
-                            ),
-                            corresponding_input_segment: current_segment + current_intra_split,
-                            max_ascender: segment_max_bearing_y,
-                        });
-                        current_x += logical_w;
-                        line_max_ascender = line_max_ascender.max(segment_max_bearing_y);
                     }
                 }
 
@@ -573,12 +542,7 @@ impl<'a> MultilineTextShaper<'a> {
 
             for segment in segments.iter_mut() {
                 segment.baseline_offset.x += aligning_x_offset;
-                if segment.glyphs.is_none() {
-                    segment.baseline_offset.y +=
-                        line_max_ascender - segment.max_ascender + annotation_y_adjustment;
-                } else {
-                    segment.baseline_offset.y += line_max_ascender + annotation_y_adjustment;
-                }
+                segment.baseline_offset.y += line_max_ascender + annotation_y_adjustment;
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
                     current_line_y + line_max_ascender - segment.max_ascender,

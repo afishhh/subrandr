@@ -25,13 +25,6 @@ impl<N> Point2<N> {
         Self { x, y }
     }
 
-    pub const fn from_array([x, y]: [N; 2]) -> Self
-    where
-        N: Copy,
-    {
-        Self { x, y }
-    }
-
     pub const fn to_vec(self) -> Vec2<N>
     where
         N: Copy,
@@ -41,13 +34,6 @@ impl<N> Point2<N> {
 }
 
 impl<N: Number> Point2<N> {
-    pub fn distance(self, other: Self) -> N
-    where
-        N: Sqrt,
-    {
-        (self - other).length()
-    }
-
     pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
@@ -68,13 +54,6 @@ pub type Vec2f = Vec2<f32>;
 
 impl<N> Vec2<N> {
     pub const fn new(x: N, y: N) -> Self {
-        Self { x, y }
-    }
-
-    pub const fn from_array([x, y]: [N; 2]) -> Self
-    where
-        N: Copy,
-    {
         Self { x, y }
     }
 
@@ -288,18 +267,6 @@ impl<N: Number + Display> Rect2<N> {
         }
     }
 
-    pub fn is_negative(&self) -> bool {
-        self.min.x > self.max.x || self.min.y > self.max.y
-    }
-
-    pub fn clamp_to_positive(&self) -> Self {
-        if self.is_negative() {
-            Self::ZERO
-        } else {
-            *self
-        }
-    }
-
     pub fn intersects(&self, other: &Self) -> bool {
         self.min.x <= other.max.x
             && self.max.x >= other.min.x
@@ -334,16 +301,6 @@ impl<N: Number + Display> Rect2<N> {
         self.size().y
     }
 
-    pub fn area(&self) -> N {
-        let size = self.size();
-
-        if self.is_negative() {
-            N::ZERO
-        } else {
-            size.x * size.y
-        }
-    }
-
     pub fn expand_to_point(&mut self, point: Point2<N>) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
@@ -356,14 +313,6 @@ impl<N: Number + Display> Rect2<N> {
         self.min.y = self.min.y.min(rect.min.y);
         self.max.x = self.max.x.max(rect.max.x);
         self.max.y = self.max.y.max(rect.max.y);
-    }
-
-    pub fn bounding_from_points(points: &[Point2<N>]) -> Self {
-        let mut bb = Self::NOTHING;
-        for &point in points {
-            bb.expand_to_point(point);
-        }
-        bb
     }
 }
 

@@ -426,7 +426,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
             get_font_size: |ctx, _event, _segment| -> I26Dot6 {
                 // Standard says 5vh, but browser engines use 5vmin.
                 // See https://github.com/w3c/webvtt/issues/529
-                ctx.player_height().min(ctx.player_width()) * 0.05 / ctx.pixel_scale()
+                ctx.video_height.min(ctx.video_width) * 0.05 / ctx.pixel_scale()
             },
             create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
         },

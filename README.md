@@ -36,11 +36,6 @@ The C API is defined in the `subrandr.h` header, items marked there as unstable 
 > This library is experimental and no API stability is guaranteed for any of its APIs
 > even for items not marked unstable. This *may* or *may not* change in the future.
 
-> [!WARNING]
-> Currently error handling in subrandr is **very bad**, subrandr **will** crash your program if
-> FreeType (or HarfBuzz) returns ANY kind of error. This will be improved in the future, but due to the
-> experimental nature of the library it's not currently high on the priority list.
-
 Although a wgpu based rasterizer is present in subrandr, it is currently not exposed via the C API so you must use `sbr_renderer_render` which performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
 
 ```c

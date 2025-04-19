@@ -1578,6 +1578,7 @@ name = "subrandr"
 version = "0.1.0"
 dependencies = [
  "aliasable",
+ "once_cell",
  "quick-xml 0.36.2",
  "text-sys",
  "thiserror 1.0.63",

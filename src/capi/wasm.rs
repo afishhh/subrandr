@@ -76,7 +76,7 @@ pub unsafe extern "C" fn sbr_wasm_library_create_font(
         Arc::from_raw(data)
     };
 
-    Box::into_raw(Box::new(Face::load_from_bytes(data)))
+    Box::into_raw(Box::new(ctry!(Face::load_from_bytes(data))))
 }
 
 #[no_mangle]

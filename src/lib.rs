@@ -8,6 +8,8 @@ use std::{
     ops::Range,
 };
 
+use thiserror::Error;
+
 use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
@@ -16,7 +18,7 @@ use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
-    FontArena, TextMetrics,
+    FontArena, FreeTypeError, TextMetrics,
 };
 use vtt::VttEvent;
 
@@ -31,8 +33,6 @@ mod outline;
 pub mod rasterize;
 mod text;
 mod util;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Alignment {
@@ -786,7 +786,21 @@ impl<'a> Renderer<'a> {
     pub fn did_change(&self, ctx: &SubtitleContext, t: u32) -> bool {
         self.previous_context != *ctx || !self.unchanged_range.contains(&t)
     }
+}
 
+#[derive(Debug, Error)]
+pub enum RenderError {
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+    #[error(transparent)]
+    FontSelect(#[from] text::font_select::Error),
+    #[error(transparent)]
+    SimpleShaping(#[from] text::ShapingError),
+    #[error(transparent)]
+    Layout(#[from] text::layout::LayoutError),
+}
+
+impl<'a> Renderer<'a> {
     fn debug_text(
         &mut self,
         rasterizer: &mut dyn Rasterizer,
@@ -797,23 +811,24 @@ impl<'a> Renderer<'a> {
         alignment: Alignment,
         size: I26Dot6,
         color: BGRA8,
-    ) {
+    ) -> Result<(), RenderError> {
         let font = self
             .fonts
-            .select_simple("monospace", I16Dot16::new(400), false)
-            .unwrap()
-            .with_size(size, self.dpi);
+            .select_simple("monospace", I16Dot16::new(400), false)?
+            .with_size(size, self.dpi)?;
         let font_arena = FontArena::new();
-        let glyphs = text::simple_shape_text(&font, &font_arena, text);
+        let glyphs = text::simple_shape_text(&font, &font_arena, text)?;
         let (ox, oy) = Self::translate_for_aligned_text(
             &font,
             true,
-            &text::compute_extents_ex(true, &glyphs),
+            &text::compute_extents_ex(true, &glyphs)?,
             alignment,
         );
 
-        let image = text::render(rasterizer, I26Dot6::ZERO, I26Dot6::ZERO, &glyphs);
+        let image = text::render(rasterizer, I26Dot6::ZERO, I26Dot6::ZERO, &glyphs)?;
         image.blit(rasterizer, target, x + ox, y + oy, color);
+
+        Ok(())
     }
 
     fn translate_for_aligned_text(
@@ -855,13 +870,13 @@ impl<'a> Renderer<'a> {
         shadows: &[TextShadow],
         scale: f32,
         ctx: &SubtitleContext,
-    ) {
+    ) -> Result<(), RenderError> {
         if glyphs.is_empty() {
             // TODO: Maybe instead ensure empty segments aren't emitted during layout?
-            return;
+            return Ok(());
         }
 
-        let image = text::render(rasterizer, x.fract(), y.fract(), glyphs);
+        let image = text::render(rasterizer, x.fract(), y.fract(), glyphs)?;
         let border = decoration.border * scale;
 
         let mut blurs = HashMap::new();
@@ -929,7 +944,7 @@ impl<'a> Renderer<'a> {
 
             poly_rasterizer.reset();
             for glyph in glyphs {
-                if let Some(outline) = glyph.font.glyph_outline(glyph.index) {
+                if let Some(outline) = glyph.font.glyph_outline(glyph.index)? {
                     let (one, two) = outline.stroke(border.x, border.y, 1.0);
 
                     for (a, b) in one.iter_contours().zip(two.iter_contours()) {
@@ -1000,6 +1015,8 @@ impl<'a> Renderer<'a> {
                 decoration.strike_out_color,
             );
         }
+
+        Ok(())
     }
 
     pub fn render(
@@ -1010,7 +1027,7 @@ impl<'a> Renderer<'a> {
         buffer: &mut [BGRA8],
         width: u32,
         height: u32,
-    ) {
+    ) -> Result<(), RenderError> {
         self.previous_context = *ctx;
         self.previous_output_size = (width, height);
 
@@ -1021,7 +1038,7 @@ impl<'a> Renderer<'a> {
             ctx,
             t,
             subs,
-        );
+        )
     }
 
     // FIXME: This is kinda ugly but `render_to` cannot be public without
@@ -1035,9 +1052,10 @@ impl<'a> Renderer<'a> {
         ctx: &SubtitleContext,
         t: u32,
         subs: &Subtitles,
-    ) {
-        self.render_to(rasterizer, &mut target, ctx, t, subs);
+    ) -> Result<(), RenderError> {
+        self.render_to(rasterizer, &mut target, ctx, t, subs)?;
         rasterizer.submit_render(target);
+        Ok(())
     }
 
     fn render_to(
@@ -1047,10 +1065,10 @@ impl<'a> Renderer<'a> {
         ctx: &SubtitleContext,
         t: u32,
         subs: &Subtitles,
-    ) {
+    ) -> Result<(), RenderError> {
         let (target_width, target_height) = (target.width(), target.width());
         if target_width == 0 || target_height == 0 {
-            return;
+            return Ok(());
         }
 
         self.perf.start_frame();
@@ -1084,7 +1102,7 @@ impl<'a> Renderer<'a> {
                 Alignment::TopLeft,
                 debug_font_size,
                 BGRA8::WHITE,
-            );
+            )?;
 
             self.debug_text(
                 rasterizer,
@@ -1095,7 +1113,7 @@ impl<'a> Renderer<'a> {
                 Alignment::TopLeft,
                 debug_font_size,
                 BGRA8::WHITE,
-            );
+            )?;
 
             let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
             self.debug_text(
@@ -1107,7 +1125,7 @@ impl<'a> Renderer<'a> {
                 Alignment::TopLeft,
                 debug_font_size,
                 BGRA8::WHITE,
-            );
+            )?;
 
             if let Some(adapter_line) = rasterizer.adapter_info_string() {
                 self.debug_text(
@@ -1119,7 +1137,7 @@ impl<'a> Renderer<'a> {
                     Alignment::TopLeft,
                     debug_font_size,
                     BGRA8::WHITE,
-                );
+                )?;
             }
         }
 
@@ -1136,7 +1154,7 @@ impl<'a> Renderer<'a> {
                 Alignment::TopRight,
                 debug_font_size,
                 BGRA8::WHITE,
-            );
+            )?;
 
             self.debug_text(
                 rasterizer,
@@ -1150,7 +1168,7 @@ impl<'a> Renderer<'a> {
                 Alignment::TopRight,
                 debug_font_size,
                 BGRA8::WHITE,
-            );
+            )?;
 
             if !self.perf.times.is_empty() {
                 let (min, max) = self.perf.minmax_frame_times();
@@ -1172,7 +1190,7 @@ impl<'a> Renderer<'a> {
                     Alignment::TopRight,
                     debug_font_size,
                     BGRA8::WHITE,
-                );
+                )?;
 
                 if let Some(&last) = self.perf.times.iter().last() {
                     self.debug_text(
@@ -1184,7 +1202,7 @@ impl<'a> Renderer<'a> {
                         Alignment::TopRight,
                         debug_font_size,
                         BGRA8::WHITE,
-                    );
+                    )?;
                 }
 
                 let graph_width = I26Dot6::new(300) * ctx.pixel_scale();
@@ -1246,12 +1264,11 @@ impl<'a> Renderer<'a> {
                                 italic: segment.italic,
                                 codepoint: None,
                             };
-                            let font = font_arena.insert(
-                                &self.fonts.select(&font_request).unwrap().with_size(
+                            let font =
+                                font_arena.insert(&self.fonts.select(&font_request)?.with_size(
                                     (subs.class.get_font_size)(ctx, event, segment),
                                     ctx.dpi,
-                                ),
-                            );
+                                )?);
 
                             match segment.ruby {
                                 Ruby::None => {
@@ -1300,7 +1317,7 @@ impl<'a> Renderer<'a> {
                     },
                     &font_arena,
                     &mut self.fonts,
-                );
+                )?;
 
                 let Point2 { x, y } = layouter.layout(ctx, &mut lines, &mut total_rect, event);
 
@@ -1357,7 +1374,7 @@ impl<'a> Renderer<'a> {
                         total_position_debug_pos.1,
                         debug_font_size,
                         BGRA8::MAGENTA,
-                    );
+                    )?;
                 }
 
                 // TODO: A trait for casting these types?
@@ -1435,7 +1452,7 @@ impl<'a> Renderer<'a> {
                             Alignment::BottomLeft,
                             debug_font_size,
                             BGRA8::RED,
-                        );
+                        )?;
 
                         self.debug_text(
                             rasterizer,
@@ -1446,7 +1463,7 @@ impl<'a> Renderer<'a> {
                             Alignment::TopLeft,
                             debug_font_size,
                             BGRA8::RED,
-                        );
+                        )?;
 
                         self.debug_text(
                             rasterizer,
@@ -1461,7 +1478,7 @@ impl<'a> Renderer<'a> {
                             Alignment::BottomRight,
                             debug_font_size,
                             BGRA8::GOLD,
-                        );
+                        )?;
 
                         rasterizer.stroke_axis_aligned_rect(target, final_logical_box, BGRA8::BLUE);
 
@@ -1491,7 +1508,7 @@ impl<'a> Renderer<'a> {
                                 &t.shadows,
                                 ctx.pixel_scale(),
                                 ctx,
-                            );
+                            )?;
                         }
                         Segment::Shape(s) => {
                             let mut outline = s.outline.clone();
@@ -1572,5 +1589,7 @@ impl<'a> Renderer<'a> {
 
         let time = self.perf.end_frame();
         trace!(self.sbr, "frame took {:.2}ms to render", time);
+
+        Ok(())
     }
 }

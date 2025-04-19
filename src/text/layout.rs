@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 use crate::{
     math::{I26Dot6, Point2, Rect2, Vec2},
     text::{self},
@@ -57,13 +59,21 @@ pub struct ShapedLine<'f> {
     pub bounding_rect: Rect2<I26Dot6>,
 }
 
+#[derive(Debug, Error)]
+pub enum LayoutError {
+    #[error(transparent)]
+    Shaping(#[from] text::ShapingError),
+    #[error(transparent)]
+    Metrics(#[from] text::FreeTypeError),
+}
+
 fn shape_simple_segment<'f>(
     font: &text::Font,
     text: &str,
     range: impl text::ItemRange,
     font_arena: &'f FontArena,
     font_select: &mut FontSelect,
-) -> (Vec<text::Glyph<'f>>, TextMetrics) {
+) -> Result<(Vec<text::Glyph<'f>>, TextMetrics), LayoutError> {
     let glyphs = {
         let mut buffer = text::ShapingBuffer::new();
         buffer.reset();
@@ -72,13 +82,13 @@ fn shape_simple_segment<'f>(
         if !direction.is_horizontal() {
             buffer.set_direction(direction.to_horizontal());
         }
-        buffer.shape(font, font_arena, font_select)
+        buffer.shape(font, font_arena, font_select)?
     };
 
-    let mut metrics = text::compute_extents_ex(true, &glyphs);
+    let mut metrics = text::compute_extents_ex(true, &glyphs)?;
     metrics.extend_by_font(font);
 
-    (glyphs, metrics)
+    Ok((glyphs, metrics))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -236,7 +246,7 @@ impl<'a> MultilineTextShaper<'a> {
         wrap: TextWrapParams,
         font_arena: &'f FontArena,
         font_select: &mut FontSelect,
-    ) -> (Vec<ShapedLine<'f>>, Rect2<I26Dot6>) {
+    ) -> Result<(Vec<ShapedLine<'f>>, Rect2<I26Dot6>), LayoutError> {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
             println!(
@@ -246,7 +256,7 @@ impl<'a> MultilineTextShaper<'a> {
         }
 
         if self.segments.is_empty() {
-            return (Vec::new(), Rect2::ZERO);
+            return Ok((Vec::new(), Rect2::ZERO));
         }
 
         let wrap_width = I26Dot6::from_f32(wrap.wrap_width);
@@ -314,7 +324,7 @@ impl<'a> MultilineTextShaper<'a> {
                             segment_slice,
                             &font_arena,
                             font_select,
-                        );
+                        )?;
 
                         if !did_wrap
                             && wrap.mode == TextWrapMode::Normal
@@ -400,7 +410,7 @@ impl<'a> MultilineTextShaper<'a> {
                                 ..,
                                 font_arena,
                                 font_select,
-                            );
+                            )?;
 
                             let base_width = extents.paint_size.x + extents.trailing_advance;
                             let ruby_width =
@@ -483,7 +493,7 @@ impl<'a> MultilineTextShaper<'a> {
                                 let glyph_range = last_glyph_idx..end_glyph_idx;
                                 let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
                                 let local_max_ascender = extents.max_ascender;
-                                let extents = text::compute_extents_ex(true, &glyph_slice);
+                                let extents = text::compute_extents_ex(true, &glyph_slice)?;
 
                                 segments.push(ShapedSegment {
                                     glyphs: Some(glyph_slice),
@@ -603,6 +613,6 @@ impl<'a> MultilineTextShaper<'a> {
             println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
         }
 
-        (lines, total_rect)
+        Ok((lines, total_rect))
     }
 }

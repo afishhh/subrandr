@@ -196,11 +196,14 @@ fn probe(content: &str) -> SubtitleFormat {
 
 macro_rules! cthrow {
     ($error: expr) => {{
-        fill_last_error($error);
-        return CErrorValue.into();
+        $crate::capi::fill_last_error($error);
+        return $crate::capi::CErrorValue.into();
     }};
     ($kind: ident, $message: expr) => {
-        cthrow!(CError::new(ErrorKind::$kind, $message))
+        cthrow!($crate::capi::CError::new(
+            $crate::capi::ErrorKind::$kind,
+            $message
+        ))
     };
 }
 
@@ -208,7 +211,7 @@ macro_rules! ctry {
     ($result: expr) => {
         match $result {
             Ok(value) => value,
-            Err(error) => cthrow!(CError::from_error(error)),
+            Err(error) => cthrow!($crate::capi::CError::from_error(error)),
         }
     };
 }
@@ -225,6 +228,9 @@ macro_rules! ctrywrap {
         }
     };
 }
+
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_init() -> *mut Subrandr {
@@ -349,7 +355,7 @@ unsafe extern "C" fn sbr_library_open_font_from_memory(
         .copy_from_slice(std::slice::from_raw_parts(data, data_len));
     }
     let bytes = Arc::<[MaybeUninit<u8>]>::assume_init(uninit);
-    Box::into_raw(Box::new(Face::load_from_bytes(bytes)))
+    Box::into_raw(Box::new(ctry!(Face::load_from_bytes(bytes))))
 }
 
 #[unsafe(no_mangle)]
@@ -382,7 +388,7 @@ unsafe extern "C" fn sbr_renderer_render(
     height: u32,
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
-    (*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height);
+    ctry!((*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height));
     0
 }
 

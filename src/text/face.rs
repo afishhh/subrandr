@@ -1,3 +1,9 @@
+use crate::{
+    math::{I16Dot16, I26Dot6, Vec2},
+    outline::Outline,
+    rasterize::{PixelFormat, Rasterizer, Texture},
+    util::fmt_from_fn,
+};
 use std::{
     cell::{Cell, UnsafeCell},
     collections::HashMap,
@@ -9,14 +15,8 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    math::{I16Dot16, I26Dot6, Vec2},
-    outline::Outline,
-    rasterize::{PixelFormat, Rasterizer, Texture},
-    util::fmt_from_fn,
-};
-
 use super::ft_utils::*;
+use once_cell::unsync::OnceCell;
 use text_sys::*;
 
 #[repr(transparent)]
@@ -24,21 +24,21 @@ struct FaceMmVar(*mut FT_MM_Var);
 
 impl FaceMmVar {
     #[inline(always)]
-    fn has(face: FT_Face) -> bool {
+    unsafe fn has(face: FT_Face) -> bool {
         unsafe { ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as FT_Long) != 0 }
     }
 
-    fn get(face: FT_Face) -> Option<Self> {
+    unsafe fn get(face: FT_Face) -> Result<Option<Self>, FreeTypeError> {
         unsafe {
-            if Self::has(face) {
+            Ok(if Self::has(face) {
                 Some(Self({
                     let mut output = MaybeUninit::uninit();
-                    fttry!(FT_Get_MM_Var(face, output.as_mut_ptr()));
+                    fttry!(FT_Get_MM_Var(face, output.as_mut_ptr()))?;
                     output.assume_init()
                 }))
             } else {
                 None
-            }
+            })
         }
     }
 
@@ -60,7 +60,7 @@ impl FaceMmVar {
 impl Drop for FaceMmVar {
     fn drop(&mut self) {
         unsafe {
-            FT_Done_MM_Var(Library::get_or_init().ptr, self.0);
+            FT_Done_MM_Var(Library::get_or_init().unwrap().ptr, self.0);
         }
     }
 }
@@ -104,21 +104,21 @@ pub const WIDTH_AXIS: u32 = create_freetype_tag(*b"wdth");
 pub const ITALIC_AXIS: u32 = create_freetype_tag(*b"ital");
 
 impl Face {
-    pub fn load_from_file(path: impl AsRef<Path>) -> Self {
-        let library = Library::get_or_init();
+    pub fn load_from_file(path: impl AsRef<Path>) -> Result<Self, FreeTypeError> {
+        let library = Library::get_or_init()?;
         let _guard = library.face_mutation_mutex.lock().unwrap();
         let cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
 
         let mut face = std::ptr::null_mut();
         unsafe {
-            fttry!(FT_New_Face(library.ptr, cstr.as_ptr(), 0, &mut face));
+            fttry!(FT_New_Face(library.ptr, cstr.as_ptr(), 0, &mut face))?;
         }
 
-        Self::adopt_ft(face, None)
+        unsafe { Self::adopt_ft(face, None) }
     }
 
-    pub fn load_from_bytes(bytes: Arc<[u8]>) -> Self {
-        let library = Library::get_or_init();
+    pub fn load_from_bytes(bytes: Arc<[u8]>) -> Result<Self, FreeTypeError> {
+        let library = Library::get_or_init()?;
         let _guard = library.face_mutation_mutex.lock().unwrap();
 
         let mut face = std::ptr::null_mut();
@@ -129,17 +129,17 @@ impl Face {
                 bytes.len() as FT_Long,
                 0,
                 &mut face
-            ));
+            ))?;
         }
 
-        Self::adopt_ft(face, Some(bytes))
+        unsafe { Self::adopt_ft(face, Some(bytes)) }
     }
 
-    fn adopt_ft(face: FT_Face, memory: Option<Arc<[u8]>>) -> Self {
+    unsafe fn adopt_ft(face: FT_Face, memory: Option<Arc<[u8]>>) -> Result<Self, FreeTypeError> {
         let mut axes = Vec::new();
         let mut default_coords = MmCoords::default();
 
-        if let Some(mm) = FaceMmVar::get(face) {
+        if let Some(mm) = unsafe { FaceMmVar::get(face)? } {
             for (index, ft_axis) in mm.axes().iter().enumerate() {
                 axes.push(Axis {
                     // FT_ULong may be u64, but this tag always fits in u32
@@ -162,18 +162,18 @@ impl Face {
             (*face).generic.finalizer = Some(SharedFaceData::finalize);
         }
 
-        Self {
+        Ok(Self {
             face,
             coords: default_coords,
-        }
+        })
     }
 
     #[inline(always)]
-    pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Font {
+    pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
         Font::create(self.face, self.coords, point_size, dpi)
     }
 
-    pub fn with_size_from(&self, other: &Font) -> Font {
+    pub fn with_size_from(&self, other: &Font) -> Result<Font, FreeTypeError> {
         Font::create(
             self.face,
             self.coords,
@@ -326,7 +326,7 @@ impl std::fmt::Debug for Axis {
 impl Clone for Face {
     fn clone(&self) -> Self {
         unsafe {
-            fttry!(FT_Reference_Face(self.face));
+            fttry!(FT_Reference_Face(self.face)).expect("FT_Reference_Face failed");
         }
         Self {
             face: self.face,
@@ -337,7 +337,11 @@ impl Clone for Face {
 
 impl Drop for Face {
     fn drop(&mut self) {
-        let _guard = Library::get_or_init().face_mutation_mutex.lock().unwrap();
+        let _guard = Library::get_or_init()
+            .unwrap()
+            .face_mutation_mutex
+            .lock()
+            .unwrap();
         unsafe {
             FT_Done_Face(self.face);
         }
@@ -473,15 +477,20 @@ pub struct Font {
 }
 
 impl Font {
-    fn create(face: FT_Face, coords: MmCoords, point_size: I26Dot6, dpi: u32) -> Self {
+    fn create(
+        face: FT_Face,
+        coords: MmCoords,
+        point_size: I26Dot6,
+        dpi: u32,
+    ) -> Result<Self, FreeTypeError> {
         let size = unsafe {
             let mut size = MaybeUninit::uninit();
-            fttry!(FT_New_Size(face, size.as_mut_ptr()));
+            fttry!(FT_New_Size(face, size.as_mut_ptr()))?;
             size.assume_init()
         };
 
         unsafe {
-            fttry!(FT_Activate_Size(size));
+            fttry!(FT_Activate_Size(size))?;
         }
 
         let dpi_scale = I26Dot6::from_quotient(dpi as i32, 72);
@@ -496,7 +505,7 @@ impl Font {
                     point_size.into_ft(),
                     dpi,
                     dpi
-                ));
+                ))?;
             }
 
             (
@@ -527,7 +536,7 @@ impl Font {
             let scale = I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
 
             unsafe {
-                fttry!(FT_Select_Size(face, picked_size_index as i32));
+                fttry!(FT_Select_Size(face, picked_size_index as i32))?;
             }
 
             (
@@ -536,7 +545,7 @@ impl Font {
             )
         };
 
-        Self {
+        Ok(Self {
             ft_face: face,
             coords,
             size: Arc::new(Size {
@@ -547,49 +556,50 @@ impl Font {
                 dpi,
             }),
             hb_font: unsafe { hb_ft_font_create_referenced(face) },
-        }
+        })
     }
 
-    pub(super) fn with_applied_size(&self) -> FT_Face {
+    pub(super) fn with_applied_size(&self) -> Result<FT_Face, FreeTypeError> {
         unsafe {
-            fttry!(FT_Activate_Size(self.size.ft_size));
+            fttry!(FT_Activate_Size(self.size.ft_size))?;
         }
 
-        if FaceMmVar::has(self.ft_face) {
+        if unsafe { FaceMmVar::has(self.ft_face) } {
             unsafe {
                 fttry!(FT_Set_Var_Design_Coordinates(
                     self.ft_face,
                     SharedFaceData::get_ref(self.ft_face).axes.len() as u32,
                     self.coords.as_ptr().cast_mut()
-                ));
+                ))?;
             }
         }
 
-        self.ft_face
+        Ok(self.ft_face)
     }
 
-    pub(super) fn with_applied_size_and_hb(&self) -> (FT_Face, *mut hb_font_t) {
-        let ft_face = self.with_applied_size();
-        (ft_face, self.hb_font)
+    pub(super) fn with_applied_size_and_hb(
+        &self,
+    ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
+        Ok((self.with_applied_size()?, self.hb_font))
     }
 
     /// Gets the Outline associated with the glyph at `index`.
     ///
     /// Returns [`None`] if the glyph does not exist in this font, or it is not
     /// an outline glyph.
-    pub fn glyph_outline(&self, index: u32) -> Option<Outline> {
-        let face = self.with_applied_size();
+    pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
+        let face = self.with_applied_size()?;
         unsafe {
             // According to FreeType documentation, bitmap-only fonts ignore
             // FT_LOAD_NO_BITMAP.
             if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
-                return None;
+                return Ok(None);
             }
 
             // TODO: return none if the glyph does not exist in the font
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32));
+            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32))?;
 
-            Some(Outline::from_freetype(&(*(*face).glyph).outline))
+            Ok(Some(Outline::from_freetype(&(*(*face).glyph).outline)))
         }
     }
 
@@ -689,16 +699,16 @@ struct SizeInfo {
 
 struct CacheSlot {
     generation: u64,
-    metrics: Option<GlyphMetrics>,
-    bitmap: Option<SingleGlyphBitmap>,
+    metrics: OnceCell<GlyphMetrics>,
+    bitmap: OnceCell<SingleGlyphBitmap>,
 }
 
 impl CacheSlot {
     fn new() -> Self {
         Self {
             generation: 0,
-            metrics: None,
-            bitmap: None,
+            metrics: OnceCell::new(),
+            bitmap: OnceCell::new(),
         }
     }
 }
@@ -743,21 +753,25 @@ impl GlyphCache {
         slot
     }
 
-    pub fn get_or_measure(&self, font: &Font, index: u32) -> &GlyphMetrics {
+    pub fn get_or_try_measure(
+        &self,
+        font: &Font,
+        index: u32,
+    ) -> Result<&GlyphMetrics, FreeTypeError> {
         unsafe { self.slot(font, index) }
             .metrics
-            .get_or_insert_with(|| font.glyph_extents_uncached(index))
+            .get_or_try_init(|| font.glyph_extents_uncached(index))
     }
 
-    pub fn get_or_render(
+    pub fn get_or_try_render(
         &self,
         rasterizer: &mut dyn Rasterizer,
         font: &Font,
         index: u32,
-    ) -> &SingleGlyphBitmap {
+    ) -> Result<&SingleGlyphBitmap, FreeTypeError> {
         unsafe { self.slot(font, index) }
             .bitmap
-            .get_or_insert_with(|| font.render_glyph_uncached(rasterizer, index))
+            .get_or_try_init(|| font.render_glyph_uncached(rasterizer, index))
     }
 }
 
@@ -768,14 +782,14 @@ pub struct SingleGlyphBitmap {
 }
 
 impl Font {
-    fn glyph_extents_uncached(&self, index: u32) -> GlyphMetrics {
-        let face = self.with_applied_size();
+    fn glyph_extents_uncached(&self, index: u32) -> Result<GlyphMetrics, FreeTypeError> {
+        let face = self.with_applied_size()?;
         let mut metrics = unsafe {
             fttry!(FT_Load_Glyph(
                 face,
                 index,
                 (FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
-            ));
+            ))?;
             (*(*face).glyph).metrics
         };
 
@@ -797,7 +811,7 @@ impl Font {
             scale_field!(vertAdvance);
         }
 
-        GlyphMetrics {
+        Ok(GlyphMetrics {
             width: I26Dot6::from_raw(metrics.width as i32),
             height: I26Dot6::from_raw(metrics.height as i32),
             hori_bearing_x: I26Dot6::from_raw(metrics.horiBearingX as i32),
@@ -806,24 +820,24 @@ impl Font {
             vert_bearing_x: I26Dot6::from_raw(metrics.vertBearingX as i32),
             vert_bearing_y: I26Dot6::from_raw(metrics.vertBearingY as i32),
             vert_advance: I26Dot6::from_raw(metrics.vertAdvance as i32),
-        }
+        })
     }
 
-    pub fn glyph_extents(&self, index: u32) -> GlyphMetrics {
-        *self.face().glyph_cache().get_or_measure(self, index)
+    pub fn glyph_extents(&self, index: u32) -> Result<&GlyphMetrics, FreeTypeError> {
+        self.face().glyph_cache().get_or_try_measure(self, index)
     }
 
     fn render_glyph_uncached(
         &self,
         rasterizer: &mut dyn Rasterizer,
         index: u32,
-    ) -> SingleGlyphBitmap {
+    ) -> Result<SingleGlyphBitmap, FreeTypeError> {
         unsafe {
-            let face = self.with_applied_size();
+            let face = self.with_applied_size()?;
 
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32));
+            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
             let slot = (*face).glyph;
-            fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL));
+            fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))?;
 
             let scale6 = self.size.scale.into_raw();
 
@@ -948,17 +962,20 @@ impl Font {
                 }),
             );
 
-            SingleGlyphBitmap {
+            Ok(SingleGlyphBitmap {
                 offset: Vec2::new(ox, oy),
                 texture,
-            }
+            })
         }
     }
 
-    pub fn render_glyph(&self, rasterizer: &mut dyn Rasterizer, index: u32) -> SingleGlyphBitmap {
+    pub fn render_glyph(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        index: u32,
+    ) -> Result<&SingleGlyphBitmap, FreeTypeError> {
         self.face()
             .glyph_cache()
-            .get_or_render(rasterizer, self, index)
-            .clone()
+            .get_or_try_render(rasterizer, self, index)
     }
 }

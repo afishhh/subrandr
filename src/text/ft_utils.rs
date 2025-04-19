@@ -1,19 +1,46 @@
-use std::sync::{Mutex, OnceLock};
+use std::{
+    fmt::{Debug, Display},
+    num::NonZero,
+    sync::Mutex,
+};
 
+use once_cell::sync::OnceCell;
 use text_sys::*;
+
+#[derive(Debug)]
+pub struct FreeTypeError(NonZero<FT_Error>);
+
+impl FreeTypeError {
+    pub(super) fn from_ft(code: NonZero<FT_Error>) -> Self {
+        Self(code)
+    }
+
+    pub(super) fn result_from_ft(code: FT_Error) -> Result<(), Self> {
+        if let Some(error) = std::num::NonZero::new(code) {
+            Err(Self::from_ft(error))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Display for FreeTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match text_sys::FREETYPE_ERRORS
+            .iter()
+            .find_map(|&(c, msg)| (c == self.0.get()).then_some(msg))
+        {
+            Some(msg) => f.write_str(msg),
+            None => write!(f, "FreeType error {:#X}", self.0),
+        }
+    }
+}
+
+impl std::error::Error for FreeTypeError {}
 
 macro_rules! fttry {
     ($expr: expr) => {
-        let code = $expr;
-        #[allow(unused_unsafe)]
-        if code != 0 {
-            panic!(
-                "ft error: 0x{code:X} {:?}",
-                text_sys::FREETYPE_ERRORS
-                    .iter()
-                    .find_map(|&(c, msg)| (c == code).then_some(msg))
-            )
-        }
+        $crate::text::ft_utils::FreeTypeError::result_from_ft($expr)
     };
 }
 
@@ -25,17 +52,17 @@ pub struct Library {
     pub face_mutation_mutex: Mutex<()>,
 }
 
-static FT_LIBRARY: OnceLock<Library> = OnceLock::new();
+static FT_LIBRARY: OnceCell<Library> = OnceCell::new();
 
 impl Library {
-    pub fn get_or_init() -> &'static Self {
-        FT_LIBRARY.get_or_init(|| unsafe {
+    pub fn get_or_init() -> Result<&'static Self, FreeTypeError> {
+        FT_LIBRARY.get_or_try_init(|| unsafe {
             let mut ft = std::ptr::null_mut();
-            fttry!(FT_Init_FreeType(&mut ft));
-            Self {
+            fttry!(FT_Init_FreeType(&mut ft))?;
+            Ok(Self {
                 ptr: ft,
                 face_mutation_mutex: Mutex::default(),
-            }
+            })
         })
     }
 }

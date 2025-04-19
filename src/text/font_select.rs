@@ -9,7 +9,7 @@ use crate::{
     Subrandr,
 };
 
-use super::{Face, WEIGHT_AXIS};
+use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontRequest {
@@ -45,9 +45,9 @@ pub enum FontSource {
 }
 
 impl FontSource {
-    pub fn load(&self) -> Result<Face, AnyError> {
+    pub fn load(&self) -> Result<Face, FreeTypeError> {
         match self {
-            Self::File(file) => Ok(Face::load_from_file(file)),
+            Self::File(file) => Ok(Face::load_from_file(file)?),
             Self::Memory(face) => Ok(face.clone()),
         }
     }
@@ -144,10 +144,11 @@ mod provider {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("An error occurred while querying system font information")]
-    Provider(#[source] AnyError),
-    #[error("Failed to load font")]
-    FailedToLoadFont(#[source] /*TODO: super::Error */ AnyError),
+    #[error(transparent)]
+    // TODO: enum
+    Provider(#[from] AnyError),
+    #[error("Failed to load font: {0}")]
+    Load(#[from] FreeTypeError),
     #[error("No font found")]
     NotFound,
 }
@@ -199,7 +200,7 @@ impl FontSelect {
         if let Some(cached) = self.source_cache.get(&face.source) {
             Ok(cached.clone())
         } else {
-            let loaded = face.source.load().map_err(Error::FailedToLoadFont)?;
+            let loaded = face.source.load().map_err(Error::Load)?;
             self.source_cache
                 .insert(face.source.clone(), loaded.clone());
             Ok(loaded)

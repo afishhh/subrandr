@@ -189,16 +189,20 @@ impl WindowState {
                 alpha_mode,
                 ..
             }) => {
-                surface.configure(rasterizer.device(), &wgpu::SurfaceConfiguration {
-                    usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    format: wgpu::TextureFormat::Bgra8Unorm,
-                    width: size.width,
-                    height: size.height,
-                    present_mode: wgpu::PresentMode::AutoVsync,
-                    desired_maximum_frame_latency: 2,
-                    alpha_mode: *alpha_mode,
-                    view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
-                });
+                surface.configure(
+                    rasterizer.device(),
+                    &wgpu::SurfaceConfiguration {
+                        usage: wgpu::TextureUsages::COPY_DST
+                            | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        width: size.width,
+                        height: size.height,
+                        present_mode: wgpu::PresentMode::AutoVsync,
+                        desired_maximum_frame_latency: 2,
+                        alpha_mode: *alpha_mode,
+                        view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
+                    },
+                );
             }
         }
     }
@@ -486,18 +490,20 @@ impl winit::application::ApplicationHandler for App<'_> {
                             WindowState::Software(soft) => {
                                 soft.buffer.resize(s_width as usize * s_height as usize, 0);
                                 if let Some(subs) = self.subs.as_ref() {
-                                    self.renderer.render(
-                                        &ctx,
-                                        t,
-                                        subs,
-                                        unsafe {
-                                            std::mem::transmute::<&mut [u32], &mut [_]>(
-                                                soft.buffer.as_mut_slice(),
-                                            )
-                                        },
-                                        s_width,
-                                        s_height,
-                                    );
+                                    self.renderer
+                                        .render(
+                                            &ctx,
+                                            t,
+                                            subs,
+                                            unsafe {
+                                                std::mem::transmute::<&mut [u32], &mut [_]>(
+                                                    soft.buffer.as_mut_slice(),
+                                                )
+                                            },
+                                            s_width,
+                                            s_height,
+                                        )
+                                        .unwrap();
 
                                     soft.presenter
                                         .present(
@@ -523,13 +529,9 @@ impl winit::application::ApplicationHandler for App<'_> {
                                     let target = wgpu
                                         .rasterizer
                                         .target_from_texture(surface_texture.texture.clone());
-                                    self.renderer.render_to_wgpu(
-                                        &mut wgpu.rasterizer,
-                                        target,
-                                        &ctx,
-                                        t,
-                                        subs,
-                                    );
+                                    self.renderer
+                                        .render_to_wgpu(&mut wgpu.rasterizer, target, &ctx, t, subs)
+                                        .unwrap();
 
                                     surface_texture.present();
                                 }

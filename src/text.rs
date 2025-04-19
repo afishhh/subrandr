@@ -6,10 +6,12 @@ use std::{
 };
 
 use text_sys::*;
+use thiserror::Error;
 
 mod face;
 mod ft_utils;
 pub use face::*;
+pub use ft_utils::FreeTypeError;
 pub mod font_select;
 pub use font_select::*;
 pub mod layout;
@@ -18,7 +20,7 @@ use crate::{
     color::BGRA8,
     math::{I16Dot16, I26Dot6, Vec2},
     rasterize::{Rasterizer, RenderTarget, Texture},
-    util::{AnyError, ReadonlyAliasableBox},
+    util::ReadonlyAliasableBox,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,22 +32,14 @@ pub enum Direction {
 }
 
 impl Direction {
-    fn from_hb(value: hb_direction_t) -> Self {
-        match value {
+    fn try_from_hb(value: hb_direction_t) -> Option<Self> {
+        Some(match value {
             HB_DIRECTION_LTR => Self::Ltr,
             HB_DIRECTION_RTL => Self::Rtl,
             HB_DIRECTION_TTB => Self::Ttb,
             HB_DIRECTION_BTT => Self::Btt,
-            _ => panic!("Invalid harfbuzz direction: {value}"),
-        }
-    }
-
-    fn from_hb_optional(value: hb_direction_t) -> Option<Self> {
-        if value == HB_DIRECTION_INVALID {
-            None
-        } else {
-            Some(Self::from_hb(value))
-        }
+            _ => return None,
+        })
     }
 
     pub const fn is_horizontal(self) -> bool {
@@ -156,7 +150,10 @@ impl TextMetrics {
     }
 }
 
-pub fn compute_extents_ex(horizontal: bool, glyphs: &[Glyph]) -> TextMetrics {
+pub fn compute_extents_ex(
+    horizontal: bool,
+    glyphs: &[Glyph],
+) -> Result<TextMetrics, FreeTypeError> {
     let mut results = TextMetrics {
         paint_size: Vec2::ZERO,
         trailing_advance: I26Dot6::ZERO,
@@ -168,13 +165,13 @@ pub fn compute_extents_ex(horizontal: bool, glyphs: &[Glyph]) -> TextMetrics {
 
     if glyphs.len() == 0 {
         results.min_descender = I26Dot6::ZERO;
-        return results;
+        return Ok(results);
     }
 
     let mut glyphs = glyphs.iter();
 
     if let Some(glyph) = glyphs.next_back() {
-        let extents = glyph.font.glyph_extents(glyph.index);
+        let extents = glyph.font.glyph_extents(glyph.index)?;
         results.paint_size.y += extents.height.abs();
         results.paint_size.x += extents.width;
         if horizontal {
@@ -188,7 +185,7 @@ pub fn compute_extents_ex(horizontal: bool, glyphs: &[Glyph]) -> TextMetrics {
     }
 
     for glyph in glyphs {
-        let extents = glyph.font.glyph_extents(glyph.index);
+        let extents = glyph.font.glyph_extents(glyph.index)?;
         if horizontal {
             results.paint_size.y = results.paint_size.y.max(extents.height.abs());
             results.paint_size.x += glyph.x_advance;
@@ -201,7 +198,7 @@ pub fn compute_extents_ex(horizontal: bool, glyphs: &[Glyph]) -> TextMetrics {
         results.extend_by_font(glyph.font);
     }
 
-    results
+    Ok(results)
 }
 
 impl AsRef<Self> for Font {
@@ -216,7 +213,7 @@ pub trait FallbackFontProvider {
         weight: I16Dot16,
         italic: bool,
         codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, AnyError>;
+    ) -> Result<Option<Face>, font_select::Error>;
 }
 
 pub struct NoopFallbackProvider;
@@ -226,7 +223,7 @@ impl FallbackFontProvider for NoopFallbackProvider {
         _weight: I16Dot16,
         _italic: bool,
         _codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, AnyError> {
+    ) -> Result<Option<Face>, font_select::Error> {
         Ok(None)
     }
 }
@@ -237,7 +234,7 @@ impl FallbackFontProvider for FontSelect {
         weight: I16Dot16,
         italic: bool,
         codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, AnyError> {
+    ) -> Result<Option<Face>, font_select::Error> {
         let request = FontRequest {
             families: Vec::new(),
             weight,
@@ -247,7 +244,7 @@ impl FallbackFontProvider for FontSelect {
         match self.select(&request) {
             Ok(face) => Ok(Some(face)),
             Err(Error::NotFound) => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         }
     }
 }
@@ -322,6 +319,14 @@ pub struct ShapingBuffer {
     buffer: *mut hb_buffer_t,
 }
 
+#[derive(Debug, Error)]
+pub enum ShapingError {
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+    #[error("font selection: {0}")]
+    FontSelect(#[from] font_select::Error),
+}
+
 impl ShapingBuffer {
     pub fn new() -> Self {
         Self {
@@ -350,7 +355,7 @@ impl ShapingBuffer {
     }
 
     pub fn direction(&self) -> Option<Direction> {
-        unsafe { Direction::from_hb_optional(hb_buffer_get_direction(self.buffer)) }
+        unsafe { Direction::try_from_hb(hb_buffer_get_direction(self.buffer)) }
     }
 
     pub fn set_direction(&mut self, direction: Direction) {
@@ -401,8 +406,8 @@ impl ShapingBuffer {
         properties: &hb_segment_properties_t,
         font: &'f Font,
         fallback: &mut impl FallbackFontProvider,
-    ) {
-        let (_, hb_font) = font.with_applied_size_and_hb();
+    ) -> Result<(), ShapingError> {
+        let (_, hb_font) = font.with_applied_size_and_hb()?;
 
         unsafe {
             hb_shape(hb_font, self.buffer, std::ptr::null(), 0);
@@ -426,12 +431,14 @@ impl ShapingBuffer {
                                              passthrough: (
                 &[hb_glyph_info_t],
                 &[hb_glyph_position_t],
-            )| {
-                if let Some(font) = fallback
-                    .get_font_for_glyph(font.weight(), font.italic(), codepoints[range.start].0)
-                    .unwrap()
-                    .map(|face| face.with_size_from(font))
-                {
+            )|
+             -> Result<(), ShapingError> {
+                if let Some(face) = fallback.get_font_for_glyph(
+                    font.weight(),
+                    font.italic(),
+                    codepoints[range.start].0,
+                )? {
+                    let font = face.with_size_from(font)?;
                     let mut sub_buffer = Self::new();
                     for ((codepoint, _), i) in codepoints[range.clone()].iter().copied().zip(range)
                     {
@@ -448,7 +455,7 @@ impl ShapingBuffer {
                         properties,
                         font_arena.insert(&font),
                         fallback,
-                    );
+                    )?;
                 } else {
                     result.extend(
                         passthrough
@@ -458,6 +465,8 @@ impl ShapingBuffer {
                             .map(|(a, b)| make_glyph(a, b)),
                     );
                 }
+
+                Ok(())
             };
 
             for (i, (info, position)) in infos.iter().zip(positions.iter()).enumerate() {
@@ -473,7 +482,7 @@ impl ShapingBuffer {
                         result,
                         font_arena,
                         (&infos[info_range.clone()], &positions[info_range]),
-                    );
+                    )?;
                 }
 
                 result.push(make_glyph(info, position));
@@ -484,7 +493,7 @@ impl ShapingBuffer {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
                     }
-                    return;
+                    return Ok(());
                 }
 
                 let info_range = start..infos.len();
@@ -496,8 +505,10 @@ impl ShapingBuffer {
                     result,
                     font_arena,
                     (&infos[info_range.clone()], &positions[info_range]),
-                )
+                )?
             }
+
+            Ok(())
         }
     }
 
@@ -506,7 +517,7 @@ impl ShapingBuffer {
         font: &Font,
         font_arena: &'f FontArena,
         fallback: &mut impl FallbackFontProvider,
-    ) -> Vec<Glyph<'f>> {
+    ) -> Result<Vec<Glyph<'f>>, ShapingError> {
         let codepoints: Vec<_> = self
             .glyphs()
             .0
@@ -536,9 +547,9 @@ impl ShapingBuffer {
             &properties,
             font_arena.insert(font),
             fallback,
-        );
+        )?;
 
-        result
+        Ok(result)
     }
 
     pub fn reset(&mut self) {
@@ -556,7 +567,11 @@ impl Drop for ShapingBuffer {
     }
 }
 
-pub fn simple_shape_text<'f>(font: &Font, font_arena: &'f FontArena, text: &str) -> Vec<Glyph<'f>> {
+pub fn simple_shape_text<'f>(
+    font: &Font,
+    font_arena: &'f FontArena,
+    text: &str,
+) -> Result<Vec<Glyph<'f>>, ShapingError> {
     let mut buffer = ShapingBuffer::new();
     buffer.add(text, ..);
     buffer.shape(font, font_arena, &mut NoopFallbackProvider)
@@ -695,7 +710,7 @@ pub fn render(
     xf: I26Dot6,
     yf: I26Dot6,
     glyphs: &[Glyph],
-) -> Image {
+) -> Result<Image, FreeTypeError> {
     let mut result = Image {
         glyphs: Vec::new(),
         monochrome: OnceCell::new(),
@@ -708,7 +723,7 @@ pub fn render(
     let mut y = yf;
     for shaped_glyph in glyphs {
         let font = shaped_glyph.font;
-        let cached = font.render_glyph(rasterizer, shaped_glyph.index);
+        let cached = font.render_glyph(rasterizer, shaped_glyph.index)?;
 
         result.glyphs.push(GlyphBitmap {
             offset: (
@@ -722,5 +737,5 @@ pub fn render(
         y += shaped_glyph.y_advance;
     }
 
-    result
+    Ok(result)
 }

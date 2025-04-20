@@ -298,7 +298,11 @@ unsafe extern "C" fn sbr_load_text(
             content_len
         ))
     );
-    let _language_hint = CStr::from_ptr(language_hint);
+    let _language_hint = if !language_hint.is_null() {
+        Some(CStr::from_ptr(language_hint))
+    } else {
+        None
+    };
 
     if format == SubtitleFormat::Unknown {
         format = probe(content);

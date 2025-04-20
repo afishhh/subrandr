@@ -17,7 +17,7 @@ use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
-    FontArena, FreeTypeError, TextMetrics,
+    FontArena, FreeTypeError, GlyphRenderError, TextMetrics,
 };
 use vtt::VttEvent;
 
@@ -413,6 +413,8 @@ impl<'a> Renderer<'a> {
 pub enum RenderError {
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),
+    #[error(transparent)]
+    GlyphRender(#[from] GlyphRenderError),
     #[error(transparent)]
     FontSelect(#[from] text::font_select::Error),
     #[error(transparent)]

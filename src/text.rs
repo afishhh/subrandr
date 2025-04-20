@@ -710,7 +710,7 @@ pub fn render(
     xf: I26Dot6,
     yf: I26Dot6,
     glyphs: &[Glyph],
-) -> Result<Image, FreeTypeError> {
+) -> Result<Image, GlyphRenderError> {
     let mut result = Image {
         glyphs: Vec::new(),
         monochrome: OnceCell::new(),

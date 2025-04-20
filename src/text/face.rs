@@ -18,6 +18,7 @@ use std::{
 use super::ft_utils::*;
 use once_cell::unsync::OnceCell;
 use text_sys::*;
+use thiserror::Error;
 
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);
@@ -720,6 +721,14 @@ impl CacheSlot {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GlyphRenderError {
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+    #[error("Unsupported pixel mode {0}")]
+    UnsupportedBitmapFormat(std::ffi::c_uchar),
+}
+
 pub(super) struct GlyphCache {
     generation: Cell<u64>,
     glyphs: UnsafeCell<HashMap<(u32, SizeInfo), CacheSlot>>,
@@ -775,7 +784,7 @@ impl GlyphCache {
         rasterizer: &mut dyn Rasterizer,
         font: &Font,
         index: u32,
-    ) -> Result<&SingleGlyphBitmap, FreeTypeError> {
+    ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
         unsafe { self.slot(font, index) }
             .bitmap
             .get_or_try_init(|| font.render_glyph_uncached(rasterizer, index))
@@ -838,7 +847,7 @@ impl Font {
         &self,
         rasterizer: &mut dyn Rasterizer,
         index: u32,
-    ) -> Result<SingleGlyphBitmap, FreeTypeError> {
+    ) -> Result<SingleGlyphBitmap, GlyphRenderError> {
         unsafe {
             let face = self.with_applied_size()?;
 
@@ -863,7 +872,7 @@ impl Font {
             let pixel_width = match bitmap.pixel_mode.into() {
                 FT_PIXEL_MODE_GRAY => 1,
                 FT_PIXEL_MODE_BGRA => 4,
-                _ => todo!("ft pixel mode {:?}", bitmap.pixel_mode),
+                _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
             };
 
             let texture = rasterizer.create_texture_mapped(
@@ -980,7 +989,7 @@ impl Font {
         &self,
         rasterizer: &mut dyn Rasterizer,
         index: u32,
-    ) -> Result<&SingleGlyphBitmap, FreeTypeError> {
+    ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
         self.face()
             .glyph_cache()
             .get_or_try_render(rasterizer, self, index)

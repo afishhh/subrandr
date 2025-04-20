@@ -650,6 +650,7 @@ impl<'a> Renderer<'a> {
         buffer: &mut [BGRA8],
         width: u32,
         height: u32,
+        stride: u32,
     ) -> Result<(), RenderError> {
         self.previous_context = *ctx;
         self.previous_output_size = (width, height);
@@ -657,7 +658,7 @@ impl<'a> Renderer<'a> {
         buffer.fill(BGRA8::ZERO);
         self.render_to(
             &mut rasterize::sw::Rasterizer::new(),
-            &mut rasterize::sw::create_render_target(buffer, width, height),
+            &mut rasterize::sw::create_render_target(buffer, width, height, stride),
             ctx,
             t,
             subs,

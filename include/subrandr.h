@@ -81,7 +81,7 @@ int sbr_renderer_render(
     // current time value in milliseconds
     uint32_t t,
     // BGRA8 pixel buffer
-    uint32_t *buffer, uint32_t width, uint32_t height
+    uint32_t *buffer, uint32_t width, uint32_t height, uint32_t stride
 );
 void sbr_renderer_destroy(sbr_renderer *);
 

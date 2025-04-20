@@ -251,8 +251,8 @@ pub(super) unsafe fn horizontal_line_unchecked(
 }
 
 macro_rules! check_buffer {
-    ($what: literal, $buffer: ident, $width: ident, $height: ident) => {
-        if $buffer.len() < $width as usize * $height as usize {
+    ($what: literal, $buffer: ident, $stride: ident, $height: ident) => {
+        if $buffer.len() < $stride as usize * $height as usize {
             panic!(concat!(
                 "Buffer passed to rasterize::",
                 $what,
@@ -270,9 +270,10 @@ pub fn fill_axis_aligned_rect(
     buffer: &mut [BGRA8],
     width: u32,
     height: u32,
+    stride: u32,
     color: BGRA8,
 ) {
-    check_buffer!("fill_axis_aligned_rect", buffer, width, height);
+    check_buffer!("fill_axis_aligned_rect", buffer, stride, height);
 
     debug_assert!(x0 <= x1);
     debug_assert!(y0 <= y1);
@@ -282,7 +283,7 @@ pub fn fill_axis_aligned_rect(
             horizontal_line_unchecked(
                 x0,
                 x1,
-                &mut buffer[y as usize * width as usize..],
+                &mut buffer[y as usize * stride as usize..],
                 width as i32,
                 color,
             );
@@ -298,9 +299,10 @@ pub fn fill_axis_aligned_antialias_rect(
     buffer: &mut [BGRA8],
     width: u32,
     height: u32,
+    stride: u32,
     color: BGRA8,
 ) {
-    check_buffer!("fill_axis_aligned_antialias_rect", buffer, width, height);
+    check_buffer!("fill_axis_aligned_antialias_rect", buffer, stride, height);
 
     debug_assert!(x0 <= x1);
     debug_assert!(y0 <= y1);
@@ -313,7 +315,7 @@ pub fn fill_axis_aligned_antialias_rect(
                 horizontal_line_unchecked(
                     x0,
                     x1,
-                    &mut buffer[top_y as usize * width as usize..],
+                    &mut buffer[top_y as usize * stride as usize..],
                     width as i32,
                     color.mul_alpha((top_fill * 255.) as u8),
                 );
@@ -332,7 +334,7 @@ pub fn fill_axis_aligned_antialias_rect(
                 horizontal_line_unchecked(
                     x0,
                     x1,
-                    &mut buffer[bottom_y as usize * width as usize..],
+                    &mut buffer[bottom_y as usize * stride as usize..],
                     width as i32,
                     color.mul_alpha((bottom_fill * 255.) as u8),
                 );
@@ -348,7 +350,7 @@ pub fn fill_axis_aligned_antialias_rect(
             horizontal_line_unchecked(
                 x0,
                 x1,
-                &mut buffer[y as usize * width as usize..],
+                &mut buffer[y as usize * stride as usize..],
                 width as i32,
                 color,
             );
@@ -422,7 +424,7 @@ fn fill_triangle(
     height: u32,
     color: BGRA8,
 ) {
-    check_buffer!("fill_triangle", buffer, width, height);
+    check_buffer!("fill_triangle", buffer, stride, height);
 
     // First, ensure (x0, y0) is the highest point of the triangle
     if y1 < y0 {
@@ -488,13 +490,24 @@ pub(super) struct RenderTargetImpl<'a> {
     buffer: &'a mut [BGRA8],
     pub width: u32,
     pub height: u32,
+    pub stride: u32,
 }
 
-pub fn create_render_target(buffer: &mut [BGRA8], width: u32, height: u32) -> super::RenderTarget {
+pub fn create_render_target(
+    buffer: &mut [BGRA8],
+    width: u32,
+    height: u32,
+    stride: u32,
+) -> super::RenderTarget {
+    assert!(
+        buffer.len() >= height as usize * stride as usize,
+        "Buffer passed to rasterize::sw::create_render_target is too small!"
+    );
     super::RenderTarget(super::RenderTargetInner::Software(RenderTargetImpl {
         buffer,
         width,
         height,
+        stride,
     }))
 }
 
@@ -681,7 +694,7 @@ impl super::Rasterizer for Rasterizer {
                 p1.x as i32,
                 p1.y as i32,
                 target.buffer,
-                target.width as usize,
+                target.stride as usize,
                 target.width as i32,
                 target.height as i32,
                 color,
@@ -708,7 +721,7 @@ impl super::Rasterizer for Rasterizer {
             horizontal_line_unchecked(
                 x0 as i32,
                 x1 as i32,
-                &mut target.buffer[y as usize * target.width as usize..],
+                &mut target.buffer[y as usize * target.stride as usize..],
                 target.width as i32,
                 color,
             )
@@ -731,7 +744,7 @@ impl super::Rasterizer for Rasterizer {
             vertices[2].x as i32,
             vertices[2].y as i32,
             target.buffer,
-            target.width as usize,
+            target.stride as usize,
             target.width,
             target.height,
             color,
@@ -754,6 +767,7 @@ impl super::Rasterizer for Rasterizer {
             target.buffer,
             target.width,
             target.height,
+            target.stride,
             color,
         );
     }
@@ -783,6 +797,7 @@ impl super::Rasterizer for Rasterizer {
             target.buffer,
             target.width,
             target.height,
+            target.stride,
             color,
         );
     }
@@ -802,7 +817,7 @@ impl super::Rasterizer for Rasterizer {
             UnwrappedTextureData::Mono(source) => {
                 blit::blit_monochrome(
                     target.buffer,
-                    target.width as usize,
+                    target.stride as usize,
                     target.width as usize,
                     target.height as usize,
                     source,
@@ -817,7 +832,7 @@ impl super::Rasterizer for Rasterizer {
             UnwrappedTextureData::Bgra(source) => {
                 blit::blit_bgra(
                     target.buffer,
-                    target.width as usize,
+                    target.stride as usize,
                     target.width as usize,
                     target.height as usize,
                     source,

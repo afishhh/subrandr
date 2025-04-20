@@ -207,6 +207,7 @@ export class Renderer {
       back.ptr,
       fb._width,
       fb._height,
+      fb._width,
     );
     g.mod.exports.sbr_wasm_copy_convert_to_rgba(
       front.ptr,

@@ -36,7 +36,8 @@ export interface SubrandrExports {
 		t: number,
 		buf_ptr: WasmPtr,
 		buf_width: number,
-		buf_height: number
+		buf_height: number,
+		buf_stride: number
 	): void
 	sbr_renderer_destroy(renderer: RendererPtr): void
 	sbr_subtitles_destroy(subtitles: SubtitlesPtr): void

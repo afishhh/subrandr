@@ -404,9 +404,10 @@ unsafe extern "C" fn sbr_renderer_render(
     buffer: *mut BGRA8,
     width: u32,
     height: u32,
+    stride: u32,
 ) -> c_int {
-    let buffer = std::slice::from_raw_parts_mut(buffer, width as usize * height as usize);
-    ctry!((*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height));
+    let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
+    ctry!((*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height, stride));
     0
 }
 

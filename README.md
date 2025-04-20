@@ -92,7 +92,8 @@ int main() {
     t,
     pixel_buffer,
     width,
-    height
+    height,
+    width
   ) < 0)
     exit(1);
 

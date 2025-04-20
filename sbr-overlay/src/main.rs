@@ -507,6 +507,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                                             },
                                             s_width,
                                             s_height,
+                                            s_width,
                                         )
                                         .unwrap();
 

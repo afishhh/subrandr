@@ -1,5 +1,4 @@
 use std::{
-    mem::ManuallyDrop,
     ops::Range,
     path::{Path, PathBuf},
     str::FromStr,
@@ -17,6 +16,7 @@ use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::WindowAttributes,
 };
+#[cfg(target_os = "linux")]
 use xcb::XidNew;
 
 #[derive(clap::Parser)]
@@ -143,7 +143,8 @@ struct App<'a> {
 }
 
 enum DisplayHandle {
-    X11(ManuallyDrop<xcb::Connection>),
+    #[cfg(target_os = "linux")]
+    X11(std::mem::ManuallyDrop<xcb::Connection>),
 }
 
 enum WindowState {
@@ -219,6 +220,7 @@ impl winit::application::ApplicationHandler for App<'_> {
             )
             .expect("failed to create window");
 
+        #[cfg(target_os = "linux")]
         if let Some(DisplayHandle::X11(conn)) = &self.display_handle {
             conn.send_and_check_request(&xcb::x::ChangeWindowAttributes {
                 window: softpresent::x11::extract_window_handle_from_window(&window).unwrap(),
@@ -227,6 +229,7 @@ impl winit::application::ApplicationHandler for App<'_> {
             .unwrap();
         };
 
+        #[cfg(target_os = "linux")]
         if self.overlay_window_id.is_some() {
             let xwindow = match window
                 .window_handle()
@@ -376,39 +379,41 @@ impl winit::application::ApplicationHandler for App<'_> {
                     let frame_start = Instant::now();
 
                     let geometry = if let Some(id) = self.overlay_window_id {
-                        let conn = match &self.display_handle {
-                            Some(DisplayHandle::X11(conn)) => conn,
+                        let size = match &self.display_handle {
+                            #[cfg(target_os = "linux")]
+                            Some(DisplayHandle::X11(conn)) => {
+                                let geometry = conn
+                                    .wait_for_reply(conn.send_request(&xcb::x::GetGeometry {
+                                        drawable: xcb::x::Drawable::Window(unsafe {
+                                            xcb::x::Window::new(id)
+                                        }),
+                                    }))
+                                    .unwrap();
+
+                                conn.send_request(&xcb::x::ConfigureWindow {
+                                    window: softpresent::x11::extract_window_handle_from_window(
+                                        state.window(),
+                                    )
+                                    .unwrap(),
+                                    value_list: &[
+                                        xcb::x::ConfigWindow::X(geometry.x().into()),
+                                        xcb::x::ConfigWindow::Y(geometry.y().into()),
+                                        xcb::x::ConfigWindow::Width(geometry.width().into()),
+                                        xcb::x::ConfigWindow::Height(geometry.height().into()),
+                                        xcb::x::ConfigWindow::StackMode(xcb::x::StackMode::Above),
+                                    ],
+                                });
+
+                                winit::dpi::PhysicalSize::<u32>::new(
+                                    geometry.width().into(),
+                                    geometry.height().into(),
+                                )
+                            }
                             _ => unreachable!(),
                         };
 
-                        let geometry = conn
-                            .wait_for_reply(conn.send_request(&xcb::x::GetGeometry {
-                                drawable: xcb::x::Drawable::Window(unsafe {
-                                    xcb::x::Window::new(id)
-                                }),
-                            }))
-                            .unwrap();
-
-                        conn.send_request(&xcb::x::ConfigureWindow {
-                            window: softpresent::x11::extract_window_handle_from_window(
-                                state.window(),
-                            )
-                            .unwrap(),
-                            value_list: &[
-                                xcb::x::ConfigWindow::X(geometry.x().into()),
-                                xcb::x::ConfigWindow::Y(geometry.y().into()),
-                                xcb::x::ConfigWindow::Width(geometry.width().into()),
-                                xcb::x::ConfigWindow::Height(geometry.height().into()),
-                                xcb::x::ConfigWindow::StackMode(xcb::x::StackMode::Above),
-                            ],
-                        });
-
                         // TODO: Set clip shape to visible region of mpv window
 
-                        let size = winit::dpi::PhysicalSize::<u32>::new(
-                            geometry.width().into(),
-                            geometry.height().into(),
-                        );
                         state.reconfigure(size);
 
                         size
@@ -646,13 +651,15 @@ fn main() {
         .display_handle()
         .expect("failed to get system display handle");
     let display_handle = match handle.as_raw() {
+        #[cfg(target_os = "linux")]
         winit::raw_window_handle::RawDisplayHandle::Xlib(handle) => {
-            Some(DisplayHandle::X11(ManuallyDrop::new(unsafe {
+            Some(DisplayHandle::X11(std::mem::ManuallyDrop::new(unsafe {
                 xcb::Connection::from_xlib_display(handle.display.unwrap().as_ptr() as *mut _)
             })))
         }
+        #[cfg(target_os = "linux")]
         winit::raw_window_handle::RawDisplayHandle::Xcb(handle) => {
-            Some(DisplayHandle::X11(ManuallyDrop::new(unsafe {
+            Some(DisplayHandle::X11(std::mem::ManuallyDrop::new(unsafe {
                 xcb::Connection::from_raw_conn(handle.connection.unwrap().as_ptr() as *mut _)
             })))
         }
@@ -661,6 +668,7 @@ fn main() {
 
     match args.rasterizer {
         Rasterizer::Software => match &display_handle {
+            #[cfg(target_os = "linux")]
             Some(DisplayHandle::X11(conn)) => {
                 conn.prefetch_maximum_request_length();
             }
@@ -707,7 +715,10 @@ fn main() {
         None
     };
 
+    #[cfg(target_os = "linux")]
     let display_supports_overlay = matches!(display_handle, Some(DisplayHandle::X11(_)));
+    #[cfg(not(target_os = "linux"))]
+    let display_supports_overlay = false;
 
     let overlay_window_id = match (args.overlay, display_supports_overlay) {
         (OverlayMode::Auto, false) => None,

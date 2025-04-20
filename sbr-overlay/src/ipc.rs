@@ -47,7 +47,7 @@ pub trait PlayerConnection {
 
 #[cfg(feature = "ipc-browser-cdp")]
 mod cdp;
-#[cfg(feature = "ipc-mpv")]
+#[cfg(all(feature = "ipc-mpv", target_os = "linux"))]
 mod mpv;
 
 pub struct PlayerConnectorDescriptor {
@@ -57,7 +57,7 @@ pub struct PlayerConnectorDescriptor {
 }
 
 pub const AVAILABLE_CONNECTORS: &[PlayerConnectorDescriptor] = &[
-    #[cfg(feature = "ipc-mpv")]
+    #[cfg(all(feature = "ipc-mpv", target_os = "linux"))]
     PlayerConnectorDescriptor {
         id: "mpv",
         description: "mpv player IPC socket",

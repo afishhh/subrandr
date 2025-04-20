@@ -16,11 +16,11 @@ extern "C" {
 #define SBR_UNSTABLE
 #else
 #define SBR_UNSTABLE                                                           \
-  __attribute__((                                                              \
-      unavailable("This item is not part of subrandr's stable API yet.\n"      \
-                  "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
-                  "you still want to use it.")                                 \
-  ))
+  __attribute__((unavailable(                                                  \
+      "This item is not part of subrandr's stable API yet.\n"                  \
+      "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "              \
+      "you still want to use it."                                              \
+  )))
 #endif
 
 typedef struct sbr_library sbr_library;
@@ -35,6 +35,8 @@ typedef struct sbr_subtitle_context {
 
 sbr_library *sbr_library_init(void);
 void sbr_library_fini(sbr_library *);
+
+void sbr_library_version(uint32_t *major, uint32_t *minor, uint32_t *patch);
 
 typedef int16_t sbr_subtitle_format;
 #define SBR_SUBTITLE_FORMAT_UNKOWN (sbr_subtitle_format)0

@@ -242,6 +242,20 @@ unsafe extern "C" fn sbr_library_fini(sbr: *mut Subrandr) {
     drop(Box::from_raw(sbr));
 }
 
+const fn const_parse_u32(value: &str) -> u32 {
+    match u32::from_str_radix(value, 10) {
+        Ok(result) => result,
+        Err(_) => panic!("const value is not an integer"),
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_library_version(major: *mut u32, minor: *mut u32, patch: *mut u32) {
+    major.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MAJOR")) });
+    minor.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MINOR")) });
+    patch.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_PATCH")) });
+}
+
 #[unsafe(no_mangle)]
 #[cfg(not(target_arch = "wasm32"))]
 unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subtitles {

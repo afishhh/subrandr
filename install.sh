@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-version=$(cargo metadata --offline --format-version 1 | jq -r '.packages.[] | select(.name == "subrandr").version')
+version=$(cargo metadata --no-deps --offline --format-version 1 | jq -r '.packages.[] | select(.name == "subrandr").version')
 
 target_dir=target
 if [[ -n ${TARGET:-} ]]; then

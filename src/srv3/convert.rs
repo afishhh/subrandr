@@ -1,6 +1,6 @@
 /// Converts parsed SRV3 subtitles into Subtitles.
 ///
-/// Was initially based on YTSubConverter, now mostly reverse engineered straight from YouTube's captions.js.
+/// Was initially based on YTSubConverter, now also reverse engineered from YouTube's captions.js.
 use crate::{
     color::BGRA8,
     log::{log_once_state, warning},
@@ -27,8 +27,8 @@ const SRV3_FONTS: &[&[&str]] = &[
         "PT Serif Caption",
         "serif",
     ],
-    // "Deja Vu Sans Mono" is not a real font :(
     &[
+        // "Deja Vu Sans Mono" is not a real font :(
         "Lucida Console",
         "Monaco",
         "Consolas",
@@ -52,11 +52,13 @@ const SRV3_FONTS: &[&[&str]] = &[
         "Dancing Script",
         "cursive",
     ],
-    // if Qg is true
+    // YouTube appears to conditionally set this to either:
     // "Carrois Gothic SC", sans-serif-smallcaps
-    // otherwise
+    // or sometimes:
     // Arial, Helvetica, Verdana, "Marcellus SC", sans-serif
-    // Qg seems to check whether the UA is "cobalt" or something
+    // the first one seems to be used when ran under Cobalt
+    // https://developers.google.com/youtube/cobalt
+    // i.e. in YouTube TV
     &[
         "Arial",
         "Helvetica",
@@ -106,17 +108,15 @@ fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     )
 }
 
-// Hey = function (p) {
-//   var C = 1 + 0.25 * (p.fontSizeIncrement || 0);
-//   if (p.offset === 0 || p.offset === 2) C *= 0.8;
-//   return C
-// },
 #[allow(clippy::let_and_return)] // shut up
 fn font_size_to_pixels(size: u16) -> f32 {
-    // fontSizeIncrement is acqiured via H.szPenSize / 100 - 1
     let c = 1.0 + 0.25 * (size as f32 / 100.0 - 1.0);
-    // offset is "H.ofOffset", don't know what that is
-    //  if (p.offset === 0 || p.offset === 2) C *= 0.8;
+    // This appears to be further modified based on an "of" attribute
+    // currently we don't even parse it but if start doing so this is the
+    // correct transformation:
+    // if offset == 0 || offset == 2 {
+    //     c *= 0.8;
+    // }
     c
 }
 
@@ -160,7 +160,7 @@ impl Srv3TextShadow {
             EdgeType::HardShadow => {
                 // in captions.js it is window.devicePixelRatio >= 2 ? 0.5 : 1
                 // BUT that is NOT what we want, I think they do this to increase fidelity on displays
-                // with a lower DPI, because browsers scale all their units by window.devicePixelRation
+                // with a lower DPI, because browsers scale all their units by window.devicePixelRatio
                 // however we're working with direct device pixels here, so we want to do the OPPOSITE
                 // of what they do and pick 0.5 when we have less pixels.
                 let step = (ctx.dpi >= 144) as i32 as f32 * 0.5 + 0.5;

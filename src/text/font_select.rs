@@ -111,7 +111,7 @@ impl FontProvider for NullFontProvider {
 
 #[path = ""]
 mod provider {
-    #[cfg(target_family = "unix")]
+    #[cfg(any(target_family = "unix", target_os = "windows"))]
     #[path = "font_provider/fontconfig.rs"]
     pub mod fontconfig;
 
@@ -123,13 +123,13 @@ mod provider {
         std::sync::atomic::AtomicBool::new(false);
 
     pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
-        #[cfg(target_family = "unix")]
+        #[cfg(any(target_family = "unix", target_os = "windows"))]
         {
             fontconfig::FontconfigFontProvider::new()
                 .map(|x| Box::new(x) as Box<dyn FontProvider>)
                 .map_err(Into::into)
         }
-        #[cfg(not(target_family = "unix"))]
+        #[cfg(not(any(target_family = "unix", target_os = "windows")))]
         {
             if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
                 crate::log::warning!(

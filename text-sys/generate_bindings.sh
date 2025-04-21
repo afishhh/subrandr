@@ -18,8 +18,8 @@ bindgen \
 	--raw-line '#![allow(non_camel_case_types)]' \
 	--raw-line '#![allow(non_snake_case)]' \
 	--raw-line '#![allow(improper_ctypes)]' \
-	--raw-line '#[cfg(target_family = "unix")]' \
-	--raw-line 'pub mod unix;' \
+	--raw-line '#[cfg(any(target_family = "unix", target_os = "windows"))]' \
+	--raw-line 'pub mod fontconfig;' \
 	--no-prepend-enum-name \
 	--no-layout-tests \
 	./header.h >src/lib.rs
@@ -33,4 +33,4 @@ bindgen \
 	--allowlist-item 'F[cC].*' \
 	--no-prepend-enum-name \
 	--no-layout-tests \
-	./header-unix.h >src/unix.rs
+	./header-fontconfig.h >src/fontconfig.rs

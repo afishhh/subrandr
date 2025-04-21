@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_char, c_int, CStr, CString, OsString},
+    ffi::{c_char, c_int, CStr, CString},
     mem::MaybeUninit,
     path::PathBuf,
 };

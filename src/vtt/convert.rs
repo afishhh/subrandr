@@ -7,7 +7,6 @@ use crate::{
 
 #[derive(Debug)]
 enum ComputedLine {
-    #[expect(dead_code, reason = "percentage line layout not implemented yet")]
     Percentage(f64),
     Lines(f64),
 }
@@ -104,7 +103,6 @@ impl VttLayouter {
         extra: &VttEvent,
     ) {
         match extra.line.computed(0) {
-            ComputedLine::Percentage(_) => todo!(),
             ComputedLine::Lines(line) => {
                 let full_dimension = if extra.writing_direction.is_horizontal() {
                     // 1. Horizontal: Let full dimension be the height of video’s rendering area.
@@ -242,6 +240,20 @@ impl VttLayouter {
                         // Jump back to the step labeled step loop.
                     }
                 }
+            }
+            ComputedLine::Percentage(percentage) => {
+                // 4. If there is a position to which the boxes in boxes can be moved while maintaining the relative positions of the boxes in boxes to each other such that none of the boxes in boxes would overlap any of the boxes in output, and all the boxes in boxes would be within the video’s rendering area, then move the boxes in boxes to the closest such position to their current position, and then jump to the step labeled done positioning below. If there are multiple such positions that are equidistant from their current position, use the highest one amongst them; if there are several at that height, then use the leftmost one amongst them.
+                // TODO: The above instruction is absolutely ridiculous, I have no idea whether this can even be done in in a reasonable time complexity...
+                //       Luckily I'm not alone in this and chromium also doesn't implement it:
+                //       https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/html/track/vtt/vtt_cue_layout_algorithm.cc;drc=fdb13881b0ca71cec367a74aa5efdedeaa2160e7;l=326
+                //       It seems like this line in the standard is absolutely useless and users will almost definitely start to rely
+                //       on the current behaviour in browsers which is to not perform this step.
+                //       Actually, WebKit does implement this most likely via "nudging until it works" like
+                //       in the snap-to-lines case.
+                //       See: https://issues.chromium.org/issues/40339463
+                //       12 year old w3c bug: https://www.w3.org/Bugs/Public/show_bug.cgi?id=22029
+                //       I couldn't find this reported on the github so it's probably been forgotten about.
+                _ = percentage;
             }
         }
     }
@@ -524,8 +536,8 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
                 text_alignment: cue.text_alignment,
                 line: cue.line,
                 size,
-                x: x_position,
-                y: y_position,
+                x: x_position / 100.,
+                y: y_position / 100.,
             }),
         });
     }

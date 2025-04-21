@@ -246,16 +246,16 @@ fn collect_timestamp(input: &mut ParsingBuffer) -> Option<u32> {
 // https://www.w3.org/TR/webvtt1/#parse-a-percentage-string
 fn parse_percentage(input: &str) -> Option<f64> {
     // https://www.w3.org/TR/webvtt1/#webvtt-percentage
-    if let Some(non_digit) = input.bytes().position(|b| !b.is_ascii_digit()) {
-        if input.as_bytes()[non_digit] != b'.' {
-            return None;
-        }
-        if input[non_digit + 1..].bytes().any(|c| !c.is_ascii_digit()) {
-            return None;
-        }
-    }
-
     if let Some(value) = input.strip_suffix('%') {
+        if let Some(non_digit) = value.bytes().position(|b| !b.is_ascii_digit()) {
+            if value.as_bytes()[non_digit] != b'.' {
+                return None;
+            }
+            if value[non_digit + 1..].bytes().any(|c| !c.is_ascii_digit()) {
+                return None;
+            }
+        }
+
         value.parse::<f64>().ok()
     } else {
         None

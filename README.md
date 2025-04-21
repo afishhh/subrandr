@@ -23,9 +23,7 @@ The mpv IPC implementation is able to automatically acquire the X11 window id of
 
 #### Hardware acceleration
 
-subrandr supports hardware accelerated rasterization via `wgpu`. This is mainly useful on HiDPI displays where, especially with large blurs, the bitmap is very large and the CPU may struggle with a severe memory bottleneck.
-
-Currently, though, this `wgpu` rasterizer is not exposed in either the C API or the WASM module. This is due to the complexity of integrating with external instances of graphics APIs on the C side, and due to subrandr's WASM approach being not trivially compatible with `wgpu`'s on the WASM side.
+subrandr supports hardware accelerated rasterization via `wgpu`. This rasterizer however is still experimental and doesn't provide significant performance gains outside of large blurs. It is also not exposed in either the C API or the WASM module. This is due to the complexity of integrating with external instances of graphics APIs on the C side, and due to subrandr's WASM approach being not trivially compatible with `wgpu`'s on the WASM side.
 
 #### Usage
 
@@ -35,8 +33,6 @@ The C API is defined in the `subrandr.h` header, items marked there as unstable 
 > [!WARNING]
 > This library is experimental and no API stability is guaranteed for any of its APIs
 > even for items not marked unstable. This *may* or *may not* change in the future.
-
-Although a wgpu based rasterizer is present in subrandr, it is currently not exposed via the C API so you must use `sbr_renderer_render` which performs all rendering on the CPU and renders to a BGRA8888 bitmap the size of your viewport.
 
 ```c
 #include <stdio.h>

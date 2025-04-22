@@ -1,6 +1,5 @@
 use std::{collections::HashMap, str::FromStr};
 
-use aliasable::boxed::AliasableBox;
 use quick_xml::{
     events::{attributes::Attributes, Event as XmlEvent},
     Error as XmlError,
@@ -9,6 +8,7 @@ use thiserror::Error;
 
 use crate::{
     log::{log_once_state, warning, LogOnceSet},
+    util::ReadonlyAliasableBox,
     Subrandr,
 };
 
@@ -114,8 +114,8 @@ impl Default for WindowPos {
 // POV: you want to self reference but Rust says "no"
 #[derive(Debug)]
 pub struct Document {
-    pens: AliasableBox<[Pen]>,
-    wps: AliasableBox<[WindowPos]>,
+    pens: ReadonlyAliasableBox<[Pen]>,
+    wps: ReadonlyAliasableBox<[WindowPos]>,
     events: Vec<Event>,
 }
 

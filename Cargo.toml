@@ -12,9 +12,6 @@ wgpu = ["dep:wgpu"]
 
 [dependencies]
 thiserror = "1"
-
-# TODO: Replace with the aliasable box from util
-aliasable = "0.1"
 quick-xml = "0.36"
 
 # TODO: Waiting for get_or_try_init to get stabilised.

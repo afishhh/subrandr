@@ -53,10 +53,14 @@ where
     FormatterFn(f)
 }
 
-pub struct ReadonlyAliasableBox<T>(NonNull<T>);
+#[derive(Debug)]
+pub struct ReadonlyAliasableBox<T: ?Sized>(NonNull<T>);
 
-impl<T> ReadonlyAliasableBox<T> {
-    pub fn new(value: T) -> Self {
+impl<T: ?Sized> ReadonlyAliasableBox<T> {
+    pub fn new(value: T) -> Self
+    where
+        T: Sized,
+    {
         Self(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(value))) })
     }
 
@@ -65,21 +69,21 @@ impl<T> ReadonlyAliasableBox<T> {
     }
 }
 
-impl<T: Hash> Hash for ReadonlyAliasableBox<T> {
+impl<T: Hash + ?Sized> Hash for ReadonlyAliasableBox<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.as_ref().hash(state);
     }
 }
 
-impl<T: PartialEq> PartialEq for ReadonlyAliasableBox<T> {
+impl<T: PartialEq + ?Sized> PartialEq for ReadonlyAliasableBox<T> {
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
     }
 }
 
-impl<T: Eq> Eq for ReadonlyAliasableBox<T> {}
+impl<T: Eq + ?Sized> Eq for ReadonlyAliasableBox<T> {}
 
-impl<T> Deref for ReadonlyAliasableBox<T> {
+impl<T: ?Sized> Deref for ReadonlyAliasableBox<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -87,19 +91,25 @@ impl<T> Deref for ReadonlyAliasableBox<T> {
     }
 }
 
-impl<T> Borrow<T> for ReadonlyAliasableBox<T> {
+impl<T: ?Sized> Borrow<T> for ReadonlyAliasableBox<T> {
     fn borrow(&self) -> &T {
         self
     }
 }
 
-impl<T> AsRef<T> for ReadonlyAliasableBox<T> {
+impl<T: ?Sized> AsRef<T> for ReadonlyAliasableBox<T> {
     fn as_ref(&self) -> &T {
         self
     }
 }
 
-impl<T> Drop for ReadonlyAliasableBox<T> {
+impl<T: ?Sized> From<Box<T>> for ReadonlyAliasableBox<T> {
+    fn from(value: Box<T>) -> Self {
+        unsafe { Self(NonNull::new_unchecked(Box::into_raw(value))) }
+    }
+}
+
+impl<T: ?Sized> Drop for ReadonlyAliasableBox<T> {
     fn drop(&mut self) {
         unsafe { _ = Box::from_raw(self.0.as_ptr()) };
     }

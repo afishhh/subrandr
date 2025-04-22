@@ -14,6 +14,8 @@ pub use face::*;
 pub use ft_utils::FreeTypeError;
 pub mod font_select;
 pub use font_select::*;
+mod glyphstring;
+pub use glyphstring::*;
 pub mod layout;
 
 use crate::{
@@ -86,7 +88,7 @@ impl FontArena {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Glyph<'f> {
     pub index: hb_codepoint_t,
     /// Byte position where this glyph started in the original UTF-8 string
@@ -118,13 +120,10 @@ impl<'f> Glyph<'f> {
         }
     }
 
-    // TODO: These will be useful for improving the correctness and performance of line breaking
-    #[expect(dead_code)]
     pub fn unsafe_to_break(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_BREAK) != 0
     }
 
-    #[expect(dead_code)]
     pub fn unsafe_to_concat(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_CONCAT) != 0
     }
@@ -150,10 +149,14 @@ impl TextMetrics {
     }
 }
 
-pub fn compute_extents_ex(
+pub fn compute_extents_ex<'a, 'f: 'a, I>(
     horizontal: bool,
-    glyphs: &[Glyph],
-) -> Result<TextMetrics, FreeTypeError> {
+    glyphs: I,
+) -> Result<TextMetrics, FreeTypeError>
+where
+    I: IntoIterator + 'a,
+    I::IntoIter: DoubleEndedIterator<Item = &'a Glyph<'f>>,
+{
     let mut results = TextMetrics {
         paint_size: Vec2::ZERO,
         trailing_advance: I26Dot6::ZERO,
@@ -163,12 +166,7 @@ pub fn compute_extents_ex(
         max_lineskip_descent: I26Dot6::ZERO,
     };
 
-    if glyphs.len() == 0 {
-        results.min_descender = I26Dot6::ZERO;
-        return Ok(results);
-    }
-
-    let mut glyphs = glyphs.iter();
+    let mut glyphs = glyphs.into_iter();
 
     if let Some(glyph) = glyphs.next_back() {
         let extents = glyph.font.glyph_extents(glyph.index)?;
@@ -182,6 +180,9 @@ pub fn compute_extents_ex(
             results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
         results.extend_by_font(glyph.font);
+    } else {
+        results.min_descender = I26Dot6::ZERO;
+        return Ok(results);
     }
 
     for glyph in glyphs {
@@ -397,6 +398,8 @@ impl ShapingBuffer {
         (infos, positions)
     }
 
+    // TODO: Make this operate directly on UTF-8 cluster values and reshape only on grapheme boundaries.
+    // TODO: Make this use a FontFallbackIterator instead that provides fonts in CSS order.
     fn shape_rec<'f>(
         &mut self,
         result: &mut Vec<Glyph<'f>>,
@@ -405,7 +408,7 @@ impl ShapingBuffer {
         codepoints: &[(u32, u32)],
         properties: &hb_segment_properties_t,
         font: &'f Font,
-        fallback: &mut impl FallbackFontProvider,
+        fallback: &mut dyn FallbackFontProvider,
     ) -> Result<(), ShapingError> {
         let (_, hb_font) = font.with_applied_size_and_hb()?;
 
@@ -516,7 +519,7 @@ impl ShapingBuffer {
         &mut self,
         font: &Font,
         font_arena: &'f FontArena,
-        fallback: &mut impl FallbackFontProvider,
+        fallback: &mut dyn FallbackFontProvider,
     ) -> Result<Vec<Glyph<'f>>, ShapingError> {
         let codepoints: Vec<_> = self
             .glyphs()
@@ -538,6 +541,10 @@ impl ShapingBuffer {
             buf.assume_init()
         };
 
+        unsafe {
+            hb_buffer_set_flags(self.buffer, HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT);
+        }
+
         let mut result = Vec::new();
         self.shape_rec(
             &mut result,
@@ -550,6 +557,12 @@ impl ShapingBuffer {
         )?;
 
         Ok(result)
+    }
+
+    pub fn clear(&mut self) {
+        unsafe {
+            hb_buffer_clear_contents(self.buffer);
+        }
     }
 
     pub fn reset(&mut self) {
@@ -709,7 +722,7 @@ pub fn render(
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
-    glyphs: &[Glyph],
+    glyphs: &GlyphString,
 ) -> Result<Image, GlyphRenderError> {
     let mut result = Image {
         glyphs: Vec::new(),
@@ -721,7 +734,7 @@ pub fn render(
 
     let mut x = xf;
     let mut y = yf;
-    for shaped_glyph in glyphs {
+    for shaped_glyph in glyphs.iter_glyphs() {
         let font = shaped_glyph.font;
         let cached = font.render_glyph(rasterizer, shaped_glyph.index)?;
 

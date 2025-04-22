@@ -4,9 +4,6 @@ pub trait Sealed {}
 
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
-mod rcarray;
-pub use rcarray::*;
-
 pub const unsafe fn array_assume_init_ref<const N: usize, T>(
     array: &[MaybeUninit<T>; N],
 ) -> &[T; N] {

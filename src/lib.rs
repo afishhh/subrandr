@@ -17,7 +17,7 @@ use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
-    FontArena, FreeTypeError, GlyphRenderError, TextMetrics,
+    FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics,
 };
 use vtt::VttEvent;
 
@@ -448,7 +448,12 @@ impl<'a> Renderer<'a> {
             alignment,
         );
 
-        let image = text::render(rasterizer, I26Dot6::ZERO, I26Dot6::ZERO, &glyphs)?;
+        let image = text::render(
+            rasterizer,
+            I26Dot6::ZERO,
+            I26Dot6::ZERO,
+            &GlyphString::from_glyphs(text, glyphs),
+        )?;
         image.blit(rasterizer, target, x + ox, y + oy, color);
 
         Ok(())
@@ -487,7 +492,7 @@ impl<'a> Renderer<'a> {
         target: &mut RenderTarget,
         x: I26Dot6,
         y: I26Dot6,
-        glyphs: &[text::Glyph],
+        glyphs: &GlyphString,
         color: BGRA8,
         decoration: &TextDecorations,
         shadows: &[TextShadow],
@@ -566,7 +571,7 @@ impl<'a> Renderer<'a> {
             let mut poly_rasterizer = NonZeroPolygonRasterizer::new();
 
             poly_rasterizer.reset();
-            for glyph in glyphs {
+            for glyph in glyphs.iter_glyphs() {
                 if let Some(outline) = glyph.font.glyph_outline(glyph.index)? {
                     let (one, two) = outline.stroke(border.x, border.y, 1.0);
 
@@ -595,7 +600,7 @@ impl<'a> Renderer<'a> {
             // TODO: Should this somehow ignore trailing advance?
             //       The issue with that is that it causes issues with cross-segment decorations
             //       so it would have to take those into account.
-            for glyph in glyphs.iter() {
+            for glyph in glyphs.iter_glyphs() {
                 end_x += glyph.x_advance;
             }
 
@@ -612,7 +617,7 @@ impl<'a> Renderer<'a> {
 
         // FIXME: This should use the main font for the segment, not the font
         //        of the first glyph..
-        let font_metrics = glyphs[0].font.metrics();
+        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
 
         if decoration.underline {
             let thickness = font_metrics.underline_thickness;
@@ -1083,13 +1088,12 @@ impl<'a> Renderer<'a> {
                     let x = shaped_segment.baseline_offset.x + x;
                     let y = shaped_segment.baseline_offset.y + y;
 
-                    let glyphs = shaped_segment.glyphs.as_ref();
                     self.draw_text_full(
                         rasterizer,
                         target,
                         x,
                         y,
-                        glyphs,
+                        &shaped_segment.glyphs,
                         segment.color,
                         &segment.decorations,
                         &segment.shadows,

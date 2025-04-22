@@ -3,11 +3,10 @@ use thiserror::Error;
 use crate::{
     math::{I26Dot6, Point2, Rect2, Vec2},
     text::{self},
-    util::RcArray,
     HorizontalAlignment, TextWrapMode,
 };
 
-use super::{FontArena, FontSelect, TextMetrics};
+use super::{FontArena, FontSelect, GlyphString, TextMetrics};
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
@@ -43,8 +42,8 @@ pub struct MultilineTextShaper<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedSegment<'f> {
-    pub glyphs: RcArray<text::Glyph<'f>>,
+pub struct ShapedSegment<'a, 'f> {
+    pub glyphs: GlyphString<'a, 'f>,
     pub baseline_offset: Point2<I26Dot6>,
     pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
@@ -53,8 +52,8 @@ pub struct ShapedSegment<'f> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedLine<'f> {
-    pub segments: Vec<ShapedSegment<'f>>,
+pub struct ShapedLine<'a, 'f> {
+    pub segments: Vec<ShapedSegment<'a, 'f>>,
     pub bounding_rect: Rect2<I26Dot6>,
 }
 
@@ -228,12 +227,12 @@ impl<'a> MultilineTextShaper<'a> {
     }
 
     pub fn shape<'f>(
-        &self,
+        &'a self,
         line_alignment: HorizontalAlignment,
         wrap: TextWrapParams,
         font_arena: &'f FontArena,
         font_select: &mut FontSelect,
-    ) -> Result<(Vec<ShapedLine<'f>>, Rect2<I26Dot6>), LayoutError> {
+    ) -> Result<(Vec<ShapedLine<'a, 'f>>, Rect2<I26Dot6>), LayoutError> {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
             println!(
@@ -247,6 +246,8 @@ impl<'a> MultilineTextShaper<'a> {
         }
 
         let wrap_width = I26Dot6::from_f32(wrap.wrap_width);
+
+        let segmenter = icu_segmenter::LineSegmenter::new_auto();
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut current_line_y = I26Dot6::ZERO;
@@ -287,15 +288,15 @@ impl<'a> MultilineTextShaper<'a> {
                 current_segment += 1;
             }
 
-            let mut did_wrap = false;
+            let mut post_wrap_glyphs: Option<GlyphString<'a, 'f>> = None;
 
-            'segment_shaper: loop {
+            loop {
                 let ShaperSegment {
                     content: ref segment,
                     end: font_boundary,
                 } = self.segments[current_segment];
 
-                let end = font_boundary.min(line_boundary);
+                let mut end = font_boundary.min(line_boundary);
                 let segment_slice = last..end;
 
                 match segment {
@@ -305,76 +306,86 @@ impl<'a> MultilineTextShaper<'a> {
                         internal_breaks_allowed,
                         ref ruby_annotation,
                     }) => {
-                        let (glyphs, extents) = shape_simple_segment(
-                            font,
-                            &self.text,
-                            segment_slice,
-                            &font_arena,
-                            font_select,
-                        )?;
+                        let (mut glyphs, mut extents) = match post_wrap_glyphs.take() {
+                            Some(glyphs) => {
+                                let mut metrics =
+                                    text::compute_extents_ex(true, glyphs.iter_glyphs())?;
+                                metrics.extend_by_font(font);
 
-                        if !did_wrap
-                            && wrap.mode == TextWrapMode::Normal
-                            // TODO: breaking before a box is always legal
+                                (glyphs, metrics)
+                            }
+                            None => {
+                                let (vec, metrics) = shape_simple_segment(
+                                    font,
+                                    &self.text,
+                                    segment_slice.clone(),
+                                    &font_arena,
+                                    font_select,
+                                )?;
+                                (GlyphString::from_glyphs(&self.text, vec), metrics)
+                            }
+                        };
+
+                        // TODO: Inter-inline-block line breaking.
+                        if wrap.mode == TextWrapMode::Normal
                             && internal_breaks_allowed
                             && current_x + extents.paint_size.x > wrap_width
                         {
-                            let mut x = current_x;
-                            let mut glyph_it = glyphs.iter();
-                            if let Some(first) = glyph_it.next() {
-                                x += first.x_advance;
-                            }
+                            const MAX_TRIES: usize = 3;
 
-                            for glyph in glyph_it {
-                                let x_after = x + glyph.x_advance;
-                                // TODO: also ensure conformance with unicode line breaking
-                                //       this would ensure, for example, that no line
-                                //       breaks are inserted between a character and
-                                //       a combining mark and that word joiners are
-                                //       respected.
-                                if x_after > wrap_width {
-                                    let idx = glyph.cluster;
-                                    let break_at = {
-                                        // FIXME: What to do about words that are partially rendered with
-                                        //        different fonts? This will not handle those properly because
-                                        //        they will be in different segments...
-                                        //        This would basically require backtracking and reshaping across
-                                        //        segment boundaries.
-                                        match self.text[last..idx].rfind(' ') {
-                                            Some(off) => {
-                                                post_wrap_skip = 1;
-                                                last + off
-                                            }
-                                            None => {
-                                                // No spaces available for breaking, render the whole word.
-                                                match self.text[idx..end].find(' ') {
-                                                    Some(off) => {
-                                                        post_wrap_skip = 1;
-                                                        idx + off
-                                                    }
-                                                    None => break,
-                                                }
-                                            }
-                                        }
-                                    };
+                            let max_width = wrap_width - current_x;
+                            // A MAX_TRIES-wide ring buffer for breaking opportunities.
+                            let mut candidate_breaks = [last; MAX_TRIES];
+                            let mut breaks =
+                                segmenter.segment_str(&self.text[segment_slice.clone()]);
+                            let mut glyph_it = glyphs.iter_glyphs().peekable();
 
-                                    did_wrap = true;
-                                    line_boundary = break_at;
+                            let mut pos = I26Dot6::ZERO;
+                            while let Some(offset) = breaks.next() {
+                                let cluster = offset + segment_slice.start;
 
-                                    if line_boundary == last {
-                                        break 'segment_shaper;
-                                    }
-
-                                    // Reshape this segment with the new line boundary
-                                    continue 'segment_shaper;
+                                while let Some(glyph) =
+                                    glyph_it.next_if(|glyph| glyph.cluster < cluster)
+                                {
+                                    pos += glyph.x_advance;
                                 }
-                                x += glyph.x_advance;
-                            }
-                            // the text is made up of one glyph and we can't
-                            // split it up, go through with rendering it.
-                        }
 
-                        let rc_glyphs = RcArray::from_boxed(glyphs.into_boxed_slice());
+                                if pos > max_width {
+                                    break;
+                                } else {
+                                    for i in (1..MAX_TRIES).rev() {
+                                        candidate_breaks[i] = candidate_breaks[i - 1];
+                                    }
+                                    candidate_breaks[0] = cluster;
+                                }
+                            }
+
+                            for candidate in candidate_breaks {
+                                if candidate == last {
+                                    continue;
+                                }
+
+                                if let Some((broken, remaining)) = glyphs.break_at_if_less_or_eq(
+                                    candidate,
+                                    max_width,
+                                    &mut text::ShapingBuffer::new(),
+                                    font,
+                                    font_arena,
+                                    font_select,
+                                )? {
+                                    drop(glyph_it);
+                                    glyphs = broken;
+                                    post_wrap_glyphs = Some(remaining);
+                                    end = candidate;
+                                    line_boundary = candidate;
+
+                                    extents = text::compute_extents_ex(true, glyphs.iter_glyphs())?;
+                                    extents.extend_by_font(font);
+
+                                    break;
+                                }
+                            }
+                        }
 
                         if MULTILINE_SHAPER_DEBUG_PRINT {
                             println!(
@@ -414,7 +425,7 @@ impl<'a> MultilineTextShaper<'a> {
                             // FIXME: Annotations seem to be slightly above where they should and
                             //        the logical rects also appear to be slightly too high.
                             annotation_segments.push(ShapedSegment {
-                                glyphs: RcArray::from_boxed(glyphs.into_boxed_slice()),
+                                glyphs: GlyphString::from_glyphs(&self.text, glyphs),
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
                                     current_line_y - extents.max_ascender,
@@ -445,7 +456,7 @@ impl<'a> MultilineTextShaper<'a> {
                             let logical_width =
                                 extents.paint_size.x + extents.trailing_advance + ruby_padding * 2;
                             segments.push(ShapedSegment {
-                                glyphs: rc_glyphs,
+                                glyphs,
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
                                     current_line_y,
@@ -465,22 +476,19 @@ impl<'a> MultilineTextShaper<'a> {
                                 "ruby bases cannot have internal segment splits"
                             );
 
-                            let mut last_glyph_idx = 0;
-
                             loop {
                                 let split_end = self
                                     .intra_font_segment_splits
                                     .get(current_intra_split)
                                     .copied()
                                     .unwrap_or(end);
-                                let end_glyph_idx = rc_glyphs
-                                    .iter()
-                                    .position(|x| x.cluster >= split_end)
-                                    .unwrap_or(rc_glyphs.len());
-                                let glyph_range = last_glyph_idx..end_glyph_idx;
-                                let glyph_slice = RcArray::slice(rc_glyphs.clone(), glyph_range);
+                                let glyph_slice = match glyphs.split_off_until_cluster(split_end) {
+                                    Some(string) => string,
+                                    None => break,
+                                };
                                 let local_max_ascender = extents.max_ascender;
-                                let extents = text::compute_extents_ex(true, &glyph_slice)?;
+                                let extents =
+                                    text::compute_extents_ex(true, glyph_slice.iter_glyphs())?;
 
                                 segments.push(ShapedSegment {
                                     glyphs: glyph_slice,
@@ -496,7 +504,6 @@ impl<'a> MultilineTextShaper<'a> {
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
                                 });
-                                last_glyph_idx = end_glyph_idx;
                                 current_x += extents.paint_size.x + extents.trailing_advance;
 
                                 if split_end >= end {
@@ -512,7 +519,7 @@ impl<'a> MultilineTextShaper<'a> {
                 last = end;
 
                 if end == line_boundary {
-                    if !did_wrap {
+                    if post_wrap_glyphs.is_none() {
                         current_explicit_line += 1;
                     }
                     break;

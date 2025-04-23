@@ -105,10 +105,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(
-                    &self.text,
-                    self.glyphs().first().unwrap().cluster..split_glyph.cluster,
-                );
+                buffer.add(&self.text, self.glyphs().first().unwrap().cluster..cluster);
                 GlyphString::from_glyphs(self.text, buffer.shape(font, font_arena, fallback)?)
             };
 
@@ -167,10 +164,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(
-                    &self.text,
-                    split_glyph.cluster..self.glyphs().last().unwrap().cluster,
-                );
+                buffer.add(&self.text, cluster..self.glyphs().last().unwrap().cluster);
                 GlyphString::from_glyphs(self.text, buffer.shape(font, font_arena, fallback)?)
             };
 

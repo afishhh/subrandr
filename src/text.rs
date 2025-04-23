@@ -735,13 +735,20 @@ pub fn render(
     let mut x = xf;
     let mut y = yf;
     for shaped_glyph in glyphs.iter_glyphs() {
+        // TODO: Once vertical text is supported, this should change depending on main axis
+        let subpixel_offset = if x < 0 {
+            I26Dot6::ONE - x.abs().fract()
+        } else {
+            x.fract()
+        };
+
         let font = shaped_glyph.font;
-        let cached = font.render_glyph(rasterizer, shaped_glyph.index)?;
+        let cached = font.render_glyph(rasterizer, shaped_glyph.index, subpixel_offset, false)?;
 
         result.glyphs.push(GlyphBitmap {
             offset: (
-                (x + cached.offset.x + shaped_glyph.x_offset).trunc_to_inner(),
-                (y + cached.offset.y + shaped_glyph.y_offset).trunc_to_inner(),
+                (x + cached.offset.x + shaped_glyph.x_offset).floor_to_inner(),
+                (y + cached.offset.y + shaped_glyph.y_offset).floor_to_inner(),
             ),
             texture: cached.texture.clone(),
         });

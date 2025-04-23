@@ -709,7 +709,7 @@ struct SizeInfo {
 struct CacheSlot {
     generation: u64,
     metrics: OnceCell<GlyphMetrics>,
-    bitmap: OnceCell<SingleGlyphBitmap>,
+    bitmap: [OnceCell<Box<SingleGlyphBitmap>>; 8],
 }
 
 impl CacheSlot {
@@ -717,7 +717,7 @@ impl CacheSlot {
         Self {
             generation: 0,
             metrics: OnceCell::new(),
-            bitmap: OnceCell::new(),
+            bitmap: [const { OnceCell::new() }; 8],
         }
     }
 }
@@ -726,6 +726,8 @@ impl CacheSlot {
 pub enum GlyphRenderError {
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),
+    #[error("Unsupported glyph format {0} after conversion")]
+    ConversionToBitmapFailed(FT_Glyph_Format),
     #[error("Unsupported pixel mode {0}")]
     UnsupportedBitmapFormat(std::ffi::c_uchar),
 }
@@ -785,10 +787,23 @@ impl GlyphCache {
         rasterizer: &mut dyn Rasterizer,
         font: &Font,
         index: u32,
+        offset_value: I26Dot6,
+        offset_axis_is_y: bool,
     ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
-        unsafe { self.slot(font, index) }
-            .bitmap
-            .get_or_try_init(|| font.render_glyph_uncached(rasterizer, index))
+        let offset_trunc = I26Dot6::from_raw(offset_value.into_raw() & 0b110000);
+        let bucket_idx = (offset_trunc.into_raw() >> 3) as usize | offset_axis_is_y as usize;
+        let render_offset = if offset_axis_is_y {
+            Vec2::new(I26Dot6::ZERO, offset_trunc)
+        } else {
+            Vec2::new(offset_trunc, I26Dot6::ZERO)
+        };
+
+        unsafe { self.slot(font, index) }.bitmap[bucket_idx as usize]
+            .get_or_try_init(|| {
+                font.render_glyph_uncached(rasterizer, index, render_offset)
+                    .map(Box::new)
+            })
+            .map(Box::as_ref)
     }
 }
 
@@ -848,22 +863,58 @@ impl Font {
         &self,
         rasterizer: &mut dyn Rasterizer,
         index: u32,
+        offset: Vec2<I26Dot6>,
     ) -> Result<SingleGlyphBitmap, GlyphRenderError> {
+        struct FtGlyph(FT_Glyph);
+        impl Drop for FtGlyph {
+            fn drop(&mut self) {
+                unsafe {
+                    FT_Done_Glyph(self.0);
+                }
+            }
+        }
+
         unsafe {
             let face = self.with_applied_size()?;
 
             fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
-            let slot = (*face).glyph;
-            fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))?;
+            let glyph = {
+                let slot = (*face).glyph;
+                let mut glyph = {
+                    let mut glyph = MaybeUninit::uninit();
+                    fttry!(FT_Get_Glyph(slot, glyph.as_mut_ptr()))?;
+                    FtGlyph(glyph.assume_init())
+                };
+
+                fttry!(FT_Glyph_To_Bitmap(
+                    &mut glyph.0,
+                    FT_RENDER_MODE_NORMAL,
+                    &FT_Vector {
+                        x: offset.x.into_ft(),
+                        y: offset.y.into_ft()
+                    },
+                    1
+                ))?;
+
+                glyph
+            };
 
             let scale6 = self.size.scale.into_raw();
 
+            // I don't think this can happen but let's be safe
+            if (*glyph.0).format != FT_GLYPH_FORMAT_BITMAP {
+                return Err(GlyphRenderError::ConversionToBitmapFailed(
+                    (*glyph.0).format,
+                ));
+            }
+
+            let bitmap_glyph = glyph.0.cast::<FT_BitmapGlyphRec>();
             let (ox, oy) = (
-                I26Dot6::from_raw((*slot).bitmap_left * scale6),
-                I26Dot6::from_raw(-(*slot).bitmap_top * scale6),
+                I26Dot6::from_raw((*bitmap_glyph).left * scale6),
+                I26Dot6::from_raw(-(*bitmap_glyph).top * scale6),
             );
 
-            let bitmap = &(*slot).bitmap;
+            let bitmap = &(*bitmap_glyph).bitmap;
 
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
@@ -990,9 +1041,15 @@ impl Font {
         &self,
         rasterizer: &mut dyn Rasterizer,
         index: u32,
+        offset_value: I26Dot6,
+        offset_axis_is_y: bool,
     ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
-        self.face()
-            .glyph_cache()
-            .get_or_try_render(rasterizer, self, index)
+        self.face().glyph_cache().get_or_try_render(
+            rasterizer,
+            self,
+            index,
+            offset_value,
+            offset_axis_is_y,
+        )
     }
 }

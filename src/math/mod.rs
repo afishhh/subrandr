@@ -65,6 +65,7 @@ impl<N> Vec2<N> {
     }
 }
 
+#[expect(dead_code)]
 impl<N: Number> Vec2<N> {
     pub fn length(self) -> N
     where

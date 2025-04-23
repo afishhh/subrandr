@@ -324,11 +324,3 @@ impl Debug for Outline {
         list.finish()
     }
 }
-
-mod stroke;
-
-impl Outline {
-    pub fn stroke(&self, x: f32, y: f32, eps: f32) -> (Outline, Outline) {
-        stroke::stroke(self, x, y, eps)
-    }
-}

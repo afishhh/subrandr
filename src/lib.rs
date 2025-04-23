@@ -13,7 +13,7 @@ use thiserror::Error;
 use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
-use rasterize::{polygon::NonZeroPolygonRasterizer, Rasterizer, RenderTarget};
+use rasterize::{Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
     layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
@@ -154,8 +154,6 @@ enum Ruby {
 
 #[derive(Debug, Clone)]
 struct TextDecorations {
-    border: Vec2f,
-    border_color: BGRA8,
     // TODO: f32 for size
     underline: bool,
     underline_color: BGRA8,
@@ -180,8 +178,6 @@ struct CssTextShadow {
 impl TextDecorations {
     pub const fn none() -> Self {
         Self {
-            border: Vec2f::ZERO,
-            border_color: BGRA8::ZERO,
             underline: false,
             underline_color: BGRA8::ZERO,
             strike_out: false,
@@ -496,7 +492,6 @@ impl<'a> Renderer<'a> {
         color: BGRA8,
         decoration: &TextDecorations,
         shadows: &[TextShadow],
-        scale: f32,
         ctx: &SubtitleContext,
     ) -> Result<(), RenderError> {
         if glyphs.is_empty() {
@@ -505,7 +500,6 @@ impl<'a> Renderer<'a> {
         }
 
         let image = text::render(rasterizer, x.fract(), y.fract(), glyphs)?;
-        let border = decoration.border * scale;
 
         let mut blurs = HashMap::new();
 
@@ -560,38 +554,6 @@ impl<'a> Renderer<'a> {
                     out.clear();
                 }
             }
-        }
-
-        if decoration.border_color.a > 0 || border.x.max(border.y) >= 1.0 {
-            // Draw the border first
-            // TODO: in reality the border should probably be blended with the text using
-            //       a substraction function (i.e. only draw the border where there is no glyph)
-            //       check how libass handles it
-            let mut x = x;
-            let mut poly_rasterizer = NonZeroPolygonRasterizer::new();
-
-            poly_rasterizer.reset();
-            for glyph in glyphs.iter_glyphs() {
-                if let Some(outline) = glyph.font.glyph_outline(glyph.index)? {
-                    let (one, two) = outline.stroke(border.x, border.y, 1.0);
-
-                    for (a, b) in one.iter_contours().zip(two.iter_contours()) {
-                        poly_rasterizer.append_polyline(
-                            (x.trunc_to_inner(), y.trunc_to_inner()),
-                            &one.flatten_contour(a),
-                            false,
-                        );
-                        poly_rasterizer.append_polyline(
-                            (x.trunc_to_inner(), y.trunc_to_inner()),
-                            &two.flatten_contour(b),
-                            true,
-                        );
-                    }
-                }
-
-                x += glyph.x_advance;
-            }
-            rasterizer.blit_cpu_polygon(target, &mut poly_rasterizer, decoration.border_color);
         }
 
         let text_end_x = {
@@ -1097,7 +1059,6 @@ impl<'a> Renderer<'a> {
                         segment.color,
                         &segment.decorations,
                         &segment.shadows,
-                        ctx.pixel_scale(),
                         ctx,
                     )?;
                 }

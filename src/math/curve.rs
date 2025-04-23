@@ -55,6 +55,7 @@ macro_rules! define_curve {
         #[derive(Clone)]
         pub struct $name(pub [Point2f; $npoints]);
 
+        #[allow(dead_code)]
         impl $name {
             pub const fn new(points: [Point2f; $npoints]) -> Self {
                 Self(points)
@@ -137,6 +138,7 @@ impl Bezier for CubicBezier {
 }
 
 impl CubicBezier {
+    #[expect(dead_code)]
     pub fn to_quadratics(&self, tolerance: f32) -> impl Iterator<Item = QuadraticBezier> + use<'_> {
         flatten::cubic_to_quadratics(self, tolerance)
     }

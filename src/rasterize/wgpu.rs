@@ -817,37 +817,6 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blit_cpu_polygon(
-        &mut self,
-        target: &mut super::RenderTarget,
-        rasterizer: &mut super::polygon::NonZeroPolygonRasterizer,
-        color: BGRA8,
-    ) {
-        let Some(target_impl) = unwrap_wgpu_render_target(target) else {
-            return;
-        };
-
-        // TODO: Smaller texture, allow getting bounds of result from rasterizer
-        let (width, height) = (target_impl.tex.width(), target_impl.tex.height());
-        let texture = unsafe {
-            self.create_texture_mapped(
-                width,
-                height,
-                PixelFormat::Mono,
-                Box::new(|buffer, stride| {
-                    buffer.fill(MaybeUninit::zeroed());
-                    rasterizer.render(width, height, |y, x0, x1| {
-                        for x in x0..x1 {
-                            buffer[(y as usize * stride) + x as usize].write(0xFF);
-                        }
-                    });
-                }),
-            )
-        };
-
-        self.blit(target, 0, 0, &texture, color);
-    }
-
     fn line(
         &mut self,
         target: &mut super::RenderTarget,

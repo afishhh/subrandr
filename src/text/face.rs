@@ -595,6 +595,7 @@ impl Font {
     ///
     /// Returns [`None`] if the glyph does not exist in this font, or it is not
     /// an outline glyph.
+    #[expect(dead_code)]
     pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
         let face = self.with_applied_size()?;
         unsafe {

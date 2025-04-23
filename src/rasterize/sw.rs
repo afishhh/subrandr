@@ -883,23 +883,6 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blit_cpu_polygon(
-        &mut self,
-        target: &mut super::RenderTarget,
-        rasterizer: &mut super::polygon::NonZeroPolygonRasterizer,
-        color: BGRA8,
-    ) {
-        let target = unwrap_sw_render_target(target);
-
-        rasterizer.render_to(
-            target.buffer,
-            target.width as usize,
-            target.width,
-            target.height,
-            color,
-        );
-    }
-
     fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32) {
         self.blurer.prepare(
             width as usize,

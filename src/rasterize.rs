@@ -1,13 +1,10 @@
 use std::mem::MaybeUninit;
 
-use polygon::NonZeroPolygonRasterizer;
-
 use crate::{
     color::BGRA8,
     math::{Point2f, Rect2f, Vec2f},
 };
 
-pub(crate) mod polygon;
 pub(crate) mod sw;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
@@ -150,6 +147,7 @@ pub(crate) trait Rasterizer {
         self.line(target, Point2f::new(x0, y), Point2f::new(x1, y), color);
     }
 
+    #[expect(dead_code)]
     fn fill_triangle(&mut self, target: &mut RenderTarget, vertices: &[Point2f; 3], color: BGRA8);
 
     fn stroke_polygon(
@@ -218,13 +216,6 @@ pub(crate) trait Rasterizer {
         dx: i32,
         dy: i32,
         texture: &Texture,
-    );
-
-    fn blit_cpu_polygon(
-        &mut self,
-        target: &mut RenderTarget,
-        rasterizer: &mut NonZeroPolygonRasterizer,
-        color: BGRA8,
     );
 
     fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);

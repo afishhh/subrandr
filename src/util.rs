@@ -4,12 +4,6 @@ pub trait Sealed {}
 
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
-pub const unsafe fn array_assume_init_ref<const N: usize, T>(
-    array: &[MaybeUninit<T>; N],
-) -> &[T; N] {
-    unsafe { &*(array as *const [_] as *const [T; N]) }
-}
-
 pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }

@@ -5,6 +5,7 @@ use std::{
     ops::{Range, RangeFrom, RangeFull},
 };
 
+use font_match::FontMatchIterator;
 use text_sys::*;
 use thiserror::Error;
 
@@ -12,15 +13,17 @@ mod face;
 mod ft_utils;
 pub use face::*;
 pub use ft_utils::FreeTypeError;
-pub mod font_select;
-pub use font_select::*;
+pub mod font_db;
+pub use font_db::*;
 mod glyphstring;
 pub use glyphstring::*;
+mod font_match;
+pub use font_match::*;
 pub mod layout;
 
 use crate::{
     color::BGRA8,
-    math::{I16Dot16, I26Dot6, Vec2},
+    math::{I26Dot6, Vec2},
     rasterize::{Rasterizer, RenderTarget, Texture},
     util::ReadonlyAliasableBox,
 };
@@ -205,48 +208,6 @@ impl AsRef<Self> for Font {
     }
 }
 
-pub trait FallbackFontProvider {
-    fn get_font_for_glyph(
-        &mut self,
-        weight: I16Dot16,
-        italic: bool,
-        codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, font_select::Error>;
-}
-
-pub struct NoopFallbackProvider;
-impl FallbackFontProvider for NoopFallbackProvider {
-    fn get_font_for_glyph(
-        &mut self,
-        _weight: I16Dot16,
-        _italic: bool,
-        _codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, font_select::Error> {
-        Ok(None)
-    }
-}
-
-impl FallbackFontProvider for FontSelect<'_> {
-    fn get_font_for_glyph(
-        &mut self,
-        weight: I16Dot16,
-        italic: bool,
-        codepoint: hb_codepoint_t,
-    ) -> Result<Option<Face>, font_select::Error> {
-        let request = FontRequest {
-            families: Vec::new(),
-            weight,
-            italic,
-            codepoint: Some(codepoint),
-        };
-        match self.select(&request) {
-            Ok(face) => Ok(Some(face)),
-            Err(Error::NotFound) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-}
-
 mod sealed {
     use std::ops::{Range, RangeFrom, RangeFull};
 
@@ -322,7 +283,7 @@ pub enum ShapingError {
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),
     #[error("font selection: {0}")]
-    FontSelect(#[from] font_select::Error),
+    FontSelect(#[from] font_db::SelectError),
 }
 
 impl ShapingBuffer {
@@ -396,17 +357,25 @@ impl ShapingBuffer {
     }
 
     // TODO: Make this operate directly on UTF-8 cluster values and reshape only on grapheme boundaries.
-    // TODO: Make this use a FontFallbackIterator instead that provides fonts in CSS order.
     fn shape_rec<'f>(
         &mut self,
         result: &mut Vec<Glyph<'f>>,
         font_arena: &'f FontArena,
-        initial_pass: bool,
         codepoints: &[(u32, u32)],
+        start: usize,
         properties: &hb_segment_properties_t,
-        font: &'f Font,
-        fallback: &mut dyn FallbackFontProvider,
+        mut font_iterator: FontMatchIterator<'_, 'f>,
+        fonts: &mut FontDb,
     ) -> Result<(), ShapingError> {
+        let Some(&(first_codepoint, _)) = codepoints.get(start) else {
+            return Ok(());
+        };
+
+        let font = match font_iterator.next_with_fallback(first_codepoint, font_arena, fonts)? {
+            Some(font) => font,
+            // TODO: TofuFont
+            None => return Err(ShapingError::FontSelect(font_db::SelectError::NotFound)),
+        };
         let (_, hb_font) = font.with_applied_size_and_hb()?;
 
         unsafe {
@@ -425,46 +394,28 @@ impl ShapingBuffer {
                     font,
                 )
             };
-            let mut reshape_with_fallback = |range: Range<usize>,
-                                             result: &mut Vec<Glyph<'f>>,
-                                             font_arena: &'f FontArena,
-                                             passthrough: (
-                &[hb_glyph_info_t],
-                &[hb_glyph_position_t],
-            )|
+            let mut retry_shaping = |range: Range<usize>,
+                                     result: &mut Vec<Glyph<'f>>,
+                                     font_arena: &'f FontArena|
              -> Result<(), ShapingError> {
-                if let Some(face) = fallback.get_font_for_glyph(
-                    font.weight(),
-                    font.italic(),
-                    codepoints[range.start].0,
-                )? {
-                    let font = face.with_size_from(font)?;
-                    let mut sub_buffer = Self::new();
-                    for ((codepoint, _), i) in codepoints[range.clone()].iter().copied().zip(range)
-                    {
-                        hb_buffer_add(sub_buffer.buffer, codepoint, i as u32);
-                    }
-                    hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
-                    hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
-
-                    sub_buffer.shape_rec(
-                        result,
-                        font_arena,
-                        false,
-                        codepoints,
-                        properties,
-                        font_arena.insert(&font),
-                        fallback,
-                    )?;
-                } else {
-                    result.extend(
-                        passthrough
-                            .0
-                            .iter()
-                            .zip(passthrough.1.iter())
-                            .map(|(a, b)| make_glyph(a, b)),
-                    );
+                let mut sub_buffer = Self::new();
+                for ((codepoint, _), i) in
+                    codepoints[range.clone()].iter().copied().zip(range.clone())
+                {
+                    hb_buffer_add(sub_buffer.buffer, codepoint, i as u32);
                 }
+                hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
+                hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
+
+                sub_buffer.shape_rec(
+                    result,
+                    font_arena,
+                    codepoints,
+                    range.start,
+                    properties,
+                    font_iterator.clone(),
+                    fonts,
+                )?;
 
                 Ok(())
             };
@@ -476,12 +427,10 @@ impl ShapingBuffer {
                     }
                     continue;
                 } else if let Some(start) = invalid_range_start.take() {
-                    let info_range = start..i;
-                    reshape_with_fallback(
+                    retry_shaping(
                         fixup_range(infos[start].cluster as usize, info.cluster as usize),
                         result,
                         font_arena,
-                        (&infos[info_range.clone()], &positions[info_range]),
                     )?;
                 }
 
@@ -489,22 +438,20 @@ impl ShapingBuffer {
             }
 
             if let Some(start) = invalid_range_start {
-                if start == 0 && !initial_pass {
+                if start == 0 && font_iterator.did_system_fallback() {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
                     }
                     return Ok(());
                 }
 
-                let info_range = start..infos.len();
-                reshape_with_fallback(
+                retry_shaping(
                     fixup_range(
                         infos[start].cluster as usize,
                         infos.last().unwrap().cluster as usize + 1,
                     ),
                     result,
                     font_arena,
-                    (&infos[info_range.clone()], &positions[info_range]),
                 )?
             }
 
@@ -514,9 +461,9 @@ impl ShapingBuffer {
 
     pub fn shape<'f>(
         &mut self,
-        font: &Font,
+        font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fallback: &mut dyn FallbackFontProvider,
+        fonts: &mut FontDb,
     ) -> Result<Vec<Glyph<'f>>, ShapingError> {
         let codepoints: Vec<_> = self
             .glyphs()
@@ -546,11 +493,11 @@ impl ShapingBuffer {
         self.shape_rec(
             &mut result,
             font_arena,
-            true,
             &codepoints,
+            0,
             &properties,
-            font_arena.insert(font),
-            fallback,
+            font_iterator,
+            fonts,
         )?;
 
         Ok(result)
@@ -578,13 +525,14 @@ impl Drop for ShapingBuffer {
 }
 
 pub fn simple_shape_text<'f>(
-    font: &Font,
+    font_iterator: FontMatchIterator<'_, 'f>,
     font_arena: &'f FontArena,
     text: &str,
+    fonts: &mut FontDb,
 ) -> Result<Vec<Glyph<'f>>, ShapingError> {
     let mut buffer = ShapingBuffer::new();
     buffer.add(text, ..);
-    buffer.shape(font, font_arena, &mut NoopFallbackProvider)
+    buffer.shape(font_iterator, font_arena, fonts)
 }
 
 struct GlyphBitmap {

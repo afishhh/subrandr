@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::{
     math::I16Dot16,
     text::{
-        font_select::{FaceInfo, FontProvider, FontRequest, FontSource},
+        font_db::{FaceInfo, FontProvider, FontRequest, FontSource},
         FontAxisValues,
     },
     util::{AnyError, Sealed},
@@ -403,7 +403,7 @@ impl FontProvider for FontconfigFontProvider {
     fn query(
         &mut self,
         req: &FontRequest,
-    ) -> Result<Vec<crate::text::font_select::FaceInfo>, AnyError> {
+    ) -> Result<Vec<crate::text::font_db::FaceInfo>, AnyError> {
         // TODO: Free on error
         let pattern = unsafe { FcPatternCreate() };
         if pattern.is_null() {
@@ -423,7 +423,7 @@ impl FontProvider for FontconfigFontProvider {
             };
         }
 
-        let Some(fc_weight) = map_opentype_weight_to_fontconfig(req.weight) else {
+        let Some(fc_weight) = map_opentype_weight_to_fontconfig(req.style.weight) else {
             return Err(LoadError::InvalidWeight.into());
         };
 
@@ -449,7 +449,7 @@ impl FontProvider for FontconfigFontProvider {
             fc_weight.round_to_inner()
         );
 
-        let slant = if req.italic {
+        let slant = if req.style.italic {
             FC_SLANT_ITALIC as i32
         } else {
             FC_SLANT_ROMAN as i32

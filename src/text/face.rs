@@ -181,18 +181,20 @@ impl Face {
         Font::create(self.face, self.coords, point_size, dpi)
     }
 
-    pub fn with_size_from(&self, other: &Font) -> Result<Font, FreeTypeError> {
-        Font::create(
-            self.face,
-            self.coords,
-            other.size.point_size,
-            other.size.dpi,
-        )
-    }
-
     pub fn family_name(&self) -> &str {
         // NOTE: FreeType says this is *always* an ASCII string.
         unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
+    }
+
+    pub fn contains_codepoint(&self, chr: u32) -> bool {
+        if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
+            return false;
+        }
+
+        #[allow(clippy::useless_conversion)]
+        let index = unsafe { FT_Get_Char_Index(self.face, chr as std::ffi::c_ulong) };
+
+        index != 0
     }
 
     fn shared_data(&self) -> &SharedFaceData {
@@ -260,12 +262,12 @@ impl std::fmt::Debug for Face {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Face({:?}@{:?}, ", self.family_name(), self.face,)?;
 
-        let s = unsafe { (*self.face).style_flags };
-        if (s & FT_STYLE_FLAG_ITALIC as FT_Long) != 0 {
+        if self.italic() {
             write!(f, "italic, ")?;
         }
-        if (s & FT_STYLE_FLAG_BOLD as FT_Long) != 0 {
-            write!(f, "bold, ")?;
+        let weight = self.weight();
+        if weight != I16Dot16::new(400) {
+            write!(f, "w{weight}, ")?;
         }
 
         f.debug_map()
@@ -641,14 +643,6 @@ impl Font {
 
     pub fn point_size(&self) -> I26Dot6 {
         self.size.point_size
-    }
-
-    pub fn weight(&self) -> I16Dot16 {
-        self.face().weight()
-    }
-
-    pub fn italic(&self) -> bool {
-        self.face().italic()
     }
 }
 

@@ -6,7 +6,7 @@ use std::{
 
 use crate::I26Dot6;
 
-use super::{FallbackFontProvider, Font, FontArena, Glyph, ShapingBuffer, ShapingError};
+use super::{font_match::FontMatchIterator, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError};
 
 #[derive(Debug, Clone)]
 pub struct GlyphString<'a, 'f> {
@@ -58,9 +58,9 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
         glyph_index: usize,
         cluster: usize,
         buffer: &mut ShapingBuffer,
-        font: &Font,
+        font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fallback: &mut dyn FallbackFontProvider,
+        fonts: &mut FontDb,
     ) -> Result<GlyphString<'a, 'f>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         // If the break is within a glyph (like a long ligature), we must
@@ -90,7 +90,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                                 cluster..concat_glyph.cluster
                             },
                         );
-                        let glyphs = buffer.shape(font, font_arena, fallback)?;
+                        let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.first().is_none_or(|first| !first.unsafe_to_concat()) {
                             break 'left GlyphString::from_array([
                                 self.break_unsafe_subslice(0..i),
@@ -106,7 +106,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
                 buffer.add(&self.text, self.glyphs().first().unwrap().cluster..cluster);
-                GlyphString::from_glyphs(self.text, buffer.shape(font, font_arena, fallback)?)
+                GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
             };
 
             Ok(left)
@@ -118,9 +118,9 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
         glyph_index: usize,
         cluster: usize,
         buffer: &mut ShapingBuffer,
-        font: &Font,
+        font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fallback: &mut dyn FallbackFontProvider,
+        fonts: &mut FontDb,
     ) -> Result<GlyphString<'a, 'f>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         let can_reuse_split_glyph = split_glyph.cluster == cluster;
@@ -149,7 +149,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                                 concat_glyph.cluster..cluster
                             },
                         );
-                        let glyphs = buffer.shape(font, font_arena, fallback)?;
+                        let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.last().is_none_or(|last| !last.unsafe_to_concat()) {
                             break 'right GlyphString::from_array([
                                 GlyphStringSegment::from_glyphs(self.text, glyphs),
@@ -165,7 +165,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
                 buffer.add(&self.text, cluster..self.glyphs().last().unwrap().cluster);
-                GlyphString::from_glyphs(self.text, buffer.shape(font, font_arena, fallback)?)
+                GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
             };
 
             Ok(right)
@@ -233,9 +233,9 @@ impl<'a, 'f> GlyphString<'a, 'f> {
         cluster: usize,
         max_width: I26Dot6,
         buffer: &mut ShapingBuffer,
-        font: &Font,
+        font_iter: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fallback: &mut dyn FallbackFontProvider,
+        fonts: &mut FontDb,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         let mut left = LinkedList::new();
         let mut it = self.segments.iter();
@@ -243,8 +243,14 @@ impl<'a, 'f> GlyphString<'a, 'f> {
         for segment in &mut it {
             // TODO: if g.cluster > cluster then use previous glyph
             if let Some(split_at) = segment.glyphs().iter().position(|g| g.cluster == cluster) {
-                let mut left_suff =
-                    segment.break_until(split_at, cluster, buffer, font, font_arena, fallback)?;
+                let mut left_suff = segment.break_until(
+                    split_at,
+                    cluster,
+                    buffer,
+                    font_iter.clone(),
+                    font_arena,
+                    fonts,
+                )?;
 
                 if left_suff
                     .iter_glyphs()
@@ -254,7 +260,7 @@ impl<'a, 'f> GlyphString<'a, 'f> {
                 {
                     left.append(&mut left_suff.segments);
                     let mut right = segment
-                        .break_after(split_at, cluster, buffer, font, font_arena, fallback)?;
+                        .break_after(split_at, cluster, buffer, font_iter, font_arena, fonts)?;
 
                     for segment in it {
                         right.segments.push_back(segment.clone());

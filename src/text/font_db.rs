@@ -14,9 +14,23 @@ use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontRequest {
     pub families: Vec<Box<str>>,
+    pub style: FontStyle,
+    pub codepoint: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FontStyle {
     pub weight: I16Dot16,
     pub italic: bool,
-    pub codepoint: Option<u32>,
+}
+
+impl Default for FontStyle {
+    fn default() -> Self {
+        Self {
+            weight: I16Dot16::new(400),
+            italic: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +52,29 @@ pub enum FontAxisValues {
     Range(I16Dot16, I16Dot16),
 }
 
+impl FontAxisValues {
+    pub fn minimum(&self) -> I16Dot16 {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed,
+            &FontAxisValues::Range(start, _) => start,
+        }
+    }
+
+    pub fn maximum(&self) -> I16Dot16 {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed,
+            &FontAxisValues::Range(_, end) => end,
+        }
+    }
+
+    pub fn contains(&self, value: I16Dot16) -> bool {
+        match self {
+            &FontAxisValues::Fixed(fixed) => fixed == value,
+            &FontAxisValues::Range(start, end) => start <= value && value <= end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
     File { path: PathBuf, index: i32 },
@@ -53,27 +90,27 @@ impl FontSource {
     }
 }
 
-fn choose<'a>(fonts: &'a [FaceInfo], request: &FontRequest) -> Option<&'a FaceInfo> {
+fn choose<'a>(fonts: &'a [FaceInfo], style: &FontStyle) -> Option<&'a FaceInfo> {
     let mut score = u32::MAX;
     let mut result = None;
 
     for font in fonts {
         let mut this_score = 0;
 
-        if font.italic && !request.italic {
+        if font.italic && !style.italic {
             this_score += 4;
-        } else if !font.italic && request.italic {
+        } else if !font.italic && style.italic {
             this_score += 1;
         }
 
         match &font.weight {
             &FontAxisValues::Fixed(weight) => {
-                this_score += (weight - request.weight).unsigned_abs().round_to_inner() / 100;
+                this_score += (weight - style.weight).unsigned_abs().round_to_inner() / 100;
             }
             &FontAxisValues::Range(start, end) => {
-                if request.weight < start || request.weight > end {
-                    this_score += ((start - request.weight).unsigned_abs().round_to_inner() / 100)
-                        .min((end - request.weight).unsigned_abs().round_to_inner() / 100);
+                if style.weight < start || style.weight > end {
+                    this_score += ((start - style.weight).unsigned_abs().round_to_inner() / 100)
+                        .min((end - style.weight).unsigned_abs().round_to_inner() / 100);
                 }
             }
         }
@@ -143,7 +180,7 @@ mod provider {
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum SelectError {
     #[error(transparent)]
     // TODO: enum
     Provider(#[from] AnyError),
@@ -154,7 +191,7 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct FontSelect<'a> {
+pub struct FontDb<'a> {
     sbr: &'a Subrandr,
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
@@ -163,16 +200,16 @@ pub struct FontSelect<'a> {
     custom: Vec<FaceInfo>,
 }
 
-fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
+pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
     if let Some(axis) = face.axis(WEIGHT_AXIS) {
         face.set_axis(axis.index, weight)
     }
 }
 
-impl<'a> FontSelect<'a> {
-    pub fn new(sbr: &'a Subrandr) -> Result<FontSelect<'a>, Error> {
+impl<'a> FontDb<'a> {
+    pub fn new(sbr: &'a Subrandr) -> Result<FontDb<'a>, SelectError> {
         let provider: Box<dyn FontProvider> =
-            provider::platform_default(sbr).map_err(Error::Provider)?;
+            provider::platform_default(sbr).map_err(SelectError::Provider)?;
 
         Ok(Self {
             sbr,
@@ -198,18 +235,18 @@ impl<'a> FontSelect<'a> {
         }
     }
 
-    pub fn open(&mut self, face: &FaceInfo) -> Result<Face, Error> {
+    pub fn open(&mut self, face: &FaceInfo) -> Result<Face, SelectError> {
         if let Some(cached) = self.source_cache.get(&face.source) {
             Ok(cached.clone())
         } else {
-            let loaded = face.source.load().map_err(Error::Load)?;
+            let loaded = face.source.load().map_err(SelectError::Load)?;
             self.source_cache
                 .insert(face.source.clone(), loaded.clone());
             Ok(loaded)
         }
     }
 
-    pub fn select(&mut self, request: &FontRequest) -> Result<Face, Error> {
+    pub fn select(&mut self, request: &FontRequest) -> Result<Face, SelectError> {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
@@ -217,7 +254,10 @@ impl<'a> FontSelect<'a> {
                 self.sbr,
                 "Querying font provider for font matching {request:?}"
             );
-            let mut choices = self.provider.query(request).map_err(Error::Provider)?;
+            let mut choices = self
+                .provider
+                .query(request)
+                .map_err(SelectError::Provider)?;
 
             let custom_start = choices.len();
             choices.extend(self.custom.iter().cloned());
@@ -232,12 +272,12 @@ impl<'a> FontSelect<'a> {
                 score
             });
 
-            let mut result = choose(&choices, request)
+            let mut result = choose(&choices, &request.style)
                 .map(|x| self.open(x))
                 .transpose()?;
 
             if let Some(ref mut face) = result {
-                set_weight_if_variable(face, request.weight);
+                set_weight_if_variable(face, request.style.weight);
             }
 
             trace!(
@@ -248,34 +288,20 @@ impl<'a> FontSelect<'a> {
             self.request_cache.insert(request.clone(), result.clone());
             result
         }
-        .ok_or(Error::NotFound)
+        .ok_or(SelectError::NotFound)
     }
 
-    pub fn select_simple(
-        &mut self,
-        name: &str,
-        weight: I16Dot16,
-        italic: bool,
-    ) -> Result<Face, Error> {
-        self.select(&FontRequest {
-            families: vec![name.into()],
-            weight,
-            italic,
-            codepoint: None,
-        })
-    }
-
-    // Currently unused, but will be if we ever integrate the CSS-complaint font
-    // selection from the `css-layout` branch.
-    #[expect(dead_code)]
-    pub fn query_by_name(&mut self, name: &str) -> Result<&[FaceInfo], Error> {
+    pub fn query_by_name(&mut self, name: &str) -> Result<&[FaceInfo], SelectError> {
         // NLL problem case 3 again
         let family_cache = &raw mut self.family_cache;
         if let Some(existing) = unsafe { (*family_cache).get(name) } {
             return Ok(existing);
         }
 
-        let result = self.provider.query_family(name).map_err(Error::Provider)?;
+        let result = self
+            .provider
+            .query_family(name)
+            .map_err(SelectError::Provider)?;
         Ok(unsafe {
             (*family_cache)
                 .entry(name.into())

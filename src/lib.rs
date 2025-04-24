@@ -295,7 +295,7 @@ impl PerfStats {
 
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
-    fonts: text::FontSelect<'a>,
+    fonts: text::FontDb<'a>,
     dpi: u32,
     perf: PerfStats,
 
@@ -319,7 +319,7 @@ impl<'a> Renderer<'a> {
 
         Self {
             sbr,
-            fonts: text::FontSelect::new(sbr).unwrap(),
+            fonts: text::FontDb::new(sbr).unwrap(),
             dpi: 0,
             perf: PerfStats::new(),
             unchanged_range: 0..0,
@@ -360,7 +360,7 @@ pub enum RenderError {
     #[error(transparent)]
     GlyphRender(#[from] GlyphRenderError),
     #[error(transparent)]
-    FontSelect(#[from] text::font_select::Error),
+    FontSelect(#[from] text::font_db::SelectError),
     #[error(transparent)]
     SimpleShaping(#[from] text::ShapingError),
     #[error(transparent)]
@@ -379,14 +379,22 @@ impl<'a> Renderer<'a> {
         size: I26Dot6,
         color: BGRA8,
     ) -> Result<(), RenderError> {
-        let font = self
-            .fonts
-            .select_simple("monospace", I16Dot16::new(400), false)?
-            .with_size(size, self.dpi)?;
         let font_arena = FontArena::new();
-        let glyphs = text::simple_shape_text(&font, &font_arena, text)?;
+        let matches = text::FontMatcher::match_all(
+            &["monospace"],
+            text::FontStyle::default(),
+            size,
+            self.dpi,
+            &font_arena,
+            &mut self.fonts,
+        )?;
+        let glyphs =
+            text::simple_shape_text(matches.iterator(), &font_arena, text, &mut self.fonts)?;
         let (ox, oy) = Self::translate_for_aligned_text(
-            &font,
+            match matches.primary(&font_arena, &mut self.fonts)? {
+                Some(font) => font,
+                None => return Ok(()),
+            },
             true,
             &text::compute_extents_ex(true, &glyphs)?,
             alignment,
@@ -786,36 +794,30 @@ impl<'a> Renderer<'a> {
                 let mut shaper = MultilineTextShaper::new();
                 let mut last_ruby_base = None;
                 for segment in event.segments.iter() {
-                    let font_request = text::FontRequest {
-                        families: segment
-                            .font
-                            .iter()
-                            .map(AsRef::as_ref)
-                            .map(Into::into)
-                            .collect(),
-                        weight: segment.font_weight,
-                        italic: segment.italic,
-                        codepoint: None,
-                    };
-                    let font = font_arena.insert(
-                        &self
-                            .fonts
-                            .select(&font_request)?
-                            .with_size((subs.class.get_font_size)(ctx, event, segment), ctx.dpi)?,
-                    );
+                    let matcher = text::FontMatcher::match_all(
+                        segment.font.iter().map(String::as_str),
+                        text::FontStyle {
+                            weight: segment.font_weight,
+                            italic: segment.italic,
+                        },
+                        (subs.class.get_font_size)(ctx, event, segment),
+                        ctx.dpi,
+                        &font_arena,
+                        &mut self.fonts,
+                    )?;
 
                     match segment.ruby {
                         Ruby::None => {
-                            shaper.add_text(&segment.text, &font);
+                            shaper.add_text(&segment.text, matcher);
                         }
                         Ruby::Base => {
-                            last_ruby_base = Some(shaper.add_ruby_base(&segment.text, &font));
+                            last_ruby_base = Some(shaper.add_ruby_base(&segment.text, matcher));
                         }
                         Ruby::Over => {
                             shaper.add_ruby_annotation(
                                 last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
                                 &segment.text,
-                                font,
+                                matcher,
                             );
                             last_ruby_base = None;
                         }

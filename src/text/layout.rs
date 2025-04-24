@@ -7,38 +7,38 @@ use crate::{
     HorizontalAlignment,
 };
 
-use super::{FontArena, FontSelect, GlyphString, TextMetrics};
+use super::{FontArena, FontDb, FontMatcher, GlyphString, TextMetrics};
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
-enum Content<'a> {
-    Text(TextContent<'a>),
-    None,
-}
-
-struct ShaperSegment<'a> {
-    content: Content<'a>,
+struct ShaperSegment<'a, 'f> {
+    content: Content<'a, 'f>,
     end: usize,
 }
 
-struct TextContent<'a> {
-    font: &'a text::Font,
-    internal_breaks_allowed: bool,
-    ruby_annotation: Option<Box<RubyAnnotation<'a>>>,
+enum Content<'a, 'f> {
+    Text(TextContent<'a, 'f>),
+    None,
 }
 
-struct RubyAnnotation<'a> {
-    font: &'a text::Font,
+struct TextContent<'a, 'f> {
+    font_matcher: FontMatcher<'f>,
+    internal_breaks_allowed: bool,
+    ruby_annotation: Option<Box<RubyAnnotation<'a, 'f>>>,
+}
+
+struct RubyAnnotation<'a, 'f> {
+    font_matcher: FontMatcher<'f>,
     input_index: usize,
     // Note: Text does not shape or form ligatures across ruby annotations or bases, even merged ones, due to bidi isolation. See § 3.5 Bidi Reordering and CSS Text 3 § 7.3 Shaping Across Element Boundaries.
     // ^^ This means we can treat all ruby annotation as completely separate pieces of text.
     text: &'a str,
 }
 
-pub struct MultilineTextShaper<'a> {
+pub struct MultilineTextShaper<'a, 'f> {
     text: String,
     explicit_line_bounaries: Vec</* end of line i */ usize>,
-    segments: Vec<ShaperSegment<'a>>,
+    segments: Vec<ShaperSegment<'a, 'f>>,
     intra_font_segment_splits: Vec<usize>,
 }
 
@@ -65,12 +65,17 @@ pub enum LayoutError {
 }
 
 fn shape_simple_segment<'f>(
-    font: &text::Font,
     text: &str,
     range: impl text::ItemRange,
+    font_iterator: text::FontMatchIterator<'_, 'f>,
     font_arena: &'f FontArena,
-    font_select: &mut FontSelect,
+    fonts: &mut FontDb,
 ) -> Result<(Vec<text::Glyph<'f>>, TextMetrics), LayoutError> {
+    let primary = font_iterator
+        .matcher()
+        .primary(font_arena, fonts)
+        .map_err(text::ShapingError::FontSelect)?;
+
     let glyphs = {
         let mut buffer = text::ShapingBuffer::new();
         buffer.reset();
@@ -79,11 +84,13 @@ fn shape_simple_segment<'f>(
         if !direction.is_horizontal() {
             buffer.set_direction(direction.to_horizontal());
         }
-        buffer.shape(font, font_arena, font_select)?
+        buffer.shape(font_iterator, font_arena, fonts)?
     };
 
     let mut metrics = text::compute_extents_ex(true, &glyphs)?;
-    metrics.extend_by_font(font);
+    if let Some(font) = primary {
+        metrics.extend_by_font(font);
+    }
 
     Ok((glyphs, metrics))
 }
@@ -133,7 +140,7 @@ pub struct RubyBaseId(usize);
 // *when the whole thing is in one block* but youtube uses inline-block so the sane
 // layout is correct.
 
-impl<'a> MultilineTextShaper<'a> {
+impl<'a, 'f> MultilineTextShaper<'a, 'f> {
     pub const fn new() -> Self {
         Self {
             text: String::new(),
@@ -143,9 +150,9 @@ impl<'a> MultilineTextShaper<'a> {
         }
     }
 
-    pub fn add_text(&mut self, mut text: &str, font: &'a text::Font) {
+    pub fn add_text(&mut self, mut text: &str, font_matcher: FontMatcher<'f>) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT TEXT: {:?} {:?}", text, font);
+            println!("SHAPING V2 INPUT TEXT: {text:?} {font_matcher:?}");
         }
 
         while let Some(nl) = text.find('\n') {
@@ -158,14 +165,14 @@ impl<'a> MultilineTextShaper<'a> {
         if let Some(&mut ShaperSegment {
             content:
                 Content::Text(TextContent {
-                    font: last_font,
+                    font_matcher: ref last_matcher,
                     internal_breaks_allowed: true,
                     ruby_annotation: None,
                 }),
             end: ref mut last_end,
         }) = self.segments.last_mut()
         {
-            if last_font == font {
+            if last_matcher == &font_matcher {
                 self.intra_font_segment_splits.push(*last_end);
                 *last_end = self.text.len();
                 return;
@@ -174,7 +181,7 @@ impl<'a> MultilineTextShaper<'a> {
 
         self.segments.push(ShaperSegment {
             content: Content::Text(TextContent {
-                font,
+                font_matcher,
                 internal_breaks_allowed: true,
                 ruby_annotation: None,
             }),
@@ -192,17 +199,17 @@ impl<'a> MultilineTextShaper<'a> {
         });
     }
 
-    pub fn add_ruby_base(&mut self, text: &str, font: &'a text::Font) -> RubyBaseId {
+    pub fn add_ruby_base(&mut self, text: &str, font_matcher: FontMatcher<'f>) -> RubyBaseId {
         let id = self.segments.len();
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT RUBY BASE[{id}]: {:?} {:?}", text, font);
+            println!("SHAPING V2 INPUT RUBY BASE[{id}]: {font_matcher:?}");
         }
 
         self.text.push_str(text);
         self.segments.push(ShaperSegment {
             content: Content::Text(TextContent {
-                font,
+                font_matcher,
                 internal_breaks_allowed: false,
                 ruby_annotation: None,
             }),
@@ -212,11 +219,16 @@ impl<'a> MultilineTextShaper<'a> {
         RubyBaseId(id)
     }
 
-    pub fn add_ruby_annotation(&mut self, base: RubyBaseId, text: &'a str, font: &'a text::Font) {
+    pub fn add_ruby_annotation(
+        &mut self,
+        base: RubyBaseId,
+        text: &'a str,
+        font_matcher: FontMatcher<'f>,
+    ) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!(
-                "SHAPING V2 INPUT RUBY ANNOTATION FOR {}: {:?} {:?}",
-                base.0, text, font
+                "SHAPING V2 INPUT RUBY ANNOTATION FOR {}: {text:?} {font_matcher:?}",
+                base.0
             );
         }
 
@@ -225,9 +237,9 @@ impl<'a> MultilineTextShaper<'a> {
         let ShaperSegment {
             content:
                 Content::Text(TextContent {
-                    font: _,
                     internal_breaks_allowed: false,
                     ruby_annotation: ref mut ruby_annotation @ None,
+                    ..
                 }),
             ..
         } = self.segments[base.0]
@@ -236,20 +248,20 @@ impl<'a> MultilineTextShaper<'a> {
         };
 
         *ruby_annotation = Some(Box::new(RubyAnnotation {
-            font,
+            font_matcher,
             input_index: index,
             text,
         }));
         self.skip_segment_for_output();
     }
 
-    pub fn shape<'f>(
+    pub fn shape(
         &'a self,
         line_alignment: HorizontalAlignment,
         wrap: TextWrapOptions,
         wrap_width: I26Dot6,
         font_arena: &'f FontArena,
-        font_select: &mut FontSelect,
+        fonts: &mut FontDb,
     ) -> Result<(Vec<ShapedLine<'a, 'f>>, Rect2<I26Dot6>), LayoutError> {
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
@@ -327,25 +339,32 @@ impl<'a> MultilineTextShaper<'a> {
                 match segment {
                     Content::None => {}
                     &Content::Text(TextContent {
-                        font,
+                        ref font_matcher,
                         internal_breaks_allowed,
                         ref ruby_annotation,
                     }) => {
+                        let primary = font_matcher
+                            .primary(font_arena, fonts)
+                            .map_err(text::ShapingError::FontSelect)?
+                            .ok_or(text::ShapingError::FontSelect(
+                                text::font_db::SelectError::NotFound,
+                            ))?;
+
                         let (mut glyphs, mut extents) = match post_wrap_glyphs.take() {
                             Some(glyphs) => {
                                 let mut metrics =
                                     text::compute_extents_ex(true, glyphs.iter_glyphs())?;
-                                metrics.extend_by_font(font);
+                                metrics.extend_by_font(primary);
 
                                 (glyphs, metrics)
                             }
                             None => {
                                 let (vec, metrics) = shape_simple_segment(
-                                    font,
                                     &self.text,
                                     segment_slice.clone(),
+                                    font_matcher.iterator(),
                                     &font_arena,
-                                    font_select,
+                                    fonts,
                                 )?;
                                 (GlyphString::from_glyphs(&self.text, vec), metrics)
                             }
@@ -394,9 +413,9 @@ impl<'a> MultilineTextShaper<'a> {
                                     candidate,
                                     max_width,
                                     &mut text::ShapingBuffer::new(),
-                                    font,
+                                    font_matcher.iterator(),
                                     font_arena,
-                                    font_select,
+                                    fonts,
                                 )? {
                                     drop(glyph_it);
                                     glyphs = broken;
@@ -405,7 +424,7 @@ impl<'a> MultilineTextShaper<'a> {
                                     line_boundary = candidate;
 
                                     extents = text::compute_extents_ex(true, glyphs.iter_glyphs())?;
-                                    extents.extend_by_font(font);
+                                    extents.extend_by_font(primary);
 
                                     break;
                                 }
@@ -428,11 +447,11 @@ impl<'a> MultilineTextShaper<'a> {
 
                         let ruby_padding = if let Some(annotation) = ruby_annotation {
                             let (glyphs, ruby_metrics) = shape_simple_segment(
-                                annotation.font,
                                 annotation.text,
                                 ..,
+                                annotation.font_matcher.iterator(),
                                 font_arena,
-                                font_select,
+                                fonts,
                             )?;
 
                             let base_width = extents.paint_size.x + extents.trailing_advance;

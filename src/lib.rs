@@ -16,7 +16,7 @@ use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
 use rasterize::{Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
-    layout::{MultilineTextShaper, ShapedLine, TextWrapParams},
+    layout::{MultilineTextShaper, ShapedLine, TextWrapOptions},
     FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics,
 };
 use vtt::VttEvent;
@@ -97,14 +97,8 @@ enum HorizontalAlignment {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextWrapMode {
-    /// Greedy line breaking.
-    Normal,
-}
-
 trait Layouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, event: &Event) -> f32;
+    fn wrap_width(&self, ctx: &SubtitleContext, event: &Event) -> I26Dot6;
 
     fn layout(
         &mut self,
@@ -126,7 +120,7 @@ struct Event {
     start: u32,
     end: u32,
     alignment: Alignment,
-    text_wrap: TextWrapMode,
+    text_wrap: TextWrapOptions,
     segments: Vec<TextSegment>,
     extra: EventExtra,
 }
@@ -835,8 +829,6 @@ impl<'a> Renderer<'a> {
                     continue;
                 }
 
-                let wrap_width = layouter.wrap_width(ctx, event);
-
                 let mut shaper = MultilineTextShaper::new();
                 let mut last_ruby_base = None;
                 for segment in event.segments.iter() {
@@ -879,10 +871,8 @@ impl<'a> Renderer<'a> {
                 let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
                 let (mut lines, mut total_rect) = shaper.shape(
                     horizontal_alignment,
-                    TextWrapParams {
-                        mode: event.text_wrap,
-                        wrap_width,
-                    },
+                    event.text_wrap,
+                    layouter.wrap_width(ctx, event),
                     &font_arena,
                     &mut self.fonts,
                 )?;

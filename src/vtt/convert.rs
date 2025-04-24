@@ -260,12 +260,12 @@ impl VttLayouter {
 }
 
 impl Layouter for VttLayouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, event: &crate::Event) -> f32 {
+    fn wrap_width(&self, ctx: &SubtitleContext, event: &crate::Event) -> I26Dot6 {
         let EventExtra::Vtt(extra) = &event.extra else {
             panic!("VttLayouter::wrap_width received foreign event {:?}", event);
         };
 
-        ctx.video_width.into_f32() * extra.size as f32 / 100.
+        ctx.video_width * extra.size as f32 / 100
     }
 
     fn layout(
@@ -530,7 +530,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
             // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
             alignment,
             segments: convert_text(cue.text),
-            text_wrap: crate::TextWrapMode::Normal,
+            text_wrap: crate::TextWrapOptions::default(),
             extra: crate::EventExtra::Vtt(VttEvent {
                 writing_direction: cue.writing_direction,
                 text_alignment: cue.text_alignment,

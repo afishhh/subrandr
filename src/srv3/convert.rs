@@ -219,8 +219,8 @@ pub(crate) struct Srv3Event {
 struct Srv3Layouter;
 
 impl Layouter for Srv3Layouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> f32 {
-        ctx.player_width().into_f32() * 0.96
+    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> I26Dot6 {
+        ctx.player_width() * 0.96
     }
 
     fn layout(
@@ -358,7 +358,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                 super::Point::BottomCenter => crate::Alignment::Bottom,
                 super::Point::BottomRight => crate::Alignment::BottomRight,
             },
-            text_wrap: crate::TextWrapMode::Normal,
+            text_wrap: crate::TextWrapOptions::default(),
             segments,
         })
     }

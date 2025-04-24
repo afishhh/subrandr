@@ -1,9 +1,10 @@
+use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
 use crate::{
     math::{I26Dot6, Point2, Rect2, Vec2},
     text::{self},
-    HorizontalAlignment, TextWrapMode,
+    HorizontalAlignment,
 };
 
 use super::{FontArena, FontSelect, GlyphString, TextMetrics};
@@ -89,10 +90,28 @@ fn shape_simple_segment<'f>(
     Ok((glyphs, metrics))
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextWrapMode {
+    /// Greedy line breaking.
+    #[default]
+    Normal,
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct TextWrapParams {
+pub struct TextWrapOptions {
     pub mode: TextWrapMode,
-    pub wrap_width: f32,
+    pub strictness: LineBreakStrictness,
+    pub word_break: LineBreakWordOption,
+}
+
+impl Default for TextWrapOptions {
+    fn default() -> Self {
+        Self {
+            mode: TextWrapMode::Normal,
+            strictness: LineBreakStrictness::Normal,
+            word_break: LineBreakWordOption::Normal,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,7 +248,8 @@ impl<'a> MultilineTextShaper<'a> {
     pub fn shape<'f>(
         &'a self,
         line_alignment: HorizontalAlignment,
-        wrap: TextWrapParams,
+        wrap: TextWrapOptions,
+        wrap_width: I26Dot6,
         font_arena: &'f FontArena,
         font_select: &mut FontSelect,
     ) -> Result<(Vec<ShapedLine<'a, 'f>>, Rect2<I26Dot6>), LayoutError> {
@@ -245,9 +265,12 @@ impl<'a> MultilineTextShaper<'a> {
             return Ok((Vec::new(), Rect2::ZERO));
         }
 
-        let wrap_width = I26Dot6::from_f32(wrap.wrap_width);
-
-        let segmenter = icu_segmenter::LineSegmenter::new_auto();
+        let segmenter = icu_segmenter::LineSegmenter::new_auto_with_options({
+            let mut options = LineBreakOptions::default();
+            options.strictness = wrap.strictness;
+            options.word_option = wrap.word_break;
+            options
+        });
 
         let mut lines: Vec<ShapedLine> = vec![];
         let mut current_line_y = I26Dot6::ZERO;

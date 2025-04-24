@@ -685,7 +685,7 @@ impl<'a> Renderer<'a> {
                 rasterizer,
                 target,
                 (ctx.padding_left + ctx.video_width).round_to_inner(),
-                0,
+                debug_line_height.round_to_inner(),
                 &format!(
                     "{:.2}x{:.2} dpi:{}",
                     ctx.video_width, ctx.video_height, ctx.dpi
@@ -699,7 +699,7 @@ impl<'a> Renderer<'a> {
                 rasterizer,
                 target,
                 (ctx.padding_left + ctx.video_width).round_to_inner(),
-                debug_line_height.round_to_inner(),
+                (debug_line_height * 2).round_to_inner(),
                 &format!(
                     "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                     ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
@@ -717,7 +717,7 @@ impl<'a> Renderer<'a> {
                     rasterizer,
                     target,
                     (ctx.padding_left + ctx.video_width).round_to_inner(),
-                    (debug_line_height * 2).round_to_inner(),
+                    (debug_line_height * 3).round_to_inner(),
                     &format!(
                         "min={:.1}ms avg={:.1}ms ({:.1}fps) max={:.1}ms ({:.1}fps)",
                         min,
@@ -736,7 +736,7 @@ impl<'a> Renderer<'a> {
                         rasterizer,
                         target,
                         (ctx.padding_left + ctx.video_width).round_to_inner(),
-                        (debug_line_height * 3).round_to_inner(),
+                        (debug_line_height * 4).round_to_inner(),
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
                         Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                         debug_font_size,
@@ -758,7 +758,7 @@ impl<'a> Renderer<'a> {
                     target,
                     Vec2::new(
                         offx as f32,
-                        ((debug_line_height * 4.5) + graph_height).into_f32(),
+                        ((debug_line_height * 5.5) + graph_height).into_f32(),
                     ),
                     &polyline,
                     BGRA8::new(255, 255, 0, 255),

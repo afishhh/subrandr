@@ -18,7 +18,7 @@ bindgen \
 	--raw-line '#![allow(non_camel_case_types)]' \
 	--raw-line '#![allow(non_snake_case)]' \
 	--raw-line '#![allow(improper_ctypes)]' \
-	--raw-line '#[cfg(any(target_family = "unix", target_os = "windows"))]' \
+	--raw-line '#[cfg(target_family = "unix")]' \
 	--raw-line 'pub mod fontconfig;' \
 	--no-prepend-enum-name \
 	--no-layout-tests \

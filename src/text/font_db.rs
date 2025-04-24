@@ -12,10 +12,10 @@ use crate::{
 use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FontRequest {
+pub struct FontFallbackRequest {
     pub families: Vec<Box<str>>,
     pub style: FontStyle,
-    pub codepoint: Option<u32>,
+    pub codepoint: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -77,15 +77,23 @@ impl FontAxisValues {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
-    File { path: PathBuf, index: i32 },
+    #[cfg_attr(not(target_family = "unix"), expect(dead_code))]
+    File {
+        path: PathBuf,
+        index: i32,
+    },
     Memory(text::Face),
+    #[cfg(target_os = "windows")]
+    DirectWrite(provider::directwrite::Source),
 }
 
 impl FontSource {
-    pub fn load(&self) -> Result<Face, FreeTypeError> {
+    pub fn load(&self) -> Result<Face, LoadError> {
         match self {
             &Self::File { ref path, index } => Ok(Face::load_from_file(path, index)?),
             Self::Memory(face) => Ok(face.clone()),
+            #[cfg(target_os = "windows")]
+            Self::DirectWrite(source) => source.open(),
         }
     }
 }
@@ -125,19 +133,22 @@ fn choose<'a>(fonts: &'a [FaceInfo], style: &FontStyle) -> Option<&'a FaceInfo> 
 }
 
 trait FontProvider: Sealed + std::fmt::Debug {
-    fn query(&mut self, request: &FontRequest) -> Result<Vec<FaceInfo>, AnyError>;
+    fn query_fallback(&mut self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, AnyError>;
     fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError>;
 }
 
 #[derive(Debug)]
 // This is only used on platforms where no native font provider is available.
-#[cfg_attr(target_family = "unix", expect(dead_code))]
+#[cfg_attr(any(target_family = "unix", target_os = "windows"), expect(dead_code))]
 struct NullFontProvider;
 
 impl Sealed for NullFontProvider {}
 
 impl FontProvider for NullFontProvider {
-    fn query(&mut self, _request: &FontRequest) -> Result<Vec<FaceInfo>, AnyError> {
+    fn query_fallback(
+        &mut self,
+        _request: &FontFallbackRequest,
+    ) -> Result<Vec<FaceInfo>, AnyError> {
         Ok(Vec::new())
     }
 
@@ -148,21 +159,31 @@ impl FontProvider for NullFontProvider {
 
 #[path = ""]
 mod provider {
-    #[cfg(any(target_family = "unix", target_os = "windows"))]
+    #[cfg(target_family = "unix")]
     #[path = "font_provider/fontconfig.rs"]
     pub mod fontconfig;
+
+    #[cfg(target_family = "windows")]
+    #[path = "font_provider/directwrite.rs"]
+    pub mod directwrite;
 
     use super::FontProvider;
     use crate::{util::AnyError, Subrandr};
 
-    #[cfg(not(target_family = "unix"))]
+    #[cfg(not(any(target_family = "unix", target_os = "windows")))]
     static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
 
     pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
-        #[cfg(any(target_family = "unix", target_os = "windows"))]
+        #[cfg(target_family = "unix")]
         {
             fontconfig::FontconfigFontProvider::new()
+                .map(|x| Box::new(x) as Box<dyn FontProvider>)
+                .map_err(Into::into)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            directwrite::DirectWriteFontProvider::new()
                 .map(|x| Box::new(x) as Box<dyn FontProvider>)
                 .map_err(Into::into)
         }
@@ -180,14 +201,29 @@ mod provider {
 }
 
 #[derive(Debug, Error)]
+pub enum LoadError {
+    #[error(transparent)]
+    #[cfg(target_os = "windows")]
+    DirectWrite(#[from] windows::core::Error),
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+}
+
+#[derive(Debug, Error)]
 pub enum SelectError {
     #[error(transparent)]
     // TODO: enum
     Provider(#[from] AnyError),
     #[error("Failed to load font: {0}")]
-    Load(#[from] FreeTypeError),
+    Load(#[from] LoadError),
     #[error("No font found")]
     NotFound,
+}
+
+impl From<FreeTypeError> for SelectError {
+    fn from(value: FreeTypeError) -> Self {
+        Self::Load(LoadError::FreeType(value))
+    }
 }
 
 #[derive(Debug)]
@@ -195,7 +231,7 @@ pub struct FontDb<'a> {
     sbr: &'a Subrandr,
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
-    request_cache: HashMap<FontRequest, Option<Face>>,
+    request_cache: HashMap<FontFallbackRequest, Option<Face>>,
     provider: Box<dyn FontProvider>,
     custom: Vec<FaceInfo>,
 }
@@ -246,7 +282,7 @@ impl<'a> FontDb<'a> {
         }
     }
 
-    pub fn select(&mut self, request: &FontRequest) -> Result<Face, SelectError> {
+    pub fn select_fallback(&mut self, request: &FontFallbackRequest) -> Result<Face, SelectError> {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
@@ -256,7 +292,7 @@ impl<'a> FontDb<'a> {
             );
             let mut choices = self
                 .provider
-                .query(request)
+                .query_fallback(request)
                 .map_err(SelectError::Provider)?;
 
             let custom_start = choices.len();

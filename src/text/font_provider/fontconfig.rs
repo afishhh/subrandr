@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::{
     math::I16Dot16,
     text::{
-        font_db::{FaceInfo, FontProvider, FontRequest, FontSource},
+        font_db::{FaceInfo, FontFallbackRequest, FontProvider, FontSource},
         FontAxisValues,
     },
     util::{AnyError, Sealed},
@@ -400,9 +400,9 @@ impl FontconfigFontProvider {
 }
 
 impl FontProvider for FontconfigFontProvider {
-    fn query(
+    fn query_fallback(
         &mut self,
-        req: &FontRequest,
+        req: &FontFallbackRequest,
     ) -> Result<Vec<crate::text::font_db::FaceInfo>, AnyError> {
         // TODO: Free on error
         let pattern = unsafe { FcPatternCreate() };
@@ -474,7 +474,7 @@ impl FontProvider for FontconfigFontProvider {
             FcFontSort(
                 self.config,
                 pattern,
-                (req.codepoint.is_some() && req.families.is_empty()) as i32,
+                req.families.is_empty() as i32,
                 std::ptr::null_mut(),
                 result.as_mut_ptr(),
             )
@@ -497,17 +497,15 @@ impl FontProvider for FontconfigFontProvider {
 
         for font in fonts.iter().copied() {
             unsafe {
-                if let Some(codepoint) = req.codepoint {
-                    let mut charset = std::ptr::null_mut();
-                    if FcPatternGetCharSet(font, FC_CHARSET.as_ptr() as *const i8, 0, &mut charset)
-                        != FcResultMatch
-                    {
-                        continue;
-                    }
+                let mut charset = std::ptr::null_mut();
+                if FcPatternGetCharSet(font, FC_CHARSET.as_ptr() as *const i8, 0, &mut charset)
+                    != FcResultMatch
+                {
+                    continue;
+                }
 
-                    if FcCharSetHasChar(charset, codepoint) == 0 {
-                        continue;
-                    }
+                if FcCharSetHasChar(charset, req.codepoint) == 0 {
+                    continue;
                 }
             }
 

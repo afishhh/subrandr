@@ -46,9 +46,14 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 fn make_pkgconfig_file(prefix: &Path, version: &str, target: &str) -> String {
     let prefix_str = prefix.to_str().unwrap().trim_end_matches('/');
     let extra_link_flags = if target.contains("-windows-") {
-        "-lWs2_32 -lNtosKrnl -luserenv"
+        "-lWs2_32 -lUserenv"
     } else {
         ""
+    };
+    let extra_requires = if target.contains("-windows-") {
+        ""
+    } else {
+        ", fontconfig >= 2"
     };
 
     format!(
@@ -59,7 +64,7 @@ includedir={prefix_str}/include
 Name: subrandr
 Description: A subtitle rendering library
 Version: {version}
-Requires: freetype2 >= 26, harfbuzz >= 10, fontconfig >= 2
+Requires: freetype2 >= 26, harfbuzz >= 10{extra_requires}
 Cflags: -I${{includedir}}
 Libs: -L${{libdir}} -lsubrandr {extra_link_flags}
 "#

@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 
 use crate::{math::I16Dot16, I26Dot6};
 
-use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontStyle};
+use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontFallbackRequest, FontStyle};
 
 // This function actually implements the logic from level 4
 // https://drafts.csswg.org/css-fonts/#font-style-matching
@@ -234,10 +234,10 @@ impl<'a, 'f> FontMatchIterator<'a, 'f> {
                     self.index += 1;
                 }
 
-                match fonts.select(&super::FontRequest {
+                match fonts.select_fallback(&FontFallbackRequest {
                     families: self.matcher.families.clone(),
                     style: self.matcher.style,
-                    codepoint: Some(codepoint),
+                    codepoint,
                 }) {
                     Ok(face) => Ok(Some(
                         arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),

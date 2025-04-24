@@ -1,2 +1,5 @@
 [target.'cfg(all(target_arch = "wasm32", target_os = "wasi"))']
 rustflags = ["-L./wasi32/deps"]
+
+[alias]
+xtask = "run --package xtask --"

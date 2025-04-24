@@ -32,5 +32,6 @@ debug = true
 
 [workspace]
 members = [
-  "sbr-overlay"
+  "sbr-overlay",
+  "xtask"
 ]

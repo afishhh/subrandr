@@ -186,17 +186,6 @@ impl Face {
         unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
     }
 
-    pub fn contains_codepoint(&self, chr: u32) -> bool {
-        if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
-            return false;
-        }
-
-        #[allow(clippy::useless_conversion)]
-        let index = unsafe { FT_Get_Char_Index(self.face, chr as std::ffi::c_ulong) };
-
-        index != 0
-    }
-
     fn shared_data(&self) -> &SharedFaceData {
         SharedFaceData::get_ref(self.face)
     }

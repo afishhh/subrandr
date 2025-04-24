@@ -28,7 +28,7 @@ const SRV3_FONTS: &[&[&str]] = &[
         "serif",
     ],
     &[
-        // "Deja Vu Sans Mono" is not a real font :(
+        "Deja Vu Sans Mono", // not a real font :(
         "Lucida Console",
         "Monaco",
         "Consolas",
@@ -44,7 +44,7 @@ const SRV3_FONTS: &[&[&str]] = &[
         "PT Sans Caption",
         "sans-serif",
     ],
-    &["Comis Sans Ms", "Impact", "Handlee", "fantasy"],
+    &["Comic Sans Ms", "Impact", "Handlee", "fantasy"],
     &[
         "Monotype Corsiva",
         "URW Chancery L",
@@ -69,13 +69,10 @@ const SRV3_FONTS: &[&[&str]] = &[
 ];
 
 fn font_style_to_name(style: u32) -> &'static [&'static str] {
-    match style {
-        ..=4 => style.checked_sub(1),
-        5 => Some(u32::MAX),
-        6.. => Some(style),
-    }
-    .and_then(|i| SRV3_FONTS.get(i as usize))
-    .map_or(SRV3_FONTS[3], |v| v)
+    style
+        .checked_sub(1)
+        .and_then(|i| SRV3_FONTS.get(i as usize))
+        .map_or(SRV3_FONTS[3], |v| v)
 }
 
 fn convert_coordinate(coord: f32) -> f32 {

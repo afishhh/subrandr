@@ -510,25 +510,21 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
             },
         }
 
-        // TODO: Split crate::Alignment into two.
-        let alignment = crate::Alignment::from_parts(
-            match cue.text_alignment {
-                // TODO: Start and End alignment is not supported yet
-                vtt::TextAlignment::Start => crate::HorizontalAlignment::Left,
-                vtt::TextAlignment::End => crate::HorizontalAlignment::Right,
-                vtt::TextAlignment::Left => crate::HorizontalAlignment::Left,
-                vtt::TextAlignment::Right => crate::HorizontalAlignment::Right,
-                vtt::TextAlignment::Center => crate::HorizontalAlignment::Center,
-            },
-            crate::VerticalAlignment::Top,
-        );
+        let horizontal_alignment = match cue.text_alignment {
+            // TODO: Start and End alignment is not supported yet
+            vtt::TextAlignment::Start => crate::HorizontalAlignment::Left,
+            vtt::TextAlignment::End => crate::HorizontalAlignment::Right,
+            vtt::TextAlignment::Left => crate::HorizontalAlignment::Left,
+            vtt::TextAlignment::Right => crate::HorizontalAlignment::Right,
+            vtt::TextAlignment::Center => crate::HorizontalAlignment::Center,
+        };
 
         subtitles.events.push(crate::Event {
             start: cue.start_time,
             end: cue.end_time,
             // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
             // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
-            alignment,
+            alignment: crate::Alignment(horizontal_alignment, crate::VerticalAlignment::Top),
             segments: convert_text(cue.text),
             text_wrap: crate::TextWrapOptions::default(),
             extra: crate::EventExtra::Vtt(VttEvent {

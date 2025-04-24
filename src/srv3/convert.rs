@@ -348,15 +348,42 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                 y: convert_coordinate(event.position().y as f32),
             }),
             alignment: match event.position().point {
-                super::Point::TopLeft => crate::Alignment::TopLeft,
-                super::Point::TopCenter => crate::Alignment::Top,
-                super::Point::TopRight => crate::Alignment::TopRight,
-                super::Point::MiddleLeft => crate::Alignment::Left,
-                super::Point::MiddleCenter => crate::Alignment::Center,
-                super::Point::MiddleRight => crate::Alignment::Right,
-                super::Point::BottomLeft => crate::Alignment::BottomLeft,
-                super::Point::BottomCenter => crate::Alignment::Bottom,
-                super::Point::BottomRight => crate::Alignment::BottomRight,
+                super::Point::TopLeft => crate::Alignment(
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::TopCenter => crate::Alignment(
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::TopRight => crate::Alignment(
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::MiddleLeft => crate::Alignment(
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::MiddleCenter => crate::Alignment(
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::MiddleRight => crate::Alignment(
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::BottomLeft => crate::Alignment(
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::Bottom,
+                ),
+                super::Point::BottomCenter => crate::Alignment(
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::Bottom,
+                ),
+                super::Point::BottomRight => crate::Alignment(
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::Bottom,
+                ),
             },
             text_wrap: crate::TextWrapOptions::default(),
             segments,

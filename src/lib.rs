@@ -34,63 +34,16 @@ mod text;
 mod util;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Alignment {
-    TopLeft,
-    Top,
-    TopRight,
-    Left,
-    Center,
-    Right,
-    BottomLeft,
-    Bottom,
-    BottomRight,
-}
+struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
 
-impl Alignment {
-    pub const fn from_parts(horiz: HorizontalAlignment, vert: VerticalAlignment) -> Alignment {
-        match (horiz, vert) {
-            (HorizontalAlignment::Left, VerticalAlignment::Top) => Alignment::TopLeft,
-            (HorizontalAlignment::Left, VerticalAlignment::BaselineCentered) => Alignment::Left,
-            (HorizontalAlignment::Left, VerticalAlignment::Bottom) => Alignment::BottomLeft,
-            (HorizontalAlignment::Center, VerticalAlignment::Top) => Alignment::Top,
-            (HorizontalAlignment::Center, VerticalAlignment::BaselineCentered) => Alignment::Center,
-            (HorizontalAlignment::Center, VerticalAlignment::Bottom) => Alignment::Bottom,
-            (HorizontalAlignment::Right, VerticalAlignment::Top) => Alignment::TopRight,
-            (HorizontalAlignment::Right, VerticalAlignment::BaselineCentered) => Alignment::Right,
-            (HorizontalAlignment::Right, VerticalAlignment::Bottom) => Alignment::BottomRight,
-        }
-    }
-
-    pub const fn into_parts(self) -> (HorizontalAlignment, VerticalAlignment) {
-        match self {
-            Self::TopLeft => (HorizontalAlignment::Left, VerticalAlignment::Top),
-            Self::Top => (HorizontalAlignment::Center, VerticalAlignment::Top),
-            Self::TopRight => (HorizontalAlignment::Right, VerticalAlignment::Top),
-            Self::Left => (
-                HorizontalAlignment::Left,
-                VerticalAlignment::BaselineCentered,
-            ),
-            Self::Center => (
-                HorizontalAlignment::Center,
-                VerticalAlignment::BaselineCentered,
-            ),
-            Self::Right => (
-                HorizontalAlignment::Right,
-                VerticalAlignment::BaselineCentered,
-            ),
-            Self::BottomLeft => (HorizontalAlignment::Left, VerticalAlignment::Bottom),
-            Self::Bottom => (HorizontalAlignment::Center, VerticalAlignment::Bottom),
-            Self::BottomRight => (HorizontalAlignment::Right, VerticalAlignment::Bottom),
-        }
-    }
-}
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VerticalAlignment {
     Top,
     BaselineCentered,
     Bottom,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HorizontalAlignment {
     Left,
     Center,
@@ -119,6 +72,7 @@ enum EventExtra {
 struct Event {
     start: u32,
     end: u32,
+    // TODO: Add `text-align` to TextSegment and move actual alignment into `Layouter`.
     alignment: Alignment,
     text_wrap: TextWrapOptions,
     segments: Vec<TextSegment>,
@@ -457,7 +411,7 @@ impl<'a> Renderer<'a> {
     ) -> (i32, i32) {
         assert!(horizontal);
 
-        let (horizontal, vertical) = alignment.into_parts();
+        let Alignment(horizontal, vertical) = alignment;
 
         let ox = match horizontal {
             HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
@@ -684,7 +638,7 @@ impl<'a> Renderer<'a> {
                     " rev ",
                     env!("BUILD_REV")
                 ),
-                Alignment::TopLeft,
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                 debug_font_size,
                 BGRA8::WHITE,
             )?;
@@ -695,7 +649,7 @@ impl<'a> Renderer<'a> {
                 0,
                 debug_line_height.round_to_inner(),
                 &format!("subtitle class: {}", subs.class.name),
-                Alignment::TopLeft,
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                 debug_font_size,
                 BGRA8::WHITE,
             )?;
@@ -707,7 +661,7 @@ impl<'a> Renderer<'a> {
                 0,
                 (debug_line_height * 2).round_to_inner(),
                 &rasterizer_line,
-                Alignment::TopLeft,
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                 debug_font_size,
                 BGRA8::WHITE,
             )?;
@@ -719,7 +673,7 @@ impl<'a> Renderer<'a> {
                     0,
                     (debug_line_height * 3).round_to_inner(),
                     &adapter_line,
-                    Alignment::TopLeft,
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                     debug_font_size,
                     BGRA8::WHITE,
                 )?;
@@ -736,7 +690,7 @@ impl<'a> Renderer<'a> {
                     "{:.2}x{:.2} dpi:{}",
                     ctx.video_width, ctx.video_height, ctx.dpi
                 ),
-                Alignment::TopRight,
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                 debug_font_size,
                 BGRA8::WHITE,
             )?;
@@ -750,7 +704,7 @@ impl<'a> Renderer<'a> {
                     "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                     ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                 ),
-                Alignment::TopRight,
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                 debug_font_size,
                 BGRA8::WHITE,
             )?;
@@ -772,7 +726,7 @@ impl<'a> Renderer<'a> {
                         max,
                         1000.0 / max
                     ),
-                    Alignment::TopRight,
+                    Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                     debug_font_size,
                     BGRA8::WHITE,
                 )?;
@@ -784,7 +738,7 @@ impl<'a> Renderer<'a> {
                         (ctx.padding_left + ctx.video_width).round_to_inner(),
                         (debug_line_height * 3).round_to_inner(),
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
-                        Alignment::TopRight,
+                        Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                         debug_font_size,
                         BGRA8::WHITE,
                     )?;
@@ -868,7 +822,7 @@ impl<'a> Renderer<'a> {
                     }
                 }
 
-                let (horizontal_alignment, vertical_alignment) = event.alignment.into_parts();
+                let Alignment(horizontal_alignment, vertical_alignment) = event.alignment;
                 let (mut lines, mut total_rect) = shaper.shape(
                     horizontal_alignment,
                     event.text_wrap,
@@ -909,11 +863,18 @@ impl<'a> Renderer<'a> {
                 }
 
                 let total_position_debug_pos = match vertical_alignment {
-                    VerticalAlignment::Top => (total_rect.height() + 20, Alignment::Top),
-                    VerticalAlignment::BaselineCentered => {
-                        (total_rect.height() + 20, Alignment::Top)
-                    }
-                    VerticalAlignment::Bottom => (I26Dot6::new(-24), Alignment::Bottom),
+                    VerticalAlignment::Top => (
+                        total_rect.height() + 20,
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                    ),
+                    VerticalAlignment::BaselineCentered => (
+                        total_rect.height() + 20,
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                    ),
+                    VerticalAlignment::Bottom => (
+                        I26Dot6::new(-24),
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
+                    ),
                 };
 
                 if self.sbr.debug.draw_layout_info {
@@ -999,7 +960,7 @@ impl<'a> Renderer<'a> {
                                 shaped_segment.logical_rect.min.x + x,
                                 shaped_segment.logical_rect.min.y + y
                             ),
-                            Alignment::BottomLeft,
+                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
                             debug_font_size,
                             BGRA8::RED,
                         )?;
@@ -1010,7 +971,7 @@ impl<'a> Renderer<'a> {
                             final_logical_box.min.x as i32,
                             final_logical_box.max.y as i32,
                             &format!("{:.1}", shaped_segment.baseline_offset.x),
-                            Alignment::TopLeft,
+                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                             debug_font_size,
                             BGRA8::RED,
                         )?;
@@ -1021,7 +982,7 @@ impl<'a> Renderer<'a> {
                             final_logical_box.max.x as i32,
                             final_logical_box.min.y as i32,
                             &format!("{:.0}pt", (subs.class.get_font_size)(ctx, event, segment)),
-                            Alignment::BottomRight,
+                            Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
                             debug_font_size,
                             BGRA8::GOLD,
                         )?;

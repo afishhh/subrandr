@@ -48,8 +48,6 @@ pub struct ShapedSegment<'a, 'f> {
     pub baseline_offset: Point2<I26Dot6>,
     pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
-    // Implementation details
-    max_ascender: I26Dot6,
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +302,10 @@ impl<'a> MultilineTextShaper<'a> {
 
             let mut line_max_ascender = I26Dot6::ZERO;
             let mut line_min_descender = I26Dot6::ZERO;
+            // TODO: Line height should actually be calculated with respect to the
+            //       whole *inline box*!!! Not its fragments like we currently do.
+            //       See <https://www.w3.org/TR/css-inline-3/#inline-height> which refers
+            //       purely to "inline box"es and not their constituent fragments.
             let mut line_max_lineskip_descent = I26Dot6::ZERO;
             let mut annotations_max_ascender = I26Dot6::ZERO;
 
@@ -463,7 +465,6 @@ impl<'a> MultilineTextShaper<'a> {
                                     ),
                                 ),
                                 corresponding_input_segment: annotation.input_index,
-                                max_ascender: ruby_metrics.max_ascender,
                             });
 
                             base_padding
@@ -485,10 +486,9 @@ impl<'a> MultilineTextShaper<'a> {
                                     current_line_y,
                                 ),
                                 logical_rect: Rect2::from_min_size(
-                                    Point2::new(-ruby_padding, I26Dot6::ZERO),
+                                    Point2::new(-ruby_padding, -extents.max_ascender),
                                     Vec2::new(logical_width, logical_height),
                                 ),
-                                max_ascender: extents.max_ascender,
                                 corresponding_input_segment: current_segment + current_intra_split,
                             });
                             current_x += logical_width;
@@ -517,13 +517,12 @@ impl<'a> MultilineTextShaper<'a> {
                                     glyphs: glyph_slice,
                                     baseline_offset: Point2::new(current_x, current_line_y),
                                     logical_rect: Rect2::from_min_size(
-                                        Point2::ZERO,
+                                        Point2::new(I26Dot6::ZERO, -local_max_ascender),
                                         Vec2::new(
                                             extents.paint_size.x + extents.trailing_advance,
                                             logical_height,
                                         ),
                                     ),
-                                    max_ascender: local_max_ascender,
                                     corresponding_input_segment: current_segment
                                         + current_intra_split,
                                 });
@@ -575,7 +574,7 @@ impl<'a> MultilineTextShaper<'a> {
                 segment.baseline_offset.y += line_max_ascender + annotation_y_adjustment;
                 segment.logical_rect = segment.logical_rect.translate(Vec2::new(
                     segment.baseline_offset.x,
-                    current_line_y + line_max_ascender - segment.max_ascender,
+                    current_line_y + line_max_ascender,
                 ));
             }
 

@@ -162,7 +162,7 @@ where
         trailing_advance: I26Dot6::ZERO,
         max_bearing_y: I26Dot6::ZERO,
         max_ascender: I26Dot6::ZERO,
-        min_descender: I26Dot6::MAX,
+        min_descender: I26Dot6::ZERO,
         max_lineskip_descent: I26Dot6::ZERO,
     };
 
@@ -180,9 +180,6 @@ where
             results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
         }
         results.extend_by_font(glyph.font);
-    } else {
-        results.min_descender = I26Dot6::ZERO;
-        return Ok(results);
     }
 
     for glyph in glyphs {

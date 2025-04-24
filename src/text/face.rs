@@ -423,7 +423,7 @@ unsafe fn build_font_metrics(
     if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2).filter(|_| scalable) } {
         ascender = scale_font_units!(os2.sTypoAscender);
         descender = scale_font_units!(os2.sTypoDescender);
-        height = scale_font_units!(os2.sTypoLineGap);
+        height = ascender - descender + scale_font_units!(os2.sTypoLineGap);
 
         strikeout_top_offset = scale_font_units!(-os2.yStrikeoutPosition);
         strikeout_thickness = scale_font_units!(os2.yStrikeoutSize);

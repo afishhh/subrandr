@@ -64,9 +64,10 @@ includedir={prefix_str}/include
 Name: subrandr
 Description: A subtitle rendering library
 Version: {version}
-Requires: freetype2 >= 26, harfbuzz >= 10{extra_requires}
+Requires.private: freetype2 >= 26, harfbuzz >= 10{extra_requires}
 Cflags: -I${{includedir}}
-Libs: -L${{libdir}} -lsubrandr {extra_link_flags}
+Libs: -L${{libdir}} -lsubrandr
+Libs.private: {extra_link_flags}
 "#
     )
 }
@@ -151,6 +152,18 @@ fn main() -> Result<()> {
                 prefix.join("lib").join("libsubrandr.a"),
             )
             .context("Failed to copy `libsubrandr.a`")?;
+
+            let shared_name = if install.target.contains("-windows-") {
+                "subrandr.dll"
+            } else {
+                "libsubrandr.so"
+            };
+
+            std::fs::copy(
+                target_dir.join(shared_name),
+                prefix.join("lib").join(shared_name),
+            )
+            .with_context(|| format!("Failed to copy `{shared_name}`"))?;
 
             std::fs::write(
                 prefix.join("lib").join("pkgconfig").join("subrandr.pc"),

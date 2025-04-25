@@ -33,6 +33,6 @@ pkgs.rustPlatform.buildRustPackage {
   ];
 
   installPhase = ''
-    PREFIX=$out TARGET=${stdenv.hostPlatform.rust.rustcTarget} bash ./install.sh
+    cargo xtask install -p $out --target ${stdenv.hostPlatform.rust.rustcTarget}
   '';
 }

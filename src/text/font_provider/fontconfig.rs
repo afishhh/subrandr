@@ -1,6 +1,7 @@
 use std::{
-    ffi::{c_char, c_int, CStr, CString},
+    ffi::{c_char, c_int, CStr, CString, OsString},
     mem::MaybeUninit,
+    os::unix::ffi::OsStringExt,
     path::PathBuf,
 };
 
@@ -287,15 +288,11 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
             return None;
         }
 
-        PathBuf::from(
-            // TODO: What format is this on Windows? Conservatively I will assume it is UTF-8 compatible..
-            String::from_utf8(
-                CStr::from_ptr(path.assume_init() as *const _)
-                    .to_bytes()
-                    .to_vec(),
-            )
-            .ok()?,
-        )
+        PathBuf::from(OsString::from_vec(
+            CStr::from_ptr(path.assume_init() as *const _)
+                .to_bytes()
+                .to_vec(),
+        ))
     };
 
     let index = unsafe {

@@ -1,6 +1,8 @@
 use std::{
+    fmt::Display,
     path::{Path, PathBuf},
     process::Command,
+    str::FromStr,
 };
 
 use anyhow::{Context, Result, bail};
@@ -20,10 +22,75 @@ enum Task {
 
 #[derive(Parser)]
 struct InstallCommand {
-    #[clap(short = 't', long = "target", default_value_t = env!("TARGET").to_owned())]
-    target: String,
+    #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
+    target: Triple,
     #[clap(short = 'p', long = "prefix")]
     prefix: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct Triple {
+    arch: Box<str>,
+    vendor: Box<str>,
+    os: Box<str>,
+    env: Option<Box<str>>,
+}
+
+impl Triple {
+    fn is_windows(&self) -> bool {
+        &*self.os == "windows"
+    }
+
+    fn is_unix(&self) -> bool {
+        // Censored version of `rustc -Z unstable-options --print all-target-specs-json | jq -r '.[] | select(.["target-family"] | index("unix") != null) | .os' | sort | uniq`
+        matches!(
+            &*self.os,
+            "android"
+                | "cygwin"
+                | "emscripten"
+                | "freebsd"
+                | "ios"
+                | "linux"
+                | "macos"
+                | "netbsd"
+                | "openbsd"
+                | "tvos"
+                | "visionos"
+                | "vita"
+        )
+    }
+}
+
+impl FromStr for Triple {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> Result<Self> {
+        let mut it = text.split('-');
+        let result = Triple {
+            arch: it.next().unwrap().into(),
+            vendor: it.next().context("Target triple missing vendor")?.into(),
+            os: it.next().context("Target triple missing os")?.into(),
+            env: it.next().map(Into::into),
+        };
+
+        if it.next().is_some() {
+            bail!("Target triple contains too many components")
+        }
+
+        Ok(result)
+    }
+}
+
+impl Display for Triple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}-{}", self.arch, self.vendor, self.os)?;
+
+        if let Some(env) = self.env.as_ref() {
+            write!(f, "-{env}")?;
+        }
+
+        Ok(())
+    }
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -43,17 +110,23 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn make_pkgconfig_file(prefix: &Path, version: &str, target: &str) -> String {
+fn copy_file(src: &Path, dst: &Path, file: &str) -> anyhow::Result<()> {
+    std::fs::copy(src.join(file), dst.join(file))
+        .with_context(|| format!("Failed to copy `{file}`"))
+        .map(|_| ())
+}
+
+fn make_pkgconfig_file(prefix: &Path, version: &str, target: &Triple) -> String {
     let prefix_str = prefix.to_str().unwrap().trim_end_matches('/');
-    let extra_link_flags = if target.contains("-windows-") {
+    let extra_link_flags = if target.is_windows() {
         "-lWs2_32 -lUserenv"
     } else {
         ""
     };
-    let extra_requires = if target.contains("-windows-") {
-        ""
-    } else {
+    let extra_requires = if target.is_unix() {
         ", fontconfig >= 2"
+    } else {
+        ""
     };
 
     format!(
@@ -70,6 +143,46 @@ Libs: -L${{libdir}} -lsubrandr
 Libs.private: {extra_link_flags}
 "#
     )
+}
+
+fn write_implib(arch: &str, def_content: &str, dllname: &str, output_path: &Path) -> Result<()> {
+    let machine = match arch {
+        "x86_64" => implib::MachineType::AMD64,
+        "i686" => implib::MachineType::I386,
+        "aarch64" => implib::MachineType::ARM64,
+        _ => panic!("Don't know how to generate implib for arch {arch:?}"),
+    };
+
+    let mut def = implib::def::ModuleDef::parse(def_content, machine)
+        .context("Failed to parse module def")?;
+    def.import_name = dllname.to_owned();
+    implib::ImportLibrary::from_def(def, machine, implib::Flavor::Gnu)
+        .write_to(
+            &mut std::fs::File::create(output_path)
+                .context("Failed to open import library output file")?,
+        )
+        .context("Failed to create import library")
+}
+
+#[derive(Debug, Deserialize)]
+struct Manifest {
+    package: Package,
+}
+
+#[derive(Debug, Deserialize)]
+struct Package {
+    version: Box<str>,
+    metadata: PackageMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackageMetadata {
+    capi: CApiMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct CApiMetadata {
+    abiver: Box<str>,
 }
 
 fn main() -> Result<()> {
@@ -91,7 +204,7 @@ fn main() -> Result<()> {
             let status = Command::new(env!("CARGO"))
                 .arg("build")
                 .arg("--target")
-                .arg(&install.target)
+                .arg(install.target.to_string())
                 .arg("--release")
                 .arg("-p")
                 .arg("subrandr")
@@ -101,37 +214,21 @@ fn main() -> Result<()> {
                 bail!("`cargo build` failed: {}", status)
             }
 
-            let output = Command::new(env!("CARGO"))
-                .arg("metadata")
-                .arg("--no-deps")
-                .output()
-                .context("Failed to run `cargo metadata`")?;
+            let manifest: Manifest = toml::from_str(
+                &std::fs::read_to_string(project_dir.join("Cargo.toml"))
+                    .context("Failed to read Cargo.toml")?,
+            )
+            .context("Failed to parse Cargo.toml")?;
 
-            if !output.status.success() {
-                bail!("`cargo metadata` failed: {}", status)
-            }
-
-            #[derive(Debug, Deserialize)]
-            struct Metadata {
-                packages: Vec<PackageMetadata>,
-            }
-
-            #[derive(Debug, Deserialize)]
-            struct PackageMetadata {
-                name: Box<str>,
-                version: Box<str>,
-            }
-
-            let metadata = serde_json::from_slice::<Metadata>(&output.stdout)
-                .context("Failed to deserialize `cargo metadata` output")?
-                .packages
-                .into_iter()
-                .find(|package| &*package.name == "subrandr")
-                .context("Failed to find metadata for package `subrandr`")?;
+            let version = manifest.package.version;
+            let abiver = manifest.package.metadata.capi.abiver;
 
             (|| -> Result<()> {
                 std::fs::create_dir_all(prefix.join("lib").join("pkgconfig"))?;
                 std::fs::create_dir_all(prefix.join("include").join("subrandr"))?;
+                if install.target.is_windows() {
+                    std::fs::create_dir_all(prefix.join("bin"))?;
+                }
                 Ok(())
             })()
             .context("Failed to create directory structure")?;
@@ -144,30 +241,50 @@ fn main() -> Result<()> {
 
             let target_dir = project_dir
                 .join("target")
-                .join(&install.target)
+                .join(install.target.to_string())
                 .join("release");
 
-            std::fs::copy(
-                target_dir.join("libsubrandr.a"),
-                prefix.join("lib").join("libsubrandr.a"),
-            )
-            .context("Failed to copy `libsubrandr.a`")?;
+            let libdir = prefix.join("lib");
 
-            let shared_name = if install.target.contains("-windows-") {
-                "subrandr.dll"
+            copy_file(&target_dir, &libdir, "libsubrandr.a")?;
+
+            let (shared_in, shared_dir, shared_out) = if install.target.is_windows() {
+                ("subrandr.dll", "bin", format!("subrandr-{abiver}.dll"))
             } else {
-                "libsubrandr.so"
+                ("libsubrandr.so", "lib", format!("libsubrandr.so.{abiver}"))
             };
 
             std::fs::copy(
-                target_dir.join(shared_name),
-                prefix.join("lib").join(shared_name),
+                target_dir.join(shared_in),
+                prefix.join(shared_dir).join(&shared_out),
             )
-            .with_context(|| format!("Failed to copy `{shared_name}`"))?;
+            .with_context(|| format!("Failed to copy `{shared_in}`"))?;
+
+            #[cfg(unix)]
+            if install.target.is_unix() {
+                let link = libdir.join("libsubrandr.so");
+                match std::fs::remove_file(&link) {
+                    Ok(()) => (),
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(err) => return Err(err).context("Failed to remove `libsubrandr.so`"),
+                };
+                std::os::unix::fs::symlink(&shared_out, link)
+                    .context("Failed to symlink `libsubrandr.so`")?;
+            }
+
+            if install.target.is_windows() {
+                write_implib(
+                    &install.target.arch,
+                    &std::fs::read_to_string(target_dir.join("subrandr.def"))
+                        .context("Failed to read module definition file")?,
+                    &shared_out,
+                    &libdir.join("libsubrandr.dll.a"),
+                )?;
+            }
 
             std::fs::write(
-                prefix.join("lib").join("pkgconfig").join("subrandr.pc"),
-                make_pkgconfig_file(&prefix, &metadata.version, &install.target),
+                libdir.join("pkgconfig").join("subrandr.pc"),
+                make_pkgconfig_file(&prefix, &version, &install.target),
             )
             .context("Failed to write pkgconfig file")?;
         }

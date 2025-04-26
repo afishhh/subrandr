@@ -3,6 +3,10 @@ name = "subrandr"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.capi]
+# This is very crudely parsed by the build script, don't touch.
+abiver = "0"
+
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
 

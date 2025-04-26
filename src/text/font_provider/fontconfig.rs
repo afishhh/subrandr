@@ -241,34 +241,28 @@ fn map_fontconfig_weight_axis_to_opentype(axis: FontAxisValues) -> Option<FontAx
 unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
     let family = unsafe {
         let mut family = MaybeUninit::uninit();
-        if FcPatternGetString(
-            pattern,
-            FC_FAMILY.as_ptr() as *const i8,
-            0,
-            family.as_mut_ptr(),
-        ) != FcResultMatch
+        if FcPatternGetString(pattern, FC_FAMILY.as_ptr().cast(), 0, family.as_mut_ptr())
+            != FcResultMatch
         {
             return None;
         }
 
-        match CStr::from_ptr(family.assume_init() as *const i8).to_str() {
+        match CStr::from_ptr(family.assume_init().cast()).to_str() {
             Ok(family) => family,
             Err(_) => return None,
         }
     };
 
-    let width = unsafe { pattern_get_axis_values(pattern, FC_WIDTH.as_ptr() as *const i8)? };
+    let width = unsafe { pattern_get_axis_values(pattern, FC_WIDTH.as_ptr().cast())? };
 
     let weight = unsafe {
-        pattern_get_axis_values(pattern, FC_WEIGHT.as_ptr() as *const i8)
+        pattern_get_axis_values(pattern, FC_WEIGHT.as_ptr().cast())
             .and_then(map_fontconfig_weight_axis_to_opentype)?
     };
 
     let italic = unsafe {
         let mut slant = 0;
-        if FcPatternGetInteger(pattern, FC_SLANT.as_ptr() as *const i8, 0, &mut slant)
-            != FcResultMatch
-        {
+        if FcPatternGetInteger(pattern, FC_SLANT.as_ptr().cast(), 0, &mut slant) != FcResultMatch {
             return None;
         }
 
@@ -281,7 +275,7 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
 
     let path = unsafe {
         let mut path = MaybeUninit::uninit();
-        if FcPatternGetString(pattern, FC_FILE.as_ptr() as *const i8, 0, path.as_mut_ptr())
+        if FcPatternGetString(pattern, FC_FILE.as_ptr().cast(), 0, path.as_mut_ptr())
             != FcResultMatch
         {
             return None;
@@ -300,12 +294,8 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
 
     let index = unsafe {
         let mut index = MaybeUninit::uninit();
-        if FcPatternGetInteger(
-            pattern,
-            FC_INDEX.as_ptr() as *const i8,
-            0,
-            index.as_mut_ptr(),
-        ) == FcResultMatch
+        if FcPatternGetInteger(pattern, FC_INDEX.as_ptr().cast(), 0, index.as_mut_ptr())
+            == FcResultMatch
         {
             #[allow(clippy::unnecessary_cast)]
             {
@@ -328,7 +318,7 @@ unsafe fn font_info_from_pattern(pattern: *mut FcPattern) -> Option<FaceInfo> {
 impl FontconfigFontProvider {
     fn query_by_param(
         &mut self,
-        param_name: *const i8,
+        param_name: *const c_char,
         value: &CStr,
     ) -> Result<Vec<FaceInfo>, AnyError> {
         let pattern = unsafe { FcPatternCreate() };
@@ -336,11 +326,11 @@ impl FontconfigFontProvider {
             return Err(LoadError::PatternCreate.into());
         }
 
-        unsafe { FcPatternAddString(pattern, param_name, value.as_ptr() as *const u8) };
+        unsafe { FcPatternAddString(pattern, param_name, value.as_ptr().cast()) };
 
         let object_set = unsafe {
             FcObjectSetBuild(
-                FC_FAMILY.as_ptr().cast::<i8>(),
+                FC_FAMILY.as_ptr().cast(),
                 FC_SLANT,
                 FC_WIDTH,
                 FC_WEIGHT,
@@ -413,7 +403,7 @@ impl FontProvider for FontconfigFontProvider {
         macro_rules! pattern_add {
             ($cfun: ident, $err: ident, $key: ident, $value: expr, $errvalue: expr) => {
                 #[allow(unused_unsafe)]
-                if unsafe { $cfun(pattern, $key.as_ptr() as *const i8, $value) == 0 } {
+                if unsafe { $cfun(pattern, $key.as_ptr().cast(), $value) == 0 } {
                     return Err(LoadError::$err(
                         const { CStr::from_bytes_with_nul($key) }.unwrap(),
                         $errvalue,
@@ -498,7 +488,7 @@ impl FontProvider for FontconfigFontProvider {
         for font in fonts.iter().copied() {
             unsafe {
                 let mut charset = std::ptr::null_mut();
-                if FcPatternGetCharSet(font, FC_CHARSET.as_ptr() as *const i8, 0, &mut charset)
+                if FcPatternGetCharSet(font, FC_CHARSET.as_ptr().cast(), 0, &mut charset)
                     != FcResultMatch
                 {
                     continue;
@@ -531,7 +521,7 @@ impl FontProvider for FontconfigFontProvider {
 
         let properties: [&[u8]; 3] = [FC_FAMILY, FC_POSTSCRIPT_NAME, FC_FULLNAME];
         for property in properties {
-            let result = self.query_by_param(property.as_ptr() as *const i8, &cfamily)?;
+            let result = self.query_by_param(property.as_ptr().cast(), &cfamily)?;
             if !result.is_empty() {
                 return Ok(result);
             }

@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     cell::UnsafeCell,
-    ffi::{c_int, CStr, CString},
+    ffi::{c_char, c_int, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
     sync::Arc,
@@ -258,7 +258,7 @@ unsafe extern "C" fn sbr_library_version(major: *mut u32, minor: *mut u32, patch
 
 #[unsafe(no_mangle)]
 #[cfg(not(target_arch = "wasm32"))]
-unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subtitles {
+unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const c_char) -> *mut Subtitles {
     let str = CStr::from_ptr(path);
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
     if bytes.ends_with(".srv3") {
@@ -282,10 +282,7 @@ unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const i8) -> *mut Subt
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_probe_text(
-    content: *const std::ffi::c_char,
-    content_len: usize,
-) -> SubtitleFormat {
+unsafe extern "C" fn sbr_probe_text(content: *const c_char, content_len: usize) -> SubtitleFormat {
     let Ok(content) = std::str::from_utf8(std::slice::from_raw_parts(
         content.cast::<u8>(),
         content_len,
@@ -299,10 +296,10 @@ unsafe extern "C" fn sbr_probe_text(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_load_text(
     sbr: &Subrandr,
-    content: *const std::ffi::c_char,
+    content: *const c_char,
     content_len: usize,
     format: i16,
-    language_hint: *const std::ffi::c_char,
+    language_hint: *const c_char,
 ) -> *mut Subtitles {
     let mut format = ctry!(SubtitleFormat::try_from_value(format));
     let content = ctrywrap!(
@@ -346,7 +343,7 @@ unsafe extern "C" fn sbr_subtitles_destroy(subtitles: *mut Subtitles) {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_get_last_error_string() -> *const i8 {
+unsafe extern "C" fn sbr_get_last_error_string() -> *const c_char {
     LAST_ERROR.with(|x| {
         (*x.get())
             .as_ref()
@@ -423,7 +420,7 @@ unsafe extern "C" fn sbr_renderer_clear_fonts(renderer: *mut Renderer<'static>) 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_add_font(
     renderer: *mut Renderer<'static>,
-    family: *const i8,
+    family: *const c_char,
     weight: f32,
     italic: bool,
     font: *mut Face,

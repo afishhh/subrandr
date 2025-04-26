@@ -61,15 +61,10 @@ impl Logger {
             }
             &Logger::C { fun, user_data } => {
                 if let Some(literal) = fmt.as_str() {
-                    fun(
-                        level,
-                        literal.as_ptr() as *const i8,
-                        literal.len(),
-                        user_data,
-                    )
+                    fun(level, literal.as_ptr().cast(), literal.len(), user_data)
                 } else {
                     let string = fmt.to_string();
-                    fun(level, string.as_ptr() as *const i8, string.len(), user_data)
+                    fun(level, string.as_ptr().cast(), string.len(), user_data)
                 }
             }
         }

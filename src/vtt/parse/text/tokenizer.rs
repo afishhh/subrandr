@@ -9,6 +9,8 @@
 
 use std::borrow::Cow;
 
+use crate::html;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenizerState {
     Data = 0,
@@ -194,8 +196,8 @@ impl<'a> Text<'a> {
     }
 
     pub fn content(&self) -> Cow<'a, str> {
-        // TODO: Unescape HTML entities
-        Cow::Borrowed(self.raw_content())
+        html::unescape(self.raw_content())
+            .map_or_else(|| Cow::Borrowed(self.raw_content()), Cow::Owned)
     }
 }
 
@@ -209,8 +211,9 @@ impl<'a> Annotation<'a> {
     }
 
     pub fn content(&self) -> Cow<'a, str> {
-        // TODO: Unescape HTML entities with additional allowed characters being '>'
-        Cow::Borrowed(self.raw_content())
+        // TODO: What does the standard mean by "with additional allowed characters being '>'"?
+        html::unescape(self.raw_content())
+            .map_or_else(|| Cow::Borrowed(self.raw_content()), Cow::Owned)
     }
 }
 

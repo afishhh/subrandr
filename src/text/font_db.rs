@@ -2,12 +2,7 @@ use std::{collections::HashMap, hash::Hash, path::PathBuf};
 
 use thiserror::Error;
 
-use crate::{
-    math::I16Dot16,
-    text, trace,
-    util::{AnyError, Sealed},
-    Subrandr,
-};
+use crate::{math::I16Dot16, text, trace, util::AnyError, Subrandr};
 
 use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 
@@ -132,29 +127,9 @@ fn choose<'a>(fonts: &'a [FaceInfo], style: &FontStyle) -> Option<&'a FaceInfo> 
     result
 }
 
-trait FontProvider: Sealed + std::fmt::Debug {
+trait FontProvider: std::fmt::Debug {
     fn query_fallback(&mut self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, AnyError>;
     fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError>;
-}
-
-#[derive(Debug)]
-// This is only used on platforms where no native font provider is available.
-#[cfg_attr(any(target_family = "unix", target_os = "windows"), expect(dead_code))]
-struct NullFontProvider;
-
-impl Sealed for NullFontProvider {}
-
-impl FontProvider for NullFontProvider {
-    fn query_fallback(
-        &mut self,
-        _request: &FontFallbackRequest,
-    ) -> Result<Vec<FaceInfo>, AnyError> {
-        Ok(Vec::new())
-    }
-
-    fn query_family(&mut self, _family: &str) -> Result<Vec<FaceInfo>, AnyError> {
-        Ok(Vec::new())
-    }
 }
 
 #[path = ""]
@@ -169,10 +144,6 @@ mod provider {
 
     use super::FontProvider;
     use crate::{util::AnyError, Subrandr};
-
-    #[cfg(not(any(target_family = "unix", target_os = "windows")))]
-    static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
-        std::sync::atomic::AtomicBool::new(false);
 
     pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
         #[cfg(target_family = "unix")]
@@ -189,13 +160,36 @@ mod provider {
         }
         #[cfg(not(any(target_family = "unix", target_os = "windows")))]
         {
+            static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+
             if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
                 crate::log::warning!(
                     _sbr,
                     "no default fontprovider available for current platform"
                 );
             }
-            Ok(Box::new(super::NullFontProvider))
+
+            #[derive(Debug)]
+            struct NullFontProvider;
+
+            impl FontProvider for NullFontProvider {
+                fn query_fallback(
+                    &mut self,
+                    _request: &super::FontFallbackRequest,
+                ) -> Result<Vec<super::FaceInfo>, AnyError> {
+                    Ok(Vec::new())
+                }
+
+                fn query_family(
+                    &mut self,
+                    _family: &str,
+                ) -> Result<Vec<super::FaceInfo>, AnyError> {
+                    Ok(Vec::new())
+                }
+            }
+
+            Ok(Box::new(NullFontProvider))
         }
     }
 }

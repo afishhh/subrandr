@@ -14,7 +14,7 @@ use crate::{
         font_db::{FaceInfo, FontFallbackRequest, FontProvider, FontSource},
         FontAxisValues,
     },
-    util::{AnyError, Sealed},
+    util::AnyError,
 };
 
 #[derive(Debug)]
@@ -525,5 +525,3 @@ impl FontProvider for FontconfigFontProvider {
         Ok(Vec::new())
     }
 }
-
-impl Sealed for FontconfigFontProvider {}

@@ -15,8 +15,6 @@ use crate::math::I16Dot16;
 use crate::text::font_db::FontProvider;
 use crate::text::{Face, FaceInfo, LoadError};
 
-impl super::super::Sealed for DirectWriteFontProvider {}
-
 fn codepoint_to_utf16(mut value: u32) -> ([u16; 2], bool) {
     if value < 0x10000 {
         ([value as u16, 0], false)

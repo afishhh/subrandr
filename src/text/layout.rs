@@ -256,13 +256,23 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
     }
 
     pub fn shape(
-        &'a self,
+        &'a mut self,
         line_alignment: HorizontalAlignment,
         wrap: TextWrapOptions,
         wrap_width: I26Dot6,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<(Vec<ShapedLine<'a, 'f>>, Rect2<I26Dot6>), LayoutError> {
+        while self
+            .explicit_line_bounaries
+            .pop_if(|i| *i == self.text.len())
+            .is_some()
+        {}
+
+        if self.text.is_empty() {
+            return Ok((Vec::new(), Rect2::ZERO));
+        }
+
         if MULTILINE_SHAPER_DEBUG_PRINT {
             println!("SHAPING V2 TEXT {:?}", self.text);
             println!(
@@ -290,7 +300,6 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
         let mut current_segment = 0;
         let mut current_intra_split = 0;
         let mut last = 0;
-        let mut post_wrap_skip = 0;
         while current_explicit_line <= self.explicit_line_bounaries.len() {
             let mut line_boundary = self
                 .explicit_line_bounaries
@@ -570,9 +579,6 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
             }
 
             debug_assert_eq!(last, line_boundary);
-
-            last += post_wrap_skip;
-            post_wrap_skip = 0;
 
             let aligning_x_offset = match line_alignment {
                 HorizontalAlignment::Left => I26Dot6::ZERO,

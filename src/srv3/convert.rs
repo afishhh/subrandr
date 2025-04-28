@@ -291,10 +291,18 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
         events: vec![],
     };
 
-    log_once_state!(ruby_under_unsupported);
+    log_once_state!(ruby_under_unsupported, window_unsupported);
 
     for event in document.events() {
         let mut segments = vec![];
+
+        if event.window_id.is_some() {
+            warning!(
+                sbr,
+                once(window_unsupported),
+                "Explicit windows on events are not supported yet"
+            )
+        }
 
         let mut it = event.segments.iter();
         'segment_loop: while let Some(segment) = it.next() {
@@ -318,7 +326,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                             warning!(
                                 sbr,
                                 once(ruby_under_unsupported),
-                                "Ruby `ruby-position: under`-style ruby text is not supported yet"
+                                "`ruby-position: under`-style ruby text is not supported yet"
                             );
                             break 'ruby_failed;
                         }

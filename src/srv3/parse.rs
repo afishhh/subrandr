@@ -110,6 +110,7 @@ impl Default for WindowPos {
 pub struct Document {
     pens: HashMap<Box<str>, Pen>,
     wps: HashMap<Box<str>, WindowPos>,
+    windows: HashMap<Box<str>, Window>,
     events: Vec<Event>,
 }
 
@@ -144,6 +145,7 @@ pub struct Event {
     pub time: u32,
     pub duration: u32,
     position: &'static WindowPos,
+    pub window_id: Option<Box<str>>,
     pub segments: Vec<Segment>,
 }
 
@@ -151,6 +153,13 @@ impl Event {
     pub const fn position(&self) -> &WindowPos {
         self.position
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Window {
+    pub time: u32,
+    pub duration: u32,
+    position: &'static WindowPos,
 }
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -447,10 +456,10 @@ fn parse_body(
     sbr: &Subrandr,
     pens: &HashMap<Box<str>, Pen>,
     wps: &HashMap<Box<str>, WindowPos>,
+    windows: &mut HashMap<Box<str>, Window>,
+    events: &mut Vec<Event>,
     reader: &mut quick_xml::Reader<&[u8]>,
-) -> Result<Vec<Event>, Error> {
-    let mut events = vec![];
-
+) -> Result<(), Error> {
     log_once_state!(
         unknown_attrs,
         unknown_body_elements,
@@ -458,7 +467,8 @@ fn parse_body(
         unknown_segment_attrs,
         unknown_segment_elements,
         non_existant_pen,
-        non_existant_wp
+        non_existant_wp,
+        win_without_id
     );
 
     macro_rules! set_or_log {
@@ -485,6 +495,42 @@ fn parse_body(
         match reader.read_event()? {
             XmlEvent::Start(element) if depth == 0 => {
                 match element.local_name().into_inner() {
+                    b"w" => {
+                        let mut result_id = None;
+                        let mut result = Window {
+                            time: 0,
+                            duration: u32::MAX,
+                            position: &DEFAULT_WINDOW_POS,
+                        };
+
+                        match_attributes! {
+                            element.attributes(),
+                            "id"(id: &str) => {
+                                result_id = Some(id.into());
+                            },
+                            "t"(time: u32) => {
+                                result.time = time;
+                            },
+                            "d"(duration: u32) => {
+                                result.duration = duration;
+                            },
+                            "wp"(id: &str) => {
+                                set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
+                            },
+                            else other => {
+                                warning!(
+                                    sbr, once(unknown_attrs, other),
+                                    "Unknown window attribute {other}"
+                                )
+                            }
+                        }
+
+                        if let Some(id) = result_id {
+                            windows.insert(id, result);
+                        } else {
+                            warning!(sbr, once(win_without_id), "Window missing id attribute");
+                        }
+                    }
                     b"p" => {
                         // time=0 and duration=0 are defaults YouTube uses
                         // duration=0 events should probably be stripped during conversion
@@ -493,6 +539,7 @@ fn parse_body(
                             time: 0,
                             duration: 0,
                             position: &DEFAULT_WINDOW_POS,
+                            window_id: None,
                             segments: vec![],
                         };
 
@@ -511,6 +558,9 @@ fn parse_body(
                             },
                             "wp"(id: &str) => {
                                 set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
+                            },
+                            "w"(id: &str) => {
+                                result.window_id = Some(id.into());
                             },
                             else other => {
                                 warning!(
@@ -628,7 +678,7 @@ fn parse_body(
         }
     }
 
-    Ok(events)
+    Ok(())
 }
 
 pub fn probe(text: &str) -> bool {
@@ -744,6 +794,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     let mut doc = Document {
         pens,
         wps,
+        windows: HashMap::new(),
         events: { vec![] },
     };
 
@@ -793,7 +844,14 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         }
     }
 
-    doc.events = parse_body(sbr, &doc.pens, &doc.wps, &mut reader)?;
+    parse_body(
+        sbr,
+        &doc.pens,
+        &doc.wps,
+        &mut doc.windows,
+        &mut doc.events,
+        &mut reader,
+    )?;
 
     Ok(doc)
 }

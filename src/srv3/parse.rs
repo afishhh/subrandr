@@ -8,7 +8,6 @@ use thiserror::Error;
 
 use crate::{
     log::{log_once_state, warning, LogOnceSet},
-    util::ReadonlyAliasableBox,
     Subrandr,
 };
 
@@ -32,8 +31,6 @@ pub enum RubyPart {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Pen {
-    id: i32,
-
     pub font_size: u16,
     pub font_style: u32,
 
@@ -50,7 +47,6 @@ pub struct Pen {
 }
 
 const DEFAULT_PEN: Pen = Pen {
-    id: -1,
     font_size: 100,
     font_style: 0,
     bold: false,
@@ -91,7 +87,6 @@ pub enum Point {
 //       a min width is computed that's equal to "-" * cc. Wild stuff.
 #[derive(Debug, Clone)]
 pub struct WindowPos {
-    id: i32,
     pub point: Point,
     pub x: u32,
     pub y: u32,
@@ -99,7 +94,6 @@ pub struct WindowPos {
 
 // TODO: Find correct values
 const DEFAULT_WINDOW_POS: WindowPos = WindowPos {
-    id: -1,
     point: Point::BottomCenter,
     x: 50,
     y: 100,
@@ -114,17 +108,17 @@ impl Default for WindowPos {
 // POV: you want to self reference but Rust says "no"
 #[derive(Debug)]
 pub struct Document {
-    pens: ReadonlyAliasableBox<[Pen]>,
-    wps: ReadonlyAliasableBox<[WindowPos]>,
+    pens: HashMap<Box<str>, Pen>,
+    wps: HashMap<Box<str>, WindowPos>,
     events: Vec<Event>,
 }
 
 impl Document {
-    pub fn pens(&self) -> &[Pen] {
+    pub fn pens(&self) -> &HashMap<Box<str>, Pen> {
         &self.pens
     }
 
-    pub fn wps(&self) -> &[WindowPos] {
+    pub fn wps(&self) -> &HashMap<Box<str>, WindowPos> {
         &self.wps
     }
 
@@ -144,6 +138,7 @@ impl Segment {
         self.pen
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct Event {
     pub time: u32,
@@ -167,8 +162,6 @@ type AnyError = Box<dyn std::error::Error + Send + Sync>;
 pub enum Error {
     #[error("{0}")]
     InvalidStructure(&'static str),
-    #[error("There exist two '{0}' elements with the same 'id' of '{1}'")]
-    DuplicateId(&'static str, i32),
     #[error("'{0}' element is missing an '{1}' attribute")]
     MissingAttribute(&'static str, &'static str),
     #[error("Attribute {0} has an invalid value {1:?}: {2}")]
@@ -178,20 +171,23 @@ pub enum Error {
 }
 
 macro_rules! match_attribute {
-    ($attr: expr, $($key: literal($var: ident: $type: ty) $(if ($cond: expr) $error: literal)? => $expr: expr,)+ else $other: pat => $else: expr $(,)?) => {
+    ($attr: expr, $($key: literal($var: ident: $($type: tt)*) => $expr: expr,)+ else $other: pat => $else: expr $(,)?) => {
         match unsafe { std::str::from_utf8_unchecked($attr.key.0) } {
             $(
             $key => {
                 let value = unsafe { std::str::from_utf8_unchecked(&$attr.value) };
-                let $var: $type = value.parse().map_err(|e| Error::InvalidAttributeValue($key, value.to_string(), Box::from(e)))?;
-                $(if !$cond {
-                    return Err(Error::InvalidAttributeValue($key, value.to_string(), $error.into()));
-                })?
+                let $var: $($type)* = match_attribute!(@parse value, $($type)*, $key);
                 $expr
             },
             )*
             $other => $else
         }
+    };
+    (@parse $value: ident, &str, $key: literal) => {
+        $value
+    };
+    (@parse $value: ident, $type: ty, $key: literal) => {
+        $value.parse().map_err(|e| Error::InvalidAttributeValue($key, $value.to_string(), Box::from(e)))?
     };
 }
 
@@ -287,15 +283,20 @@ impl FromStr for Point {
     }
 }
 
-fn parse_pen(sbr: &Subrandr, attributes: Attributes, logset: &LogOnceSet) -> Result<Pen, Error> {
+fn parse_pen(
+    sbr: &Subrandr,
+    attributes: Attributes,
+    logset: &LogOnceSet,
+) -> Result<(Box<str>, Pen), Error> {
+    let mut result_id = None;
     let mut result = Pen::default();
 
     log_once_state!(in logset; unknown_pen_attribute);
 
     match_attributes! {
         attributes,
-        "id"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
-            result.id = id;
+        "id"(id: &str) => {
+            result_id = Some(id.into());
         },
         "fc"(color: HexRGBColor) => {
             result.foreground_color &= 0x000000FF;
@@ -343,26 +344,27 @@ fn parse_pen(sbr: &Subrandr, attributes: Attributes, logset: &LogOnceSet) -> Res
         }
     }
 
-    if result.id < 0 {
-        return Err(Error::MissingAttribute("pen", "id"));
+    match result_id {
+        // TODO: This should be a warning only
+        None => return Err(Error::MissingAttribute("pen", "id")),
+        Some(id) => Ok((id, result)),
     }
-
-    Ok(result)
 }
 
 fn parse_wp(
     sbr: &Subrandr,
     attributes: Attributes,
     logset: &LogOnceSet,
-) -> Result<WindowPos, Error> {
+) -> Result<(Box<str>, WindowPos), Error> {
+    let mut result_id = None;
     let mut result = WindowPos::default();
 
     log_once_state!(in logset; unknown_wp_attribute);
 
     match_attributes! {
         attributes,
-        "id"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
-            result.id = id;
+        "id"(id: &str) => {
+            result_id = Some(id.into());
         },
         "ap"(point: Point) => {
             result.point = point;
@@ -382,18 +384,17 @@ fn parse_wp(
         }
     }
 
-    if result.id < 0 {
-        return Err(Error::MissingAttribute("wp", "id"));
+    match result_id {
+        None => return Err(Error::MissingAttribute("wp", "id")),
+        Some(id) => Ok((id, result)),
     }
-
-    Ok(result)
 }
 
 fn parse_head(
     sbr: &Subrandr,
     reader: &mut quick_xml::Reader<&[u8]>,
-) -> Result<(Vec<Pen>, Vec<WindowPos>), Error> {
-    let (mut pens, mut wps) = (vec![], vec![]);
+) -> Result<(HashMap<Box<str>, Pen>, HashMap<Box<str>, WindowPos>), Error> {
+    let (mut pens, mut wps) = (HashMap::new(), HashMap::new());
 
     let logset = LogOnceSet::new();
     log_once_state!(in &logset; unknown_elements_head);
@@ -405,10 +406,12 @@ fn parse_head(
                 match element.local_name().into_inner() {
                     // TODO: Warn on text content in pen or wp
                     b"pen" => {
-                        pens.push(parse_pen(sbr, element.attributes(), &logset)?);
+                        let (id, pen) = parse_pen(sbr, element.attributes(), &logset)?;
+                        pens.insert(id, pen);
                     }
                     b"wp" => {
-                        wps.push(parse_wp(sbr, element.attributes(), &logset)?);
+                        let (id, wp) = parse_wp(sbr, element.attributes(), &logset)?;
+                        wps.insert(id, wp);
                     }
                     name => {
                         warning!(
@@ -442,8 +445,8 @@ fn parse_head(
 
 fn parse_body(
     sbr: &Subrandr,
-    pens: &HashMap<i32, &'static Pen>,
-    wps: &HashMap<i32, &'static WindowPos>,
+    pens: &HashMap<Box<str>, Pen>,
+    wps: &HashMap<Box<str>, WindowPos>,
     reader: &mut quick_xml::Reader<&[u8]>,
 ) -> Result<Vec<Event>, Error> {
     let mut events = vec![];
@@ -460,8 +463,8 @@ fn parse_body(
 
     macro_rules! set_or_log {
         ($dst: expr, $map: expr, $id: expr, $log_id: expr, $what: literal) => {
-            if let Some(value) = $map.get(&$id) {
-                $dst = value;
+            if let Some(value) = $map.get($id) {
+                $dst = unsafe { &*(value as *const _) };
             } else {
                 warning!(
                     sbr,
@@ -503,10 +506,10 @@ fn parse_body(
                             "d"(duration: u32) => {
                                 result.duration = duration;
                             },
-                            "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
+                            "p"(id: &str) => {
                                 set_or_log!(current_event_pen, pens, id, non_existant_pen, "Pen");
                             },
-                            "wp"(id: i32) if (id >= 0) "wp ID must be greater than zero" => {
+                            "wp"(id: &str) => {
                                 set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
                             },
                             else other => {
@@ -544,7 +547,7 @@ fn parse_body(
 
                         match_attributes! {
                             element.attributes(),
-                            "p"(id: i32) if (id >= 0) "pen ID must be greater than zero" => {
+                            "p"(id: &str) => {
                                 set_or_log!(current_segment_pen, pens, id, non_existant_pen, "Pen");
                             },
                             else other => {
@@ -735,32 +738,14 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     let (pens, wps) = if has_head {
         parse_head(sbr, &mut reader)?
     } else {
-        (vec![], vec![])
+        (HashMap::new(), HashMap::new())
     };
 
     let mut doc = Document {
-        pens: pens.into_boxed_slice().into(),
-        wps: wps.into_boxed_slice().into(),
+        pens,
+        wps,
         events: { vec![] },
     };
-
-    let pens: &'static [Pen] = unsafe { std::mem::transmute(&*doc.pens) };
-
-    let mut pens_by_id = HashMap::new();
-    for pen in pens {
-        if pens_by_id.insert(pen.id, pen).is_some() {
-            return Err(Error::DuplicateId("pen", pen.id));
-        }
-    }
-
-    let wps: &'static [WindowPos] = unsafe { std::mem::transmute(&*doc.wps) };
-
-    let mut wps_by_id = HashMap::new();
-    for wp in wps {
-        if wps_by_id.insert(wp.id, wp).is_some() {
-            return Err(Error::DuplicateId("wp", wp.id));
-        }
-    }
 
     if has_head {
         let mut depth = 0;
@@ -808,7 +793,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         }
     }
 
-    doc.events = parse_body(sbr, &pens_by_id, &wps_by_id, &mut reader)?;
+    doc.events = parse_body(sbr, &doc.pens, &doc.wps, &mut reader)?;
 
     Ok(doc)
 }

@@ -566,9 +566,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                     #[cfg(not(feature = "wgpu"))]
                     let use_poll = false;
 
-                    if use_poll {
-                        // TODO: Make this more customisable, currently Poll is forced to always
-                        //       make use of vsync.
+                    if use_poll && deadline == next_min_wait {
                         event_loop.set_control_flow(ControlFlow::Poll);
                     } else {
                         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));

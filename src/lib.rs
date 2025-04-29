@@ -200,7 +200,6 @@ struct DebugFlags {
     draw_version_string: bool,
     draw_perf_info: bool,
     draw_layout_info: bool,
-    stroke_shape_outlines: bool,
 }
 
 impl DebugFlags {
@@ -213,7 +212,6 @@ impl DebugFlags {
                     "draw_version" => result.draw_version_string = true,
                     "draw_perf" => result.draw_perf_info = true,
                     "draw_layout" => result.draw_layout_info = true,
-                    "draw_shape_outlines" => result.stroke_shape_outlines = true,
                     _ => (),
                 }
             }

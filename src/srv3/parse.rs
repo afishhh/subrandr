@@ -140,7 +140,7 @@ impl Segment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Event {
     pub time: u32,
     pub duration: u32,
@@ -155,7 +155,7 @@ impl Event {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Window {
     pub time: u32,
     pub duration: u32,

@@ -39,7 +39,7 @@ void sbr_library_fini(sbr_library *);
 void sbr_library_version(uint32_t *major, uint32_t *minor, uint32_t *patch);
 
 typedef int16_t sbr_subtitle_format;
-#define SBR_SUBTITLE_FORMAT_UNKOWN (sbr_subtitle_format)0
+#define SBR_SUBTITLE_FORMAT_UNKNOWN (sbr_subtitle_format)0
 #define SBR_SUBTITLE_FORMAT_SRV3 (sbr_subtitle_format)1
 #define SBR_SUBTITLE_FORMAT_WEBVTT (sbr_subtitle_format)2
 

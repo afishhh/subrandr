@@ -16,6 +16,7 @@ pub(crate) enum PixelFormat {
 }
 
 impl PixelFormat {
+    #[cfg_attr(not(feature = "wgpu"), expect(dead_code))]
     pub(crate) fn width(&self) -> u8 {
         match self {
             PixelFormat::Mono => 1,

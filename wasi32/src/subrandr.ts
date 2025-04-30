@@ -177,10 +177,13 @@ export class Renderer {
       weights = weight
     }
 
-    if(weight != "auto")
+    if (weight != "auto") {
       for (const w of weights)
         if (!Number.isSafeInteger(w) || w < 0 || w > 1000)
-          throw new RangeError("font weight must be an integer in the range 0..=1000")
+          throw new RangeError("Font weight must be an integer in the range 0..=1000")
+      if (weights[0] > weights[1])
+        throw new RangeError("Font weight range bounds must be in ascending order")
+    }
 
     const g = state();
     const [name_ptr, name_len] = g.mod.allocCopy(name)

@@ -33,6 +33,13 @@ const notoSansItalic = fetch("https://fishhh.dev/files/cors/NotoSans-Italic-Vari
   .then(r => r.bytes())
   .then(b => new Font(b))
 
+const jetbrainsMono = fetch("https://fishhh.dev/files/cors/JetBrainsMono[wght].ttf")
+  .then(r => r.bytes())
+  .then(b => new Font(b))
+const jetbrainsItalic = fetch("https://fishhh.dev/files/cors/JetBrainsMono-Italic[wght].ttf")
+  .then(r => r.bytes())
+  .then(b => new Font(b))
+
 const fb = new Framebuffer(0, 0)
 let subtitles: S.Subtitles | null = null
 let renderer: S.Renderer | null = null
@@ -56,16 +63,30 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       
       renderer.addFont(
         "Noto Sans JP",
-        "variadic",
+        "auto",
         false,
         await notoSans
       );
 
       renderer.addFont(
         "Noto Sans Italic",
-        "variadic",
+        "auto",
         true,
         await notoSansItalic
+      );
+
+      renderer.addFont(
+        "monospace",
+        "auto",
+        false,
+        await jetbrainsMono
+      );
+
+      renderer.addFont(
+        "monospace",
+        "auto",
+        true,
+        await jetbrainsItalic
       );
 
       postMessage({ id: event.data.id })

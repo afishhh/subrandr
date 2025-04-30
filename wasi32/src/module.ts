@@ -28,6 +28,11 @@ export interface SubrandrExports {
 	sbr_library_init(): LibraryPtr
 	sbr_library_fini(ptr: LibraryPtr): void
 	sbr_library_close_font(sbr: LibraryPtr, ptr: FontPtr): void
+	sbr_load_text(
+		ptr: LibraryPtr,
+		text_ptr: WasmPtr, text_len: number,
+		format: number, language_hint: WasmPtr
+	): SubtitlesPtr;
 	sbr_renderer_create(sbr: LibraryPtr): RendererPtr
 	sbr_renderer_render(
 		renderer: RendererPtr,
@@ -43,19 +48,17 @@ export interface SubrandrExports {
 	sbr_subtitles_destroy(subtitles: SubtitlesPtr): void
 	sbr_get_last_error_string(): WasmPtr
 
-	// Wasm specific core API
-	sbr_wasm_load_subtitles(sbr: LibraryPtr, string_ptr: WasmPtr, string_len: number): SubtitlesPtr
+	// Wasm specific API
 	sbr_wasm_library_create_font(sbr: LibraryPtr, arc_data_ptr: WasmPtr, arc_data_len: number): FontPtr
 	sbr_wasm_renderer_add_font(
 		renderer: RendererPtr,
 		name_ptr: WasmPtr,
 		name_len: number,
-		weight: number,
+		weight0: number,
+		weight1: number,
 		italic: boolean,
 		font_ptr: FontPtr,
 	): void
-
-
 	sbr_wasm_copy_convert_to_rgba(
 		front: WasmPtr, back: WasmPtr,
 		width: number, height: number

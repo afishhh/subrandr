@@ -9,14 +9,18 @@ export class Subtitles {
     this.__ptr = ptr
   }
 
-  // TODO: use filename
-  public static parseFromString(text: string | Uint8Array, _filename?: string): Subtitles {
-
+  public static parseFromString(text: string | Uint8Array): Subtitles {
     const g = state();
     const [text_ptr, text_len] = g.mod.allocCopy(text)
     let ptr: SubtitlesPtr;
     try {
-      ptr = g.mod.exports.sbr_wasm_load_subtitles(g.lib, text_ptr, text_len)
+      ptr = g.mod.exports.sbr_load_text(
+        g.lib,
+        text_ptr,
+        text_len,
+        /* SBR_SUBTITLE_FORMAT_UNKNOWN */ 0,
+        WASM_NULL
+      )
     } finally {
       g.mod.dealloc(text_ptr, text_len)
     }
@@ -163,9 +167,20 @@ export class Renderer {
     this.__ctxptr = g.mod.alloc(SUBCTX_LEN)
   }
 
-  addFont(name: string, weight: number | "variadic", italic: boolean, face: Font) {
-    if (weight != "variadic" && !(weight > 0 && Number.isInteger(weight)))
-      throw new RangeError("font weight must be a positive integer")
+  addFont(name: string, weight: number | [number, number] | "auto", italic: boolean, face: Font) {
+    let weights: [number, number];
+    if (typeof weight == "number") {
+      weights = [weight, weight]
+    } else if (weight == "auto") {
+      weights = [-1, -1]
+    } else {
+      weights = weight
+    }
+
+    if(weight != "auto")
+      for (const w of weights)
+        if (!Number.isSafeInteger(w) || w < 0 || w > 1000)
+          throw new RangeError("font weight must be an integer in the range 0..=1000")
 
     const g = state();
     const [name_ptr, name_len] = g.mod.allocCopy(name)
@@ -174,7 +189,8 @@ export class Renderer {
         this.__ptr,
         name_ptr,
         name_len,
-        weight == "variadic" ? -1 : weight,
+        weights[0],
+        weights[1],
         italic,
         face.__ptr
       )
@@ -189,12 +205,12 @@ export class Renderer {
       new DataView(g.mod.memoryBuffer, this.__ctxptr, SUBCTX_LEN),
       [
         structField("u32", ctx.dpi ?? 72 * window.devicePixelRatio),
-        structField("f32", ctx.video_width),
-        structField("f32", ctx.video_height),
-        structField("f32", ctx.padding_left ?? 0),
-        structField("f32", ctx.padding_right ?? 0),
-        structField("f32", ctx.padding_top ?? 0),
-        structField("f32", ctx.padding_bottom ?? 0),
+        structField("i32", ctx.video_width << 6),
+        structField("i32", ctx.video_height << 6),
+        structField("i32", (ctx.padding_left ?? 0) << 6),
+        structField("i32", (ctx.padding_right ?? 0)),
+        structField("i32", (ctx.padding_top ?? 0) << 6),
+        structField("i32", (ctx.padding_bottom ?? 0) << 6),
       ]);
 
     const front = fb._front;
@@ -239,7 +255,6 @@ function state() {
 }
 
 export async function initStreaming(source: Response | PromiseLike<Response>, options?: ModuleOptions) {
-  // "/target/wasm32-wasip1/debug/subrandr.wasm"
   const mod = await SubrandrModule.instantiateStreaming(source, options)
   const lib = mod.exports.sbr_library_init()
   STATE = {

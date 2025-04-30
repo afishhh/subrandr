@@ -19,15 +19,13 @@ export function decodeAndEscapeControl(buf: Uint8Array) {
 }
 
 
-type CFieldType = "f32" | "i32" | "u32";
+type CFieldType = "i32" | "u32";
 interface CFieldValues {
-	f32: number,
 	i32: number,
 	u32: number,
 }
 
 const C_TYPE_ALIGNMENT = {
-	"f32": 4,
 	"i32": 4,
 	"u32": 4,
 };
@@ -63,9 +61,6 @@ export function writeStruct(output: DataView, fields: CStructData) {
 			offset += alignment - (offset % alignment);
 
 		switch (field.type) {
-			case "f32":
-				output.setFloat32(offset, field.value, true)
-				break;
 			case "i32":
 				output.setInt32(offset, field.value, true)
 				break;

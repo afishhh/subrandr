@@ -24,25 +24,6 @@ pub unsafe extern "C" fn sbr_wasm_copy_convert_to_rgba(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sbr_wasm_load_subtitles(
-    sbr: &Subrandr,
-    text: *mut u8,
-    len: usize,
-) -> *mut Subtitles {
-    let bytes = unsafe { std::slice::from_raw_parts(text, len) };
-    let text = std::str::from_utf8(bytes).unwrap();
-    match crate::srv3::parse(sbr, text) {
-        Ok(document) => Box::into_raw(Box::new(crate::srv3::convert(sbr, document))),
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn sbr_wasm_free_subtitles(subs: *mut Subtitles) {
-    unsafe { drop(Box::from_raw(subs)) }
-}
-
-#[no_mangle]
 pub extern "C" fn sbr_wasm_alloc(len: usize) -> *mut u8 {
     unsafe { std::alloc::alloc(Layout::array::<u8>(len).unwrap()) }
 }
@@ -84,7 +65,8 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
     renderer: *mut Renderer,
     name_ptr: *const u8,
     name_len: usize,
-    weight: f32,
+    weight0: i32,
+    weight1: i32,
     italic: bool,
     font: *mut Face,
 ) {
@@ -94,13 +76,17 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
     renderer.fonts.add_extra(FaceInfo {
         family: name.into(),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
-        weight: if weight.is_sign_negative() {
-            (*font).axis(WEIGHT_AXIS).map_or_else(
-                || FontAxisValues::Fixed((*font).weight()),
-                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
-            )
+        weight: if weight0 == weight1 {
+            if weight0 == -1 {
+                (*font).axis(WEIGHT_AXIS).map_or_else(
+                    || FontAxisValues::Fixed((*font).weight()),
+                    |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
+                )
+            } else {
+                FontAxisValues::Fixed(I16Dot16::new(weight0))
+            }
         } else {
-            crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(weight))
+            FontAxisValues::Range(I16Dot16::new(weight0), I16Dot16::new(weight1))
         },
         italic,
         source: crate::text::FontSource::Memory((*font).clone()),

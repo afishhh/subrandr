@@ -20,6 +20,7 @@ bindgen \
 	--raw-line '#![allow(improper_ctypes)]' \
 	--raw-line '#[cfg(target_family = "unix")]' \
 	--raw-line 'pub mod fontconfig;' \
+	--allowlist-item '(FT|TT|T1|hb|HB)_.*' \
 	--no-prepend-enum-name \
 	--no-layout-tests \
 	./header.h >src/lib.rs
@@ -30,7 +31,9 @@ bindgen \
 	--raw-line '#![allow(non_upper_case_globals)]' \
 	--raw-line '#![allow(non_camel_case_types)]' \
 	--raw-line '#![allow(non_snake_case)]' \
-	--allowlist-item 'F[cC].*' \
+	--allowlist-item '(FC_|Fc).*' \
 	--no-prepend-enum-name \
 	--no-layout-tests \
 	./header-fontconfig.h >src/fontconfig.rs
+
+rustfmt ./src/*.rs

@@ -4,7 +4,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(improper_ctypes)]
-#[cfg(any(target_family = "unix", target_os = "windows"))]
+#[cfg(target_family = "unix")]
 pub mod fontconfig;
 
 pub const FT_RENDER_POOL_SIZE: u32 = 16384;
@@ -13,258 +13,6 @@ pub const TT_CONFIG_OPTION_MAX_RUNNABLE_OPCODES: u32 = 1000000;
 pub const T1_MAX_DICT_DEPTH: u32 = 5;
 pub const T1_MAX_SUBRS_CALLS: u32 = 16;
 pub const T1_MAX_CHARSTRINGS_OPERANDS: u32 = 256;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_X1: u32 = 500;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_Y1: u32 = 400;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_X2: u32 = 1000;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_Y2: u32 = 275;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_X3: u32 = 1667;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_Y3: u32 = 275;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_X4: u32 = 2333;
-pub const CFF_CONFIG_OPTION_DARKENING_PARAMETER_Y4: u32 = 0;
-pub const _LIBC_LIMITS_H_: u32 = 1;
-pub const _FEATURES_H: u32 = 1;
-pub const _DEFAULT_SOURCE: u32 = 1;
-pub const __GLIBC_USE_ISOC23: u32 = 0;
-pub const __USE_ISOC11: u32 = 1;
-pub const __USE_ISOC99: u32 = 1;
-pub const __USE_ISOC95: u32 = 1;
-pub const __USE_POSIX_IMPLICITLY: u32 = 1;
-pub const _POSIX_SOURCE: u32 = 1;
-pub const _POSIX_C_SOURCE: u32 = 200809;
-pub const __USE_POSIX: u32 = 1;
-pub const __USE_POSIX2: u32 = 1;
-pub const __USE_POSIX199309: u32 = 1;
-pub const __USE_POSIX199506: u32 = 1;
-pub const __USE_XOPEN2K: u32 = 1;
-pub const __USE_XOPEN2K8: u32 = 1;
-pub const _ATFILE_SOURCE: u32 = 1;
-pub const __WORDSIZE: u32 = 64;
-pub const __WORDSIZE_TIME64_COMPAT32: u32 = 1;
-pub const __SYSCALL_WORDSIZE: u32 = 64;
-pub const __TIMESIZE: u32 = 64;
-pub const __USE_TIME_BITS64: u32 = 1;
-pub const __USE_MISC: u32 = 1;
-pub const __USE_ATFILE: u32 = 1;
-pub const __USE_FORTIFY_LEVEL: u32 = 0;
-pub const __GLIBC_USE_DEPRECATED_GETS: u32 = 0;
-pub const __GLIBC_USE_DEPRECATED_SCANF: u32 = 0;
-pub const __GLIBC_USE_C23_STRTOL: u32 = 0;
-pub const _STDC_PREDEF_H: u32 = 1;
-pub const __STDC_IEC_559__: u32 = 1;
-pub const __STDC_IEC_60559_BFP__: u32 = 201404;
-pub const __STDC_IEC_559_COMPLEX__: u32 = 1;
-pub const __STDC_IEC_60559_COMPLEX__: u32 = 201404;
-pub const __STDC_ISO_10646__: u32 = 201706;
-pub const __GNU_LIBRARY__: u32 = 6;
-pub const __GLIBC__: u32 = 2;
-pub const __GLIBC_MINOR__: u32 = 40;
-pub const _SYS_CDEFS_H: u32 = 1;
-pub const __glibc_c99_flexarr_available: u32 = 1;
-pub const __LDOUBLE_REDIRECTS_TO_FLOAT128_ABI: u32 = 0;
-pub const __HAVE_GENERIC_SELECTION: u32 = 1;
-pub const __GLIBC_USE_LIB_EXT2: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_BFP_EXT: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_BFP_EXT_C23: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_EXT: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_FUNCS_EXT: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_FUNCS_EXT_C23: u32 = 0;
-pub const __GLIBC_USE_IEC_60559_TYPES_EXT: u32 = 0;
-pub const MB_LEN_MAX: u32 = 16;
-pub const _BITS_POSIX1_LIM_H: u32 = 1;
-pub const _POSIX_AIO_LISTIO_MAX: u32 = 2;
-pub const _POSIX_AIO_MAX: u32 = 1;
-pub const _POSIX_ARG_MAX: u32 = 4096;
-pub const _POSIX_CHILD_MAX: u32 = 25;
-pub const _POSIX_DELAYTIMER_MAX: u32 = 32;
-pub const _POSIX_HOST_NAME_MAX: u32 = 255;
-pub const _POSIX_LINK_MAX: u32 = 8;
-pub const _POSIX_LOGIN_NAME_MAX: u32 = 9;
-pub const _POSIX_MAX_CANON: u32 = 255;
-pub const _POSIX_MAX_INPUT: u32 = 255;
-pub const _POSIX_MQ_OPEN_MAX: u32 = 8;
-pub const _POSIX_MQ_PRIO_MAX: u32 = 32;
-pub const _POSIX_NAME_MAX: u32 = 14;
-pub const _POSIX_NGROUPS_MAX: u32 = 8;
-pub const _POSIX_OPEN_MAX: u32 = 20;
-pub const _POSIX_PATH_MAX: u32 = 256;
-pub const _POSIX_PIPE_BUF: u32 = 512;
-pub const _POSIX_RE_DUP_MAX: u32 = 255;
-pub const _POSIX_RTSIG_MAX: u32 = 8;
-pub const _POSIX_SEM_NSEMS_MAX: u32 = 256;
-pub const _POSIX_SEM_VALUE_MAX: u32 = 32767;
-pub const _POSIX_SIGQUEUE_MAX: u32 = 32;
-pub const _POSIX_SSIZE_MAX: u32 = 32767;
-pub const _POSIX_STREAM_MAX: u32 = 8;
-pub const _POSIX_SYMLINK_MAX: u32 = 255;
-pub const _POSIX_SYMLOOP_MAX: u32 = 8;
-pub const _POSIX_TIMER_MAX: u32 = 32;
-pub const _POSIX_TTY_NAME_MAX: u32 = 9;
-pub const _POSIX_TZNAME_MAX: u32 = 6;
-pub const _POSIX_CLOCKRES_MIN: u32 = 20000000;
-pub const NR_OPEN: u32 = 1024;
-pub const NGROUPS_MAX: u32 = 65536;
-pub const ARG_MAX: u32 = 131072;
-pub const LINK_MAX: u32 = 127;
-pub const MAX_CANON: u32 = 255;
-pub const MAX_INPUT: u32 = 255;
-pub const NAME_MAX: u32 = 255;
-pub const PATH_MAX: u32 = 4096;
-pub const PIPE_BUF: u32 = 4096;
-pub const XATTR_NAME_MAX: u32 = 255;
-pub const XATTR_SIZE_MAX: u32 = 65536;
-pub const XATTR_LIST_MAX: u32 = 65536;
-pub const RTSIG_MAX: u32 = 32;
-pub const _POSIX_THREAD_KEYS_MAX: u32 = 128;
-pub const PTHREAD_KEYS_MAX: u32 = 1024;
-pub const _POSIX_THREAD_DESTRUCTOR_ITERATIONS: u32 = 4;
-pub const PTHREAD_DESTRUCTOR_ITERATIONS: u32 = 4;
-pub const _POSIX_THREAD_THREADS_MAX: u32 = 64;
-pub const AIO_PRIO_DELTA_MAX: u32 = 20;
-pub const PTHREAD_STACK_MIN: u32 = 16384;
-pub const DELAYTIMER_MAX: u32 = 2147483647;
-pub const TTY_NAME_MAX: u32 = 32;
-pub const LOGIN_NAME_MAX: u32 = 256;
-pub const HOST_NAME_MAX: u32 = 64;
-pub const MQ_PRIO_MAX: u32 = 32768;
-pub const SEM_VALUE_MAX: u32 = 2147483647;
-pub const _BITS_POSIX2_LIM_H: u32 = 1;
-pub const _POSIX2_BC_BASE_MAX: u32 = 99;
-pub const _POSIX2_BC_DIM_MAX: u32 = 2048;
-pub const _POSIX2_BC_SCALE_MAX: u32 = 99;
-pub const _POSIX2_BC_STRING_MAX: u32 = 1000;
-pub const _POSIX2_COLL_WEIGHTS_MAX: u32 = 2;
-pub const _POSIX2_EXPR_NEST_MAX: u32 = 32;
-pub const _POSIX2_LINE_MAX: u32 = 2048;
-pub const _POSIX2_RE_DUP_MAX: u32 = 255;
-pub const _POSIX2_CHARCLASS_NAME_MAX: u32 = 14;
-pub const BC_BASE_MAX: u32 = 99;
-pub const BC_DIM_MAX: u32 = 2048;
-pub const BC_SCALE_MAX: u32 = 99;
-pub const BC_STRING_MAX: u32 = 1000;
-pub const COLL_WEIGHTS_MAX: u32 = 255;
-pub const EXPR_NEST_MAX: u32 = 32;
-pub const LINE_MAX: u32 = 2048;
-pub const CHARCLASS_NAME_MAX: u32 = 2048;
-pub const RE_DUP_MAX: u32 = 32767;
-pub const _STRING_H: u32 = 1;
-pub const _BITS_TYPES_LOCALE_T_H: u32 = 1;
-pub const _BITS_TYPES___LOCALE_T_H: u32 = 1;
-pub const _STRINGS_H: u32 = 1;
-pub const _STDIO_H: u32 = 1;
-pub const _BITS_TYPES_H: u32 = 1;
-pub const _BITS_TYPESIZES_H: u32 = 1;
-pub const __OFF_T_MATCHES_OFF64_T: u32 = 1;
-pub const __INO_T_MATCHES_INO64_T: u32 = 1;
-pub const __RLIM_T_MATCHES_RLIM64_T: u32 = 1;
-pub const __STATFS_MATCHES_STATFS64: u32 = 1;
-pub const __KERNEL_OLD_TIMEVAL_MATCHES_TIMEVAL64: u32 = 1;
-pub const __FD_SETSIZE: u32 = 1024;
-pub const _BITS_TIME64_H: u32 = 1;
-pub const _____fpos_t_defined: u32 = 1;
-pub const ____mbstate_t_defined: u32 = 1;
-pub const _____fpos64_t_defined: u32 = 1;
-pub const ____FILE_defined: u32 = 1;
-pub const __FILE_defined: u32 = 1;
-pub const __struct_FILE_defined: u32 = 1;
-pub const _IO_EOF_SEEN: u32 = 16;
-pub const _IO_ERR_SEEN: u32 = 32;
-pub const _IO_USER_LOCK: u32 = 32768;
-pub const __cookie_io_functions_t_defined: u32 = 1;
-pub const _IOFBF: u32 = 0;
-pub const _IOLBF: u32 = 1;
-pub const _IONBF: u32 = 2;
-pub const BUFSIZ: u32 = 8192;
-pub const EOF: i32 = -1;
-pub const SEEK_SET: u32 = 0;
-pub const SEEK_CUR: u32 = 1;
-pub const SEEK_END: u32 = 2;
-pub const P_tmpdir: &[u8; 5] = b"/tmp\0";
-pub const L_tmpnam: u32 = 20;
-pub const TMP_MAX: u32 = 238328;
-pub const _BITS_STDIO_LIM_H: u32 = 1;
-pub const FILENAME_MAX: u32 = 4096;
-pub const L_ctermid: u32 = 9;
-pub const FOPEN_MAX: u32 = 16;
-pub const __HAVE_FLOAT128: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT128: u32 = 0;
-pub const __HAVE_FLOAT64X: u32 = 1;
-pub const __HAVE_FLOAT64X_LONG_DOUBLE: u32 = 1;
-pub const __HAVE_FLOAT16: u32 = 0;
-pub const __HAVE_FLOAT32: u32 = 1;
-pub const __HAVE_FLOAT64: u32 = 1;
-pub const __HAVE_FLOAT32X: u32 = 1;
-pub const __HAVE_FLOAT128X: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT16: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT32: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT64: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT32X: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT64X: u32 = 0;
-pub const __HAVE_DISTINCT_FLOAT128X: u32 = 0;
-pub const __HAVE_FLOATN_NOT_TYPEDEF: u32 = 0;
-pub const _STDLIB_H: u32 = 1;
-pub const WNOHANG: u32 = 1;
-pub const WUNTRACED: u32 = 2;
-pub const WSTOPPED: u32 = 2;
-pub const WEXITED: u32 = 4;
-pub const WCONTINUED: u32 = 8;
-pub const WNOWAIT: u32 = 16777216;
-pub const __WNOTHREAD: u32 = 536870912;
-pub const __WALL: u32 = 1073741824;
-pub const __WCLONE: u32 = 2147483648;
-pub const __W_CONTINUED: u32 = 65535;
-pub const __WCOREFLAG: u32 = 128;
-pub const __ldiv_t_defined: u32 = 1;
-pub const __lldiv_t_defined: u32 = 1;
-pub const RAND_MAX: u32 = 2147483647;
-pub const EXIT_FAILURE: u32 = 1;
-pub const EXIT_SUCCESS: u32 = 0;
-pub const _SYS_TYPES_H: u32 = 1;
-pub const __clock_t_defined: u32 = 1;
-pub const __clockid_t_defined: u32 = 1;
-pub const __time_t_defined: u32 = 1;
-pub const __timer_t_defined: u32 = 1;
-pub const _BITS_STDINT_INTN_H: u32 = 1;
-pub const __BIT_TYPES_DEFINED__: u32 = 1;
-pub const _ENDIAN_H: u32 = 1;
-pub const _BITS_ENDIAN_H: u32 = 1;
-pub const __LITTLE_ENDIAN: u32 = 1234;
-pub const __BIG_ENDIAN: u32 = 4321;
-pub const __PDP_ENDIAN: u32 = 3412;
-pub const _BITS_ENDIANNESS_H: u32 = 1;
-pub const __BYTE_ORDER: u32 = 1234;
-pub const __FLOAT_WORD_ORDER: u32 = 1234;
-pub const LITTLE_ENDIAN: u32 = 1234;
-pub const BIG_ENDIAN: u32 = 4321;
-pub const PDP_ENDIAN: u32 = 3412;
-pub const BYTE_ORDER: u32 = 1234;
-pub const _BITS_BYTESWAP_H: u32 = 1;
-pub const _BITS_UINTN_IDENTITY_H: u32 = 1;
-pub const _SYS_SELECT_H: u32 = 1;
-pub const __sigset_t_defined: u32 = 1;
-pub const __timeval_defined: u32 = 1;
-pub const _STRUCT_TIMESPEC: u32 = 1;
-pub const FD_SETSIZE: u32 = 1024;
-pub const _BITS_PTHREADTYPES_COMMON_H: u32 = 1;
-pub const _THREAD_SHARED_TYPES_H: u32 = 1;
-pub const _BITS_PTHREADTYPES_ARCH_H: u32 = 1;
-pub const __SIZEOF_PTHREAD_MUTEX_T: u32 = 40;
-pub const __SIZEOF_PTHREAD_ATTR_T: u32 = 56;
-pub const __SIZEOF_PTHREAD_RWLOCK_T: u32 = 56;
-pub const __SIZEOF_PTHREAD_BARRIER_T: u32 = 32;
-pub const __SIZEOF_PTHREAD_MUTEXATTR_T: u32 = 4;
-pub const __SIZEOF_PTHREAD_COND_T: u32 = 48;
-pub const __SIZEOF_PTHREAD_CONDATTR_T: u32 = 4;
-pub const __SIZEOF_PTHREAD_RWLOCKATTR_T: u32 = 8;
-pub const __SIZEOF_PTHREAD_BARRIERATTR_T: u32 = 4;
-pub const _THREAD_MUTEX_INTERNAL_H: u32 = 1;
-pub const __PTHREAD_MUTEX_HAVE_PREV: u32 = 1;
-pub const __have_pthread_attr_t: u32 = 1;
-pub const _ALLOCA_H: u32 = 1;
-pub const _SETJMP_H: u32 = 1;
-pub const _BITS_SETJMP_H: u32 = 1;
-pub const __jmp_buf_tag_defined: u32 = 1;
-pub const HAVE_UNISTD_H: u32 = 1;
-pub const HAVE_FCNTL_H: u32 = 1;
 pub const FT_OUTLINE_NONE: u32 = 0;
 pub const FT_OUTLINE_OWNER: u32 = 1;
 pub const FT_OUTLINE_EVEN_ODD_FILL: u32 = 2;
@@ -275,13 +23,6 @@ pub const FT_OUTLINE_INCLUDE_STUBS: u32 = 32;
 pub const FT_OUTLINE_OVERLAP: u32 = 64;
 pub const FT_OUTLINE_HIGH_PRECISION: u32 = 256;
 pub const FT_OUTLINE_SINGLE_PASS: u32 = 512;
-pub const ft_outline_none: u32 = 0;
-pub const ft_outline_owner: u32 = 1;
-pub const ft_outline_even_odd_fill: u32 = 2;
-pub const ft_outline_reverse_fill: u32 = 4;
-pub const ft_outline_ignore_dropouts: u32 = 8;
-pub const ft_outline_high_precision: u32 = 256;
-pub const ft_outline_single_pass: u32 = 512;
 pub const FT_CURVE_TAG_ON: u32 = 1;
 pub const FT_CURVE_TAG_CONIC: u32 = 0;
 pub const FT_CURVE_TAG_CUBIC: u32 = 2;
@@ -299,10 +40,6 @@ pub const FT_RASTER_FLAG_AA: u32 = 1;
 pub const FT_RASTER_FLAG_DIRECT: u32 = 2;
 pub const FT_RASTER_FLAG_CLIP: u32 = 4;
 pub const FT_RASTER_FLAG_SDF: u32 = 8;
-pub const ft_raster_flag_default: u32 = 0;
-pub const ft_raster_flag_aa: u32 = 1;
-pub const ft_raster_flag_direct: u32 = 2;
-pub const ft_raster_flag_clip: u32 = 4;
 pub const FT_ERR_BASE: u32 = 0;
 pub const FT_FACE_FLAG_SCALABLE: u32 = 1;
 pub const FT_FACE_FLAG_FIXED_SIZES: u32 = 2;
@@ -330,11 +67,6 @@ pub const FT_OPEN_STREAM: u32 = 2;
 pub const FT_OPEN_PATHNAME: u32 = 4;
 pub const FT_OPEN_DRIVER: u32 = 8;
 pub const FT_OPEN_PARAMS: u32 = 16;
-pub const ft_open_memory: u32 = 1;
-pub const ft_open_stream: u32 = 2;
-pub const ft_open_pathname: u32 = 4;
-pub const ft_open_driver: u32 = 8;
-pub const ft_open_params: u32 = 16;
 pub const FT_LOAD_DEFAULT: u32 = 0;
 pub const FT_LOAD_NO_SCALE: u32 = 1;
 pub const FT_LOAD_NO_HINTING: u32 = 2;
@@ -370,9 +102,6 @@ pub const FT_FSTYPE_PREVIEW_AND_PRINT_EMBEDDING: u32 = 4;
 pub const FT_FSTYPE_EDITABLE_EMBEDDING: u32 = 8;
 pub const FT_FSTYPE_NO_SUBSETTING: u32 = 256;
 pub const FT_FSTYPE_BITMAP_EMBEDDING_ONLY: u32 = 512;
-pub const FREETYPE_MAJOR: u32 = 2;
-pub const FREETYPE_MINOR: u32 = 13;
-pub const FREETYPE_PATCH: u32 = 3;
 pub const T1_MAX_MM_AXIS: u32 = 4;
 pub const T1_MAX_MM_DESIGNS: u32 = 16;
 pub const T1_MAX_MM_MAP_POINTS: u32 = 20;
@@ -1006,205 +735,6 @@ pub const TT_UCR_ARABIC_PRESENTATION_A: u32 = 2147483648;
 pub const TT_UCR_ARABIC_PRESENTATION_B: u32 = 8;
 pub const TT_UCR_COMBINING_DIACRITICS: u32 = 64;
 pub const TT_UCR_COMBINING_DIACRITICS_SYMB: u32 = 4;
-pub const _INTTYPES_H: u32 = 1;
-pub const _STDINT_H: u32 = 1;
-pub const _BITS_WCHAR_H: u32 = 1;
-pub const _BITS_STDINT_UINTN_H: u32 = 1;
-pub const _BITS_STDINT_LEAST_H: u32 = 1;
-pub const INT8_MIN: i32 = -128;
-pub const INT16_MIN: i32 = -32768;
-pub const INT32_MIN: i32 = -2147483648;
-pub const INT8_MAX: u32 = 127;
-pub const INT16_MAX: u32 = 32767;
-pub const INT32_MAX: u32 = 2147483647;
-pub const UINT8_MAX: u32 = 255;
-pub const UINT16_MAX: u32 = 65535;
-pub const UINT32_MAX: u32 = 4294967295;
-pub const INT_LEAST8_MIN: i32 = -128;
-pub const INT_LEAST16_MIN: i32 = -32768;
-pub const INT_LEAST32_MIN: i32 = -2147483648;
-pub const INT_LEAST8_MAX: u32 = 127;
-pub const INT_LEAST16_MAX: u32 = 32767;
-pub const INT_LEAST32_MAX: u32 = 2147483647;
-pub const UINT_LEAST8_MAX: u32 = 255;
-pub const UINT_LEAST16_MAX: u32 = 65535;
-pub const UINT_LEAST32_MAX: u32 = 4294967295;
-pub const INT_FAST8_MIN: i32 = -128;
-pub const INT_FAST16_MIN: i64 = -9223372036854775808;
-pub const INT_FAST32_MIN: i64 = -9223372036854775808;
-pub const INT_FAST8_MAX: u32 = 127;
-pub const INT_FAST16_MAX: u64 = 9223372036854775807;
-pub const INT_FAST32_MAX: u64 = 9223372036854775807;
-pub const UINT_FAST8_MAX: u32 = 255;
-pub const UINT_FAST16_MAX: i32 = -1;
-pub const UINT_FAST32_MAX: i32 = -1;
-pub const INTPTR_MIN: i64 = -9223372036854775808;
-pub const INTPTR_MAX: u64 = 9223372036854775807;
-pub const UINTPTR_MAX: i32 = -1;
-pub const PTRDIFF_MIN: i64 = -9223372036854775808;
-pub const PTRDIFF_MAX: u64 = 9223372036854775807;
-pub const SIG_ATOMIC_MIN: i32 = -2147483648;
-pub const SIG_ATOMIC_MAX: u32 = 2147483647;
-pub const SIZE_MAX: i32 = -1;
-pub const WINT_MIN: u32 = 0;
-pub const WINT_MAX: u32 = 4294967295;
-pub const ____gwchar_t_defined: u32 = 1;
-pub const __PRI64_PREFIX: &[u8; 2] = b"l\0";
-pub const __PRIPTR_PREFIX: &[u8; 2] = b"l\0";
-pub const PRId8: &[u8; 2] = b"d\0";
-pub const PRId16: &[u8; 2] = b"d\0";
-pub const PRId32: &[u8; 2] = b"d\0";
-pub const PRId64: &[u8; 3] = b"ld\0";
-pub const PRIdLEAST8: &[u8; 2] = b"d\0";
-pub const PRIdLEAST16: &[u8; 2] = b"d\0";
-pub const PRIdLEAST32: &[u8; 2] = b"d\0";
-pub const PRIdLEAST64: &[u8; 3] = b"ld\0";
-pub const PRIdFAST8: &[u8; 2] = b"d\0";
-pub const PRIdFAST16: &[u8; 3] = b"ld\0";
-pub const PRIdFAST32: &[u8; 3] = b"ld\0";
-pub const PRIdFAST64: &[u8; 3] = b"ld\0";
-pub const PRIi8: &[u8; 2] = b"i\0";
-pub const PRIi16: &[u8; 2] = b"i\0";
-pub const PRIi32: &[u8; 2] = b"i\0";
-pub const PRIi64: &[u8; 3] = b"li\0";
-pub const PRIiLEAST8: &[u8; 2] = b"i\0";
-pub const PRIiLEAST16: &[u8; 2] = b"i\0";
-pub const PRIiLEAST32: &[u8; 2] = b"i\0";
-pub const PRIiLEAST64: &[u8; 3] = b"li\0";
-pub const PRIiFAST8: &[u8; 2] = b"i\0";
-pub const PRIiFAST16: &[u8; 3] = b"li\0";
-pub const PRIiFAST32: &[u8; 3] = b"li\0";
-pub const PRIiFAST64: &[u8; 3] = b"li\0";
-pub const PRIo8: &[u8; 2] = b"o\0";
-pub const PRIo16: &[u8; 2] = b"o\0";
-pub const PRIo32: &[u8; 2] = b"o\0";
-pub const PRIo64: &[u8; 3] = b"lo\0";
-pub const PRIoLEAST8: &[u8; 2] = b"o\0";
-pub const PRIoLEAST16: &[u8; 2] = b"o\0";
-pub const PRIoLEAST32: &[u8; 2] = b"o\0";
-pub const PRIoLEAST64: &[u8; 3] = b"lo\0";
-pub const PRIoFAST8: &[u8; 2] = b"o\0";
-pub const PRIoFAST16: &[u8; 3] = b"lo\0";
-pub const PRIoFAST32: &[u8; 3] = b"lo\0";
-pub const PRIoFAST64: &[u8; 3] = b"lo\0";
-pub const PRIu8: &[u8; 2] = b"u\0";
-pub const PRIu16: &[u8; 2] = b"u\0";
-pub const PRIu32: &[u8; 2] = b"u\0";
-pub const PRIu64: &[u8; 3] = b"lu\0";
-pub const PRIuLEAST8: &[u8; 2] = b"u\0";
-pub const PRIuLEAST16: &[u8; 2] = b"u\0";
-pub const PRIuLEAST32: &[u8; 2] = b"u\0";
-pub const PRIuLEAST64: &[u8; 3] = b"lu\0";
-pub const PRIuFAST8: &[u8; 2] = b"u\0";
-pub const PRIuFAST16: &[u8; 3] = b"lu\0";
-pub const PRIuFAST32: &[u8; 3] = b"lu\0";
-pub const PRIuFAST64: &[u8; 3] = b"lu\0";
-pub const PRIx8: &[u8; 2] = b"x\0";
-pub const PRIx16: &[u8; 2] = b"x\0";
-pub const PRIx32: &[u8; 2] = b"x\0";
-pub const PRIx64: &[u8; 3] = b"lx\0";
-pub const PRIxLEAST8: &[u8; 2] = b"x\0";
-pub const PRIxLEAST16: &[u8; 2] = b"x\0";
-pub const PRIxLEAST32: &[u8; 2] = b"x\0";
-pub const PRIxLEAST64: &[u8; 3] = b"lx\0";
-pub const PRIxFAST8: &[u8; 2] = b"x\0";
-pub const PRIxFAST16: &[u8; 3] = b"lx\0";
-pub const PRIxFAST32: &[u8; 3] = b"lx\0";
-pub const PRIxFAST64: &[u8; 3] = b"lx\0";
-pub const PRIX8: &[u8; 2] = b"X\0";
-pub const PRIX16: &[u8; 2] = b"X\0";
-pub const PRIX32: &[u8; 2] = b"X\0";
-pub const PRIX64: &[u8; 3] = b"lX\0";
-pub const PRIXLEAST8: &[u8; 2] = b"X\0";
-pub const PRIXLEAST16: &[u8; 2] = b"X\0";
-pub const PRIXLEAST32: &[u8; 2] = b"X\0";
-pub const PRIXLEAST64: &[u8; 3] = b"lX\0";
-pub const PRIXFAST8: &[u8; 2] = b"X\0";
-pub const PRIXFAST16: &[u8; 3] = b"lX\0";
-pub const PRIXFAST32: &[u8; 3] = b"lX\0";
-pub const PRIXFAST64: &[u8; 3] = b"lX\0";
-pub const PRIdMAX: &[u8; 3] = b"ld\0";
-pub const PRIiMAX: &[u8; 3] = b"li\0";
-pub const PRIoMAX: &[u8; 3] = b"lo\0";
-pub const PRIuMAX: &[u8; 3] = b"lu\0";
-pub const PRIxMAX: &[u8; 3] = b"lx\0";
-pub const PRIXMAX: &[u8; 3] = b"lX\0";
-pub const PRIdPTR: &[u8; 3] = b"ld\0";
-pub const PRIiPTR: &[u8; 3] = b"li\0";
-pub const PRIoPTR: &[u8; 3] = b"lo\0";
-pub const PRIuPTR: &[u8; 3] = b"lu\0";
-pub const PRIxPTR: &[u8; 3] = b"lx\0";
-pub const PRIXPTR: &[u8; 3] = b"lX\0";
-pub const SCNd8: &[u8; 4] = b"hhd\0";
-pub const SCNd16: &[u8; 3] = b"hd\0";
-pub const SCNd32: &[u8; 2] = b"d\0";
-pub const SCNd64: &[u8; 3] = b"ld\0";
-pub const SCNdLEAST8: &[u8; 4] = b"hhd\0";
-pub const SCNdLEAST16: &[u8; 3] = b"hd\0";
-pub const SCNdLEAST32: &[u8; 2] = b"d\0";
-pub const SCNdLEAST64: &[u8; 3] = b"ld\0";
-pub const SCNdFAST8: &[u8; 4] = b"hhd\0";
-pub const SCNdFAST16: &[u8; 3] = b"ld\0";
-pub const SCNdFAST32: &[u8; 3] = b"ld\0";
-pub const SCNdFAST64: &[u8; 3] = b"ld\0";
-pub const SCNi8: &[u8; 4] = b"hhi\0";
-pub const SCNi16: &[u8; 3] = b"hi\0";
-pub const SCNi32: &[u8; 2] = b"i\0";
-pub const SCNi64: &[u8; 3] = b"li\0";
-pub const SCNiLEAST8: &[u8; 4] = b"hhi\0";
-pub const SCNiLEAST16: &[u8; 3] = b"hi\0";
-pub const SCNiLEAST32: &[u8; 2] = b"i\0";
-pub const SCNiLEAST64: &[u8; 3] = b"li\0";
-pub const SCNiFAST8: &[u8; 4] = b"hhi\0";
-pub const SCNiFAST16: &[u8; 3] = b"li\0";
-pub const SCNiFAST32: &[u8; 3] = b"li\0";
-pub const SCNiFAST64: &[u8; 3] = b"li\0";
-pub const SCNu8: &[u8; 4] = b"hhu\0";
-pub const SCNu16: &[u8; 3] = b"hu\0";
-pub const SCNu32: &[u8; 2] = b"u\0";
-pub const SCNu64: &[u8; 3] = b"lu\0";
-pub const SCNuLEAST8: &[u8; 4] = b"hhu\0";
-pub const SCNuLEAST16: &[u8; 3] = b"hu\0";
-pub const SCNuLEAST32: &[u8; 2] = b"u\0";
-pub const SCNuLEAST64: &[u8; 3] = b"lu\0";
-pub const SCNuFAST8: &[u8; 4] = b"hhu\0";
-pub const SCNuFAST16: &[u8; 3] = b"lu\0";
-pub const SCNuFAST32: &[u8; 3] = b"lu\0";
-pub const SCNuFAST64: &[u8; 3] = b"lu\0";
-pub const SCNo8: &[u8; 4] = b"hho\0";
-pub const SCNo16: &[u8; 3] = b"ho\0";
-pub const SCNo32: &[u8; 2] = b"o\0";
-pub const SCNo64: &[u8; 3] = b"lo\0";
-pub const SCNoLEAST8: &[u8; 4] = b"hho\0";
-pub const SCNoLEAST16: &[u8; 3] = b"ho\0";
-pub const SCNoLEAST32: &[u8; 2] = b"o\0";
-pub const SCNoLEAST64: &[u8; 3] = b"lo\0";
-pub const SCNoFAST8: &[u8; 4] = b"hho\0";
-pub const SCNoFAST16: &[u8; 3] = b"lo\0";
-pub const SCNoFAST32: &[u8; 3] = b"lo\0";
-pub const SCNoFAST64: &[u8; 3] = b"lo\0";
-pub const SCNx8: &[u8; 4] = b"hhx\0";
-pub const SCNx16: &[u8; 3] = b"hx\0";
-pub const SCNx32: &[u8; 2] = b"x\0";
-pub const SCNx64: &[u8; 3] = b"lx\0";
-pub const SCNxLEAST8: &[u8; 4] = b"hhx\0";
-pub const SCNxLEAST16: &[u8; 3] = b"hx\0";
-pub const SCNxLEAST32: &[u8; 2] = b"x\0";
-pub const SCNxLEAST64: &[u8; 3] = b"lx\0";
-pub const SCNxFAST8: &[u8; 4] = b"hhx\0";
-pub const SCNxFAST16: &[u8; 3] = b"lx\0";
-pub const SCNxFAST32: &[u8; 3] = b"lx\0";
-pub const SCNxFAST64: &[u8; 3] = b"lx\0";
-pub const SCNdMAX: &[u8; 3] = b"ld\0";
-pub const SCNiMAX: &[u8; 3] = b"li\0";
-pub const SCNoMAX: &[u8; 3] = b"lo\0";
-pub const SCNuMAX: &[u8; 3] = b"lu\0";
-pub const SCNxMAX: &[u8; 3] = b"lx\0";
-pub const SCNdPTR: &[u8; 3] = b"ld\0";
-pub const SCNiPTR: &[u8; 3] = b"li\0";
-pub const SCNoPTR: &[u8; 3] = b"lo\0";
-pub const SCNuPTR: &[u8; 3] = b"lu\0";
-pub const SCNxPTR: &[u8; 3] = b"lx\0";
 pub const HB_FEATURE_GLOBAL_START: u32 = 0;
 pub const HB_UNICODE_MAX: u32 = 1114111;
 pub const HB_FONT_NO_VAR_NAMED_INSTANCE: u32 = 4294967295;
@@ -1212,1821 +742,9 @@ pub const HB_BUFFER_REPLACEMENT_CODEPOINT_DEFAULT: u32 = 65533;
 pub const HB_UNICODE_COMBINING_CLASS_CCC133: u32 = 133;
 pub const HB_UNICODE_MAX_DECOMPOSITION_LEN: u32 = 19;
 pub const HB_VERSION_MAJOR: u32 = 10;
-pub const HB_VERSION_MINOR: u32 = 1;
+pub const HB_VERSION_MINOR: u32 = 2;
 pub const HB_VERSION_MICRO: u32 = 0;
-pub const HB_VERSION_STRING: &[u8; 7] = b"10.1.0\0";
-pub type wchar_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[repr(align(16))]
-#[derive(Debug, Copy, Clone)]
-pub struct max_align_t {
-    pub __clang_max_align_nonce1: ::std::os::raw::c_longlong,
-    pub __bindgen_padding_0: u64,
-    pub __clang_max_align_nonce2: u128,
-}
-extern "C" {
-    pub fn memcpy(
-        __dest: *mut ::std::os::raw::c_void,
-        __src: *const ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn memmove(
-        __dest: *mut ::std::os::raw::c_void,
-        __src: *const ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn memccpy(
-        __dest: *mut ::std::os::raw::c_void,
-        __src: *const ::std::os::raw::c_void,
-        __c: ::std::os::raw::c_int,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn memset(
-        __s: *mut ::std::os::raw::c_void,
-        __c: ::std::os::raw::c_int,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn memcmp(
-        __s1: *const ::std::os::raw::c_void,
-        __s2: *const ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn __memcmpeq(
-        __s1: *const ::std::os::raw::c_void,
-        __s2: *const ::std::os::raw::c_void,
-        __n: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn memchr(
-        __s: *const ::std::os::raw::c_void,
-        __c: ::std::os::raw::c_int,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn strcpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strncpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strcat(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strncat(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strcmp(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strncmp(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strcoll(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strxfrm(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_ulong;
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __locale_struct {
-    pub __locales: [*mut __locale_data; 13usize],
-    pub __ctype_b: *const ::std::os::raw::c_ushort,
-    pub __ctype_tolower: *const ::std::os::raw::c_int,
-    pub __ctype_toupper: *const ::std::os::raw::c_int,
-    pub __names: [*const ::std::os::raw::c_char; 13usize],
-}
-pub type __locale_t = *mut __locale_struct;
-pub type locale_t = __locale_t;
-extern "C" {
-    pub fn strcoll_l(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-        __l: locale_t,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strxfrm_l(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: usize,
-        __l: locale_t,
-    ) -> usize;
-}
-extern "C" {
-    pub fn strdup(__s: *const ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strndup(
-        __string: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strchr(
-        __s: *const ::std::os::raw::c_char,
-        __c: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strrchr(
-        __s: *const ::std::os::raw::c_char,
-        __c: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strchrnul(
-        __s: *const ::std::os::raw::c_char,
-        __c: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strcspn(
-        __s: *const ::std::os::raw::c_char,
-        __reject: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn strspn(
-        __s: *const ::std::os::raw::c_char,
-        __accept: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn strpbrk(
-        __s: *const ::std::os::raw::c_char,
-        __accept: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strstr(
-        __haystack: *const ::std::os::raw::c_char,
-        __needle: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strtok(
-        __s: *mut ::std::os::raw::c_char,
-        __delim: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn __strtok_r(
-        __s: *mut ::std::os::raw::c_char,
-        __delim: *const ::std::os::raw::c_char,
-        __save_ptr: *mut *mut ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strtok_r(
-        __s: *mut ::std::os::raw::c_char,
-        __delim: *const ::std::os::raw::c_char,
-        __save_ptr: *mut *mut ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strcasestr(
-        __haystack: *const ::std::os::raw::c_char,
-        __needle: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn memmem(
-        __haystack: *const ::std::os::raw::c_void,
-        __haystacklen: usize,
-        __needle: *const ::std::os::raw::c_void,
-        __needlelen: usize,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn __mempcpy(
-        __dest: *mut ::std::os::raw::c_void,
-        __src: *const ::std::os::raw::c_void,
-        __n: usize,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn mempcpy(
-        __dest: *mut ::std::os::raw::c_void,
-        __src: *const ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn strlen(__s: *const ::std::os::raw::c_char) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn strnlen(__string: *const ::std::os::raw::c_char, __maxlen: usize) -> usize;
-}
-extern "C" {
-    pub fn strerror(__errnum: ::std::os::raw::c_int) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    #[link_name = "\u{1}__xpg_strerror_r"]
-    pub fn strerror_r(
-        __errnum: ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-        __buflen: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strerror_l(
-        __errnum: ::std::os::raw::c_int,
-        __l: locale_t,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn bcmp(
-        __s1: *const ::std::os::raw::c_void,
-        __s2: *const ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn bcopy(
-        __src: *const ::std::os::raw::c_void,
-        __dest: *mut ::std::os::raw::c_void,
-        __n: ::std::os::raw::c_ulong,
-    );
-}
-extern "C" {
-    pub fn bzero(__s: *mut ::std::os::raw::c_void, __n: ::std::os::raw::c_ulong);
-}
-extern "C" {
-    pub fn index(
-        __s: *const ::std::os::raw::c_char,
-        __c: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn rindex(
-        __s: *const ::std::os::raw::c_char,
-        __c: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn ffs(__i: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ffsl(__l: ::std::os::raw::c_long) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ffsll(__ll: ::std::os::raw::c_longlong) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strcasecmp(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strncasecmp(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strcasecmp_l(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-        __loc: locale_t,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn strncasecmp_l(
-        __s1: *const ::std::os::raw::c_char,
-        __s2: *const ::std::os::raw::c_char,
-        __n: usize,
-        __loc: locale_t,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn explicit_bzero(__s: *mut ::std::os::raw::c_void, __n: usize);
-}
-extern "C" {
-    pub fn strsep(
-        __stringp: *mut *mut ::std::os::raw::c_char,
-        __delim: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strsignal(__sig: ::std::os::raw::c_int) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn __stpcpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn stpcpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn __stpncpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: usize,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn stpncpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn strlcpy(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn strlcat(
-        __dest: *mut ::std::os::raw::c_char,
-        __src: *const ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_ulong,
-    ) -> ::std::os::raw::c_ulong;
-}
-pub type __gnuc_va_list = __builtin_va_list;
-pub type __u_char = ::std::os::raw::c_uchar;
-pub type __u_short = ::std::os::raw::c_ushort;
-pub type __u_int = ::std::os::raw::c_uint;
-pub type __u_long = ::std::os::raw::c_ulong;
-pub type __int8_t = ::std::os::raw::c_schar;
-pub type __uint8_t = ::std::os::raw::c_uchar;
-pub type __int16_t = ::std::os::raw::c_short;
-pub type __uint16_t = ::std::os::raw::c_ushort;
-pub type __int32_t = ::std::os::raw::c_int;
-pub type __uint32_t = ::std::os::raw::c_uint;
-pub type __int64_t = ::std::os::raw::c_long;
-pub type __uint64_t = ::std::os::raw::c_ulong;
-pub type __int_least8_t = __int8_t;
-pub type __uint_least8_t = __uint8_t;
-pub type __int_least16_t = __int16_t;
-pub type __uint_least16_t = __uint16_t;
-pub type __int_least32_t = __int32_t;
-pub type __uint_least32_t = __uint32_t;
-pub type __int_least64_t = __int64_t;
-pub type __uint_least64_t = __uint64_t;
-pub type __quad_t = ::std::os::raw::c_long;
-pub type __u_quad_t = ::std::os::raw::c_ulong;
-pub type __intmax_t = ::std::os::raw::c_long;
-pub type __uintmax_t = ::std::os::raw::c_ulong;
-pub type __dev_t = ::std::os::raw::c_ulong;
-pub type __uid_t = ::std::os::raw::c_uint;
-pub type __gid_t = ::std::os::raw::c_uint;
-pub type __ino_t = ::std::os::raw::c_ulong;
-pub type __ino64_t = ::std::os::raw::c_ulong;
-pub type __mode_t = ::std::os::raw::c_uint;
-pub type __nlink_t = ::std::os::raw::c_ulong;
-pub type __off_t = ::std::os::raw::c_long;
-pub type __off64_t = ::std::os::raw::c_long;
-pub type __pid_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __fsid_t {
-    pub __val: [::std::os::raw::c_int; 2usize],
-}
-pub type __clock_t = ::std::os::raw::c_long;
-pub type __rlim_t = ::std::os::raw::c_ulong;
-pub type __rlim64_t = ::std::os::raw::c_ulong;
-pub type __id_t = ::std::os::raw::c_uint;
-pub type __time_t = ::std::os::raw::c_long;
-pub type __useconds_t = ::std::os::raw::c_uint;
-pub type __suseconds_t = ::std::os::raw::c_long;
-pub type __suseconds64_t = ::std::os::raw::c_long;
-pub type __daddr_t = ::std::os::raw::c_int;
-pub type __key_t = ::std::os::raw::c_int;
-pub type __clockid_t = ::std::os::raw::c_int;
-pub type __timer_t = *mut ::std::os::raw::c_void;
-pub type __blksize_t = ::std::os::raw::c_long;
-pub type __blkcnt_t = ::std::os::raw::c_long;
-pub type __blkcnt64_t = ::std::os::raw::c_long;
-pub type __fsblkcnt_t = ::std::os::raw::c_ulong;
-pub type __fsblkcnt64_t = ::std::os::raw::c_ulong;
-pub type __fsfilcnt_t = ::std::os::raw::c_ulong;
-pub type __fsfilcnt64_t = ::std::os::raw::c_ulong;
-pub type __fsword_t = ::std::os::raw::c_long;
-pub type __ssize_t = ::std::os::raw::c_long;
-pub type __syscall_slong_t = ::std::os::raw::c_long;
-pub type __syscall_ulong_t = ::std::os::raw::c_ulong;
-pub type __loff_t = __off64_t;
-pub type __caddr_t = *mut ::std::os::raw::c_char;
-pub type __intptr_t = ::std::os::raw::c_long;
-pub type __socklen_t = ::std::os::raw::c_uint;
-pub type __sig_atomic_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct __mbstate_t {
-    pub __count: ::std::os::raw::c_int,
-    pub __value: __mbstate_t__bindgen_ty_1,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union __mbstate_t__bindgen_ty_1 {
-    pub __wch: ::std::os::raw::c_uint,
-    pub __wchb: [::std::os::raw::c_char; 4usize],
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct _G_fpos_t {
-    pub __pos: __off_t,
-    pub __state: __mbstate_t,
-}
-pub type __fpos_t = _G_fpos_t;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct _G_fpos64_t {
-    pub __pos: __off64_t,
-    pub __state: __mbstate_t,
-}
-pub type __fpos64_t = _G_fpos64_t;
-pub type __FILE = _IO_FILE;
-pub type FILE = _IO_FILE;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _IO_marker {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _IO_codecvt {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _IO_wide_data {
-    _unused: [u8; 0],
-}
-pub type _IO_lock_t = ::std::os::raw::c_void;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _IO_FILE {
-    pub _flags: ::std::os::raw::c_int,
-    pub _IO_read_ptr: *mut ::std::os::raw::c_char,
-    pub _IO_read_end: *mut ::std::os::raw::c_char,
-    pub _IO_read_base: *mut ::std::os::raw::c_char,
-    pub _IO_write_base: *mut ::std::os::raw::c_char,
-    pub _IO_write_ptr: *mut ::std::os::raw::c_char,
-    pub _IO_write_end: *mut ::std::os::raw::c_char,
-    pub _IO_buf_base: *mut ::std::os::raw::c_char,
-    pub _IO_buf_end: *mut ::std::os::raw::c_char,
-    pub _IO_save_base: *mut ::std::os::raw::c_char,
-    pub _IO_backup_base: *mut ::std::os::raw::c_char,
-    pub _IO_save_end: *mut ::std::os::raw::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::std::os::raw::c_int,
-    pub _flags2: ::std::os::raw::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::std::os::raw::c_ushort,
-    pub _vtable_offset: ::std::os::raw::c_schar,
-    pub _shortbuf: [::std::os::raw::c_char; 1usize],
-    pub _lock: *mut _IO_lock_t,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::std::os::raw::c_void,
-    pub _prevchain: *mut *mut _IO_FILE,
-    pub _mode: ::std::os::raw::c_int,
-    pub _unused2: [::std::os::raw::c_char; 20usize],
-}
-pub type cookie_read_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __buf: *mut ::std::os::raw::c_char,
-        __nbytes: usize,
-    ) -> __ssize_t,
->;
-pub type cookie_write_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __buf: *const ::std::os::raw::c_char,
-        __nbytes: usize,
-    ) -> __ssize_t,
->;
-pub type cookie_seek_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __pos: *mut __off64_t,
-        __w: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int,
->;
-pub type cookie_close_function_t = ::std::option::Option<
-    unsafe extern "C" fn(__cookie: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
->;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _IO_cookie_io_functions_t {
-    pub read: cookie_read_function_t,
-    pub write: cookie_write_function_t,
-    pub seek: cookie_seek_function_t,
-    pub close: cookie_close_function_t,
-}
-pub type cookie_io_functions_t = _IO_cookie_io_functions_t;
-pub type va_list = __gnuc_va_list;
-pub type off_t = __off_t;
-pub type fpos_t = __fpos_t;
-extern "C" {
-    pub static mut stdin: *mut FILE;
-}
-extern "C" {
-    pub static mut stdout: *mut FILE;
-}
-extern "C" {
-    pub static mut stderr: *mut FILE;
-}
-extern "C" {
-    pub fn remove(__filename: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn rename(
-        __old: *const ::std::os::raw::c_char,
-        __new: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn renameat(
-        __oldfd: ::std::os::raw::c_int,
-        __old: *const ::std::os::raw::c_char,
-        __newfd: ::std::os::raw::c_int,
-        __new: *const ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fclose(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn tmpfile() -> *mut FILE;
-}
-extern "C" {
-    pub fn tmpnam(arg1: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn tmpnam_r(__s: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn tempnam(
-        __dir: *const ::std::os::raw::c_char,
-        __pfx: *const ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn fflush(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fflush_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fopen(
-        __filename: *const ::std::os::raw::c_char,
-        __modes: *const ::std::os::raw::c_char,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn freopen(
-        __filename: *const ::std::os::raw::c_char,
-        __modes: *const ::std::os::raw::c_char,
-        __stream: *mut FILE,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn fdopen(__fd: ::std::os::raw::c_int, __modes: *const ::std::os::raw::c_char)
-        -> *mut FILE;
-}
-extern "C" {
-    pub fn fopencookie(
-        __magic_cookie: *mut ::std::os::raw::c_void,
-        __modes: *const ::std::os::raw::c_char,
-        __io_funcs: cookie_io_functions_t,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn fmemopen(
-        __s: *mut ::std::os::raw::c_void,
-        __len: usize,
-        __modes: *const ::std::os::raw::c_char,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn open_memstream(
-        __bufloc: *mut *mut ::std::os::raw::c_char,
-        __sizeloc: *mut usize,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn setbuf(__stream: *mut FILE, __buf: *mut ::std::os::raw::c_char);
-}
-extern "C" {
-    pub fn setvbuf(
-        __stream: *mut FILE,
-        __buf: *mut ::std::os::raw::c_char,
-        __modes: ::std::os::raw::c_int,
-        __n: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn setbuffer(__stream: *mut FILE, __buf: *mut ::std::os::raw::c_char, __size: usize);
-}
-extern "C" {
-    pub fn setlinebuf(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn printf(__format: *const ::std::os::raw::c_char, ...) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn sprintf(
-        __s: *mut ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vfprintf(
-        __s: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vprintf(
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vsprintf(
-        __s: *mut ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn snprintf(
-        __s: *mut ::std::os::raw::c_char,
-        __maxlen: ::std::os::raw::c_ulong,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vsnprintf(
-        __s: *mut ::std::os::raw::c_char,
-        __maxlen: ::std::os::raw::c_ulong,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vasprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __f: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn __asprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __fmt: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn asprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __fmt: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vdprintf(
-        __fd: ::std::os::raw::c_int,
-        __fmt: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn dprintf(
-        __fd: ::std::os::raw::c_int,
-        __fmt: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fscanf(
-        __stream: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn scanf(__format: *const ::std::os::raw::c_char, ...) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn sscanf(
-        __s: *const ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-pub type _Float32 = f32;
-pub type _Float64 = f64;
-pub type _Float32x = f64;
-pub type _Float64x = u128;
-extern "C" {
-    #[link_name = "\u{1}__isoc99_fscanf"]
-    pub fn fscanf1(
-        __stream: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    #[link_name = "\u{1}__isoc99_scanf"]
-    pub fn scanf1(__format: *const ::std::os::raw::c_char, ...) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    #[link_name = "\u{1}__isoc99_sscanf"]
-    pub fn sscanf1(
-        __s: *const ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vfscanf(
-        __s: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vscanf(
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn vsscanf(
-        __s: *const ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    #[link_name = "\u{1}__isoc99_vfscanf"]
-    pub fn vfscanf1(
-        __s: *mut FILE,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    #[link_name = "\u{1}__isoc99_vscanf"]
-    pub fn vscanf1(
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    #[link_name = "\u{1}__isoc99_vsscanf"]
-    pub fn vsscanf1(
-        __s: *const ::std::os::raw::c_char,
-        __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fgetc(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getc(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getchar() -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getc_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getchar_unlocked() -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fgetc_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fputc(__c: ::std::os::raw::c_int, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn putc(__c: ::std::os::raw::c_int, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn putchar(__c: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fputc_unlocked(__c: ::std::os::raw::c_int, __stream: *mut FILE)
-        -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn putc_unlocked(__c: ::std::os::raw::c_int, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn putchar_unlocked(__c: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getw(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn putw(__w: ::std::os::raw::c_int, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fgets(
-        __s: *mut ::std::os::raw::c_char,
-        __n: ::std::os::raw::c_int,
-        __stream: *mut FILE,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn __getdelim(
-        __lineptr: *mut *mut ::std::os::raw::c_char,
-        __n: *mut usize,
-        __delimiter: ::std::os::raw::c_int,
-        __stream: *mut FILE,
-    ) -> __ssize_t;
-}
-extern "C" {
-    pub fn getdelim(
-        __lineptr: *mut *mut ::std::os::raw::c_char,
-        __n: *mut usize,
-        __delimiter: ::std::os::raw::c_int,
-        __stream: *mut FILE,
-    ) -> __ssize_t;
-}
-extern "C" {
-    pub fn getline(
-        __lineptr: *mut *mut ::std::os::raw::c_char,
-        __n: *mut usize,
-        __stream: *mut FILE,
-    ) -> __ssize_t;
-}
-extern "C" {
-    pub fn fputs(__s: *const ::std::os::raw::c_char, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn puts(__s: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ungetc(__c: ::std::os::raw::c_int, __stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fread(
-        __ptr: *mut ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-        __n: ::std::os::raw::c_ulong,
-        __stream: *mut FILE,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn fwrite(
-        __ptr: *const ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-        __n: ::std::os::raw::c_ulong,
-        __s: *mut FILE,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn fread_unlocked(
-        __ptr: *mut ::std::os::raw::c_void,
-        __size: usize,
-        __n: usize,
-        __stream: *mut FILE,
-    ) -> usize;
-}
-extern "C" {
-    pub fn fwrite_unlocked(
-        __ptr: *const ::std::os::raw::c_void,
-        __size: usize,
-        __n: usize,
-        __stream: *mut FILE,
-    ) -> usize;
-}
-extern "C" {
-    pub fn fseek(
-        __stream: *mut FILE,
-        __off: ::std::os::raw::c_long,
-        __whence: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ftell(__stream: *mut FILE) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn rewind(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn fseeko(
-        __stream: *mut FILE,
-        __off: __off_t,
-        __whence: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ftello(__stream: *mut FILE) -> __off_t;
-}
-extern "C" {
-    pub fn fgetpos(__stream: *mut FILE, __pos: *mut fpos_t) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fsetpos(__stream: *mut FILE, __pos: *const fpos_t) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn clearerr(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn feof(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ferror(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn clearerr_unlocked(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn feof_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn ferror_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn perror(__s: *const ::std::os::raw::c_char);
-}
-extern "C" {
-    pub fn fileno(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fileno_unlocked(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn pclose(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn popen(
-        __command: *const ::std::os::raw::c_char,
-        __modes: *const ::std::os::raw::c_char,
-    ) -> *mut FILE;
-}
-extern "C" {
-    pub fn ctermid(__s: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn flockfile(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn ftrylockfile(__stream: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn funlockfile(__stream: *mut FILE);
-}
-extern "C" {
-    pub fn __uflow(arg1: *mut FILE) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn __overflow(arg1: *mut FILE, arg2: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct div_t {
-    pub quot: ::std::os::raw::c_int,
-    pub rem: ::std::os::raw::c_int,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ldiv_t {
-    pub quot: ::std::os::raw::c_long,
-    pub rem: ::std::os::raw::c_long,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct lldiv_t {
-    pub quot: ::std::os::raw::c_longlong,
-    pub rem: ::std::os::raw::c_longlong,
-}
-extern "C" {
-    pub fn __ctype_get_mb_cur_max() -> usize;
-}
-extern "C" {
-    pub fn atof(__nptr: *const ::std::os::raw::c_char) -> f64;
-}
-extern "C" {
-    pub fn atoi(__nptr: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn atol(__nptr: *const ::std::os::raw::c_char) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn atoll(__nptr: *const ::std::os::raw::c_char) -> ::std::os::raw::c_longlong;
-}
-extern "C" {
-    pub fn strtod(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-    ) -> f64;
-}
-extern "C" {
-    pub fn strtof(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-    ) -> f32;
-}
-extern "C" {
-    pub fn strtold(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-    ) -> u128;
-}
-extern "C" {
-    pub fn strtol(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn strtoul(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_ulong;
-}
-extern "C" {
-    pub fn strtoq(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_longlong;
-}
-extern "C" {
-    pub fn strtouq(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_ulonglong;
-}
-extern "C" {
-    pub fn strtoll(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_longlong;
-}
-extern "C" {
-    pub fn strtoull(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_ulonglong;
-}
-extern "C" {
-    pub fn l64a(__n: ::std::os::raw::c_long) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn a64l(__s: *const ::std::os::raw::c_char) -> ::std::os::raw::c_long;
-}
-pub type u_char = __u_char;
-pub type u_short = __u_short;
-pub type u_int = __u_int;
-pub type u_long = __u_long;
-pub type quad_t = __quad_t;
-pub type u_quad_t = __u_quad_t;
-pub type fsid_t = __fsid_t;
-pub type loff_t = __loff_t;
-pub type ino_t = __ino_t;
-pub type dev_t = __dev_t;
-pub type gid_t = __gid_t;
-pub type mode_t = __mode_t;
-pub type nlink_t = __nlink_t;
-pub type uid_t = __uid_t;
-pub type pid_t = __pid_t;
-pub type id_t = __id_t;
-pub type daddr_t = __daddr_t;
-pub type caddr_t = __caddr_t;
-pub type key_t = __key_t;
-pub type clock_t = __clock_t;
-pub type clockid_t = __clockid_t;
-pub type time_t = __time_t;
-pub type timer_t = __timer_t;
-pub type ulong = ::std::os::raw::c_ulong;
-pub type ushort = ::std::os::raw::c_ushort;
-pub type uint = ::std::os::raw::c_uint;
-pub type u_int8_t = __uint8_t;
-pub type u_int16_t = __uint16_t;
-pub type u_int32_t = __uint32_t;
-pub type u_int64_t = __uint64_t;
-pub type register_t = ::std::os::raw::c_long;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __sigset_t {
-    pub __val: [::std::os::raw::c_ulong; 16usize],
-}
-pub type sigset_t = __sigset_t;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct timeval {
-    pub tv_sec: __time_t,
-    pub tv_usec: __suseconds_t,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct timespec {
-    pub tv_sec: __time_t,
-    pub tv_nsec: __syscall_slong_t,
-}
-pub type suseconds_t = __suseconds_t;
-pub type __fd_mask = ::std::os::raw::c_long;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct fd_set {
-    pub __fds_bits: [__fd_mask; 16usize],
-}
-pub type fd_mask = __fd_mask;
-extern "C" {
-    pub fn select(
-        __nfds: ::std::os::raw::c_int,
-        __readfds: *mut fd_set,
-        __writefds: *mut fd_set,
-        __exceptfds: *mut fd_set,
-        __timeout: *mut timeval,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn pselect(
-        __nfds: ::std::os::raw::c_int,
-        __readfds: *mut fd_set,
-        __writefds: *mut fd_set,
-        __exceptfds: *mut fd_set,
-        __timeout: *const timespec,
-        __sigmask: *const __sigset_t,
-    ) -> ::std::os::raw::c_int;
-}
-pub type blksize_t = __blksize_t;
-pub type blkcnt_t = __blkcnt_t;
-pub type fsblkcnt_t = __fsblkcnt_t;
-pub type fsfilcnt_t = __fsfilcnt_t;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union __atomic_wide_counter {
-    pub __value64: ::std::os::raw::c_ulonglong,
-    pub __value32: __atomic_wide_counter__bindgen_ty_1,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __atomic_wide_counter__bindgen_ty_1 {
-    pub __low: ::std::os::raw::c_uint,
-    pub __high: ::std::os::raw::c_uint,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __pthread_internal_list {
-    pub __prev: *mut __pthread_internal_list,
-    pub __next: *mut __pthread_internal_list,
-}
-pub type __pthread_list_t = __pthread_internal_list;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __pthread_internal_slist {
-    pub __next: *mut __pthread_internal_slist,
-}
-pub type __pthread_slist_t = __pthread_internal_slist;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __pthread_mutex_s {
-    pub __lock: ::std::os::raw::c_int,
-    pub __count: ::std::os::raw::c_uint,
-    pub __owner: ::std::os::raw::c_int,
-    pub __nusers: ::std::os::raw::c_uint,
-    pub __kind: ::std::os::raw::c_int,
-    pub __spins: ::std::os::raw::c_short,
-    pub __elision: ::std::os::raw::c_short,
-    pub __list: __pthread_list_t,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __pthread_rwlock_arch_t {
-    pub __readers: ::std::os::raw::c_uint,
-    pub __writers: ::std::os::raw::c_uint,
-    pub __wrphase_futex: ::std::os::raw::c_uint,
-    pub __writers_futex: ::std::os::raw::c_uint,
-    pub __pad3: ::std::os::raw::c_uint,
-    pub __pad4: ::std::os::raw::c_uint,
-    pub __cur_writer: ::std::os::raw::c_int,
-    pub __shared: ::std::os::raw::c_int,
-    pub __rwelision: ::std::os::raw::c_schar,
-    pub __pad1: [::std::os::raw::c_uchar; 7usize],
-    pub __pad2: ::std::os::raw::c_ulong,
-    pub __flags: ::std::os::raw::c_uint,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct __pthread_cond_s {
-    pub __wseq: __atomic_wide_counter,
-    pub __g1_start: __atomic_wide_counter,
-    pub __g_refs: [::std::os::raw::c_uint; 2usize],
-    pub __g_size: [::std::os::raw::c_uint; 2usize],
-    pub __g1_orig_size: ::std::os::raw::c_uint,
-    pub __wrefs: ::std::os::raw::c_uint,
-    pub __g_signals: [::std::os::raw::c_uint; 2usize],
-}
-pub type __tss_t = ::std::os::raw::c_uint;
-pub type __thrd_t = ::std::os::raw::c_ulong;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __once_flag {
-    pub __data: ::std::os::raw::c_int,
-}
-pub type pthread_t = ::std::os::raw::c_ulong;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_mutexattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
-    pub __align: ::std::os::raw::c_int,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_condattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
-    pub __align: ::std::os::raw::c_int,
-}
-pub type pthread_key_t = ::std::os::raw::c_uint;
-pub type pthread_once_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_attr_t {
-    pub __size: [::std::os::raw::c_char; 56usize],
-    pub __align: ::std::os::raw::c_long,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_mutex_t {
-    pub __data: __pthread_mutex_s,
-    pub __size: [::std::os::raw::c_char; 40usize],
-    pub __align: ::std::os::raw::c_long,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_cond_t {
-    pub __data: __pthread_cond_s,
-    pub __size: [::std::os::raw::c_char; 48usize],
-    pub __align: ::std::os::raw::c_longlong,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_rwlock_t {
-    pub __data: __pthread_rwlock_arch_t,
-    pub __size: [::std::os::raw::c_char; 56usize],
-    pub __align: ::std::os::raw::c_long,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_rwlockattr_t {
-    pub __size: [::std::os::raw::c_char; 8usize],
-    pub __align: ::std::os::raw::c_long,
-}
-pub type pthread_spinlock_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_barrier_t {
-    pub __size: [::std::os::raw::c_char; 32usize],
-    pub __align: ::std::os::raw::c_long,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union pthread_barrierattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
-    pub __align: ::std::os::raw::c_int,
-}
-extern "C" {
-    pub fn random() -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn srandom(__seed: ::std::os::raw::c_uint);
-}
-extern "C" {
-    pub fn initstate(
-        __seed: ::std::os::raw::c_uint,
-        __statebuf: *mut ::std::os::raw::c_char,
-        __statelen: usize,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn setstate(__statebuf: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct random_data {
-    pub fptr: *mut i32,
-    pub rptr: *mut i32,
-    pub state: *mut i32,
-    pub rand_type: ::std::os::raw::c_int,
-    pub rand_deg: ::std::os::raw::c_int,
-    pub rand_sep: ::std::os::raw::c_int,
-    pub end_ptr: *mut i32,
-}
-extern "C" {
-    pub fn random_r(__buf: *mut random_data, __result: *mut i32) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn srandom_r(
-        __seed: ::std::os::raw::c_uint,
-        __buf: *mut random_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn initstate_r(
-        __seed: ::std::os::raw::c_uint,
-        __statebuf: *mut ::std::os::raw::c_char,
-        __statelen: usize,
-        __buf: *mut random_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn setstate_r(
-        __statebuf: *mut ::std::os::raw::c_char,
-        __buf: *mut random_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn rand() -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn srand(__seed: ::std::os::raw::c_uint);
-}
-extern "C" {
-    pub fn rand_r(__seed: *mut ::std::os::raw::c_uint) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn drand48() -> f64;
-}
-extern "C" {
-    pub fn erand48(__xsubi: *mut ::std::os::raw::c_ushort) -> f64;
-}
-extern "C" {
-    pub fn lrand48() -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn nrand48(__xsubi: *mut ::std::os::raw::c_ushort) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn mrand48() -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn jrand48(__xsubi: *mut ::std::os::raw::c_ushort) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn srand48(__seedval: ::std::os::raw::c_long);
-}
-extern "C" {
-    pub fn seed48(__seed16v: *mut ::std::os::raw::c_ushort) -> *mut ::std::os::raw::c_ushort;
-}
-extern "C" {
-    pub fn lcong48(__param: *mut ::std::os::raw::c_ushort);
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct drand48_data {
-    pub __x: [::std::os::raw::c_ushort; 3usize],
-    pub __old_x: [::std::os::raw::c_ushort; 3usize],
-    pub __c: ::std::os::raw::c_ushort,
-    pub __init: ::std::os::raw::c_ushort,
-    pub __a: ::std::os::raw::c_ulonglong,
-}
-extern "C" {
-    pub fn drand48_r(__buffer: *mut drand48_data, __result: *mut f64) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn erand48_r(
-        __xsubi: *mut ::std::os::raw::c_ushort,
-        __buffer: *mut drand48_data,
-        __result: *mut f64,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn lrand48_r(
-        __buffer: *mut drand48_data,
-        __result: *mut ::std::os::raw::c_long,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn nrand48_r(
-        __xsubi: *mut ::std::os::raw::c_ushort,
-        __buffer: *mut drand48_data,
-        __result: *mut ::std::os::raw::c_long,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mrand48_r(
-        __buffer: *mut drand48_data,
-        __result: *mut ::std::os::raw::c_long,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn jrand48_r(
-        __xsubi: *mut ::std::os::raw::c_ushort,
-        __buffer: *mut drand48_data,
-        __result: *mut ::std::os::raw::c_long,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn srand48_r(
-        __seedval: ::std::os::raw::c_long,
-        __buffer: *mut drand48_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn seed48_r(
-        __seed16v: *mut ::std::os::raw::c_ushort,
-        __buffer: *mut drand48_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn lcong48_r(
-        __param: *mut ::std::os::raw::c_ushort,
-        __buffer: *mut drand48_data,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn arc4random() -> __uint32_t;
-}
-extern "C" {
-    pub fn arc4random_buf(__buf: *mut ::std::os::raw::c_void, __size: usize);
-}
-extern "C" {
-    pub fn arc4random_uniform(__upper_bound: __uint32_t) -> __uint32_t;
-}
-extern "C" {
-    pub fn malloc(__size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn calloc(
-        __nmemb: ::std::os::raw::c_ulong,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn realloc(
-        __ptr: *mut ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn free(__ptr: *mut ::std::os::raw::c_void);
-}
-extern "C" {
-    pub fn reallocarray(
-        __ptr: *mut ::std::os::raw::c_void,
-        __nmemb: usize,
-        __size: usize,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn alloca(__size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn valloc(__size: usize) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn posix_memalign(
-        __memptr: *mut *mut ::std::os::raw::c_void,
-        __alignment: usize,
-        __size: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn aligned_alloc(
-        __alignment: ::std::os::raw::c_ulong,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn abort() -> !;
-}
-extern "C" {
-    pub fn atexit(__func: ::std::option::Option<unsafe extern "C" fn()>) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn at_quick_exit(
-        __func: ::std::option::Option<unsafe extern "C" fn()>,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn on_exit(
-        __func: ::std::option::Option<
-            unsafe extern "C" fn(
-                __status: ::std::os::raw::c_int,
-                __arg: *mut ::std::os::raw::c_void,
-            ),
-        >,
-        __arg: *mut ::std::os::raw::c_void,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn exit(__status: ::std::os::raw::c_int) -> !;
-}
-extern "C" {
-    pub fn quick_exit(__status: ::std::os::raw::c_int) -> !;
-}
-extern "C" {
-    pub fn _Exit(__status: ::std::os::raw::c_int) -> !;
-}
-extern "C" {
-    pub fn getenv(__name: *const ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn putenv(__string: *mut ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn setenv(
-        __name: *const ::std::os::raw::c_char,
-        __value: *const ::std::os::raw::c_char,
-        __replace: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn unsetenv(__name: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn clearenv() -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mktemp(__template: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn mkstemp(__template: *mut ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mkstemps(
-        __template: *mut ::std::os::raw::c_char,
-        __suffixlen: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mkdtemp(__template: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn system(__command: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn realpath(
-        __name: *const ::std::os::raw::c_char,
-        __resolved: *mut ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-pub type __compar_fn_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        arg1: *const ::std::os::raw::c_void,
-        arg2: *const ::std::os::raw::c_void,
-    ) -> ::std::os::raw::c_int,
->;
-extern "C" {
-    pub fn bsearch(
-        __key: *const ::std::os::raw::c_void,
-        __base: *const ::std::os::raw::c_void,
-        __nmemb: usize,
-        __size: usize,
-        __compar: __compar_fn_t,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn qsort(
-        __base: *mut ::std::os::raw::c_void,
-        __nmemb: usize,
-        __size: usize,
-        __compar: __compar_fn_t,
-    );
-}
-extern "C" {
-    pub fn abs(__x: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn labs(__x: ::std::os::raw::c_long) -> ::std::os::raw::c_long;
-}
-extern "C" {
-    pub fn llabs(__x: ::std::os::raw::c_longlong) -> ::std::os::raw::c_longlong;
-}
-extern "C" {
-    pub fn div(__numer: ::std::os::raw::c_int, __denom: ::std::os::raw::c_int) -> div_t;
-}
-extern "C" {
-    pub fn ldiv(__numer: ::std::os::raw::c_long, __denom: ::std::os::raw::c_long) -> ldiv_t;
-}
-extern "C" {
-    pub fn lldiv(
-        __numer: ::std::os::raw::c_longlong,
-        __denom: ::std::os::raw::c_longlong,
-    ) -> lldiv_t;
-}
-extern "C" {
-    pub fn ecvt(
-        __value: f64,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn fcvt(
-        __value: f64,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn gcvt(
-        __value: f64,
-        __ndigit: ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn qecvt(
-        __value: u128,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn qfcvt(
-        __value: u128,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn qgcvt(
-        __value: u128,
-        __ndigit: ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-    ) -> *mut ::std::os::raw::c_char;
-}
-extern "C" {
-    pub fn ecvt_r(
-        __value: f64,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-        __len: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn fcvt_r(
-        __value: f64,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-        __len: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn qecvt_r(
-        __value: u128,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-        __len: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn qfcvt_r(
-        __value: u128,
-        __ndigit: ::std::os::raw::c_int,
-        __decpt: *mut ::std::os::raw::c_int,
-        __sign: *mut ::std::os::raw::c_int,
-        __buf: *mut ::std::os::raw::c_char,
-        __len: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mblen(__s: *const ::std::os::raw::c_char, __n: usize) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mbtowc(
-        __pwc: *mut wchar_t,
-        __s: *const ::std::os::raw::c_char,
-        __n: usize,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn wctomb(__s: *mut ::std::os::raw::c_char, __wchar: wchar_t) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn mbstowcs(__pwcs: *mut wchar_t, __s: *const ::std::os::raw::c_char, __n: usize) -> usize;
-}
-extern "C" {
-    pub fn wcstombs(__s: *mut ::std::os::raw::c_char, __pwcs: *const wchar_t, __n: usize) -> usize;
-}
-extern "C" {
-    pub fn rpmatch(__response: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getsubopt(
-        __optionp: *mut *mut ::std::os::raw::c_char,
-        __tokens: *const *mut ::std::os::raw::c_char,
-        __valuep: *mut *mut ::std::os::raw::c_char,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn getloadavg(__loadavg: *mut f64, __nelem: ::std::os::raw::c_int)
-        -> ::std::os::raw::c_int;
-}
-pub type __jmp_buf = [::std::os::raw::c_long; 8usize];
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __jmp_buf_tag {
-    pub __jmpbuf: __jmp_buf,
-    pub __mask_was_saved: ::std::os::raw::c_int,
-    pub __saved_mask: __sigset_t,
-}
-pub type jmp_buf = [__jmp_buf_tag; 1usize];
-extern "C" {
-    pub fn setjmp(__env: *mut __jmp_buf_tag) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn __sigsetjmp(
-        __env: *mut __jmp_buf_tag,
-        __savemask: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn _setjmp(__env: *mut __jmp_buf_tag) -> ::std::os::raw::c_int;
-}
-extern "C" {
-    pub fn longjmp(__env: *mut __jmp_buf_tag, __val: ::std::os::raw::c_int) -> !;
-}
-extern "C" {
-    pub fn _longjmp(__env: *mut __jmp_buf_tag, __val: ::std::os::raw::c_int) -> !;
-}
-pub type sigjmp_buf = [__jmp_buf_tag; 1usize];
-extern "C" {
-    pub fn siglongjmp(__env: *mut __jmp_buf_tag, __val: ::std::os::raw::c_int) -> !;
-}
+pub const HB_VERSION_STRING: &[u8; 7] = b"10.2.0\0";
 pub type FT_Int16 = ::std::os::raw::c_short;
 pub type FT_UInt16 = ::std::os::raw::c_ushort;
 pub type FT_Int32 = ::std::os::raw::c_int;
@@ -3472,7 +1190,7 @@ pub const FT_Err_Corrupted_Font_Header: _bindgen_ty_2 = 185;
 pub const FT_Err_Corrupted_Font_Glyphs: _bindgen_ty_2 = 186;
 pub const FT_Err_Max: _bindgen_ty_2 = 187;
 pub type _bindgen_ty_2 = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Error_String(error_code: FT_Error) -> *const ::std::os::raw::c_char;
 }
 #[repr(C)]
@@ -3666,10 +1384,10 @@ pub struct FT_GlyphSlotRec_ {
     pub internal: FT_Slot_Internal,
 }
 pub type FT_GlyphSlotRec = FT_GlyphSlotRec_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Init_FreeType(alibrary: *mut FT_Library) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Done_FreeType(library: FT_Library) -> FT_Error;
 }
 #[repr(C)]
@@ -3692,7 +1410,7 @@ pub struct FT_Open_Args_ {
     pub params: *mut FT_Parameter,
 }
 pub type FT_Open_Args = FT_Open_Args_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_New_Face(
         library: FT_Library,
         filepathname: *const ::std::os::raw::c_char,
@@ -3700,7 +1418,7 @@ extern "C" {
         aface: *mut FT_Face,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_New_Memory_Face(
         library: FT_Library,
         file_base: *const FT_Byte,
@@ -3709,7 +1427,7 @@ extern "C" {
         aface: *mut FT_Face,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Open_Face(
         library: FT_Library,
         args: *const FT_Open_Args,
@@ -3717,19 +1435,19 @@ extern "C" {
         aface: *mut FT_Face,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Attach_File(face: FT_Face, filepathname: *const ::std::os::raw::c_char) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Attach_Stream(face: FT_Face, parameters: *const FT_Open_Args) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Reference_Face(face: FT_Face) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Done_Face(face: FT_Face) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Select_Size(face: FT_Face, strike_index: FT_Int) -> FT_Error;
 }
 pub const FT_SIZE_REQUEST_TYPE_NOMINAL: FT_Size_Request_Type_ = 0;
@@ -3751,10 +1469,10 @@ pub struct FT_Size_RequestRec_ {
 }
 pub type FT_Size_RequestRec = FT_Size_RequestRec_;
 pub type FT_Size_Request = *mut FT_Size_RequestRec_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Request_Size(face: FT_Face, req: FT_Size_Request) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Char_Size(
         face: FT_Face,
         char_width: FT_F26Dot6,
@@ -3763,23 +1481,23 @@ extern "C" {
         vert_resolution: FT_UInt,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Pixel_Sizes(
         face: FT_Face,
         pixel_width: FT_UInt,
         pixel_height: FT_UInt,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Load_Glyph(face: FT_Face, glyph_index: FT_UInt, load_flags: FT_Int32) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Load_Char(face: FT_Face, char_code: FT_ULong, load_flags: FT_Int32) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Transform(face: FT_Face, matrix: *mut FT_Matrix, delta: *mut FT_Vector);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Transform(face: FT_Face, matrix: *mut FT_Matrix, delta: *mut FT_Vector);
 }
 pub const FT_RENDER_MODE_NORMAL: FT_Render_Mode_ = 0;
@@ -3791,7 +1509,7 @@ pub const FT_RENDER_MODE_SDF: FT_Render_Mode_ = 5;
 pub const FT_RENDER_MODE_MAX: FT_Render_Mode_ = 6;
 pub type FT_Render_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Render_Mode_ as FT_Render_Mode;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Render_Glyph(slot: FT_GlyphSlot, render_mode: FT_Render_Mode) -> FT_Error;
 }
 pub const FT_KERNING_DEFAULT: FT_Kerning_Mode_ = 0;
@@ -3799,7 +1517,7 @@ pub const FT_KERNING_UNFITTED: FT_Kerning_Mode_ = 1;
 pub const FT_KERNING_UNSCALED: FT_Kerning_Mode_ = 2;
 pub type FT_Kerning_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Kerning_Mode_ as FT_Kerning_Mode;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Kerning(
         face: FT_Face,
         left_glyph: FT_UInt,
@@ -3808,7 +1526,7 @@ extern "C" {
         akerning: *mut FT_Vector,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Track_Kerning(
         face: FT_Face,
         point_size: FT_Fixed,
@@ -3816,35 +1534,35 @@ extern "C" {
         akerning: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Select_Charmap(face: FT_Face, encoding: FT_Encoding) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Charmap(face: FT_Face, charmap: FT_CharMap) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Charmap_Index(charmap: FT_CharMap) -> FT_Int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Char_Index(face: FT_Face, charcode: FT_ULong) -> FT_UInt;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_First_Char(face: FT_Face, agindex: *mut FT_UInt) -> FT_ULong;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Next_Char(face: FT_Face, char_code: FT_ULong, agindex: *mut FT_UInt) -> FT_ULong;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_Properties(
         face: FT_Face,
         num_properties: FT_UInt,
         properties: *mut FT_Parameter,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Name_Index(face: FT_Face, glyph_name: *const FT_String) -> FT_UInt;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Glyph_Name(
         face: FT_Face,
         glyph_index: FT_UInt,
@@ -3852,10 +1570,10 @@ extern "C" {
         buffer_max: FT_UInt,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Postscript_Name(face: FT_Face) -> *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_SubGlyph_Info(
         glyph: FT_GlyphSlot,
         sub_index: FT_UInt,
@@ -3866,54 +1584,54 @@ extern "C" {
         p_transform: *mut FT_Matrix,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_FSType_Flags(face: FT_Face) -> FT_UShort;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_GetCharVariantIndex(
         face: FT_Face,
         charcode: FT_ULong,
         variantSelector: FT_ULong,
     ) -> FT_UInt;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_GetCharVariantIsDefault(
         face: FT_Face,
         charcode: FT_ULong,
         variantSelector: FT_ULong,
     ) -> FT_Int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_GetVariantSelectors(face: FT_Face) -> *mut FT_UInt32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_GetVariantsOfChar(face: FT_Face, charcode: FT_ULong) -> *mut FT_UInt32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_GetCharsOfVariant(face: FT_Face, variantSelector: FT_ULong) -> *mut FT_UInt32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_MulDiv(a: FT_Long, b: FT_Long, c: FT_Long) -> FT_Long;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_MulFix(a: FT_Long, b: FT_Long) -> FT_Long;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_DivFix(a: FT_Long, b: FT_Long) -> FT_Long;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_RoundFix(a: FT_Fixed) -> FT_Fixed;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_CeilFix(a: FT_Fixed) -> FT_Fixed;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_FloorFix(a: FT_Fixed) -> FT_Fixed;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Vector_Transform(vector: *mut FT_Vector, matrix: *const FT_Matrix);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Library_Version(
         library: FT_Library,
         amajor: *mut FT_Int,
@@ -3921,19 +1639,19 @@ extern "C" {
         apatch: *mut FT_Int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_CheckTrueTypePatents(face: FT_Face) -> FT_Bool;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Face_SetUnpatentedHinting(face: FT_Face, value: FT_Bool) -> FT_Bool;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_New_Size(face: FT_Face, size: *mut FT_Size) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Done_Size(size: FT_Size) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Activate_Size(size: FT_Size) -> FT_Error;
 }
 #[repr(C)]
@@ -3986,20 +1704,20 @@ pub struct FT_SvgGlyphRec_ {
     pub delta: FT_Vector,
 }
 pub type FT_SvgGlyphRec = FT_SvgGlyphRec_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_New_Glyph(
         library: FT_Library,
         format: FT_Glyph_Format,
         aglyph: *mut FT_Glyph,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Glyph(slot: FT_GlyphSlot, aglyph: *mut FT_Glyph) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Glyph_Copy(source: FT_Glyph, target: *mut FT_Glyph) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Glyph_Transform(
         glyph: FT_Glyph,
         matrix: *const FT_Matrix,
@@ -4013,10 +1731,10 @@ pub const FT_GLYPH_BBOX_TRUNCATE: FT_Glyph_BBox_Mode_ = 2;
 pub const FT_GLYPH_BBOX_PIXELS: FT_Glyph_BBox_Mode_ = 3;
 pub type FT_Glyph_BBox_Mode_ = ::std::os::raw::c_uint;
 pub use self::FT_Glyph_BBox_Mode_ as FT_Glyph_BBox_Mode;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Glyph_Get_CBox(glyph: FT_Glyph, bbox_mode: FT_UInt, acbox: *mut FT_BBox);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Glyph_To_Bitmap(
         the_glyph: *mut FT_Glyph,
         render_mode: FT_Render_Mode,
@@ -4024,13 +1742,13 @@ extern "C" {
         destroy: FT_Bool,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Done_Glyph(glyph: FT_Glyph);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Matrix_Multiply(a: *const FT_Matrix, b: *mut FT_Matrix);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Matrix_Invert(matrix: *mut FT_Matrix) -> FT_Error;
 }
 #[repr(C)]
@@ -4078,89 +1796,89 @@ pub struct FT_MM_Var_ {
     pub namedstyle: *mut FT_Var_Named_Style,
 }
 pub type FT_MM_Var = FT_MM_Var_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Multi_Master(face: FT_Face, amaster: *mut FT_Multi_Master) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_MM_Var(face: FT_Face, amaster: *mut *mut FT_MM_Var) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Done_MM_Var(library: FT_Library, amaster: *mut FT_MM_Var) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_MM_Design_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Long,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Var_Design_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Var_Design_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_MM_Blend_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_MM_Blend_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Var_Blend_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Var_Blend_Coordinates(
         face: FT_Face,
         num_coords: FT_UInt,
         coords: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_MM_WeightVector(
         face: FT_Face,
         len: FT_UInt,
         weightvector: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_MM_WeightVector(
         face: FT_Face,
         len: *mut FT_UInt,
         weightvector: *mut FT_Fixed,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Var_Axis_Flags(
         master: *mut FT_MM_Var,
         axis_index: FT_UInt,
         flags: *mut FT_UInt,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Set_Named_Instance(face: FT_Face, instance_index: FT_UInt) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Default_Named_Instance(face: FT_Face, instance_index: *mut FT_UInt) -> FT_Error;
 }
 #[repr(C)]
@@ -4174,10 +1892,10 @@ pub struct FT_SfntName_ {
     pub string_len: FT_UInt,
 }
 pub type FT_SfntName = FT_SfntName_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Sfnt_Name_Count(face: FT_Face) -> FT_UInt;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Sfnt_Name(face: FT_Face, idx: FT_UInt, aname: *mut FT_SfntName) -> FT_Error;
 }
 #[repr(C)]
@@ -4187,7 +1905,7 @@ pub struct FT_SfntLangTag_ {
     pub string_len: FT_UInt,
 }
 pub type FT_SfntLangTag = FT_SfntLangTag_;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Sfnt_LangTag(
         face: FT_Face,
         langID: FT_UInt,
@@ -4366,10 +2084,10 @@ pub const FT_SFNT_PCLT: FT_Sfnt_Tag_ = 6;
 pub const FT_SFNT_MAX: FT_Sfnt_Tag_ = 7;
 pub type FT_Sfnt_Tag_ = ::std::os::raw::c_uint;
 pub use self::FT_Sfnt_Tag_ as FT_Sfnt_Tag;
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_Sfnt_Table(face: FT_Face, tag: FT_Sfnt_Tag) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Load_Sfnt_Table(
         face: FT_Face,
         tag: FT_ULong,
@@ -4378,7 +2096,7 @@ extern "C" {
         length: *mut FT_ULong,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Sfnt_Table_Info(
         face: FT_Face,
         table_index: FT_UInt,
@@ -4386,70 +2104,11 @@ extern "C" {
         length: *mut FT_ULong,
     ) -> FT_Error;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_CMap_Language_ID(charmap: FT_CharMap) -> FT_ULong;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn FT_Get_CMap_Format(charmap: FT_CharMap) -> FT_Long;
-}
-pub type int_least8_t = __int_least8_t;
-pub type int_least16_t = __int_least16_t;
-pub type int_least32_t = __int_least32_t;
-pub type int_least64_t = __int_least64_t;
-pub type uint_least8_t = __uint_least8_t;
-pub type uint_least16_t = __uint_least16_t;
-pub type uint_least32_t = __uint_least32_t;
-pub type uint_least64_t = __uint_least64_t;
-pub type int_fast8_t = ::std::os::raw::c_schar;
-pub type int_fast16_t = ::std::os::raw::c_long;
-pub type int_fast32_t = ::std::os::raw::c_long;
-pub type int_fast64_t = ::std::os::raw::c_long;
-pub type uint_fast8_t = ::std::os::raw::c_uchar;
-pub type uint_fast16_t = ::std::os::raw::c_ulong;
-pub type uint_fast32_t = ::std::os::raw::c_ulong;
-pub type uint_fast64_t = ::std::os::raw::c_ulong;
-pub type intmax_t = __intmax_t;
-pub type uintmax_t = __uintmax_t;
-pub type __gwchar_t = ::std::os::raw::c_int;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct imaxdiv_t {
-    pub quot: ::std::os::raw::c_long,
-    pub rem: ::std::os::raw::c_long,
-}
-extern "C" {
-    pub fn imaxabs(__n: intmax_t) -> intmax_t;
-}
-extern "C" {
-    pub fn imaxdiv(__numer: intmax_t, __denom: intmax_t) -> imaxdiv_t;
-}
-extern "C" {
-    pub fn strtoimax(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> intmax_t;
-}
-extern "C" {
-    pub fn strtoumax(
-        __nptr: *const ::std::os::raw::c_char,
-        __endptr: *mut *mut ::std::os::raw::c_char,
-        __base: ::std::os::raw::c_int,
-    ) -> uintmax_t;
-}
-extern "C" {
-    pub fn wcstoimax(
-        __nptr: *const __gwchar_t,
-        __endptr: *mut *mut __gwchar_t,
-        __base: ::std::os::raw::c_int,
-    ) -> intmax_t;
-}
-extern "C" {
-    pub fn wcstoumax(
-        __nptr: *const __gwchar_t,
-        __endptr: *mut *mut __gwchar_t,
-        __base: ::std::os::raw::c_int,
-    ) -> uintmax_t;
 }
 pub type hb_bool_t = ::std::os::raw::c_int;
 pub type hb_codepoint_t = u32;
@@ -4479,13 +2138,13 @@ pub union _hb_var_num_t {
 }
 pub type hb_var_num_t = _hb_var_num_t;
 pub type hb_tag_t = u32;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_tag_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
     ) -> hb_tag_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_tag_to_string(tag: hb_tag_t, buf: *mut ::std::os::raw::c_char);
 }
 pub const HB_DIRECTION_INVALID: hb_direction_t = 0;
@@ -4494,13 +2153,13 @@ pub const HB_DIRECTION_RTL: hb_direction_t = 5;
 pub const HB_DIRECTION_TTB: hb_direction_t = 6;
 pub const HB_DIRECTION_BTT: hb_direction_t = 7;
 pub type hb_direction_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_direction_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
     ) -> hb_direction_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_direction_to_string(direction: hb_direction_t) -> *const ::std::os::raw::c_char;
 }
 #[repr(C)]
@@ -4509,19 +2168,19 @@ pub struct hb_language_impl_t {
     _unused: [u8; 0],
 }
 pub type hb_language_t = *const hb_language_impl_t;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_language_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
     ) -> hb_language_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_language_to_string(language: hb_language_t) -> *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_language_get_default() -> hb_language_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_language_matches(language: hb_language_t, specific: hb_language_t) -> hb_bool_t;
 }
 pub const HB_SCRIPT_COMMON: hb_script_t = 1517910393;
@@ -4700,19 +2359,19 @@ pub const HB_SCRIPT_INVALID: hb_script_t = 0;
 pub const _HB_SCRIPT_MAX_VALUE: hb_script_t = 2147483647;
 pub const _HB_SCRIPT_MAX_VALUE_SIGNED: hb_script_t = 2147483647;
 pub type hb_script_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_script_from_iso15924_tag(tag: hb_tag_t) -> hb_script_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_script_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
     ) -> hb_script_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_script_to_iso15924_tag(script: hb_script_t) -> hb_tag_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_script_get_horizontal_direction(script: hb_script_t) -> hb_direction_t;
 }
 #[repr(C)]
@@ -4730,14 +2389,14 @@ pub struct hb_feature_t {
     pub start: ::std::os::raw::c_uint,
     pub end: ::std::os::raw::c_uint,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_feature_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
         feature: *mut hb_feature_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_feature_to_string(
         feature: *mut hb_feature_t,
         buf: *mut ::std::os::raw::c_char,
@@ -4750,14 +2409,14 @@ pub struct hb_variation_t {
     pub tag: hb_tag_t,
     pub value: f32,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_variation_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
         variation: *mut hb_variation_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_variation_to_string(
         variation: *mut hb_variation_t,
         buf: *mut ::std::os::raw::c_char,
@@ -4765,16 +2424,16 @@ extern "C" {
     );
 }
 pub type hb_color_t = u32;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_get_alpha(color: hb_color_t) -> u8;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_get_red(color: hb_color_t) -> u8;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_get_green(color: hb_color_t) -> u8;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_get_blue(color: hb_color_t) -> u8;
 }
 #[repr(C)]
@@ -4800,7 +2459,7 @@ pub type hb_memory_mode_t = ::std::os::raw::c_uint;
 pub struct hb_blob_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_create(
         data: *const ::std::os::raw::c_char,
         length: ::std::os::raw::c_uint,
@@ -4809,7 +2468,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     ) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_create_or_fail(
         data: *const ::std::os::raw::c_char,
         length: ::std::os::raw::c_uint,
@@ -4818,34 +2477,34 @@ extern "C" {
         destroy: hb_destroy_func_t,
     ) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_create_from_file(file_name: *const ::std::os::raw::c_char) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_create_from_file_or_fail(
         file_name: *const ::std::os::raw::c_char,
     ) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_create_sub_blob(
         parent: *mut hb_blob_t,
         offset: ::std::os::raw::c_uint,
         length: ::std::os::raw::c_uint,
     ) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_copy_writable_or_fail(blob: *mut hb_blob_t) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_get_empty() -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_reference(blob: *mut hb_blob_t) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_destroy(blob: *mut hb_blob_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_set_user_data(
         blob: *mut hb_blob_t,
         key: *mut hb_user_data_key_t,
@@ -4854,28 +2513,28 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_get_user_data(
         blob: *const hb_blob_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_make_immutable(blob: *mut hb_blob_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_is_immutable(blob: *mut hb_blob_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_get_length(blob: *mut hb_blob_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_get_data(
         blob: *mut hb_blob_t,
         length: *mut ::std::os::raw::c_uint,
     ) -> *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_blob_get_data_writable(
         blob: *mut hb_blob_t,
         length: *mut ::std::os::raw::c_uint,
@@ -4975,22 +2634,22 @@ pub type hb_unicode_combining_class_t = ::std::os::raw::c_uint;
 pub struct hb_unicode_funcs_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_get_default() -> *mut hb_unicode_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_create(parent: *mut hb_unicode_funcs_t) -> *mut hb_unicode_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_get_empty() -> *mut hb_unicode_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_reference(ufuncs: *mut hb_unicode_funcs_t) -> *mut hb_unicode_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_destroy(ufuncs: *mut hb_unicode_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_user_data(
         ufuncs: *mut hb_unicode_funcs_t,
         key: *mut hb_user_data_key_t,
@@ -4999,19 +2658,19 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_get_user_data(
         ufuncs: *const hb_unicode_funcs_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_make_immutable(ufuncs: *mut hb_unicode_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_is_immutable(ufuncs: *mut hb_unicode_funcs_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_get_parent(ufuncs: *mut hb_unicode_funcs_t) -> *mut hb_unicode_funcs_t;
 }
 pub type hb_unicode_combining_class_func_t = ::std::option::Option<
@@ -5060,7 +2719,7 @@ pub type hb_unicode_decompose_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> hb_bool_t,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_combining_class_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_combining_class_func_t,
@@ -5068,7 +2727,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_general_category_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_general_category_func_t,
@@ -5076,7 +2735,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_mirroring_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_mirroring_func_t,
@@ -5084,7 +2743,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_script_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_script_func_t,
@@ -5092,7 +2751,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_compose_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_compose_func_t,
@@ -5100,7 +2759,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_decompose_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_decompose_func_t,
@@ -5108,31 +2767,31 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_combining_class(
         ufuncs: *mut hb_unicode_funcs_t,
         unicode: hb_codepoint_t,
     ) -> hb_unicode_combining_class_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_general_category(
         ufuncs: *mut hb_unicode_funcs_t,
         unicode: hb_codepoint_t,
     ) -> hb_unicode_general_category_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_mirroring(
         ufuncs: *mut hb_unicode_funcs_t,
         unicode: hb_codepoint_t,
     ) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_script(
         ufuncs: *mut hb_unicode_funcs_t,
         unicode: hb_codepoint_t,
     ) -> hb_script_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_compose(
         ufuncs: *mut hb_unicode_funcs_t,
         a: hb_codepoint_t,
@@ -5140,7 +2799,7 @@ extern "C" {
         ab: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_decompose(
         ufuncs: *mut hb_unicode_funcs_t,
         ab: hb_codepoint_t,
@@ -5153,19 +2812,19 @@ extern "C" {
 pub struct hb_set_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_create() -> *mut hb_set_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_get_empty() -> *mut hb_set_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_reference(set: *mut hb_set_t) -> *mut hb_set_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_destroy(set: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_set_user_data(
         set: *mut hb_set_t,
         key: *mut hb_user_data_key_t,
@@ -5174,106 +2833,106 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_get_user_data(
         set: *const hb_set_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_allocation_successful(set: *const hb_set_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_copy(set: *const hb_set_t) -> *mut hb_set_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_clear(set: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_is_empty(set: *const hb_set_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_invert(set: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_is_inverted(set: *const hb_set_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_has(set: *const hb_set_t, codepoint: hb_codepoint_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_add(set: *mut hb_set_t, codepoint: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_add_range(set: *mut hb_set_t, first: hb_codepoint_t, last: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_add_sorted_array(
         set: *mut hb_set_t,
         sorted_codepoints: *const hb_codepoint_t,
         num_codepoints: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_del(set: *mut hb_set_t, codepoint: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_del_range(set: *mut hb_set_t, first: hb_codepoint_t, last: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_is_equal(set: *const hb_set_t, other: *const hb_set_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_hash(set: *const hb_set_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_is_subset(set: *const hb_set_t, larger_set: *const hb_set_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_set(set: *mut hb_set_t, other: *const hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_union(set: *mut hb_set_t, other: *const hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_intersect(set: *mut hb_set_t, other: *const hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_subtract(set: *mut hb_set_t, other: *const hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_symmetric_difference(set: *mut hb_set_t, other: *const hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_get_population(set: *const hb_set_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_get_min(set: *const hb_set_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_get_max(set: *const hb_set_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_next(set: *const hb_set_t, codepoint: *mut hb_codepoint_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_previous(set: *const hb_set_t, codepoint: *mut hb_codepoint_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_next_range(
         set: *const hb_set_t,
         first: *mut hb_codepoint_t,
         last: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_previous_range(
         set: *const hb_set_t,
         first: *mut hb_codepoint_t,
         last: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_set_next_many(
         set: *const hb_set_t,
         codepoint: hb_codepoint_t,
@@ -5286,19 +2945,19 @@ extern "C" {
 pub struct hb_map_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_create() -> *mut hb_map_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_get_empty() -> *mut hb_map_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_reference(map: *mut hb_map_t) -> *mut hb_map_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_destroy(map: *mut hb_map_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_set_user_data(
         map: *mut hb_map_t,
         key: *mut hb_user_data_key_t,
@@ -5307,49 +2966,49 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_get_user_data(
         map: *const hb_map_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_allocation_successful(map: *const hb_map_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_copy(map: *const hb_map_t) -> *mut hb_map_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_clear(map: *mut hb_map_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_is_empty(map: *const hb_map_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_get_population(map: *const hb_map_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_is_equal(map: *const hb_map_t, other: *const hb_map_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_hash(map: *const hb_map_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_set(map: *mut hb_map_t, key: hb_codepoint_t, value: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_get(map: *const hb_map_t, key: hb_codepoint_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_del(map: *mut hb_map_t, key: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_has(map: *const hb_map_t, key: hb_codepoint_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_update(map: *mut hb_map_t, other: *const hb_map_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_next(
         map: *const hb_map_t,
         idx: *mut ::std::os::raw::c_int,
@@ -5357,13 +3016,13 @@ extern "C" {
         value: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_keys(map: *const hb_map_t, keys: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_map_values(map: *const hb_map_t, values: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_count(blob: *mut hb_blob_t) -> ::std::os::raw::c_uint;
 }
 #[repr(C)]
@@ -5371,16 +3030,16 @@ extern "C" {
 pub struct hb_face_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_create(blob: *mut hb_blob_t, index: ::std::os::raw::c_uint) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_create_or_fail(
         blob: *mut hb_blob_t,
         index: ::std::os::raw::c_uint,
     ) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_create_from_file_or_fail(
         file_name: *const ::std::os::raw::c_char,
         index: ::std::os::raw::c_uint,
@@ -5393,23 +3052,23 @@ pub type hb_reference_table_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> *mut hb_blob_t,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_create_for_tables(
         reference_table_func: hb_reference_table_func_t,
         user_data: *mut ::std::os::raw::c_void,
         destroy: hb_destroy_func_t,
     ) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_empty() -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_reference(face: *mut hb_face_t) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_destroy(face: *mut hb_face_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_set_user_data(
         face: *mut hb_face_t,
         key: *mut hb_user_data_key_t,
@@ -5418,40 +3077,40 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_user_data(
         face: *const hb_face_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_make_immutable(face: *mut hb_face_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_is_immutable(face: *const hb_face_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_reference_table(face: *const hb_face_t, tag: hb_tag_t) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_reference_blob(face: *mut hb_face_t) -> *mut hb_blob_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_set_index(face: *mut hb_face_t, index: ::std::os::raw::c_uint);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_index(face: *const hb_face_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_set_upem(face: *mut hb_face_t, upem: ::std::os::raw::c_uint);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_upem(face: *const hb_face_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_set_glyph_count(face: *mut hb_face_t, glyph_count: ::std::os::raw::c_uint);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_glyph_count(face: *const hb_face_t) -> ::std::os::raw::c_uint;
 }
 pub type hb_get_table_tags_func_t = ::std::option::Option<
@@ -5463,7 +3122,7 @@ pub type hb_get_table_tags_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_uint,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_set_get_table_tags_func(
         face: *mut hb_face_t,
         func: hb_get_table_tags_func_t,
@@ -5471,7 +3130,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_get_table_tags(
         face: *const hb_face_t,
         start_offset: ::std::os::raw::c_uint,
@@ -5479,37 +3138,37 @@ extern "C" {
         table_tags: *mut hb_tag_t,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_collect_unicodes(face: *mut hb_face_t, out: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_collect_nominal_glyph_mapping(
         face: *mut hb_face_t,
         mapping: *mut hb_map_t,
         unicodes: *mut hb_set_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_collect_variation_selectors(face: *mut hb_face_t, out: *mut hb_set_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_collect_variation_unicodes(
         face: *mut hb_face_t,
         variation_selector: hb_codepoint_t,
         out: *mut hb_set_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_builder_create() -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_builder_add_table(
         face: *mut hb_face_t,
         tag: hb_tag_t,
         blob: *mut hb_blob_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_face_builder_sort_tables(face: *mut hb_face_t, tags: *const hb_tag_t);
 }
 #[repr(C)]
@@ -5587,7 +3246,7 @@ pub type hb_draw_close_path_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ),
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_move_to_func(
         dfuncs: *mut hb_draw_funcs_t,
         func: hb_draw_move_to_func_t,
@@ -5595,7 +3254,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_line_to_func(
         dfuncs: *mut hb_draw_funcs_t,
         func: hb_draw_line_to_func_t,
@@ -5603,7 +3262,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_quadratic_to_func(
         dfuncs: *mut hb_draw_funcs_t,
         func: hb_draw_quadratic_to_func_t,
@@ -5611,7 +3270,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_cubic_to_func(
         dfuncs: *mut hb_draw_funcs_t,
         func: hb_draw_cubic_to_func_t,
@@ -5619,7 +3278,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_close_path_func(
         dfuncs: *mut hb_draw_funcs_t,
         func: hb_draw_close_path_func_t,
@@ -5627,19 +3286,19 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_create() -> *mut hb_draw_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_get_empty() -> *mut hb_draw_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_reference(dfuncs: *mut hb_draw_funcs_t) -> *mut hb_draw_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_destroy(dfuncs: *mut hb_draw_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_set_user_data(
         dfuncs: *mut hb_draw_funcs_t,
         key: *mut hb_user_data_key_t,
@@ -5648,19 +3307,19 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_get_user_data(
         dfuncs: *const hb_draw_funcs_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_make_immutable(dfuncs: *mut hb_draw_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_funcs_is_immutable(dfuncs: *mut hb_draw_funcs_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_move_to(
         dfuncs: *mut hb_draw_funcs_t,
         draw_data: *mut ::std::os::raw::c_void,
@@ -5669,7 +3328,7 @@ extern "C" {
         to_y: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_line_to(
         dfuncs: *mut hb_draw_funcs_t,
         draw_data: *mut ::std::os::raw::c_void,
@@ -5678,7 +3337,7 @@ extern "C" {
         to_y: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_quadratic_to(
         dfuncs: *mut hb_draw_funcs_t,
         draw_data: *mut ::std::os::raw::c_void,
@@ -5689,7 +3348,7 @@ extern "C" {
         to_y: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_cubic_to(
         dfuncs: *mut hb_draw_funcs_t,
         draw_data: *mut ::std::os::raw::c_void,
@@ -5702,7 +3361,7 @@ extern "C" {
         to_y: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_draw_close_path(
         dfuncs: *mut hb_draw_funcs_t,
         draw_data: *mut ::std::os::raw::c_void,
@@ -5714,19 +3373,19 @@ extern "C" {
 pub struct hb_paint_funcs_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_create() -> *mut hb_paint_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_get_empty() -> *mut hb_paint_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_reference(funcs: *mut hb_paint_funcs_t) -> *mut hb_paint_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_destroy(funcs: *mut hb_paint_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_user_data(
         funcs: *mut hb_paint_funcs_t,
         key: *mut hb_user_data_key_t,
@@ -5735,16 +3394,16 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_get_user_data(
         funcs: *const hb_paint_funcs_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_make_immutable(funcs: *mut hb_paint_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_is_immutable(funcs: *mut hb_paint_funcs_t) -> hb_bool_t;
 }
 pub type hb_paint_push_transform_func_t = ::std::option::Option<
@@ -5870,7 +3529,7 @@ pub struct hb_color_line_t {
     pub reserved7: *mut ::std::os::raw::c_void,
     pub reserved8: *mut ::std::os::raw::c_void,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_line_get_color_stops(
         color_line: *mut hb_color_line_t,
         start: ::std::os::raw::c_uint,
@@ -5878,7 +3537,7 @@ extern "C" {
         color_stops: *mut hb_color_stop_t,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_color_line_get_extend(color_line: *mut hb_color_line_t) -> hb_paint_extend_t;
 }
 pub type hb_paint_linear_gradient_func_t = ::std::option::Option<
@@ -5974,7 +3633,7 @@ pub type hb_paint_custom_palette_color_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> hb_bool_t,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_push_transform_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_push_transform_func_t,
@@ -5982,7 +3641,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_pop_transform_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_pop_transform_func_t,
@@ -5990,7 +3649,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_color_glyph_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_color_glyph_func_t,
@@ -5998,7 +3657,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_push_clip_glyph_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_push_clip_glyph_func_t,
@@ -6006,7 +3665,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_push_clip_rectangle_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_push_clip_rectangle_func_t,
@@ -6014,7 +3673,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_pop_clip_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_pop_clip_func_t,
@@ -6022,7 +3681,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_color_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_color_func_t,
@@ -6030,7 +3689,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_image_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_image_func_t,
@@ -6038,7 +3697,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_linear_gradient_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_linear_gradient_func_t,
@@ -6046,7 +3705,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_radial_gradient_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_radial_gradient_func_t,
@@ -6054,7 +3713,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_sweep_gradient_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_sweep_gradient_func_t,
@@ -6062,7 +3721,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_push_group_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_push_group_func_t,
@@ -6070,7 +3729,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_pop_group_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_pop_group_func_t,
@@ -6078,7 +3737,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_funcs_set_custom_palette_color_func(
         funcs: *mut hb_paint_funcs_t,
         func: hb_paint_custom_palette_color_func_t,
@@ -6086,7 +3745,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_push_transform(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6098,13 +3757,13 @@ extern "C" {
         dy: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_pop_transform(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_color_glyph(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6112,7 +3771,7 @@ extern "C" {
         font: *mut hb_font_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_push_clip_glyph(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6120,7 +3779,7 @@ extern "C" {
         font: *mut hb_font_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_push_clip_rectangle(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6130,10 +3789,10 @@ extern "C" {
         ymax: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_pop_clip(funcs: *mut hb_paint_funcs_t, paint_data: *mut ::std::os::raw::c_void);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_color(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6141,7 +3800,7 @@ extern "C" {
         color: hb_color_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_image(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6153,7 +3812,7 @@ extern "C" {
         extents: *mut hb_glyph_extents_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_linear_gradient(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6166,7 +3825,7 @@ extern "C" {
         y2: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_radial_gradient(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6179,7 +3838,7 @@ extern "C" {
         r1: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_sweep_gradient(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6190,20 +3849,20 @@ extern "C" {
         end_angle: f32,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_push_group(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_pop_group(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
         mode: hb_paint_composite_mode_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_paint_custom_palette_color(
         funcs: *mut hb_paint_funcs_t,
         paint_data: *mut ::std::os::raw::c_void,
@@ -6216,19 +3875,19 @@ extern "C" {
 pub struct hb_font_funcs_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_create() -> *mut hb_font_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_get_empty() -> *mut hb_font_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_reference(ffuncs: *mut hb_font_funcs_t) -> *mut hb_font_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_destroy(ffuncs: *mut hb_font_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_user_data(
         ffuncs: *mut hb_font_funcs_t,
         key: *mut hb_user_data_key_t,
@@ -6237,16 +3896,16 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_get_user_data(
         ffuncs: *const hb_font_funcs_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_make_immutable(ffuncs: *mut hb_font_funcs_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_is_immutable(ffuncs: *mut hb_font_funcs_t) -> hb_bool_t;
 }
 #[repr(C)]
@@ -6414,7 +4073,7 @@ pub type hb_font_paint_glyph_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ),
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_font_h_extents_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_font_h_extents_func_t,
@@ -6422,7 +4081,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_font_v_extents_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_font_v_extents_func_t,
@@ -6430,7 +4089,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_nominal_glyph_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_nominal_glyph_func_t,
@@ -6438,7 +4097,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_nominal_glyphs_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_nominal_glyphs_func_t,
@@ -6446,7 +4105,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_variation_glyph_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_variation_glyph_func_t,
@@ -6454,7 +4113,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_h_advance_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_h_advance_func_t,
@@ -6462,7 +4121,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_v_advance_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_v_advance_func_t,
@@ -6470,7 +4129,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_h_advances_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_h_advances_func_t,
@@ -6478,7 +4137,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_v_advances_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_v_advances_func_t,
@@ -6486,7 +4145,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_h_origin_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_h_origin_func_t,
@@ -6494,7 +4153,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_v_origin_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_v_origin_func_t,
@@ -6502,7 +4161,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_h_kerning_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_h_kerning_func_t,
@@ -6510,7 +4169,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_extents_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_extents_func_t,
@@ -6518,7 +4177,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_contour_point_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_contour_point_func_t,
@@ -6526,7 +4185,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_name_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_name_func_t,
@@ -6534,7 +4193,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_from_name_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_from_name_func_t,
@@ -6542,7 +4201,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_draw_glyph_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_draw_glyph_func_t,
@@ -6550,7 +4209,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_paint_glyph_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_paint_glyph_func_t,
@@ -6558,26 +4217,26 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_h_extents(
         font: *mut hb_font_t,
         extents: *mut hb_font_extents_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_v_extents(
         font: *mut hb_font_t,
         extents: *mut hb_font_extents_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_nominal_glyph(
         font: *mut hb_font_t,
         unicode: hb_codepoint_t,
         glyph: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_variation_glyph(
         font: *mut hb_font_t,
         unicode: hb_codepoint_t,
@@ -6585,7 +4244,7 @@ extern "C" {
         glyph: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_nominal_glyphs(
         font: *mut hb_font_t,
         count: ::std::os::raw::c_uint,
@@ -6595,19 +4254,19 @@ extern "C" {
         glyph_stride: ::std::os::raw::c_uint,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_h_advance(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
     ) -> hb_position_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_v_advance(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
     ) -> hb_position_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_h_advances(
         font: *mut hb_font_t,
         count: ::std::os::raw::c_uint,
@@ -6617,7 +4276,7 @@ extern "C" {
         advance_stride: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_v_advances(
         font: *mut hb_font_t,
         count: ::std::os::raw::c_uint,
@@ -6627,7 +4286,7 @@ extern "C" {
         advance_stride: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_h_origin(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6635,7 +4294,7 @@ extern "C" {
         y: *mut hb_position_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_v_origin(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6643,21 +4302,21 @@ extern "C" {
         y: *mut hb_position_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_h_kerning(
         font: *mut hb_font_t,
         left_glyph: hb_codepoint_t,
         right_glyph: hb_codepoint_t,
     ) -> hb_position_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_extents(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
         extents: *mut hb_glyph_extents_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_contour_point(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6666,7 +4325,7 @@ extern "C" {
         y: *mut hb_position_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_name(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6674,7 +4333,7 @@ extern "C" {
         size: ::std::os::raw::c_uint,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_from_name(
         font: *mut hb_font_t,
         name: *const ::std::os::raw::c_char,
@@ -6682,7 +4341,7 @@ extern "C" {
         glyph: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_draw_glyph(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6690,7 +4349,7 @@ extern "C" {
         draw_data: *mut ::std::os::raw::c_void,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_paint_glyph(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6700,7 +4359,7 @@ extern "C" {
         foreground: hb_color_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph(
         font: *mut hb_font_t,
         unicode: hb_codepoint_t,
@@ -6708,14 +4367,14 @@ extern "C" {
         glyph: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_extents_for_direction(
         font: *mut hb_font_t,
         direction: hb_direction_t,
         extents: *mut hb_font_extents_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_advance_for_direction(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6724,7 +4383,7 @@ extern "C" {
         y: *mut hb_position_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_advances_for_direction(
         font: *mut hb_font_t,
         direction: hb_direction_t,
@@ -6735,7 +4394,7 @@ extern "C" {
         advance_stride: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_origin_for_direction(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6744,7 +4403,7 @@ extern "C" {
         y: *mut hb_position_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_add_glyph_origin_for_direction(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6753,7 +4412,7 @@ extern "C" {
         y: *mut hb_position_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_subtract_glyph_origin_for_direction(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6762,7 +4421,7 @@ extern "C" {
         y: *mut hb_position_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_kerning_for_direction(
         font: *mut hb_font_t,
         first_glyph: hb_codepoint_t,
@@ -6772,7 +4431,7 @@ extern "C" {
         y: *mut hb_position_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_extents_for_origin(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6780,7 +4439,7 @@ extern "C" {
         extents: *mut hb_glyph_extents_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_contour_point_for_origin(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6790,7 +4449,7 @@ extern "C" {
         y: *mut hb_position_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_glyph_to_string(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -6798,7 +4457,7 @@ extern "C" {
         size: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_glyph_from_string(
         font: *mut hb_font_t,
         s: *const ::std::os::raw::c_char,
@@ -6806,22 +4465,22 @@ extern "C" {
         glyph: *mut hb_codepoint_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_create(face: *mut hb_face_t) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_create_sub_font(parent: *mut hb_font_t) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_empty() -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_reference(font: *mut hb_font_t) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_destroy(font: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_user_data(
         font: *mut hb_font_t,
         key: *mut hb_user_data_key_t,
@@ -6830,37 +4489,37 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_user_data(
         font: *const hb_font_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_make_immutable(font: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_is_immutable(font: *mut hb_font_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_serial(font: *mut hb_font_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_changed(font: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_parent(font: *mut hb_font_t, parent: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_parent(font: *mut hb_font_t) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_face(font: *mut hb_font_t, face: *mut hb_face_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_face(font: *mut hb_font_t) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_funcs(
         font: *mut hb_font_t,
         klass: *mut hb_font_funcs_t,
@@ -6868,48 +4527,48 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_funcs_data(
         font: *mut hb_font_t,
         font_data: *mut ::std::os::raw::c_void,
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_scale(
         font: *mut hb_font_t,
         x_scale: ::std::os::raw::c_int,
         y_scale: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_scale(
         font: *mut hb_font_t,
         x_scale: *mut ::std::os::raw::c_int,
         y_scale: *mut ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_ppem(
         font: *mut hb_font_t,
         x_ppem: ::std::os::raw::c_uint,
         y_ppem: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_ppem(
         font: *mut hb_font_t,
         x_ppem: *mut ::std::os::raw::c_uint,
         y_ppem: *mut ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_ptem(font: *mut hb_font_t, ptem: f32);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_ptem(font: *mut hb_font_t) -> f32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_synthetic_bold(
         font: *mut hb_font_t,
         x_embolden: f32,
@@ -6917,7 +4576,7 @@ extern "C" {
         in_place: hb_bool_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_synthetic_bold(
         font: *mut hb_font_t,
         x_embolden: *mut f32,
@@ -6925,55 +4584,55 @@ extern "C" {
         in_place: *mut hb_bool_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_synthetic_slant(font: *mut hb_font_t, slant: f32);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_synthetic_slant(font: *mut hb_font_t) -> f32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_variations(
         font: *mut hb_font_t,
         variations: *const hb_variation_t,
         variations_length: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_variation(font: *mut hb_font_t, tag: hb_tag_t, value: f32);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_var_coords_design(
         font: *mut hb_font_t,
         coords: *const f32,
         coords_length: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_var_coords_design(
         font: *mut hb_font_t,
         length: *mut ::std::os::raw::c_uint,
     ) -> *const f32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_var_coords_normalized(
         font: *mut hb_font_t,
         coords: *const ::std::os::raw::c_int,
         coords_length: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_var_coords_normalized(
         font: *mut hb_font_t,
         length: *mut ::std::os::raw::c_uint,
     ) -> *const ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_set_var_named_instance(
         font: *mut hb_font_t,
         instance_index: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_var_named_instance(font: *mut hb_font_t) -> ::std::os::raw::c_uint;
 }
 #[repr(C)]
@@ -6990,7 +4649,7 @@ pub const HB_GLYPH_FLAG_UNSAFE_TO_CONCAT: hb_glyph_flags_t = 2;
 pub const HB_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL: hb_glyph_flags_t = 4;
 pub const HB_GLYPH_FLAG_DEFINED: hb_glyph_flags_t = 7;
 pub type hb_glyph_flags_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_glyph_info_get_glyph_flags(info: *const hb_glyph_info_t) -> hb_glyph_flags_t;
 }
 #[repr(C)]
@@ -7011,16 +4670,16 @@ pub struct hb_segment_properties_t {
     pub reserved1: *mut ::std::os::raw::c_void,
     pub reserved2: *mut ::std::os::raw::c_void,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_segment_properties_equal(
         a: *const hb_segment_properties_t,
         b: *const hb_segment_properties_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_segment_properties_hash(p: *const hb_segment_properties_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_segment_properties_overlay(
         p: *mut hb_segment_properties_t,
         src: *const hb_segment_properties_t,
@@ -7031,25 +4690,25 @@ extern "C" {
 pub struct hb_buffer_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_create() -> *mut hb_buffer_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_create_similar(src: *const hb_buffer_t) -> *mut hb_buffer_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_reset(buffer: *mut hb_buffer_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_empty() -> *mut hb_buffer_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_reference(buffer: *mut hb_buffer_t) -> *mut hb_buffer_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_destroy(buffer: *mut hb_buffer_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_user_data(
         buffer: *mut hb_buffer_t,
         key: *mut hb_user_data_key_t,
@@ -7058,7 +4717,7 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_user_data(
         buffer: *const hb_buffer_t,
         key: *mut hb_user_data_key_t,
@@ -7068,55 +4727,55 @@ pub const HB_BUFFER_CONTENT_TYPE_INVALID: hb_buffer_content_type_t = 0;
 pub const HB_BUFFER_CONTENT_TYPE_UNICODE: hb_buffer_content_type_t = 1;
 pub const HB_BUFFER_CONTENT_TYPE_GLYPHS: hb_buffer_content_type_t = 2;
 pub type hb_buffer_content_type_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_content_type(
         buffer: *mut hb_buffer_t,
         content_type: hb_buffer_content_type_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_content_type(buffer: *const hb_buffer_t) -> hb_buffer_content_type_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_unicode_funcs(
         buffer: *mut hb_buffer_t,
         unicode_funcs: *mut hb_unicode_funcs_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_unicode_funcs(buffer: *const hb_buffer_t) -> *mut hb_unicode_funcs_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_direction(buffer: *mut hb_buffer_t, direction: hb_direction_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_direction(buffer: *const hb_buffer_t) -> hb_direction_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_script(buffer: *mut hb_buffer_t, script: hb_script_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_script(buffer: *const hb_buffer_t) -> hb_script_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_language(buffer: *mut hb_buffer_t, language: hb_language_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_language(buffer: *const hb_buffer_t) -> hb_language_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_segment_properties(
         buffer: *mut hb_buffer_t,
         props: *const hb_segment_properties_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_segment_properties(
         buffer: *const hb_buffer_t,
         props: *mut hb_segment_properties_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_guess_segment_properties(buffer: *mut hb_buffer_t);
 }
 pub const HB_BUFFER_FLAG_DEFAULT: hb_buffer_flags_t = 0;
@@ -7130,10 +4789,10 @@ pub const HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT: hb_buffer_flags_t = 64;
 pub const HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL: hb_buffer_flags_t = 128;
 pub const HB_BUFFER_FLAG_DEFINED: hb_buffer_flags_t = 255;
 pub type hb_buffer_flags_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_flags(buffer: *mut hb_buffer_t, flags: hb_buffer_flags_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_flags(buffer: *const hb_buffer_t) -> hb_buffer_flags_t;
 }
 pub const HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES: hb_buffer_cluster_level_t = 0;
@@ -7141,86 +4800,86 @@ pub const HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS: hb_buffer_cluster_level_t
 pub const HB_BUFFER_CLUSTER_LEVEL_CHARACTERS: hb_buffer_cluster_level_t = 2;
 pub const HB_BUFFER_CLUSTER_LEVEL_DEFAULT: hb_buffer_cluster_level_t = 0;
 pub type hb_buffer_cluster_level_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_cluster_level(
         buffer: *mut hb_buffer_t,
         cluster_level: hb_buffer_cluster_level_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_cluster_level(buffer: *const hb_buffer_t) -> hb_buffer_cluster_level_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_replacement_codepoint(
         buffer: *mut hb_buffer_t,
         replacement: hb_codepoint_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_replacement_codepoint(buffer: *const hb_buffer_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_invisible_glyph(buffer: *mut hb_buffer_t, invisible: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_invisible_glyph(buffer: *const hb_buffer_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_not_found_glyph(buffer: *mut hb_buffer_t, not_found: hb_codepoint_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_not_found_glyph(buffer: *const hb_buffer_t) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_not_found_variation_selector_glyph(
         buffer: *mut hb_buffer_t,
         not_found_variation_selector: hb_codepoint_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_not_found_variation_selector_glyph(
         buffer: *const hb_buffer_t,
     ) -> hb_codepoint_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_random_state(buffer: *mut hb_buffer_t, state: ::std::os::raw::c_uint);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_random_state(buffer: *const hb_buffer_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_clear_contents(buffer: *mut hb_buffer_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_pre_allocate(
         buffer: *mut hb_buffer_t,
         size: ::std::os::raw::c_uint,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_allocation_successful(buffer: *mut hb_buffer_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_reverse(buffer: *mut hb_buffer_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_reverse_range(
         buffer: *mut hb_buffer_t,
         start: ::std::os::raw::c_uint,
         end: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_reverse_clusters(buffer: *mut hb_buffer_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add(
         buffer: *mut hb_buffer_t,
         codepoint: hb_codepoint_t,
         cluster: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add_utf8(
         buffer: *mut hb_buffer_t,
         text: *const ::std::os::raw::c_char,
@@ -7229,7 +4888,7 @@ extern "C" {
         item_length: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add_utf16(
         buffer: *mut hb_buffer_t,
         text: *const u16,
@@ -7238,7 +4897,7 @@ extern "C" {
         item_length: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add_utf32(
         buffer: *mut hb_buffer_t,
         text: *const u32,
@@ -7247,7 +4906,7 @@ extern "C" {
         item_length: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add_latin1(
         buffer: *mut hb_buffer_t,
         text: *const u8,
@@ -7256,7 +4915,7 @@ extern "C" {
         item_length: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_add_codepoints(
         buffer: *mut hb_buffer_t,
         text: *const hb_codepoint_t,
@@ -7265,7 +4924,7 @@ extern "C" {
         item_length: ::std::os::raw::c_int,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_append(
         buffer: *mut hb_buffer_t,
         source: *const hb_buffer_t,
@@ -7273,31 +4932,31 @@ extern "C" {
         end: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_length(
         buffer: *mut hb_buffer_t,
         length: ::std::os::raw::c_uint,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_length(buffer: *const hb_buffer_t) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_glyph_infos(
         buffer: *mut hb_buffer_t,
         length: *mut ::std::os::raw::c_uint,
     ) -> *mut hb_glyph_info_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_get_glyph_positions(
         buffer: *mut hb_buffer_t,
         length: *mut ::std::os::raw::c_uint,
     ) -> *mut hb_glyph_position_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_has_positions(buffer: *mut hb_buffer_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_normalize_glyphs(buffer: *mut hb_buffer_t);
 }
 pub const HB_BUFFER_SERIALIZE_FLAG_DEFAULT: hb_buffer_serialize_flags_t = 0;
@@ -7313,21 +4972,21 @@ pub const HB_BUFFER_SERIALIZE_FORMAT_TEXT: hb_buffer_serialize_format_t = 141383
 pub const HB_BUFFER_SERIALIZE_FORMAT_JSON: hb_buffer_serialize_format_t = 1246973774;
 pub const HB_BUFFER_SERIALIZE_FORMAT_INVALID: hb_buffer_serialize_format_t = 0;
 pub type hb_buffer_serialize_format_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize_format_from_string(
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
     ) -> hb_buffer_serialize_format_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize_format_to_string(
         format: hb_buffer_serialize_format_t,
     ) -> *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize_list_formats() -> *mut *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize_glyphs(
         buffer: *mut hb_buffer_t,
         start: ::std::os::raw::c_uint,
@@ -7340,7 +4999,7 @@ extern "C" {
         flags: hb_buffer_serialize_flags_t,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize_unicode(
         buffer: *mut hb_buffer_t,
         start: ::std::os::raw::c_uint,
@@ -7352,7 +5011,7 @@ extern "C" {
         flags: hb_buffer_serialize_flags_t,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_serialize(
         buffer: *mut hb_buffer_t,
         start: ::std::os::raw::c_uint,
@@ -7365,7 +5024,7 @@ extern "C" {
         flags: hb_buffer_serialize_flags_t,
     ) -> ::std::os::raw::c_uint;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_deserialize_glyphs(
         buffer: *mut hb_buffer_t,
         buf: *const ::std::os::raw::c_char,
@@ -7375,7 +5034,7 @@ extern "C" {
         format: hb_buffer_serialize_format_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_deserialize_unicode(
         buffer: *mut hb_buffer_t,
         buf: *const ::std::os::raw::c_char,
@@ -7394,7 +5053,7 @@ pub const HB_BUFFER_DIFF_FLAG_CLUSTER_MISMATCH: hb_buffer_diff_flags_t = 32;
 pub const HB_BUFFER_DIFF_FLAG_GLYPH_FLAGS_MISMATCH: hb_buffer_diff_flags_t = 64;
 pub const HB_BUFFER_DIFF_FLAG_POSITION_MISMATCH: hb_buffer_diff_flags_t = 128;
 pub type hb_buffer_diff_flags_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_diff(
         buffer: *mut hb_buffer_t,
         reference: *mut hb_buffer_t,
@@ -7410,7 +5069,7 @@ pub type hb_buffer_message_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> hb_bool_t,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_buffer_set_message_func(
         buffer: *mut hb_buffer_t,
         func: hb_buffer_message_func_t,
@@ -7428,7 +5087,7 @@ pub type hb_font_get_glyph_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> hb_bool_t,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_func_t,
@@ -7443,7 +5102,7 @@ pub type hb_unicode_eastasian_width_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_uint,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_eastasian_width_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_eastasian_width_func_t,
@@ -7451,7 +5110,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_eastasian_width(
         ufuncs: *mut hb_unicode_funcs_t,
         unicode: hb_codepoint_t,
@@ -7465,7 +5124,7 @@ pub type hb_unicode_decompose_compatibility_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_uint,
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_funcs_set_decompose_compatibility_func(
         ufuncs: *mut hb_unicode_funcs_t,
         func: hb_unicode_decompose_compatibility_func_t,
@@ -7473,7 +5132,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_unicode_decompose_compatibility(
         ufuncs: *mut hb_unicode_funcs_t,
         u: hb_codepoint_t,
@@ -7481,7 +5140,7 @@ extern "C" {
     ) -> ::std::os::raw::c_uint;
 }
 pub type hb_font_get_glyph_v_kerning_func_t = hb_font_get_glyph_kerning_func_t;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_v_kerning_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_v_kerning_func_t,
@@ -7489,7 +5148,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_v_kerning(
         font: *mut hb_font_t,
         top_glyph: hb_codepoint_t,
@@ -7506,7 +5165,7 @@ pub type hb_font_get_glyph_shape_func_t = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ),
 >;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_funcs_set_glyph_shape_func(
         ffuncs: *mut hb_font_funcs_t,
         func: hb_font_get_glyph_shape_func_t,
@@ -7514,7 +5173,7 @@ extern "C" {
         destroy: hb_destroy_func_t,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_font_get_glyph_shape(
         font: *mut hb_font_t,
         glyph: hb_codepoint_t,
@@ -7522,7 +5181,7 @@ extern "C" {
         draw_data: *mut ::std::os::raw::c_void,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape(
         font: *mut hb_font_t,
         buffer: *mut hb_buffer_t,
@@ -7530,7 +5189,7 @@ extern "C" {
         num_features: ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_full(
         font: *mut hb_font_t,
         buffer: *mut hb_buffer_t,
@@ -7539,21 +5198,7 @@ extern "C" {
         shaper_list: *const *const ::std::os::raw::c_char,
     ) -> hb_bool_t;
 }
-extern "C" {
-    pub fn hb_shape_justify(
-        font: *mut hb_font_t,
-        buffer: *mut hb_buffer_t,
-        features: *const hb_feature_t,
-        num_features: ::std::os::raw::c_uint,
-        shaper_list: *const *const ::std::os::raw::c_char,
-        min_target_advance: f32,
-        max_target_advance: f32,
-        advance: *mut f32,
-        var_tag: *mut hb_tag_t,
-        var_value: *mut f32,
-    ) -> hb_bool_t;
-}
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_list_shapers() -> *mut *const ::std::os::raw::c_char;
 }
 #[repr(C)]
@@ -7561,7 +5206,7 @@ extern "C" {
 pub struct hb_shape_plan_t {
     _unused: [u8; 0],
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_create(
         face: *mut hb_face_t,
         props: *const hb_segment_properties_t,
@@ -7570,7 +5215,7 @@ extern "C" {
         shaper_list: *const *const ::std::os::raw::c_char,
     ) -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_create_cached(
         face: *mut hb_face_t,
         props: *const hb_segment_properties_t,
@@ -7579,7 +5224,7 @@ extern "C" {
         shaper_list: *const *const ::std::os::raw::c_char,
     ) -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_create2(
         face: *mut hb_face_t,
         props: *const hb_segment_properties_t,
@@ -7590,7 +5235,7 @@ extern "C" {
         shaper_list: *const *const ::std::os::raw::c_char,
     ) -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_create_cached2(
         face: *mut hb_face_t,
         props: *const hb_segment_properties_t,
@@ -7601,16 +5246,16 @@ extern "C" {
         shaper_list: *const *const ::std::os::raw::c_char,
     ) -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_get_empty() -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_reference(shape_plan: *mut hb_shape_plan_t) -> *mut hb_shape_plan_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_destroy(shape_plan: *mut hb_shape_plan_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_set_user_data(
         shape_plan: *mut hb_shape_plan_t,
         key: *mut hb_user_data_key_t,
@@ -7619,13 +5264,13 @@ extern "C" {
         replace: hb_bool_t,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_get_user_data(
         shape_plan: *const hb_shape_plan_t,
         key: *mut hb_user_data_key_t,
     ) -> *mut ::std::os::raw::c_void;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_execute(
         shape_plan: *mut hb_shape_plan_t,
         font: *mut hb_font_t,
@@ -7634,7 +5279,7 @@ extern "C" {
         num_features: ::std::os::raw::c_uint,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_shape_plan_get_shaper(
         shape_plan: *mut hb_shape_plan_t,
     ) -> *const ::std::os::raw::c_char;
@@ -7647,148 +5292,134 @@ pub const HB_STYLE_TAG_WIDTH: hb_style_tag_t = 2003072104;
 pub const HB_STYLE_TAG_WEIGHT: hb_style_tag_t = 2003265652;
 pub const _HB_STYLE_TAG_MAX_VALUE: hb_style_tag_t = 2147483647;
 pub type hb_style_tag_t = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn hb_style_get_value(font: *mut hb_font_t, style_tag: hb_style_tag_t) -> f32;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_version(
         major: *mut ::std::os::raw::c_uint,
         minor: *mut ::std::os::raw::c_uint,
         micro: *mut ::std::os::raw::c_uint,
     );
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_version_string() -> *const ::std::os::raw::c_char;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_version_atleast(
         major: ::std::os::raw::c_uint,
         minor: ::std::os::raw::c_uint,
         micro: ::std::os::raw::c_uint,
     ) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_face_create(ft_face: FT_Face, destroy: hb_destroy_func_t) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_face_create_cached(ft_face: FT_Face) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_face_create_referenced(ft_face: FT_Face) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_face_create_from_file_or_fail(
         file_name: *const ::std::os::raw::c_char,
         index: ::std::os::raw::c_uint,
     ) -> *mut hb_face_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_create(ft_face: FT_Face, destroy: hb_destroy_func_t) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_create_referenced(ft_face: FT_Face) -> *mut hb_font_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_get_face(font: *mut hb_font_t) -> FT_Face;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_lock_face(font: *mut hb_font_t) -> FT_Face;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_unlock_face(font: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_set_load_flags(font: *mut hb_font_t, load_flags: ::std::os::raw::c_int);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_get_load_flags(font: *mut hb_font_t) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_changed(font: *mut hb_font_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_hb_font_changed(font: *mut hb_font_t) -> hb_bool_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn hb_ft_font_set_funcs(font: *mut hb_font_t);
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __locale_data {
-    pub _address: u8,
-}
-pub type __builtin_va_list = [__va_list_tag; 1usize];
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __va_list_tag {
-    pub gp_offset: ::std::os::raw::c_uint,
-    pub fp_offset: ::std::os::raw::c_uint,
-    pub overflow_arg_area: *mut ::std::os::raw::c_void,
-    pub reg_save_area: *mut ::std::os::raw::c_void,
-}
 pub const FREETYPE_ERRORS: &[(FT_Error, &str)] = &[
-	(0x01, "cannot open resource"),
-	(0x02, "unknown file format"),
-	(0x03, "broken file"),
-	(0x04, "invalid FreeType version"),
-	(0x05, "module version is too low"),
-	(0x06, "invalid argument"),
-	(0x07, "unimplemented feature"),
-	(0x08, "broken table"),
-	(0x09, "broken offset within table"),
-	(0x10, "invalid glyph index"),
-	(0x11, "invalid character code"),
-	(0x12, "unsupported glyph image format"),
-	(0x13, "cannot render this glyph format"),
-	(0x14, "invalid outline"),
-	(0x15, "invalid composite glyph"),
-	(0x16, "too many hints"),
-	(0x17, "invalid pixel size"),
-	(0x18, "invalid SVG document"),
-	(0x20, "invalid object handle"),
-	(0x21, "invalid library handle"),
-	(0x22, "invalid module handle"),
-	(0x23, "invalid face handle"),
-	(0x24, "invalid size handle"),
-	(0x25, "invalid glyph slot handle"),
-	(0x26, "invalid charmap handle"),
-	(0x27, "invalid cache manager handle"),
-	(0x28, "invalid stream handle"),
-	(0x30, "too many modules"),
-	(0x31, "too many extensions"),
-	(0x40, "out of memory"),
-	(0x41, "unlisted object"),
-	(0x51, "cannot open stream"),
-	(0x52, "invalid stream seek"),
-	(0x53, "invalid stream skip"),
-	(0x54, "invalid stream read"),
-	(0x55, "invalid stream operation"),
-	(0x56, "invalid frame operation"),
-	(0x57, "nested frame access"),
-	(0x58, "invalid frame read"),
-	(0x60, "raster uninitialized"),
-	(0x61, "raster corrupted"),
-	(0x62, "raster overflow"),
-	(0x63, "negative height while rastering"),
-	(0x70, "too many registered caches"),
-	(0x80, "invalid opcode"),
-	(0x81, "too few arguments"),
-	(0x82, "stack overflow"),
-	(0x83, "code overflow"),
-	(0x84, "bad argument"),
-	(0x85, "division by zero"),
-	(0x86, "invalid reference"),
-	(0x87, "found debug opcode"),
-	(0x88, "found ENDF opcode in execution stream"),
-	(0x89, "nested DEFS"),
-	(0x90, "locations (loca) table missing"),
-	(0x91, "name table missing"),
-	(0x92, "character map (cmap) table missing"),
-	(0x93, "horizontal metrics (hmtx) table missing"),
-	(0x94, "PostScript (post) table missing"),
-	(0x95, "invalid horizontal metrics"),
-	(0x96, "invalid character map (cmap) format"),
-	(0x97, "invalid ppem value"),
-	(0x98, "invalid vertical metrics"),
-	(0x99, "could not find context"),
+    (0x01, "cannot open resource"),
+    (0x02, "unknown file format"),
+    (0x03, "broken file"),
+    (0x04, "invalid FreeType version"),
+    (0x05, "module version is too low"),
+    (0x06, "invalid argument"),
+    (0x07, "unimplemented feature"),
+    (0x08, "broken table"),
+    (0x09, "broken offset within table"),
+    (0x10, "invalid glyph index"),
+    (0x11, "invalid character code"),
+    (0x12, "unsupported glyph image format"),
+    (0x13, "cannot render this glyph format"),
+    (0x14, "invalid outline"),
+    (0x15, "invalid composite glyph"),
+    (0x16, "too many hints"),
+    (0x17, "invalid pixel size"),
+    (0x18, "invalid SVG document"),
+    (0x20, "invalid object handle"),
+    (0x21, "invalid library handle"),
+    (0x22, "invalid module handle"),
+    (0x23, "invalid face handle"),
+    (0x24, "invalid size handle"),
+    (0x25, "invalid glyph slot handle"),
+    (0x26, "invalid charmap handle"),
+    (0x27, "invalid cache manager handle"),
+    (0x28, "invalid stream handle"),
+    (0x30, "too many modules"),
+    (0x31, "too many extensions"),
+    (0x40, "out of memory"),
+    (0x41, "unlisted object"),
+    (0x51, "cannot open stream"),
+    (0x52, "invalid stream seek"),
+    (0x53, "invalid stream skip"),
+    (0x54, "invalid stream read"),
+    (0x55, "invalid stream operation"),
+    (0x56, "invalid frame operation"),
+    (0x57, "nested frame access"),
+    (0x58, "invalid frame read"),
+    (0x60, "raster uninitialized"),
+    (0x61, "raster corrupted"),
+    (0x62, "raster overflow"),
+    (0x63, "negative height while rastering"),
+    (0x70, "too many registered caches"),
+    (0x80, "invalid opcode"),
+    (0x81, "too few arguments"),
+    (0x82, "stack overflow"),
+    (0x83, "code overflow"),
+    (0x84, "bad argument"),
+    (0x85, "division by zero"),
+    (0x86, "invalid reference"),
+    (0x87, "found debug opcode"),
+    (0x88, "found ENDF opcode in execution stream"),
+    (0x89, "nested DEFS"),
+    (0x90, "locations (loca) table missing"),
+    (0x91, "name table missing"),
+    (0x92, "character map (cmap) table missing"),
+    (0x93, "horizontal metrics (hmtx) table missing"),
+    (0x94, "PostScript (post) table missing"),
+    (0x95, "invalid horizontal metrics"),
+    (0x96, "invalid character map (cmap) format"),
+    (0x97, "invalid ppem value"),
+    (0x98, "invalid vertical metrics"),
+    (0x99, "could not find context"),
 ];

@@ -4,7 +4,7 @@ use crate::{
     color::BGRA8,
     math::I16Dot16,
     text::{Face, FaceInfo, FontAxisValues, WEIGHT_AXIS},
-    Renderer, Subrandr, Subtitles,
+    Renderer, Subrandr,
 };
 
 #[no_mangle]

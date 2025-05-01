@@ -178,7 +178,7 @@ impl<'a> ParsingBuffer<'a> {
         if self.text.as_bytes().get(i..i + 2) == Some(b"\r\n") {
             self.text = &self.text[i + 2..];
         } else {
-            self.text = &self.text[i + 1..];
+            self.text = &self.text[(i + 1).min(self.text.len())..];
         }
 
         result

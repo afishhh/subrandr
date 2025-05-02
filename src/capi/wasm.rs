@@ -92,3 +92,120 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
         source: crate::text::FontSource::Memory((*font).clone()),
     });
 }
+
+#[cfg(feature = "wgpu")]
+mod not_public {
+    pub struct WebRasterizer {
+        surface: wgpu::Surface<'static>,
+        rasterizer: crate::rasterize::wgpu::Rasterizer,
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    pub async unsafe extern "C" fn sbr_wasm_web_rasterizer_create(
+        canvas_id: u32,
+    ) -> Result<*mut WebRasterizer, wasm_bindgen::JsError> {
+        let instance = wgpu::util::new_instance_with_webgpu_detection(
+            &wgpu::InstanceDescriptor::from_env_or_default(),
+        )
+        .await;
+
+        use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
+
+        struct Handle(u32);
+
+        impl HasWindowHandle for Handle {
+            fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
+                unsafe {
+                    Ok(wgpu::rwh::WindowHandle::borrow_raw(
+                        wgpu::rwh::RawWindowHandle::Web(wgpu::rwh::WebWindowHandle::new(self.0)),
+                    ))
+                }
+            }
+        }
+
+        impl HasDisplayHandle for Handle {
+            fn display_handle(
+                &self,
+            ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+                Ok(wgpu::rwh::DisplayHandle::web())
+            }
+        }
+
+        let surface = instance.create_surface(Handle(canvas_id)).unwrap();
+
+        let Some(adapter) = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::from_env()
+                    .unwrap_or(wgpu::PowerPreference::LowPower),
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            })
+            .await
+        else {
+            return Err(wasm_bindgen::JsError::new("No adapter found"));
+        };
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .await?;
+
+        Ok(Box::into_raw(Box::new(WebRasterizer {
+            surface,
+            rasterizer: {
+                let mut r = crate::rasterize::wgpu::Rasterizer::new(device, queue);
+                r.set_adapter_info(adapter.get_info());
+                r
+            },
+        })))
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn sbr_wasm_renderer_render_with(
+        renderer: *mut crate::Renderer<'static>,
+        ctx: *const crate::SubtitleContext,
+        subs: *const crate::Subtitles,
+        t: u32,
+        rasterizer: *mut WebRasterizer,
+        width: u32,
+        height: u32,
+    ) -> std::ffi::c_int {
+        let WebRasterizer {
+            surface,
+            rasterizer,
+        } = &mut *rasterizer;
+
+        let device = rasterizer.device();
+        surface.configure(
+            device,
+            &wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                width,
+                height,
+                present_mode: wgpu::PresentMode::AutoVsync,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+                view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
+            },
+        );
+
+        let texture = surface.get_current_texture().unwrap();
+
+        if (*renderer)
+            .render_to_wgpu(
+                rasterizer,
+                rasterizer.target_from_texture(texture.texture.clone()),
+                &*ctx,
+                t,
+                unsafe { &*subs },
+            )
+            .is_err()
+        {
+            return -1;
+        };
+
+        texture.present();
+
+        0
+    }
+}

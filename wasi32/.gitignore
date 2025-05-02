@@ -1,4 +1,4 @@
 /deps
 /dist
 /node_modules
-/bindgen
+/build

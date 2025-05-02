@@ -96,49 +96,27 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
 #[cfg(feature = "wgpu")]
 mod not_public {
     pub struct WebRasterizer {
-        surface: wgpu::Surface<'static>,
+        instance: wgpu::Instance,
         rasterizer: crate::rasterize::wgpu::Rasterizer,
     }
 
-    #[wasm_bindgen::prelude::wasm_bindgen]
-    pub async unsafe extern "C" fn sbr_wasm_web_rasterizer_create(
-        canvas_id: u32,
+    use wasm_bindgen::prelude::*;
+    use wgpu::web_sys;
+
+    #[wasm_bindgen]
+    pub async unsafe fn sbr_wasm_web_rasterizer_create(
     ) -> Result<*mut WebRasterizer, wasm_bindgen::JsError> {
         let instance = wgpu::util::new_instance_with_webgpu_detection(
             &wgpu::InstanceDescriptor::from_env_or_default(),
         )
         .await;
 
-        use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
-
-        struct Handle(u32);
-
-        impl HasWindowHandle for Handle {
-            fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
-                unsafe {
-                    Ok(wgpu::rwh::WindowHandle::borrow_raw(
-                        wgpu::rwh::RawWindowHandle::Web(wgpu::rwh::WebWindowHandle::new(self.0)),
-                    ))
-                }
-            }
-        }
-
-        impl HasDisplayHandle for Handle {
-            fn display_handle(
-                &self,
-            ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
-                Ok(wgpu::rwh::DisplayHandle::web())
-            }
-        }
-
-        let surface = instance.create_surface(Handle(canvas_id)).unwrap();
-
         let Some(adapter) = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::from_env()
                     .unwrap_or(wgpu::PowerPreference::LowPower),
                 force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
+                compatible_surface: None,
             })
             .await
         else {
@@ -150,7 +128,7 @@ mod not_public {
             .await?;
 
         Ok(Box::into_raw(Box::new(WebRasterizer {
-            surface,
+            instance,
             rasterizer: {
                 let mut r = crate::rasterize::wgpu::Rasterizer::new(device, queue);
                 r.set_adapter_info(adapter.get_info());
@@ -159,20 +137,35 @@ mod not_public {
         })))
     }
 
-    #[unsafe(no_mangle)]
-    unsafe extern "C" fn sbr_wasm_renderer_render_with(
-        renderer: *mut crate::Renderer<'static>,
+    #[wasm_bindgen]
+    pub unsafe fn sbr_wasm_renderer_render_with(
+        renderer: *mut crate::Renderer,
         ctx: *const crate::SubtitleContext,
         subs: *const crate::Subtitles,
         t: u32,
         rasterizer: *mut WebRasterizer,
+        any_canvas: JsValue,
         width: u32,
         height: u32,
-    ) -> std::ffi::c_int {
+    ) -> Result<(), JsError> {
         let WebRasterizer {
-            surface,
+            instance,
             rasterizer,
         } = &mut *rasterizer;
+
+        let surface =
+            instance.create_surface(match any_canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
+                Ok(canvas) => wgpu::SurfaceTarget::Canvas(canvas),
+                Err(any_canvas) => match any_canvas.dyn_into::<web_sys::OffscreenCanvas>() {
+                    Ok(offscreen_canvas) => wgpu::SurfaceTarget::OffscreenCanvas(offscreen_canvas),
+                    Err(value) => {
+                        return Err(JsError::new(&format!(
+                            "Value of non-canvas type passed as canvas argument: {:?}",
+                            value
+                        )))
+                    }
+                },
+            })?;
 
         let device = rasterizer.device();
         surface.configure(
@@ -189,23 +182,18 @@ mod not_public {
             },
         );
 
-        let texture = surface.get_current_texture().unwrap();
+        let texture = surface.get_current_texture()?;
 
-        if (*renderer)
-            .render_to_wgpu(
-                rasterizer,
-                rasterizer.target_from_texture(texture.texture.clone()),
-                &*ctx,
-                t,
-                unsafe { &*subs },
-            )
-            .is_err()
-        {
-            return -1;
-        };
+        (*renderer).render_to_wgpu(
+            rasterizer,
+            rasterizer.target_from_texture(texture.texture.clone()),
+            &*ctx,
+            t,
+            unsafe { &*subs },
+        )?;
 
         texture.present();
 
-        0
+        Ok(())
     }
 }

@@ -8,7 +8,10 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = ["wgpu"]
-wgpu = ["dep:wgpu"]
+wgpu = [
+  "dep:wgpu",
+  "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:js-sys"
+]
 
 [dependencies]
 thiserror = "1"
@@ -27,8 +30,10 @@ windows = { version = "0.61", features = ["Win32_Graphics_DirectWrite"] }
 windows-core = "0.61"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 [patch.crates-io]
 wasm-bindgen-backend = { path = "/home/fishhh/sync/projects2/wasm-bindgen/crates/backend" }

@@ -1682,12 +1682,14 @@ name = "subrandr"
 version = "0.1.0"
 dependencies = [
  "icu_segmenter",
+ "js-sys",
  "once_cell",
  "quick-xml 0.36.2",
  "text-sys",
  "thiserror 1.0.63",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys 0.3.77 (registry+https://github.com/rust-lang/crates.io-index)",
  "wgpu",
  "windows 0.61.1",
  "windows-core 0.61.0",

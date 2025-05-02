@@ -1,2 +1,3 @@
+pub mod component;
 pub mod parse;
-mod selector;
+pub mod selector;

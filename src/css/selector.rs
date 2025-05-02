@@ -272,9 +272,8 @@ impl Parse<'_> for CompoundSelectorList {
 
 #[cfg(test)]
 mod test {
-    use crate::css::parse::TokenParser;
-
     use super::*;
+    use crate::css::component::TokenParser;
 
     fn tokenize_and_parse<T: for<'a> Parse<'a>>(text: &str) -> Result<T, ParseError> {
         parse_whole(ParseStream::new(

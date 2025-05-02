@@ -321,6 +321,15 @@ impl<'a> ParseStream<'a> {
         T::parse(self)
     }
 
+    pub fn skip_whitespace(&mut self) -> bool {
+        if self.peek::<Whitespace>() {
+            self.advance_by(1);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn peek<T: AtomicParse<'a>>(&self) -> bool {
         Self::peek_n::<0, T>(self).is_some()
     }
@@ -375,12 +384,62 @@ pub trait Parse<'a>: Sized {
     fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError>;
 }
 
-pub fn parse_whole<'a, T: Parse<'a>>(mut stream: ParseStream<'a>) -> Result<T, ParseError> {
-    let result = stream.parse::<T>()?;
+pub fn parse_whole_with<'a, R>(
+    mut stream: ParseStream<'a>,
+    parser: impl FnOnce(&mut ParseStream<'a>) -> Result<R, ParseError>,
+) -> Result<R, ParseError> {
+    let result = parser(&mut stream)?;
     if stream.is_empty() {
         Ok(result)
     } else {
         Err(ParseError {})
+    }
+}
+
+pub fn parse_whole<'a, T: Parse<'a>>(stream: ParseStream<'a>) -> Result<T, ParseError> {
+    parse_whole_with(stream, T::parse)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Punctuated<T, P>(pub Vec<(T, Option<P>)>);
+
+impl<'a, T: Parse<'a>, P: AtomicParse<'a>> Punctuated<T, P> {
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, value: T) {
+        assert!(self.0.last().is_none_or(|x| x.1.is_some()));
+        self.0.push((value, None));
+    }
+
+    pub fn push_punct(&mut self, value: P) {
+        assert!(self.0.last().is_some_and(|x| x.1.is_none()));
+        self.0.last_mut().unwrap().1 = Some(value);
+    }
+
+    pub fn parse_separated_skip_whitespace(
+        stream: &mut ParseStream<'a>,
+    ) -> Result<Self, ParseError> {
+        let mut result = Self(Vec::new());
+
+        loop {
+            if stream.is_empty() {
+                break;
+            }
+
+            result.push(stream.parse()?);
+
+            stream.skip_whitespace();
+            if stream.peek::<P>() {
+                result.push_punct(stream.parse()?);
+                stream.skip_whitespace();
+            } else {
+                break;
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -459,6 +518,49 @@ impl AtomicParse<'_> for Ident {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringLiteral {
+    pub value: Box<str>,
+}
+
+impl StringLiteral {
+    #[cfg(test)]
+    pub fn new_unspanned(value: impl Into<Box<str>>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl AtomicParse<'_> for StringLiteral {
+    fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+        match token {
+            Some(ComponentValue::PreservedToken(Token {
+                kind: TokenKind::String(value),
+                representation: _,
+            })) => Some(Self {
+                value: value.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Whitespace;
+
+impl AtomicParse<'_> for Whitespace {
+    fn matches(token: Option<&ComponentValue<'_>>) -> Option<Self> {
+        match token {
+            Some(ComponentValue::PreservedToken(Token {
+                kind: TokenKind::Whitespace,
+                representation: _,
+            })) => Some(Self),
+            _ => None,
+        }
+    }
+}
+
 pub trait BlockLikeToken<'a> {
     fn parse_content(&self) -> ParseStream<'a>;
 }
@@ -482,6 +584,28 @@ pub mod tokens {
             match token {
                 Some(ComponentValue::PreservedToken(Token {
                     kind: TokenKind::Colon,
+                    representation: _,
+                })) => Some(Self {}),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Comma {}
+
+    impl Comma {
+        #[cfg(test)]
+        pub fn new_unspanned() -> Self {
+            Self {}
+        }
+    }
+
+    impl AtomicParse<'_> for Comma {
+        fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+            match token {
+                Some(ComponentValue::PreservedToken(Token {
+                    kind: TokenKind::Comma,
                     representation: _,
                 })) => Some(Self {}),
                 _ => None,
@@ -598,6 +722,7 @@ pub mod tokens {
 #[rustfmt::skip]
 macro_rules! token_macro {
     (:) => { $crate::css::parse::tokens::Colon };
+    (,) => { $crate::css::parse::tokens::Comma };
     (.) => { $crate::css::parse::tokens::Dot };
     (past) => { $crate::css::parse::tokens::Past };
     (future) => { $crate::css::parse::tokens::Future };

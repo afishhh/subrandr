@@ -1,6 +1,6 @@
 use super::parse::{
-    parse_whole, tokenizer::is_whitespace, BlockLikeToken, IdHash, Ident, Parse, ParseError,
-    ParseStream, Token,
+    parse_whole, parse_whole_with, tokenizer::is_whitespace, BlockLikeToken, IdHash, Ident, Parse,
+    ParseError, ParseStream, Punctuated, StringLiteral, Token,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,18 +179,35 @@ impl Parse<'_> for PseudoClassSelectorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LangPseudoClassSelector {
-    pub langs: Vec<Box<str>>,
-}
+pub struct LangPseudoClassSelector(pub Punctuated<LanguageRange, Token![,]>);
 
 impl Parse<'_> for LangPseudoClassSelector {
     fn parse(stream: &mut ParseStream<'_>) -> Result<Self, ParseError> {
         let langf = stream.parse::<Token![lang(..)]>()?;
-        let lang_stream = langf.parse_content();
 
-        // TODO: comma separated list of languages
-        _ = lang_stream;
-        panic!()
+        Ok(Self(parse_whole_with(
+            langf.parse_content(),
+            Punctuated::parse_separated_skip_whitespace,
+        )?))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanguageRange {
+    Ident(Ident),
+    String(StringLiteral),
+}
+
+impl Parse<'_> for LanguageRange {
+    fn parse(stream: &mut ParseStream<'_>) -> Result<Self, ParseError> {
+        let mut lk = stream.lookahead1();
+        if lk.peek::<Ident>() {
+            Ok(Self::Ident(stream.parse()?))
+        } else if lk.peek::<StringLiteral>() {
+            Ok(Self::String(stream.parse()?))
+        } else {
+            Err(lk.error())
+        }
     }
 }
 
@@ -238,6 +255,15 @@ impl Parse<'_> for PseudoElementSelectorKind {
         } else {
             Err(lk.error())
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompoundSelectorList(Punctuated<CompoundSelector, Token![,]>);
+
+impl Parse<'_> for CompoundSelectorList {
+    fn parse(stream: &mut ParseStream<'_>) -> Result<Self, ParseError> {
+        Punctuated::parse_separated_skip_whitespace(stream).map(Self)
     }
 }
 
@@ -315,6 +341,86 @@ mod test {
                     })
                 })
             }
+        );
+    }
+    #[test]
+    fn parse_compound_selector_list() {
+        assert_eq!(
+            tokenize_and_parse::<CompoundSelectorList>("div.class").unwrap(),
+            CompoundSelectorList(Punctuated(vec![(
+                CompoundSelector {
+                    type_selector: Some(TypeSelector(Ident::new_unspanned("div"))),
+                    subclass_selectors: vec![SubclassSelector::Class(ClassSelector {
+                        dot: <Token![.]>::new_unspanned(),
+                        name: Ident::new_unspanned("class")
+                    })],
+                    pseudo_element: None
+                },
+                None
+            )]))
+        );
+
+        assert_eq!(
+            tokenize_and_parse::<CompoundSelectorList>(
+                r#"div.class:lang(en-US, "*-JP"), span#id ,::cue"#,
+            )
+            .unwrap(),
+            CompoundSelectorList(Punctuated(vec![
+                (
+                    CompoundSelector {
+                        type_selector: Some(TypeSelector(Ident::new_unspanned("div"))),
+                        subclass_selectors: vec![
+                            SubclassSelector::Class(ClassSelector {
+                                dot: <Token![.]>::new_unspanned(),
+                                name: Ident::new_unspanned("class")
+                            }),
+                            SubclassSelector::PseudoClass(PseudoClassSelector {
+                                colon: <Token![:]>::new_unspanned(),
+                                kind: PseudoClassSelectorKind::Lang(LangPseudoClassSelector(
+                                    Punctuated(vec![
+                                        (
+                                            LanguageRange::Ident(Ident::new_unspanned("en-US")),
+                                            Some(<Token![,]>::new_unspanned())
+                                        ),
+                                        (
+                                            LanguageRange::String(StringLiteral::new_unspanned(
+                                                "*-JP"
+                                            )),
+                                            None
+                                        )
+                                    ])
+                                ))
+                            })
+                        ],
+                        pseudo_element: None
+                    },
+                    Some(<Token![,]>::new_unspanned())
+                ),
+                (
+                    CompoundSelector {
+                        type_selector: Some(TypeSelector(Ident::new_unspanned("span"))),
+                        subclass_selectors: vec![SubclassSelector::Id(IdSelector(
+                            IdHash::new_unspanned("id")
+                        ))],
+                        pseudo_element: None
+                    },
+                    Some(<Token![,]>::new_unspanned())
+                ),
+                (
+                    CompoundSelector {
+                        type_selector: None,
+                        subclass_selectors: vec![],
+                        pseudo_element: Some(PseudoElementSelector {
+                            colon1: <Token![:]>::new_unspanned(),
+                            colon2: <Token![:]>::new_unspanned(),
+                            kind: PseudoElementSelectorKind::Cue(CuePsuedoElement {
+                                selector: None
+                            })
+                        })
+                    },
+                    None
+                ),
+            ]))
         );
     }
 }

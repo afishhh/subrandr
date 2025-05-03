@@ -45,6 +45,14 @@ impl<'a> InputStream<'a> {
         }
     }
 
+    pub fn fork(&self) -> Self {
+        Self {
+            source: self.source,
+            pos: self.pos.clone(),
+            temporary_buffer: String::new(),
+        }
+    }
+
     fn reconsume(&mut self, codepoint: char) {
         self.pos.index -= codepoint.len_utf8();
         if codepoint == '\n' && self.source.as_bytes()[self.pos.index] == b'\r' {

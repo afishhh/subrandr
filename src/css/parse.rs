@@ -174,6 +174,18 @@ impl<'a, T: AtomicParse<'a>> Parse<'a> for T {
     }
 }
 
+impl<'a> Parse<'a> for ComponentStream<'a> {
+    fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        Ok(ComponentStream {
+            components: {
+                let result = stream.stream.components[stream.position..].into();
+                stream.position = stream.stream.components.len();
+                result
+            },
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdHash {
     pub value: Box<str>,

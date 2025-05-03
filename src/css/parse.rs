@@ -8,6 +8,7 @@ pub struct ParseError {}
 
 #[derive(Debug, Clone)]
 pub struct ParseStream<'a> {
+    // TODO: Support TokenStream as a backend for ComponentStream
     stream: ComponentStream<'a>,
     position: usize,
 }
@@ -21,7 +22,7 @@ impl<'a> ParseStream<'a> {
     }
 
     fn next_token(&mut self) -> Option<&ComponentValue<'a>> {
-        if let Some(component) = self.stream.components.get(self.position) {
+        if let Some(component) = self.stream.components().get(self.position) {
             self.position += 1;
             Some(component)
         } else {
@@ -30,7 +31,7 @@ impl<'a> ParseStream<'a> {
     }
 
     fn peek_token(&mut self) -> Option<&ComponentValue<'a>> {
-        self.stream.components.get(self.position)
+        self.stream.components().get(self.position)
     }
 
     pub fn parse<T: Parse<'a>>(&mut self) -> Result<T, ParseError> {
@@ -63,7 +64,7 @@ impl<'a> ParseStream<'a> {
     }
 
     fn peek_n<const OFF: usize, T: AtomicParse<'a>>(&self) -> Option<T> {
-        T::matches(self.stream.components.get(self.position + OFF))
+        T::matches(self.stream.components().get(self.position + OFF))
     }
 
     pub fn lookahead1(&self) -> Lookahead1<'a, '_> {
@@ -71,7 +72,7 @@ impl<'a> ParseStream<'a> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.stream.components.len() == self.position
+        self.stream.len() == self.position
     }
 
     pub fn fork(&self) -> Self {
@@ -174,14 +175,25 @@ impl<'a, T: AtomicParse<'a>> Parse<'a> for T {
     }
 }
 
+impl<'a, T: AtomicParse<'a>> Parse<'a> for Option<T> {
+    fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        if let Some(parsed) = T::matches(stream.peek_token()) {
+            stream.advance_by(1);
+            Ok(Some(parsed))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 impl<'a> Parse<'a> for ComponentStream<'a> {
     fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
-        Ok(ComponentStream {
-            components: {
-                let result = stream.stream.components[stream.position..].into();
-                stream.position = stream.stream.components.len();
-                result
-            },
+        Ok({
+            let result = stream
+                .stream
+                .substream(stream.position..stream.stream.len());
+            stream.position = stream.stream.len();
+            result
         })
     }
 }
@@ -298,56 +310,13 @@ pub mod tokens {
     use super::super::component::*;
     use super::*;
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Colon {}
-
-    impl Colon {
-        #[cfg(test)]
-        pub fn new_unspanned() -> Self {
-            Self {}
-        }
-    }
-
-    impl AtomicParse<'_> for Colon {
-        fn matches(token: Option<&ComponentValue>) -> Option<Self> {
-            match token {
-                Some(ComponentValue::PreservedToken(Token {
-                    kind: TokenKind::Colon,
-                    representation: _,
-                })) => Some(Self {}),
-                _ => None,
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Comma {}
-
-    impl Comma {
-        #[cfg(test)]
-        pub fn new_unspanned() -> Self {
-            Self {}
-        }
-    }
-
-    impl AtomicParse<'_> for Comma {
-        fn matches(token: Option<&ComponentValue>) -> Option<Self> {
-            match token {
-                Some(ComponentValue::PreservedToken(Token {
-                    kind: TokenKind::Comma,
-                    representation: _,
-                })) => Some(Self {}),
-                _ => None,
-            }
-        }
-    }
-
-    macro_rules! delimiter_atomic {
-        ($name: ident, $chr: literal, $display_str: literal) => {
+    macro_rules! make_simple {
+        ($name: ident, $token: ident, $display_str: literal) => {
             #[derive(Debug, Clone, PartialEq, Eq)]
             pub struct $name {}
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl $name {
                 #[cfg(test)]
                 pub fn new_unspanned() -> Self {
@@ -356,6 +325,37 @@ pub mod tokens {
             }
 
             #[automatically_derived]
+            #[allow(dead_code)]
+            impl AtomicParse<'_> for $name {
+                fn matches(token: Option<&ComponentValue>) -> Option<Self> {
+                    match token {
+                        Some(ComponentValue::PreservedToken(Token {
+                            kind: TokenKind::$token,
+                            representation: _,
+                        })) => Some(Self {}),
+                        _ => None,
+                    }
+                }
+            }
+        };
+    }
+
+    macro_rules! make_delim {
+        ($name: ident, $chr: literal, $display_str: literal) => {
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub struct $name {}
+
+            #[automatically_derived]
+            #[allow(dead_code)]
+            impl $name {
+                #[cfg(test)]
+                pub fn new_unspanned() -> Self {
+                    Self {}
+                }
+            }
+
+            #[automatically_derived]
+            #[allow(dead_code)]
             impl AtomicParse<'_> for $name {
                 fn matches(token: Option<&ComponentValue>) -> Option<Self> {
                     match token {
@@ -370,14 +370,13 @@ pub mod tokens {
         };
     }
 
-    delimiter_atomic!(Dot, '.', ".");
-
     macro_rules! make_keyword {
         ($name: ident, $value: literal) => {
             #[derive(Debug, Clone, PartialEq, Eq)]
             pub struct $name {}
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl $name {
                 #[cfg(test)]
                 pub fn new_unspanned() -> Self {
@@ -386,6 +385,7 @@ pub mod tokens {
             }
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl AtomicParse<'_> for $name {
                 fn matches(token: Option<&ComponentValue>) -> Option<Self> {
                     match token {
@@ -400,10 +400,6 @@ pub mod tokens {
         };
     }
 
-    make_keyword!(Past, "past");
-    make_keyword!(Future, "future");
-    make_keyword!(Cue, "cue");
-
     macro_rules! make_function_keyword {
         ($name: ident, $fname: literal) => {
             #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,6 +408,7 @@ pub mod tokens {
             }
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl<'a> $name<'a> {
                 #[cfg(test)]
                 pub fn new_unspanned(value: ComponentStream<'a>) -> Self {
@@ -420,6 +417,7 @@ pub mod tokens {
             }
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl<'a> AtomicParse<'a> for $name<'a> {
                 fn matches(token: Option<&ComponentValue<'a>>) -> Option<Self> {
                     match token {
@@ -436,6 +434,7 @@ pub mod tokens {
             }
 
             #[automatically_derived]
+            #[allow(dead_code)]
             impl<'a> BlockLikeToken<'a> for $name<'a> {
                 fn parse_content(&self) -> ParseStream<'a> {
                     ParseStream::new(self.value.clone())
@@ -444,22 +443,78 @@ pub mod tokens {
         };
     }
 
-    make_function_keyword!(LangFunction, "lang");
-    make_function_keyword!(CueFunction, "cue");
+    macro_rules! make_all {
+        (
+            $dolar: tt,
+            $($what: ident $name: ident [$($token_name: tt)*] ($($params: tt)*);)*
+        ) => {
+            macro_rules! Token {
+                $(($($token_name)*) => { $dolar crate::css::parse::tokens::$name };)*
+            }
+
+            $(make_all!(@mktype $what $name $($params)*);)*
+        };
+        (@mktype simple $name: ident $($params: tt)*) => {
+            make_simple!($name, $($params)*);
+        };
+        (@mktype delim $name: ident $($params: tt)*) => {
+            make_delim!($name, $($params)*);
+        };
+        (@mktype keyword $name: ident $($params: tt)*) => {
+            make_keyword!($name, $($params)*);
+        };
+        (@mktype function_keyword $name: ident $($params: tt)*) => {
+            make_function_keyword!($name, $($params)*);
+        };
+    }
+
+    make_simple!(LBrace, LBrace, "{");
+    make_simple!(RBrace, RBrace, "}");
+    make_simple!(LBracket, LBracket, "[");
+    make_simple!(RBracket, RBracket, "]");
+
+    make_all! {
+        $,
+        simple Colon [:] (Colon, ":");
+        simple Comma [,] (Comma, ",");
+        delim Dot [.] ('.', ".");
+
+        keyword Past        [past] ("past");
+        keyword Future      [future] ("future");
+        keyword Cue         [cue] ("cue");
+        keyword Auto        [auto] ("auto");
+        keyword Inherit     [inherit] ("inherit");
+        keyword Initial     [initial] ("initial");
+        keyword Unset       [unset] ("unset");
+        keyword Static      [static] ("static");
+        keyword Relative    [relative] ("relative");
+        keyword Absolute    [absolute] ("absolute");
+        keyword Sticky      [sticky] ("sticky");
+        keyword Fixed       [fixed] ("fixed");
+
+        keyword Normal      [normal] ("normal");
+
+        keyword Pre         [pre] ("pre");
+        keyword Nowrap      [nowrap] ("nowrap");
+        keyword PreWrap     [pre-wrap] ("pre-wrap");
+        keyword BreakSpaces [break-spaces] ("break-spaces");
+        keyword PreLine     [pre-line] ("pre-line");
+
+        keyword Italic      [italic] ("italic");
+        keyword Oblique     [oblique] ("oblique");
+
+        keyword Alternate   [alternate] ("alternate");
+        keyword Over        [over]      ("over");
+        keyword Under       [under]     ("under");
+        keyword InterCharacter [inter-character] ("inter-character");
+
+        function_keyword LangFunction [lang(..)] ("lang");
+        function_keyword CueFunction [cue(..)] ("cue");
+    }
+
+    pub(crate) use Token;
 }
 
-#[rustfmt::skip]
-macro_rules! token_macro {
-    (:) => { $crate::css::parse::tokens::Colon };
-    (,) => { $crate::css::parse::tokens::Comma };
-    (.) => { $crate::css::parse::tokens::Dot };
-    (past) => { $crate::css::parse::tokens::Past };
-    (future) => { $crate::css::parse::tokens::Future };
-    (lang(..)) => { $crate::css::parse::tokens::LangFunction };
-    (cue) => { $crate::css::parse::tokens::Cue };
-    (cue(..)) => { $crate::css::parse::tokens::CueFunction };
-}
-
-pub(crate) use token_macro as Token;
+pub(crate) use tokens::Token;
 
 use super::component::{ComponentStream, ComponentValue};

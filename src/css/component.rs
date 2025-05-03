@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
 use super::{
     parse::{
@@ -6,8 +6,9 @@ use super::{
         tokenizer::{InputStream, Token, TokenKind},
         ParseStream,
     },
-    properties::AnyProperty,
+    properties::AnyPropertyValue,
     selector::CompoundSelectorList,
+    values::CssWideKeywordOr,
 };
 
 /// Implements parsing algorithms defined in <https://drafts.csswg.org/css-syntax-3/#parsing>.
@@ -23,6 +24,7 @@ enum RuleParseResult<R> {
     InvalidRuleError,
 }
 
+// TODO: imagine if we could use ParseStream here :(
 impl<'a> TokenParser<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
@@ -36,8 +38,6 @@ impl<'a> TokenParser<'a> {
     //       pretty expensive. Maybe instead we should truly have a lookback list when marked
     //       content exists.
     fn fork(&self) -> Self {
-        assert!(self.temporary_buffer.is_empty());
-
         Self {
             input: self.input.fork(),
             reconsumed: self.reconsumed.clone(),
@@ -60,6 +60,7 @@ impl<'a> TokenParser<'a> {
             self.temporary_buffer.set_len(start);
 
             ComponentStream {
+                range: 0..out.len(),
                 components: Rc::<[_]>::assume_init(out),
             }
         }
@@ -99,8 +100,7 @@ impl<'a> TokenParser<'a> {
     }
 
     // https://drafts.csswg.org/css-syntax/#consume-a-block
-    // TODO: use ParseStream and match spec behaviour
-    fn consume_a_block(&mut self) -> Block2<'a> {
+    fn consume_a_block(&mut self) -> BlockContents<'a> {
         self.consume_a_blocks_contents()
     }
 
@@ -337,7 +337,7 @@ impl<'a> TokenParser<'a> {
         rules
     }
 
-    pub fn consume_a_blocks_contents(&mut self) -> Block2<'a> {
+    pub fn consume_a_blocks_contents(&mut self) -> BlockContents<'a> {
         let mut rules = Vec::new();
         let mut decls = Vec::new();
 
@@ -408,7 +408,7 @@ impl<'a> TokenParser<'a> {
             }
         }
 
-        Block2(rules)
+        BlockContents(rules)
     }
 
     // https://drafts.csswg.org/css-syntax/#consume-a-declaration
@@ -630,11 +630,11 @@ pub struct Block<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Block2<'a>(pub Vec<RuleOrListOfDeclarations<'a>>);
+pub struct BlockContents<'a>(pub Vec<RuleOrListOfDeclarations<'a>>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyDeclaration {
-    pub value: AnyProperty,
+    pub value: AnyPropertyValue,
     pub important: bool,
 }
 
@@ -669,7 +669,7 @@ pub struct AtRule<'a> {
     pub prelude: ComponentStream<'a>,
     pub name: Box<str>,
     // truly do not care about at-rules for now, just pass the block
-    pub block: Option<Block2<'a>>,
+    pub block: Option<BlockContents<'a>>,
 }
 
 #[derive(Debug, Clone)]
@@ -682,14 +682,41 @@ pub enum Rule<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentStream<'a> {
-    pub(super) components: Rc<[ComponentValue<'a>]>,
+    components: Rc<[ComponentValue<'a>]>,
+    range: Range<usize>,
 }
 
-impl ComponentStream<'_> {
+impl<'a> ComponentStream<'a> {
     pub fn empty() -> Self {
         Self {
             components: Rc::new([]),
+            range: 0..0,
         }
+    }
+
+    pub(super) fn new(components: Rc<[ComponentValue<'a>]>) -> Self {
+        Self {
+            range: 0..components.len(),
+            components,
+        }
+    }
+
+    pub(super) fn components(&self) -> &[ComponentValue<'a>] {
+        &self.components[self.range.clone()]
+    }
+
+    pub(super) fn substream(&self, range: Range<usize>) -> Self {
+        let new_range = self.range.start + range.start..self.range.start + range.end;
+        assert!(new_range.end <= self.range.end);
+        assert!(new_range.start <= self.range.end);
+        Self {
+            components: self.components.clone(),
+            range: new_range,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.range.end - self.range.start
     }
 }
 
@@ -702,8 +729,15 @@ mod test {
         let rules = dbg!(TokenParser::new(
             r#"
 ::cue(:lang(en-US, brazil\!\!\!)) {
-    color: red;
-    color: blue !important;
+    /* color: blue !important; */
+    ruby-position: alternate over;
+    ruby-position: alternate;
+    ruby-position: under alternate;
+    ruby-position: under !important;
+    ruby-position: inter-character;
+    font-style: normal;
+    font-style: italic;
+    font-style: oblique;
 }
 "#,
         )

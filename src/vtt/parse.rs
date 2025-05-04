@@ -238,9 +238,13 @@ fn collect_timestamp(input: &mut ParsingBuffer) -> Option<u32> {
         return None;
     }
 
-    let result = ((value_1 * 60 + value_2) * 60 + value_3) * 1000 + value_4;
-
-    Some(result)
+    value_1
+        .checked_mul(60)?
+        .checked_add(value_2)?
+        .checked_mul(60)?
+        .checked_add(value_3)?
+        .checked_mul(1000)?
+        .checked_add(value_4)
 }
 
 // https://www.w3.org/TR/webvtt1/#parse-a-percentage-string

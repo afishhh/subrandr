@@ -177,6 +177,8 @@ pub enum Error {
     InvalidAttributeValue(&'static str, String, AnyError),
     #[error(transparent)]
     InvalidXML(#[from] XmlError),
+    #[error("Unexpected end-of-file")]
+    UnexpectedEof,
 }
 
 macro_rules! match_attribute {
@@ -445,7 +447,7 @@ fn parse_head(
                 ));
             }
             XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => unreachable!(),
+            XmlEvent::Eof => return Err(Error::UnexpectedEof),
         }
     }
 
@@ -674,7 +676,7 @@ fn parse_body(
                 ));
             }
             XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => unreachable!(),
+            XmlEvent::Eof => return Err(Error::UnexpectedEof),
         }
     }
 
@@ -735,11 +737,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                 ))
             }
             XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => {
-                return Err(Error::InvalidStructure(
-                    "Encountered EOF before a root element",
-                ))
-            }
+            XmlEvent::Eof => return Err(Error::UnexpectedEof),
         }
     }
 
@@ -781,7 +779,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                 ));
             }
             XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => unreachable!(),
+            XmlEvent::Eof => return Err(Error::UnexpectedEof),
         }
     }
 
@@ -839,7 +837,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                 | XmlEvent::Decl(_)
                 | XmlEvent::PI(_)
                 | XmlEvent::DocType(_) => (),
-                XmlEvent::Eof => unreachable!(),
+                XmlEvent::Eof => return Err(Error::UnexpectedEof),
             }
         }
     }

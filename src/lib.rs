@@ -14,9 +14,8 @@ use color::BGRA8;
 use log::{info, trace, Logger};
 use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
 use rasterize::{Rasterizer, RenderTarget};
-use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
-    layout::{MultilineTextShaper, ShapedLine, ShapedSegment, TextWrapOptions},
+    layout::{ShapedLine, ShapedSegment, TextWrapOptions},
     FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics,
 };
 use vtt::VttEvent;
@@ -65,7 +64,6 @@ trait Layouter {
 
 #[derive(Debug, Clone)]
 enum EventExtra {
-    Srv3(Srv3Event),
     Vtt(VttEvent),
 }
 
@@ -90,7 +88,7 @@ struct TextSegment {
     color: BGRA8,
     background_color: BGRA8,
     text: String,
-    shadows: Vec<TextShadow>,
+    shadows: Vec<CssTextShadow>,
     ruby: Ruby,
 }
 
@@ -108,13 +106,6 @@ struct TextDecorations {
     underline_color: BGRA8,
     strike_out: bool,
     strike_out_color: BGRA8,
-}
-
-#[derive(Debug, Clone)]
-enum TextShadow {
-    #[expect(dead_code, reason = "for WebVTT")]
-    Css(CssTextShadow),
-    Srv3(Srv3TextShadow),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -190,9 +181,16 @@ struct SubtitleClass {
 }
 
 #[derive(Debug)]
-pub struct Subtitles {
-    class: &'static SubtitleClass,
-    events: Vec<Event>,
+pub enum Subtitles {
+    Srv3(srv3::Document),
+}
+
+impl Subtitles {
+    fn class_name(&self) -> &'static str {
+        match self {
+            Subtitles::Srv3(..) => "srv3",
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -292,6 +290,10 @@ impl PerfStats {
     }
 }
 
+enum FormatRenderer {
+    Srv3(srv3::Renderer),
+}
+
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     fonts: text::FontDb<'a>,
@@ -300,15 +302,20 @@ pub struct Renderer<'a> {
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
     previous_output_size: (u32, u32),
+
+    logset: log::LogOnceSet,
+    format_renderer: Option<FormatRenderer>,
 }
 
-struct FrameRenderPass<'s, 't, 'p> {
+struct FrameRenderPass<'s, 't, 'frame> {
     sbr: &'s Subrandr,
-    fonts: &'p mut text::FontDb<'s>,
-    rasterizer: &'p mut dyn Rasterizer,
-    target: &'p mut RenderTarget<'t>,
+    font_arena: &'frame text::FontArena,
+    fonts: &'frame mut text::FontDb<'s>,
+    rasterizer: &'frame mut dyn Rasterizer,
+    target: &'frame mut RenderTarget<'t>,
     t: u32,
-    ctx: &'p SubtitleContext,
+    logset: &'frame log::LogOnceSet,
+    ctx: &'frame SubtitleContext,
 
     unchanged_range: Range<u32>,
 }
@@ -322,8 +329,8 @@ fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
     )
 }
 
-impl<'s, 't, 'r> FrameRenderPass<'s, 't, 'r> {
-    fn add_event_range(&mut self, event: &Event) -> bool {
+impl<'s, 't, 'frame> FrameRenderPass<'s, 't, 'frame> {
+    fn add_event_range(&mut self, event: Range<u32>) -> bool {
         let r = self.unchanged_range.clone();
         if (event.start..event.end).contains(&self.t) {
             self.unchanged_range = r.start.max(event.start)..r.end.min(event.end);
@@ -730,6 +737,7 @@ impl<'a> Renderer<'a> {
             sbr,
             fonts: text::FontDb::new(sbr).unwrap(),
             perf: PerfStats::new(),
+
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
                 dpi: 0,
@@ -741,6 +749,9 @@ impl<'a> Renderer<'a> {
                 padding_bottom: I26Dot6::ZERO,
             },
             previous_output_size: (0, 0),
+
+            logset: log::LogOnceSet::new(),
+            format_renderer: None,
         }
     }
 
@@ -834,9 +845,11 @@ impl<'a> Renderer<'a> {
 
         let mut pass = FrameRenderPass {
             sbr: self.sbr,
+            font_arena: &text::FontArena::new(),
             fonts: &mut self.fonts,
             rasterizer,
             target,
+            logset: &self.logset,
             ctx,
             t,
             unchanged_range: 0..u32::MAX,
@@ -845,7 +858,7 @@ impl<'a> Renderer<'a> {
         trace!(
             self.sbr,
             "rendering frame (class={} ctx={ctx:?} t={t}ms)",
-            subs.class.name
+            subs.class_name()
         );
 
         if self.sbr.debug.draw_version_string {
@@ -866,7 +879,7 @@ impl<'a> Renderer<'a> {
             pass.debug_text(
                 0,
                 pass.debug_line_height().round_to_inner(),
-                &format!("subtitle class: {}", subs.class.name),
+                &format!("subtitle class: {}", subs.class_name()),
                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                 pass.debug_font_size(),
                 BGRA8::WHITE,
@@ -972,96 +985,17 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        {
-            let mut layouter = (subs.class.create_layouter)();
-            let font_arena = FontArena::new();
-            for event in subs.events.iter() {
-                if !pass.add_event_range(event) {
-                    continue;
+        match subs {
+            Subtitles::Srv3(document) => match self.format_renderer {
+                Some(FormatRenderer::Srv3(ref mut renderer)) => {
+                    renderer.render(&mut pass, document)?
                 }
-
-                let mut shaper = MultilineTextShaper::new();
-                let mut last_ruby_base = None;
-                for segment in event.segments.iter() {
-                    let matcher = text::FontMatcher::match_all(
-                        segment.font.iter().map(String::as_str),
-                        text::FontStyle {
-                            weight: segment.font_weight,
-                            italic: segment.italic,
-                        },
-                        (subs.class.get_font_size)(ctx, event, segment),
-                        ctx.dpi,
-                        &font_arena,
-                        &mut pass.fonts,
-                    )?;
-
-                    match segment.ruby {
-                        Ruby::None => {
-                            shaper.add_text(&segment.text, matcher);
-                        }
-                        Ruby::Base => {
-                            last_ruby_base = Some(shaper.add_ruby_base(&segment.text, matcher));
-                        }
-                        Ruby::Over => {
-                            shaper.add_ruby_annotation(
-                                last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
-                                &segment.text,
-                                matcher,
-                            );
-                            last_ruby_base = None;
-                        }
-                    }
+                _ => {
+                    let mut new = srv3::Renderer::new();
+                    new.render(&mut pass, document)?;
+                    self.format_renderer = Some(FormatRenderer::Srv3(new))
                 }
-
-                let Alignment(horizontal_alignment, vertical_alignment) = event.alignment;
-                let (mut lines, mut total_rect) = shaper.shape(
-                    horizontal_alignment,
-                    event.text_wrap,
-                    layouter.wrap_width(ctx, event),
-                    &font_arena,
-                    &mut pass.fonts,
-                )?;
-
-                let Point2 { x, y } = layouter.layout(ctx, &mut lines, &mut total_rect, event);
-
-                let x = I26Dot6::from_f32(x);
-                let y = I26Dot6::from_f32(y)
-                    + match vertical_alignment {
-                        VerticalAlignment::Top => I26Dot6::ZERO,
-                        VerticalAlignment::BaselineCentered => -total_rect.height() / 2,
-                        VerticalAlignment::Bottom => -total_rect.height(),
-                    };
-
-                pass.draw_text_total_rect_debug_info(
-                    total_rect.translate(Vec2::new(x, y)),
-                    vertical_alignment,
-                )?;
-
-                pass.draw_simple_text_background_boxes(
-                    x,
-                    y,
-                    lines.iter().map(|l| &l.segments),
-                    |index| event.segments[index].background_color,
-                );
-
-                pass.draw_text_segments_full(
-                    x,
-                    y,
-                    lines.iter().flat_map(|line| &line.segments),
-                    |index, out_shadows| {
-                        let segment = &event.segments[index];
-
-                        for shadow in segment.shadows.iter() {
-                            match shadow {
-                                TextShadow::Css(css) => out_shadows.push(*css),
-                                TextShadow::Srv3(srv3) => srv3.to_css(ctx, out_shadows),
-                            }
-                        }
-
-                        (segment.color, segment.decorations)
-                    },
-                )?;
-            }
+            },
         }
 
         self.unchanged_range = pass.unchanged_range;

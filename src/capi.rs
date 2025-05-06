@@ -263,10 +263,9 @@ unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const c_char) -> *mut 
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
     if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
-        Box::into_raw(Box::new(crate::srv3::convert(
-            sbr,
-            ctry!(crate::srv3::parse(sbr, &text)),
-        )))
+        Box::into_raw(Box::new(Subtitles::Srv3(ctry!(crate::srv3::parse(
+            sbr, &text
+        )))))
     } else if bytes.ends_with(".vtt") {
         let text = ctry!(std::fs::read_to_string(bytes));
         Box::into_raw(Box::new(crate::vtt::convert(
@@ -320,10 +319,9 @@ unsafe extern "C" fn sbr_load_text(
     }
 
     match format {
-        SubtitleFormat::Srv3 => Box::into_raw(Box::new(crate::srv3::convert(
-            sbr,
-            ctry!(crate::srv3::parse(sbr, content)),
-        ))),
+        SubtitleFormat::Srv3 => Box::into_raw(Box::new(Subtitles::Srv3(ctry!(
+            crate::srv3::parse(sbr, content)
+        )))),
         SubtitleFormat::WebVTT => Box::into_raw(Box::new(crate::vtt::convert(
             sbr,
             match crate::vtt::parse(content) {

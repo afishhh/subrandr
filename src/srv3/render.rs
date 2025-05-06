@@ -4,12 +4,14 @@
 use crate::{
     color::BGRA8,
     log::{log_once_state, warning},
-    math::{I16Dot16, I26Dot6, Point2, Point2f, Vec2f},
-    CssTextShadow, Event, EventExtra, Layouter, Ruby, Subrandr, SubtitleClass, SubtitleContext,
-    Subtitles, TextDecorations, TextSegment,
+    math::{I16Dot16, I26Dot6, Vec2, Vec2f},
+    srv3::{RubyPart, Segment},
+    text::{self, layout::MultilineTextShaper},
+    Alignment, CssTextShadow, FrameRenderPass, RenderError, SubtitleContext, TextDecorations,
+    VerticalAlignment,
 };
 
-use super::{Document, EdgeType, RubyPart};
+use super::EdgeType;
 
 const SRV3_FONTS: &[&[&str]] = &[
     &[
@@ -75,8 +77,9 @@ fn font_style_to_name(style: u32) -> &'static [&'static str] {
         .map_or(SRV3_FONTS[3], |v| v)
 }
 
-fn convert_coordinate(coord: f32) -> f32 {
-    0.02 + coord * 0.0096
+fn apply_coordinate(coord: u32, full: I26Dot6) -> I26Dot6 {
+    // full * (0.02 + coord * 0.0096)
+    full / 50 + full * coord as i32 * 96 / 10000
 }
 
 fn calculate_font_scale(
@@ -138,13 +141,12 @@ fn pixels_to_points(pixels: f32) -> f32 {
 }
 
 #[derive(Debug, Clone)]
-pub struct Srv3TextShadow {
-    // never None
+struct TextShadow {
     kind: EdgeType,
     color: BGRA8,
 }
 
-impl Srv3TextShadow {
+impl TextShadow {
     pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<CssTextShadow>) {
         let a = font_scale_from_ctx(ctx) / 32.0;
         let e = a.max(1.0);
@@ -153,7 +155,7 @@ impl Srv3TextShadow {
         let c = (5.0 * a).max(1.0);
 
         match self.kind {
-            EdgeType::None => unreachable!(),
+            EdgeType::None => (),
             EdgeType::HardShadow => {
                 // in captions.js it is window.devicePixelRatio >= 2 ? 0.5 : 1
                 // BUT that is NOT what we want, I think they do this to increase fidelity on displays
@@ -207,193 +209,225 @@ impl Srv3TextShadow {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Srv3Event {
-    x: f32,
-    y: f32,
+struct Event {
+    start: u32,
+    end: u32,
+    alignment: Alignment,
+    segments: Vec<TSegment>,
+    x: I26Dot6,
+    y: I26Dot6,
 }
 
-struct Srv3Layouter;
+struct TSegment {
+    text: Box<str>,
+    font: &'static [&'static str],
+    base_size: I26Dot6,
+    bold: bool,
+    italic: bool,
+    color: BGRA8,
+    background_color: BGRA8,
+    shadow: TextShadow,
+    ruby: Ruby,
+}
 
-impl Layouter for Srv3Layouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> I26Dot6 {
-        ctx.player_width() * 0.96
+enum Ruby {
+    None,
+    Base,
+    Over,
+}
+
+struct Subtitles {
+    events: Vec<Event>,
+}
+
+pub struct Renderer {}
+
+impl Renderer {
+    pub fn new() -> Self {
+        Self {}
     }
 
-    fn layout(
+    pub fn render(
         &mut self,
-        ctx: &SubtitleContext,
-        _lines: &mut Vec<crate::text::layout::ShapedLine>,
-        _total_rect: &mut crate::math::Rect2<crate::math::I26Dot6>,
-        event: &Event,
-    ) -> Point2f {
-        let EventExtra::Srv3(extra) = &event.extra else {
-            panic!("Srv3Layouter received foreign event {:?}", event);
-        };
+        pass: &mut FrameRenderPass,
+        subs: &Subtitles,
+    ) -> Result<(), RenderError> {
+        log_once_state!(in pass.logset; ruby_under_unsupported, window_unsupported);
 
-        Point2::new(
-            extra.x * ctx.player_width().into_f32(),
-            extra.y * ctx.player_height().into_f32(),
-        )
-    }
-}
-
-fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::TextSegment {
-    let mut shadows = Vec::new();
-
-    if segment.pen().edge_type != EdgeType::None {
-        let edge_color = BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000);
-        shadows.push(crate::TextShadow::Srv3(Srv3TextShadow {
-            kind: segment.pen().edge_type,
-            color: edge_color,
-        }));
-    }
-
-    TextSegment {
-        font: font_style_to_name(segment.pen().font_style)
-            .iter()
-            .copied()
-            .map(str::to_owned)
-            .collect(),
-        font_size: {
-            let mut base = pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75);
-            if matches!(ruby, Ruby::Over) {
-                base /= 2.0;
+        for event in subs.events.iter() {
+            if !pass.add_event_range(event.start..event.end) {
+                continue;
             }
-            I26Dot6::from_f32(base)
-        },
-        font_weight: if segment.pen().bold {
-            I16Dot16::new(700)
-        } else {
-            I16Dot16::new(400)
-        },
-        italic: segment.pen().italic,
-        decorations: TextDecorations {
-            ..Default::default()
-        },
-        color: BGRA8::from_rgba32(segment.pen().foreground_color),
-        background_color: BGRA8::from_rgba32(segment.pen().background_color),
-        text: segment.text.clone(),
-        shadows,
-        ruby,
-    }
-}
 
-pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
-    let mut result = Subtitles {
-        class: &SubtitleClass {
-            name: "srv3",
-            get_font_size: |ctx, _event, segment| -> I26Dot6 {
-                segment.font_size * font_scale_from_ctx(ctx)
-            },
-            create_layouter: || Box::new(Srv3Layouter),
-        },
-        events: vec![],
-    };
+            if event.window_id.is_some() {
+                warning!(
+                    pass.sbr,
+                    once(window_unsupported),
+                    "Explicit windows on events are not supported yet"
+                )
+            }
 
-    log_once_state!(ruby_under_unsupported, window_unsupported);
+            let mut font_matcher_for = |segment: &Segment, ruby_annotation: bool| {
+                text::FontMatcher::match_all(
+                    font_style_to_name(segment.pen.font_style),
+                    text::FontStyle {
+                        weight: if segment.pen.bold {
+                            I16Dot16::new(700)
+                        } else {
+                            I16Dot16::new(400)
+                        },
+                        italic: segment.pen.italic,
+                    },
+                    {
+                        let mut base =
+                            pixels_to_points(font_size_to_pixels(segment.pen.font_size) * 0.75);
+                        if ruby_annotation {
+                            base /= 2.0;
+                        }
+                        I26Dot6::from_f32(base * font_scale_from_ctx(pass.ctx))
+                    },
+                    pass.ctx.dpi,
+                    &pass.font_arena,
+                    &mut pass.fonts,
+                )
+            };
 
-    for event in document.events() {
-        let mut segments = vec![];
+            let mut shaper = MultilineTextShaper::new();
 
-        if event.window_id.is_some() {
-            warning!(
-                sbr,
-                once(window_unsupported),
-                "Explicit windows on events are not supported yet"
-            )
-        }
+            let mut it = event.segments.iter();
+            'segment_loop: while let Some(segment) = it.next() {
+                'ruby_failed: {
+                    if segment.pen.ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
+                        let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
 
-        let mut it = event.segments.iter();
-        'segment_loop: while let Some(segment) = it.next() {
-            'ruby_failed: {
-                if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
-                    let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
+                        if !matches!(
+                            ruby_block.each_ref().map(|s| s.pen.ruby_part),
+                            [
+                                RubyPart::Parenthesis,
+                                RubyPart::Over | RubyPart::Under,
+                                RubyPart::Parenthesis,
+                            ]
+                        ) {
+                            break 'ruby_failed;
+                        }
 
-                    if !matches!(
-                        ruby_block.each_ref().map(|s| s.pen().ruby_part),
-                        [
-                            RubyPart::Parenthesis,
-                            RubyPart::Over | RubyPart::Under,
-                            RubyPart::Parenthesis,
-                        ]
-                    ) {
-                        break 'ruby_failed;
-                    }
-                    let ruby = match ruby_block[1].pen().ruby_part {
-                        RubyPart::Over => Ruby::Over,
-                        RubyPart::Under => {
+                        if let RubyPart::Under = ruby_block[1].pen.ruby_part {
                             warning!(
-                                sbr,
+                                pass.sbr,
                                 once(ruby_under_unsupported),
                                 "`ruby-position: under`-style ruby text is not supported yet"
                             );
                             break 'ruby_failed;
-                        }
-                        _ => unreachable!(),
-                    };
+                        };
 
-                    segments.push(convert_segment(segment, Ruby::Base));
-                    _ = it.next().unwrap();
-                    segments.push(convert_segment(it.next().unwrap(), ruby));
-                    _ = it.next().unwrap();
+                        let base_id =
+                            shaper.add_ruby_base(&segment.text, font_matcher_for(segment, false)?);
 
-                    continue 'segment_loop;
+                        _ = it.next().unwrap();
+                        shaper.skip_segment_for_output();
+
+                        let annotation = it.next().unwrap();
+                        shaper.add_ruby_annotation(
+                            base_id,
+                            &annotation.text,
+                            font_matcher_for(annotation, true)?,
+                        );
+
+                        _ = it.next().unwrap();
+                        shaper.skip_segment_for_output();
+
+                        continue 'segment_loop;
+                    }
                 }
+
+                shaper.add_text(&segment.text, font_matcher_for(segment, false)?);
             }
 
-            segments.push(convert_segment(segment, Ruby::None));
+            let (halign, valign) = match event.position.point {
+                super::Point::TopLeft => (
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::TopCenter => (
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::TopRight => (
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::Top,
+                ),
+                super::Point::MiddleLeft => (
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::MiddleCenter => (
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::MiddleRight => (
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::BaselineCentered,
+                ),
+                super::Point::BottomLeft => (
+                    crate::HorizontalAlignment::Left,
+                    crate::VerticalAlignment::Bottom,
+                ),
+                super::Point::BottomCenter => (
+                    crate::HorizontalAlignment::Center,
+                    crate::VerticalAlignment::Bottom,
+                ),
+                super::Point::BottomRight => (
+                    crate::HorizontalAlignment::Right,
+                    crate::VerticalAlignment::Bottom,
+                ),
+            };
+
+            let (lines, total_rect) = shaper.shape(
+                halign,
+                text::layout::TextWrapOptions::default(),
+                pass.ctx.player_width() * 96 / 100,
+                &pass.font_arena,
+                &mut pass.fonts,
+            )?;
+
+            let x = apply_coordinate(event.position.x, pass.ctx.player_width());
+            let y = apply_coordinate(event.position.y, pass.ctx.player_height())
+                + match valign {
+                    VerticalAlignment::Top => I26Dot6::ZERO,
+                    VerticalAlignment::BaselineCentered => -total_rect.height() / 2,
+                    VerticalAlignment::Bottom => -total_rect.height(),
+                };
+
+            pass.draw_text_total_rect_debug_info(total_rect.translate(Vec2::new(x, y)), valign)?;
+
+            pass.draw_simple_text_background_boxes(
+                x,
+                y,
+                lines.iter().map(|l| &l.segments),
+                |index| BGRA8::from_rgba32(event.segments[index].pen.background_color),
+            );
+
+            pass.draw_text_segments_full(
+                x,
+                y,
+                lines.iter().flat_map(|line| &line.segments),
+                |index, out_shadows| {
+                    let segment = &event.segments[index];
+
+                    TextShadow {
+                        kind: segment.pen.edge_type,
+                        color: BGRA8::from_argb32(segment.pen.edge_color | 0xFF000000),
+                    }
+                    .to_css(pass.ctx, out_shadows);
+
+                    (
+                        BGRA8::from_rgba32(segment.pen.foreground_color),
+                        TextDecorations::default(),
+                    )
+                },
+            )?;
         }
 
-        result.events.push(Event {
-            start: event.time,
-            end: event.time + event.duration,
-            extra: EventExtra::Srv3(Srv3Event {
-                x: convert_coordinate(event.position().x as f32),
-                y: convert_coordinate(event.position().y as f32),
-            }),
-            alignment: match event.position().point {
-                super::Point::TopLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::TopCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::TopRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::MiddleLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::MiddleCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::MiddleRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::BottomLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::Bottom,
-                ),
-                super::Point::BottomCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::Bottom,
-                ),
-                super::Point::BottomRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::Bottom,
-                ),
-            },
-            text_wrap: crate::TextWrapOptions::default(),
-            segments,
-        })
+        Ok(())
     }
-
-    result
 }

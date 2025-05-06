@@ -432,111 +432,112 @@ fn convert_text(text: &str) -> Vec<crate::TextSegment> {
 }
 
 pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
-    let mut subtitles = crate::Subtitles {
-        class: &SubtitleClass {
-            name: "vtt",
-            get_font_size: |ctx, _event, _segment| -> I26Dot6 {
-                // Standard says 5vh, but browser engines use 5vmin.
-                // See https://github.com/w3c/webvtt/issues/529
-                ctx.video_height.min(ctx.video_width) * 0.05 / ctx.pixel_scale()
-            },
-            create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
-        },
-        events: Vec::new(),
-    };
+    unimplemented!()
+    // let mut subtitles = crate::Subtitles {
+    //     class: &SubtitleClass {
+    //         name: "vtt",
+    //         get_font_size: |ctx, _event, _segment| -> I26Dot6 {
+    //             // Standard says 5vh, but browser engines use 5vmin.
+    //             // See https://github.com/w3c/webvtt/issues/529
+    //             ctx.video_height.min(ctx.video_width) * 0.05 / ctx.pixel_scale()
+    //         },
+    //         create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
+    //     },
+    //     events: Vec::new(),
+    // };
 
-    let logset = LogOnceSet::new();
-    log_once_state!(in logset; region_unsupported);
+    // let logset = LogOnceSet::new();
+    // log_once_state!(in logset; region_unsupported);
 
-    if !captions.stylesheets.is_empty() {
-        warning!(
-            sbr,
-            "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
-        )
-    }
+    // if !captions.stylesheets.is_empty() {
+    //     warning!(
+    //         sbr,
+    //         "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
+    //     )
+    // }
 
-    for cue in captions.cues {
-        if cue.region.is_some() && !captions.regions.is_empty() {
-            warning!(
-                sbr,
-                once(region_unsupported),
-                "WebVTT file makes use of regions, which are currently not supported and will be ignored."
-            )
-        }
+    // for cue in captions.cues {
+    //     if cue.region.is_some() && !captions.regions.is_empty() {
+    //         warning!(
+    //             sbr,
+    //             once(region_unsupported),
+    //             "WebVTT file makes use of regions, which are currently not supported and will be ignored."
+    //         )
+    //     }
 
-        let computed_position = cue.computed_position();
-        let computed_position_alignment = cue.computed_position_alignment(true);
-        let maximum_size = match computed_position_alignment {
-            ComputedPositionAlignment::LineLeft => 100. - computed_position,
-            ComputedPositionAlignment::LineRight => computed_position,
-            ComputedPositionAlignment::Center => {
-                if computed_position <= 50. {
-                    computed_position * 2.
-                } else {
-                    (100. - computed_position) * 2.
-                }
-            }
-        };
+    //     let computed_position = cue.computed_position();
+    //     let computed_position_alignment = cue.computed_position_alignment(true);
+    //     let maximum_size = match computed_position_alignment {
+    //         ComputedPositionAlignment::LineLeft => 100. - computed_position,
+    //         ComputedPositionAlignment::LineRight => computed_position,
+    //         ComputedPositionAlignment::Center => {
+    //             if computed_position <= 50. {
+    //                 computed_position * 2.
+    //             } else {
+    //                 (100. - computed_position) * 2.
+    //             }
+    //         }
+    //     };
 
-        let size = cue.size.min(maximum_size);
+    //     let size = cue.size.min(maximum_size);
 
-        let mut x_position = 0.0;
-        let mut y_position = 0.0;
+    //     let mut x_position = 0.0;
+    //     let mut y_position = 0.0;
 
-        match cue.writing_direction {
-            vtt::WritingDirection::Horizontal => match computed_position_alignment {
-                ComputedPositionAlignment::LineLeft => x_position = computed_position,
-                ComputedPositionAlignment::Center => x_position = computed_position - size / 2.,
-                ComputedPositionAlignment::LineRight => x_position = computed_position - size,
-            },
-            vtt::WritingDirection::VerticalGrowingLeft
-            | vtt::WritingDirection::VerticalGrowingRight => match computed_position_alignment {
-                ComputedPositionAlignment::LineLeft => y_position = computed_position,
-                ComputedPositionAlignment::Center => y_position = computed_position - size / 2.,
-                ComputedPositionAlignment::LineRight => y_position = computed_position - size,
-            },
-        }
+    //     match cue.writing_direction {
+    //         vtt::WritingDirection::Horizontal => match computed_position_alignment {
+    //             ComputedPositionAlignment::LineLeft => x_position = computed_position,
+    //             ComputedPositionAlignment::Center => x_position = computed_position - size / 2.,
+    //             ComputedPositionAlignment::LineRight => x_position = computed_position - size,
+    //         },
+    //         vtt::WritingDirection::VerticalGrowingLeft
+    //         | vtt::WritingDirection::VerticalGrowingRight => match computed_position_alignment {
+    //             ComputedPositionAlignment::LineLeft => y_position = computed_position,
+    //             ComputedPositionAlignment::Center => y_position = computed_position - size / 2.,
+    //             ComputedPositionAlignment::LineRight => y_position = computed_position - size,
+    //         },
+    //     }
 
-        match cue.line {
-            vtt::Line::Percentage(percentage) => match cue.writing_direction {
-                vtt::WritingDirection::Horizontal => y_position = percentage,
-                vtt::WritingDirection::VerticalGrowingLeft
-                | vtt::WritingDirection::VerticalGrowingRight => x_position = percentage,
-            },
-            vtt::Line::Lines(_) | vtt::Line::Auto => match cue.writing_direction {
-                vtt::WritingDirection::Horizontal => y_position = 0.,
-                vtt::WritingDirection::VerticalGrowingLeft
-                | vtt::WritingDirection::VerticalGrowingRight => x_position = 0.,
-            },
-        }
+    //     match cue.line {
+    //         vtt::Line::Percentage(percentage) => match cue.writing_direction {
+    //             vtt::WritingDirection::Horizontal => y_position = percentage,
+    //             vtt::WritingDirection::VerticalGrowingLeft
+    //             | vtt::WritingDirection::VerticalGrowingRight => x_position = percentage,
+    //         },
+    //         vtt::Line::Lines(_) | vtt::Line::Auto => match cue.writing_direction {
+    //             vtt::WritingDirection::Horizontal => y_position = 0.,
+    //             vtt::WritingDirection::VerticalGrowingLeft
+    //             | vtt::WritingDirection::VerticalGrowingRight => x_position = 0.,
+    //         },
+    //     }
 
-        let horizontal_alignment = match cue.text_alignment {
-            // TODO: Start and End alignment is not supported yet
-            vtt::TextAlignment::Start => crate::HorizontalAlignment::Left,
-            vtt::TextAlignment::End => crate::HorizontalAlignment::Right,
-            vtt::TextAlignment::Left => crate::HorizontalAlignment::Left,
-            vtt::TextAlignment::Right => crate::HorizontalAlignment::Right,
-            vtt::TextAlignment::Center => crate::HorizontalAlignment::Center,
-        };
+    //     let horizontal_alignment = match cue.text_alignment {
+    //         // TODO: Start and End alignment is not supported yet
+    //         vtt::TextAlignment::Start => crate::HorizontalAlignment::Left,
+    //         vtt::TextAlignment::End => crate::HorizontalAlignment::Right,
+    //         vtt::TextAlignment::Left => crate::HorizontalAlignment::Left,
+    //         vtt::TextAlignment::Right => crate::HorizontalAlignment::Right,
+    //         vtt::TextAlignment::Center => crate::HorizontalAlignment::Center,
+    //     };
 
-        subtitles.events.push(crate::Event {
-            start: cue.start_time,
-            end: cue.end_time,
-            // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
-            // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
-            alignment: crate::Alignment(horizontal_alignment, crate::VerticalAlignment::Top),
-            segments: convert_text(cue.text),
-            text_wrap: crate::TextWrapOptions::default(),
-            extra: crate::EventExtra::Vtt(VttEvent {
-                writing_direction: cue.writing_direction,
-                text_alignment: cue.text_alignment,
-                line: cue.line,
-                size,
-                x: x_position / 100.,
-                y: y_position / 100.,
-            }),
-        });
-    }
+    //     subtitles.events.push(crate::Event {
+    //         start: cue.start_time,
+    //         end: cue.end_time,
+    //         // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
+    //         // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
+    //         alignment: crate::Alignment(horizontal_alignment, crate::VerticalAlignment::Top),
+    //         segments: convert_text(cue.text),
+    //         text_wrap: crate::TextWrapOptions::default(),
+    //         extra: crate::EventExtra::Vtt(VttEvent {
+    //             writing_direction: cue.writing_direction,
+    //             text_alignment: cue.text_alignment,
+    //             line: cue.line,
+    //             size,
+    //             x: x_position / 100.,
+    //             y: y_position / 100.,
+    //         }),
+    //     });
+    // }
 
-    subtitles
+    // subtitles
 }

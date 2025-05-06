@@ -108,58 +108,30 @@ impl Default for WindowPos {
 // POV: you want to self reference but Rust says "no"
 #[derive(Debug)]
 pub struct Document {
-    pens: HashMap<Box<str>, Pen>,
-    wps: HashMap<Box<str>, WindowPos>,
-    windows: HashMap<Box<str>, Window>,
-    events: Vec<Event>,
-}
-
-impl Document {
-    pub fn pens(&self) -> &HashMap<Box<str>, Pen> {
-        &self.pens
-    }
-
-    pub fn wps(&self) -> &HashMap<Box<str>, WindowPos> {
-        &self.wps
-    }
-
-    pub fn events(&self) -> &[Event] {
-        &self.events
-    }
+    pub windows: HashMap<Box<str>, Window>,
+    pub events: Vec<Event>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Segment {
-    pen: &'static Pen,
+    pub pen: Pen,
     pub text: String,
-}
-
-impl Segment {
-    pub const fn pen(&self) -> &Pen {
-        self.pen
-    }
 }
 
 #[derive(Debug)]
 pub struct Event {
     pub time: u32,
     pub duration: u32,
-    position: &'static WindowPos,
+    pub position: WindowPos,
     pub window_id: Option<Box<str>>,
     pub segments: Vec<Segment>,
-}
-
-impl Event {
-    pub const fn position(&self) -> &WindowPos {
-        self.position
-    }
 }
 
 #[derive(Debug)]
 pub struct Window {
     pub time: u32,
     pub duration: u32,
-    position: &'static WindowPos,
+    pub position: WindowPos,
 }
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -476,7 +448,7 @@ fn parse_body(
     macro_rules! set_or_log {
         ($dst: expr, $map: expr, $id: expr, $log_id: expr, $what: literal) => {
             if let Some(value) = $map.get($id) {
-                $dst = unsafe { &*(value as *const _) };
+                $dst = value.clone();
             } else {
                 warning!(
                     sbr,
@@ -488,7 +460,7 @@ fn parse_body(
         };
     }
 
-    let mut current_event_pen = &DEFAULT_PEN;
+    let mut current_event_pen = DEFAULT_PEN;
     let mut current_segment_pen = current_event_pen;
     let mut current_text = String::new();
     let mut current = None;
@@ -502,7 +474,7 @@ fn parse_body(
                         let mut result = Window {
                             time: 0,
                             duration: u32::MAX,
-                            position: &DEFAULT_WINDOW_POS,
+                            position: DEFAULT_WINDOW_POS,
                         };
 
                         match_attributes! {
@@ -540,12 +512,12 @@ fn parse_body(
                         let mut result = Event {
                             time: 0,
                             duration: 0,
-                            position: &DEFAULT_WINDOW_POS,
+                            position: DEFAULT_WINDOW_POS,
                             window_id: None,
                             segments: vec![],
                         };
 
-                        current_event_pen = &DEFAULT_PEN;
+                        current_event_pen = DEFAULT_PEN;
 
                         match_attributes! {
                             element.attributes(),
@@ -790,8 +762,6 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     };
 
     let mut doc = Document {
-        pens,
-        wps,
         windows: HashMap::new(),
         events: { vec![] },
     };
@@ -844,8 +814,8 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
 
     parse_body(
         sbr,
-        &doc.pens,
-        &doc.wps,
+        &pens,
+        &wps,
         &mut doc.windows,
         &mut doc.events,
         &mut reader,

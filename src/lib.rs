@@ -16,7 +16,7 @@ use math::{I16Dot16, Point2, Point2f, Rect2, Vec2, Vec2f};
 use rasterize::{Rasterizer, RenderTarget};
 use srv3::{Srv3Event, Srv3TextShadow};
 use text::{
-    layout::{MultilineTextShaper, ShapedLine, TextWrapOptions},
+    layout::{MultilineTextShaper, ShapedLine, ShapedSegment, TextWrapOptions},
     FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics,
 };
 use vtt::VttEvent;
@@ -101,9 +101,9 @@ enum Ruby {
     Over,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct TextDecorations {
-    // TODO: f32 for size
+    // TODO: f32 for size?
     underline: bool,
     underline_color: BGRA8,
     strike_out: bool,
@@ -117,7 +117,7 @@ enum TextShadow {
     Srv3(Srv3TextShadow),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct CssTextShadow {
     offset: Vec2f,
     blur_radius: I26Dot6,
@@ -295,12 +295,422 @@ impl PerfStats {
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     fonts: text::FontDb<'a>,
-    dpi: u32,
     perf: PerfStats,
 
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
     previous_output_size: (u32, u32),
+}
+
+struct FrameRenderPass<'s, 't, 'p> {
+    sbr: &'s Subrandr,
+    fonts: &'p mut text::FontDb<'s>,
+    rasterizer: &'p mut dyn Rasterizer,
+    target: &'p mut RenderTarget<'t>,
+    t: u32,
+    ctx: &'p SubtitleContext,
+
+    unchanged_range: Range<u32>,
+}
+
+// TODO: A trait for casting these types?
+// TODO: Use I26Dot6 for Rasterizer coordinates
+fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
+    Rect2::new(
+        Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
+        Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
+    )
+}
+
+impl<'s, 't, 'r> FrameRenderPass<'s, 't, 'r> {
+    fn add_event_range(&mut self, event: &Event) -> bool {
+        let r = self.unchanged_range.clone();
+        if (event.start..event.end).contains(&self.t) {
+            self.unchanged_range = r.start.max(event.start)..r.end.min(event.end);
+        } else {
+            if event.start > self.t {
+                self.unchanged_range = r.start..r.end.min(event.start);
+            } else {
+                self.unchanged_range = r.start.max(event.end)..r.end;
+            }
+            return false;
+        }
+        true
+    }
+
+    // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
+    //        to a subtitle renderer so this looks small on there.
+    fn debug_font_size(&self) -> I26Dot6 {
+        I26Dot6::new(16)
+    }
+
+    fn debug_line_height(&self) -> I26Dot6 {
+        I26Dot6::new(20) * self.ctx.pixel_scale()
+    }
+
+    fn debug_text(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        alignment: Alignment,
+        size: I26Dot6,
+        color: BGRA8,
+    ) -> Result<(), RenderError> {
+        let font_arena = FontArena::new();
+        let matches = text::FontMatcher::match_all(
+            &["monospace"],
+            text::FontStyle::default(),
+            size,
+            self.ctx.dpi,
+            &font_arena,
+            &mut self.fonts,
+        )?;
+        let glyphs =
+            text::simple_shape_text(matches.iterator(), &font_arena, text, &mut self.fonts)?;
+        let (ox, oy) = Self::translate_for_aligned_text(
+            match matches.primary(&font_arena, &mut self.fonts)? {
+                Some(font) => font,
+                None => return Ok(()),
+            },
+            true,
+            &text::compute_extents_ex(true, &glyphs)?,
+            alignment,
+        );
+
+        let image = text::render(
+            self.rasterizer,
+            I26Dot6::ZERO,
+            I26Dot6::ZERO,
+            &GlyphString::from_glyphs(text, glyphs),
+        )?;
+        image.blit(self.rasterizer, &mut self.target, x + ox, y + oy, color);
+
+        Ok(())
+    }
+
+    fn translate_for_aligned_text(
+        font: &text::Font,
+        horizontal: bool,
+        extents: &TextMetrics,
+        alignment: Alignment,
+    ) -> (i32, i32) {
+        assert!(horizontal);
+
+        let Alignment(horizontal, vertical) = alignment;
+
+        let ox = match horizontal {
+            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
+            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
+            HorizontalAlignment::Right => (-extents.paint_size.x
+                + I26Dot6::from_raw(font.horizontal_extents().descender))
+            .trunc_to_inner(),
+        };
+
+        let oy = match vertical {
+            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
+            VerticalAlignment::BaselineCentered => 0,
+            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
+        };
+
+        (ox, oy)
+    }
+
+    fn draw_text_total_rect_debug_info(
+        &mut self,
+        final_total_rect: Rect2<I26Dot6>,
+        vertical_alignment: VerticalAlignment,
+    ) -> Result<(), RenderError> {
+        if self.sbr.debug.draw_layout_info {
+            self.rasterizer.stroke_axis_aligned_rect(
+                self.target,
+                Rect2::new(
+                    Point2::new(
+                        final_total_rect.min.x.into_f32() - 1.,
+                        final_total_rect.min.y.into_f32() - 1.,
+                    ),
+                    Point2::new(
+                        final_total_rect.max.x.into_f32() + 2.,
+                        final_total_rect.max.y.into_f32() + 2.,
+                    ),
+                ),
+                BGRA8::MAGENTA,
+            );
+
+            let total_position_debug_pos = match vertical_alignment {
+                VerticalAlignment::Top => (
+                    final_total_rect.height() + 20,
+                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                ),
+                VerticalAlignment::BaselineCentered => (
+                    final_total_rect.height() + 20,
+                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                ),
+                VerticalAlignment::Bottom => (
+                    I26Dot6::new(-24),
+                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
+                ),
+            };
+
+            self.debug_text(
+                (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
+                (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
+                &format!(
+                    "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
+                    final_total_rect.x(),
+                    final_total_rect.y(),
+                    final_total_rect.width(),
+                    final_total_rect.height()
+                ),
+                total_position_debug_pos.1,
+                self.debug_font_size(),
+                BGRA8::MAGENTA,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    // FIXME: This should be format specific I think
+    //        SRV3 background boxes actually seem to behave slightly differently than this
+    fn draw_simple_text_background_boxes<'a, L, S>(
+        &mut self,
+        x: I26Dot6,
+        y: I26Dot6,
+        lines: L,
+        segment_to_background_color: impl Fn(usize) -> BGRA8,
+    ) where
+        L: IntoIterator<Item = S>,
+        S: IntoIterator<Item = &'a ShapedSegment<'a, 'a>>,
+    {
+        for line in lines {
+            let mut current_background_box = Rect2::<I26Dot6>::NOTHING;
+            let mut last_segment_index = usize::MAX;
+
+            for shaped_segment in line {
+                if shaped_segment.corresponding_input_segment != last_segment_index {
+                    if last_segment_index != usize::MAX {
+                        let background_color = segment_to_background_color(last_segment_index);
+                        if background_color.a != 0 {
+                            self.rasterizer.fill_axis_aligned_rect(
+                                self.target,
+                                convert_rect(current_background_box.translate(Vec2::new(x, y))),
+                                background_color,
+                            );
+                        }
+                    }
+
+                    current_background_box = shaped_segment.logical_rect;
+                    last_segment_index = shaped_segment.corresponding_input_segment;
+                } else {
+                    current_background_box.expand_to_point(shaped_segment.logical_rect.max);
+                }
+            }
+
+            // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
+            if last_segment_index != usize::MAX {
+                let background_color = segment_to_background_color(last_segment_index);
+                if background_color.a != 0 {
+                    self.rasterizer.fill_axis_aligned_rect(
+                        self.target,
+                        convert_rect(current_background_box.translate(Vec2::new(x, y))),
+                        background_color,
+                    );
+                }
+            }
+        }
+    }
+
+    fn draw_text_full(
+        &mut self,
+        x: I26Dot6,
+        y: I26Dot6,
+        glyphs: &GlyphString,
+        color: BGRA8,
+        decoration: &TextDecorations,
+        shadows: &[CssTextShadow],
+    ) -> Result<(), RenderError> {
+        if glyphs.is_empty() {
+            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
+            return Ok(());
+        }
+
+        let image = text::render(self.rasterizer, x.fract(), y.fract(), glyphs)?;
+
+        let mut blurs = HashMap::new();
+
+        // TODO: This should also draw an offset underline I think and possibly strike through?
+        for shadow in shadows.iter().rev() {
+            if shadow.color.a > 0 {
+                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
+                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
+                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
+                    // ... by applying to the shadow a Gaussian blur with a standard deviation
+                    // equal to half the blur radius.
+                    let sigma = shadow.blur_radius / 2;
+
+                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
+                        let offset = image.prepare_for_blur(self.rasterizer, sigma.into_f32());
+                        let padding = self.rasterizer.blur_padding();
+                        (
+                            self.rasterizer.blur_to_mono_texture(),
+                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
+                        )
+                    });
+
+                    self.rasterizer.blit(
+                        self.target,
+                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
+                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
+                        blurred,
+                        shadow.color,
+                    );
+                } else {
+                    let monochrome = image.monochrome(self.rasterizer);
+                    monochrome.blit(
+                        self.rasterizer,
+                        self.target,
+                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
+                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
+                        shadow.color,
+                    );
+                }
+            }
+        }
+
+        let text_end_x = {
+            let mut end_x = x;
+
+            // TODO: Should this somehow ignore trailing advance?
+            //       The issue with that is that it causes issues with cross-segment decorations
+            //       so it would have to take those into account.
+            for glyph in glyphs.iter_glyphs() {
+                end_x += glyph.x_advance;
+            }
+
+            end_x
+        };
+
+        image.blit(
+            self.rasterizer,
+            self.target,
+            x.trunc_to_inner(),
+            y.trunc_to_inner(),
+            color,
+        );
+
+        // FIXME: This should use the main font for the segment, not the font
+        //        of the first glyph..
+        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
+
+        if decoration.underline {
+            let thickness = font_metrics.underline_thickness;
+            self.rasterizer.fill_axis_aligned_antialias_rect(
+                self.target,
+                Rect2::new(
+                    Point2::new(x.into_f32(), y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
+                ),
+                decoration.underline_color,
+            );
+        }
+
+        if decoration.strike_out {
+            let strike_y = y + font_metrics.strikeout_top_offset;
+            let thickness = font_metrics.strikeout_thickness;
+            self.rasterizer.fill_axis_aligned_antialias_rect(
+                self.target,
+                Rect2::new(
+                    Point2::new(x.into_f32(), strike_y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
+                ),
+                decoration.strike_out_color,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn draw_text_segments_full<'a>(
+        &mut self,
+        x: I26Dot6,
+        y: I26Dot6,
+        segments: impl IntoIterator<Item = &'a ShapedSegment<'a, 'a>>,
+        segment_id_to_style: impl Fn(usize, &mut Vec<CssTextShadow>) -> (BGRA8, TextDecorations),
+    ) -> Result<(), RenderError> {
+        let mut shadows = Vec::new();
+        for shaped_segment in segments {
+            let Some(font_size) = shaped_segment
+                .glyphs
+                .iter_glyphs()
+                .next()
+                .map(|g| g.font.point_size())
+            else {
+                continue;
+            };
+
+            shadows.clear();
+            let (color, decorations) =
+                segment_id_to_style(shaped_segment.corresponding_input_segment, &mut shadows);
+
+            let final_logical_box =
+                convert_rect(shaped_segment.logical_rect.translate(Vec2::new(x, y)));
+
+            if self.sbr.debug.draw_layout_info {
+                self.debug_text(
+                    final_logical_box.min.x as i32,
+                    final_logical_box.min.y as i32,
+                    &format!(
+                        "{:.0},{:.0}",
+                        shaped_segment.logical_rect.min.x + x,
+                        shaped_segment.logical_rect.min.y + y
+                    ),
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
+                    self.debug_font_size(),
+                    BGRA8::RED,
+                )?;
+
+                self.debug_text(
+                    final_logical_box.min.x as i32,
+                    final_logical_box.max.y as i32,
+                    &format!("{:.1}", shaped_segment.baseline_offset.x),
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                    self.debug_font_size(),
+                    BGRA8::RED,
+                )?;
+
+                self.debug_text(
+                    final_logical_box.max.x as i32,
+                    final_logical_box.min.y as i32,
+                    &format!("{:.0}pt", font_size),
+                    Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
+                    self.debug_font_size(),
+                    BGRA8::GOLD,
+                )?;
+
+                self.rasterizer.stroke_axis_aligned_rect(
+                    self.target,
+                    final_logical_box,
+                    BGRA8::BLUE,
+                );
+
+                self.rasterizer.horizontal_line(
+                    self.target,
+                    (shaped_segment.baseline_offset.y + y).into_f32(),
+                    final_logical_box.min.x,
+                    final_logical_box.max.x,
+                    BGRA8::GREEN,
+                );
+            }
+
+            let x = shaped_segment.baseline_offset.x + x;
+            let y = shaped_segment.baseline_offset.y + y;
+
+            self.draw_text_full(x, y, &shaped_segment.glyphs, color, &decorations, &shadows)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> Renderer<'a> {
@@ -319,7 +729,6 @@ impl<'a> Renderer<'a> {
         Self {
             sbr,
             fonts: text::FontDb::new(sbr).unwrap(),
-            dpi: 0,
             perf: PerfStats::new(),
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
@@ -367,203 +776,6 @@ pub enum RenderError {
 }
 
 impl<'a> Renderer<'a> {
-    fn debug_text(
-        &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        x: i32,
-        y: i32,
-        text: &str,
-        alignment: Alignment,
-        size: I26Dot6,
-        color: BGRA8,
-    ) -> Result<(), RenderError> {
-        let font_arena = FontArena::new();
-        let matches = text::FontMatcher::match_all(
-            &["monospace"],
-            text::FontStyle::default(),
-            size,
-            self.dpi,
-            &font_arena,
-            &mut self.fonts,
-        )?;
-        let glyphs =
-            text::simple_shape_text(matches.iterator(), &font_arena, text, &mut self.fonts)?;
-        let (ox, oy) = Self::translate_for_aligned_text(
-            match matches.primary(&font_arena, &mut self.fonts)? {
-                Some(font) => font,
-                None => return Ok(()),
-            },
-            true,
-            &text::compute_extents_ex(true, &glyphs)?,
-            alignment,
-        );
-
-        let image = text::render(
-            rasterizer,
-            I26Dot6::ZERO,
-            I26Dot6::ZERO,
-            &GlyphString::from_glyphs(text, glyphs),
-        )?;
-        image.blit(rasterizer, target, x + ox, y + oy, color);
-
-        Ok(())
-    }
-
-    fn translate_for_aligned_text(
-        font: &text::Font,
-        horizontal: bool,
-        extents: &TextMetrics,
-        alignment: Alignment,
-    ) -> (i32, i32) {
-        assert!(horizontal);
-
-        let Alignment(horizontal, vertical) = alignment;
-
-        let ox = match horizontal {
-            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
-            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
-            HorizontalAlignment::Right => (-extents.paint_size.x
-                + I26Dot6::from_raw(font.horizontal_extents().descender))
-            .trunc_to_inner(),
-        };
-
-        let oy = match vertical {
-            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
-            VerticalAlignment::BaselineCentered => 0,
-            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
-        };
-
-        (ox, oy)
-    }
-
-    fn draw_text_full(
-        &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        x: I26Dot6,
-        y: I26Dot6,
-        glyphs: &GlyphString,
-        color: BGRA8,
-        decoration: &TextDecorations,
-        shadows: &[TextShadow],
-        ctx: &SubtitleContext,
-    ) -> Result<(), RenderError> {
-        if glyphs.is_empty() {
-            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
-            return Ok(());
-        }
-
-        let image = text::render(rasterizer, x.fract(), y.fract(), glyphs)?;
-
-        let mut blurs = HashMap::new();
-
-        // TODO: This should also draw an offset underline I think and possibly strike through?
-        let mut draw_css_shadow = |shadow: &CssTextShadow| {
-            if shadow.color.a > 0 {
-                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
-                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
-                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
-                    // ... by applying to the shadow a Gaussian blur with a standard deviation
-                    // equal to half the blur radius.
-                    let sigma = shadow.blur_radius / 2;
-
-                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
-                        let offset = image.prepare_for_blur(rasterizer, sigma.into_f32());
-                        let padding = rasterizer.blur_padding();
-                        (
-                            rasterizer.blur_to_mono_texture(),
-                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
-                        )
-                    });
-
-                    rasterizer.blit(
-                        target,
-                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
-                        blurred,
-                        shadow.color,
-                    );
-                } else {
-                    let monochrome = image.monochrome(rasterizer);
-                    monochrome.blit(
-                        rasterizer,
-                        target,
-                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
-                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
-                        shadow.color,
-                    );
-                }
-            }
-        };
-
-        let mut out = Vec::new();
-        for shadow in shadows.iter().rev() {
-            match shadow {
-                TextShadow::Css(css_shadow) => draw_css_shadow(css_shadow),
-                TextShadow::Srv3(srv3_shadow) => {
-                    srv3_shadow.to_css(ctx, &mut out);
-                    for css_shadow in out.iter().rev() {
-                        draw_css_shadow(css_shadow)
-                    }
-                    out.clear();
-                }
-            }
-        }
-
-        let text_end_x = {
-            let mut end_x = x;
-
-            // TODO: Should this somehow ignore trailing advance?
-            //       The issue with that is that it causes issues with cross-segment decorations
-            //       so it would have to take those into account.
-            for glyph in glyphs.iter_glyphs() {
-                end_x += glyph.x_advance;
-            }
-
-            end_x
-        };
-
-        image.blit(
-            rasterizer,
-            target,
-            x.trunc_to_inner(),
-            y.trunc_to_inner(),
-            color,
-        );
-
-        // FIXME: This should use the main font for the segment, not the font
-        //        of the first glyph..
-        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
-
-        if decoration.underline {
-            let thickness = font_metrics.underline_thickness;
-            rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
-                ),
-                decoration.underline_color,
-            );
-        }
-
-        if decoration.strike_out {
-            let strike_y = y + font_metrics.strikeout_top_offset;
-            let thickness = font_metrics.strikeout_thickness;
-            rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), strike_y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
-                ),
-                decoration.strike_out_color,
-            );
-        }
-
-        Ok(())
-    }
-
     pub fn render(
         &mut self,
         ctx: &SubtitleContext,
@@ -620,7 +832,15 @@ impl<'a> Renderer<'a> {
         self.perf.start_frame();
         self.fonts.advance_cache_generation();
 
-        self.dpi = ctx.dpi;
+        let mut pass = FrameRenderPass {
+            sbr: self.sbr,
+            fonts: &mut self.fonts,
+            rasterizer,
+            target,
+            ctx,
+            t,
+            unchanged_range: 0..u32::MAX,
+        };
 
         trace!(
             self.sbr,
@@ -628,15 +848,8 @@ impl<'a> Renderer<'a> {
             subs.class.name
         );
 
-        // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
-        //        to a subtitle renderer so this doesn't work.
-        let debug_font_size = I26Dot6::new(16);
-        let debug_line_height = I26Dot6::new(20) * ctx.pixel_scale();
-
         if self.sbr.debug.draw_version_string {
-            self.debug_text(
-                rasterizer,
-                target,
+            pass.debug_text(
                 0,
                 0,
                 concat!(
@@ -646,73 +859,63 @@ impl<'a> Renderer<'a> {
                     env!("BUILD_REV")
                 ),
                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
+                pass.debug_font_size(),
                 BGRA8::WHITE,
             )?;
 
-            self.debug_text(
-                rasterizer,
-                target,
+            pass.debug_text(
                 0,
-                debug_line_height.round_to_inner(),
+                pass.debug_line_height().round_to_inner(),
                 &format!("subtitle class: {}", subs.class.name),
                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
+                pass.debug_font_size(),
                 BGRA8::WHITE,
             )?;
 
-            let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
-            self.debug_text(
-                rasterizer,
-                target,
+            let rasterizer_line = format!("rasterizer: {}", pass.rasterizer.name());
+            pass.debug_text(
                 0,
-                (debug_line_height * 2).round_to_inner(),
+                (pass.debug_line_height() * 2).round_to_inner(),
                 &rasterizer_line,
                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
+                pass.debug_font_size(),
                 BGRA8::WHITE,
             )?;
 
-            if let Some(adapter_line) = rasterizer.adapter_info_string() {
-                self.debug_text(
-                    rasterizer,
-                    target,
+            if let Some(adapter_line) = pass.rasterizer.adapter_info_string() {
+                pass.debug_text(
                     0,
-                    (debug_line_height * 3).round_to_inner(),
+                    (pass.debug_line_height() * 3).round_to_inner(),
                     &adapter_line,
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    debug_font_size,
+                    pass.debug_font_size(),
                     BGRA8::WHITE,
                 )?;
             }
         }
 
         if self.sbr.debug.draw_perf_info {
-            self.debug_text(
-                rasterizer,
-                target,
+            pass.debug_text(
                 (ctx.padding_left + ctx.video_width).round_to_inner(),
-                debug_line_height.round_to_inner(),
+                pass.debug_line_height().round_to_inner(),
                 &format!(
                     "{:.2}x{:.2} dpi:{}",
                     ctx.video_width, ctx.video_height, ctx.dpi
                 ),
                 Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                debug_font_size,
+                pass.debug_font_size(),
                 BGRA8::WHITE,
             )?;
 
-            self.debug_text(
-                rasterizer,
-                target,
+            pass.debug_text(
                 (ctx.padding_left + ctx.video_width).round_to_inner(),
-                (debug_line_height * 2).round_to_inner(),
+                (pass.debug_line_height() * 2).round_to_inner(),
                 &format!(
                     "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                     ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                 ),
                 Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                debug_font_size,
+                pass.debug_font_size(),
                 BGRA8::WHITE,
             )?;
 
@@ -720,11 +923,9 @@ impl<'a> Renderer<'a> {
                 let (min, max) = self.perf.minmax_frame_times();
                 let avg = self.perf.avg_frame_time();
 
-                self.debug_text(
-                    rasterizer,
-                    target,
+                pass.debug_text(
                     (ctx.padding_left + ctx.video_width).round_to_inner(),
-                    (debug_line_height * 3).round_to_inner(),
+                    (pass.debug_line_height() * 3).round_to_inner(),
                     &format!(
                         "min={:.1}ms avg={:.1}ms ({:.1}fps) max={:.1}ms ({:.1}fps)",
                         min,
@@ -734,19 +935,17 @@ impl<'a> Renderer<'a> {
                         1000.0 / max
                     ),
                     Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                    debug_font_size,
+                    pass.debug_font_size(),
                     BGRA8::WHITE,
                 )?;
 
                 if let Some(&last) = self.perf.times.iter().last() {
-                    self.debug_text(
-                        rasterizer,
-                        target,
+                    pass.debug_text(
                         (ctx.padding_left + ctx.video_width).round_to_inner(),
-                        (debug_line_height * 4).round_to_inner(),
+                        (pass.debug_line_height() * 4).round_to_inner(),
                         &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
                         Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                        debug_font_size,
+                        pass.debug_font_size(),
                         BGRA8::WHITE,
                     )?;
                 }
@@ -761,11 +960,11 @@ impl<'a> Renderer<'a> {
                     polyline.push(Point2f::new(x, y));
                 }
 
-                rasterizer.stroke_polyline(
-                    target,
+                pass.rasterizer.stroke_polyline(
+                    pass.target,
                     Vec2::new(
                         offx as f32,
-                        ((debug_line_height * 5.5) + graph_height).into_f32(),
+                        ((pass.debug_line_height() * 5.5) + graph_height).into_f32(),
                     ),
                     &polyline,
                     BGRA8::new(255, 255, 0, 255),
@@ -773,20 +972,11 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        let mut unchanged_range: Range<u32> = 0..u32::MAX;
         {
             let mut layouter = (subs.class.create_layouter)();
             let font_arena = FontArena::new();
             for event in subs.events.iter() {
-                let r = unchanged_range.clone();
-                if (event.start..event.end).contains(&t) {
-                    unchanged_range = r.start.max(event.start)..r.end.min(event.end);
-                } else {
-                    if event.start > t {
-                        unchanged_range = r.start..r.end.min(event.start);
-                    } else {
-                        unchanged_range = r.start.max(event.end)..r.end;
-                    }
+                if !pass.add_event_range(event) {
                     continue;
                 }
 
@@ -802,7 +992,7 @@ impl<'a> Renderer<'a> {
                         (subs.class.get_font_size)(ctx, event, segment),
                         ctx.dpi,
                         &font_arena,
-                        &mut self.fonts,
+                        &mut pass.fonts,
                     )?;
 
                     match segment.ruby {
@@ -829,195 +1019,52 @@ impl<'a> Renderer<'a> {
                     event.text_wrap,
                     layouter.wrap_width(ctx, event),
                     &font_arena,
-                    &mut self.fonts,
+                    &mut pass.fonts,
                 )?;
 
                 let Point2 { x, y } = layouter.layout(ctx, &mut lines, &mut total_rect, event);
 
-                let x = x as i32;
-                let y = y as i32
+                let x = I26Dot6::from_f32(x);
+                let y = I26Dot6::from_f32(y)
                     + match vertical_alignment {
-                        VerticalAlignment::Top => 0,
-                        VerticalAlignment::BaselineCentered => {
-                            -total_rect.height().trunc_to_inner() / 2
-                        }
-                        VerticalAlignment::Bottom => -total_rect.height().trunc_to_inner(),
+                        VerticalAlignment::Top => I26Dot6::ZERO,
+                        VerticalAlignment::BaselineCentered => -total_rect.height() / 2,
+                        VerticalAlignment::Bottom => -total_rect.height(),
                     };
 
-                let final_total_rect = total_rect.translate(Vec2::new(x, y));
+                pass.draw_text_total_rect_debug_info(
+                    total_rect.translate(Vec2::new(x, y)),
+                    vertical_alignment,
+                )?;
 
-                if self.sbr.debug.draw_layout_info {
-                    rasterizer.stroke_axis_aligned_rect(
-                        target,
-                        Rect2::new(
-                            Point2::new(
-                                final_total_rect.min.x.into_f32() - 1.,
-                                final_total_rect.min.y.into_f32() - 1.,
-                            ),
-                            Point2::new(
-                                final_total_rect.max.x.into_f32() + 2.,
-                                final_total_rect.max.y.into_f32() + 2.,
-                            ),
-                        ),
-                        BGRA8::MAGENTA,
-                    );
-                }
+                pass.draw_simple_text_background_boxes(
+                    x,
+                    y,
+                    lines.iter().map(|l| &l.segments),
+                    |index| event.segments[index].background_color,
+                );
 
-                let total_position_debug_pos = match vertical_alignment {
-                    VerticalAlignment::Top => (
-                        total_rect.height() + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::BaselineCentered => (
-                        total_rect.height() + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::Bottom => (
-                        I26Dot6::new(-24),
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
-                    ),
-                };
+                pass.draw_text_segments_full(
+                    x,
+                    y,
+                    lines.iter().flat_map(|line| &line.segments),
+                    |index, out_shadows| {
+                        let segment = &event.segments[index];
 
-                if self.sbr.debug.draw_layout_info {
-                    self.debug_text(
-                        rasterizer,
-                        target,
-                        (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
-                        (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
-                        &format!(
-                            "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
-                            final_total_rect.x(),
-                            final_total_rect.y(),
-                            final_total_rect.width(),
-                            final_total_rect.height()
-                        ),
-                        total_position_debug_pos.1,
-                        debug_font_size,
-                        BGRA8::MAGENTA,
-                    )?;
-                }
-
-                // TODO: A trait for casting these types?
-                fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
-                    Rect2::new(
-                        Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
-                        Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
-                    )
-                }
-
-                for line in &lines {
-                    let mut current_background_box = Rect2::<I26Dot6>::NOTHING;
-                    let mut last_segment_index = usize::MAX;
-
-                    for shaped_segment in &line.segments {
-                        if shaped_segment.corresponding_input_segment != last_segment_index {
-                            if last_segment_index != usize::MAX {
-                                let segment = &event.segments[last_segment_index];
-                                if segment.background_color.a != 0 {
-                                    rasterizer.fill_axis_aligned_rect(
-                                        target,
-                                        convert_rect(current_background_box)
-                                            .translate(Vec2::new(x as f32, y as f32)),
-                                        segment.background_color,
-                                    );
-                                }
+                        for shadow in segment.shadows.iter() {
+                            match shadow {
+                                TextShadow::Css(css) => out_shadows.push(*css),
+                                TextShadow::Srv3(srv3) => srv3.to_css(ctx, out_shadows),
                             }
-
-                            current_background_box = shaped_segment.logical_rect;
-                            last_segment_index = shaped_segment.corresponding_input_segment;
-                        } else {
-                            current_background_box.expand_to_point(shaped_segment.logical_rect.max);
                         }
-                    }
 
-                    // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
-                    if last_segment_index != usize::MAX {
-                        let segment = &event.segments[last_segment_index];
-                        if segment.background_color.a != 0 {
-                            rasterizer.fill_axis_aligned_rect(
-                                target,
-                                convert_rect(current_background_box)
-                                    .translate(Vec2::new(x as f32, y as f32)),
-                                segment.background_color,
-                            );
-                        }
-                    }
-                }
-
-                for shaped_segment in lines.iter().flat_map(|line| &line.segments) {
-                    let segment = &event.segments[shaped_segment.corresponding_input_segment];
-
-                    let final_logical_box = convert_rect(shaped_segment.logical_rect)
-                        .translate(Vec2::new(x as f32, y as f32));
-
-                    if self.sbr.debug.draw_layout_info {
-                        self.debug_text(
-                            rasterizer,
-                            target,
-                            final_logical_box.min.x as i32,
-                            final_logical_box.min.y as i32,
-                            &format!(
-                                "{:.0},{:.0}",
-                                shaped_segment.logical_rect.min.x + x,
-                                shaped_segment.logical_rect.min.y + y
-                            ),
-                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
-                            debug_font_size,
-                            BGRA8::RED,
-                        )?;
-
-                        self.debug_text(
-                            rasterizer,
-                            target,
-                            final_logical_box.min.x as i32,
-                            final_logical_box.max.y as i32,
-                            &format!("{:.1}", shaped_segment.baseline_offset.x),
-                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                            debug_font_size,
-                            BGRA8::RED,
-                        )?;
-
-                        self.debug_text(
-                            rasterizer,
-                            target,
-                            final_logical_box.max.x as i32,
-                            final_logical_box.min.y as i32,
-                            &format!("{:.0}pt", (subs.class.get_font_size)(ctx, event, segment)),
-                            Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
-                            debug_font_size,
-                            BGRA8::GOLD,
-                        )?;
-
-                        rasterizer.stroke_axis_aligned_rect(target, final_logical_box, BGRA8::BLUE);
-
-                        rasterizer.horizontal_line(
-                            target,
-                            (shaped_segment.baseline_offset.y + y).into_f32(),
-                            final_logical_box.min.x,
-                            final_logical_box.max.x,
-                            BGRA8::GREEN,
-                        );
-                    }
-
-                    let x = shaped_segment.baseline_offset.x + x;
-                    let y = shaped_segment.baseline_offset.y + y;
-
-                    self.draw_text_full(
-                        rasterizer,
-                        target,
-                        x,
-                        y,
-                        &shaped_segment.glyphs,
-                        segment.color,
-                        &segment.decorations,
-                        &segment.shadows,
-                        ctx,
-                    )?;
-                }
+                        (segment.color, segment.decorations)
+                    },
+                )?;
             }
         }
 
-        self.unchanged_range = unchanged_range;
+        self.unchanged_range = pass.unchanged_range;
 
         let time = self.perf.end_frame();
         trace!(self.sbr, "frame took {:.2}ms to render", time);

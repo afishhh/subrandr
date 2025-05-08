@@ -18,7 +18,7 @@ quick-xml = "0.36"
 once_cell = "1"
 
 text-sys = { path = "./text-sys" }
-wgpu = { version = "24", optional = true }
+wgpu = { version = "25", optional = true }
 
 icu_segmenter = { version = "1", features = ["compiled_data"] }
 

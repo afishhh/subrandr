@@ -294,15 +294,13 @@ impl winit::application::ApplicationHandler for App<'_> {
                     .block_on()
                     .unwrap();
                 let (device, queue) = adapter
-                    .request_device(
-                        &wgpu::DeviceDescriptor {
-                            label: None,
-                            required_features: wgpu::Features::empty(),
-                            required_limits: wgpu::Limits::default(),
-                            memory_hints: wgpu::MemoryHints::Performance,
-                        },
-                        None,
-                    )
+                    .request_device(&wgpu::DeviceDescriptor {
+                        label: None,
+                        required_features: wgpu::Features::empty(),
+                        required_limits: wgpu::Limits::default(),
+                        memory_hints: wgpu::MemoryHints::Performance,
+                        trace: wgpu::Trace::Off,
+                    })
                     .block_on()
                     .unwrap();
 

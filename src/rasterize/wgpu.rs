@@ -245,7 +245,12 @@ impl Rasterizer {
                 ],
             });
 
-        let blur_module = device.create_shader_module(include_wgsl!("./wgpu/blur.wgsl"));
+        let blur_module = unsafe {
+            device.create_shader_module_trusted(
+                include_wgsl!("./wgpu/blur.wgsl"),
+                wgpu::ShaderRuntimeChecks::unchecked(),
+            )
+        };
         let blur_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,

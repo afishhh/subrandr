@@ -183,7 +183,9 @@ fn unwrap_wgpu_render_target<'a>(
     }
 }
 
-fn unwrap_wgpu_render_target_owned(target: super::RenderTarget<'_>) -> Option<RenderTargetImpl> {
+fn unwrap_wgpu_render_target_owned(
+    target: super::RenderTarget<'_>,
+) -> Option<Box<RenderTargetImpl>> {
     match target.0 {
         super::RenderTargetInner::Wgpu(target) => Some(target),
         super::RenderTargetInner::WgpuEmpty => None,
@@ -200,9 +202,7 @@ pub(super) struct TextureImpl {
     pub tex: Option<wgpu::Texture>,
 }
 
-fn unwrap_wgpu_texture<'a>(
-    texture: &'a super::Texture,
-) -> Option<(&'a wgpu::Texture, PixelFormat)> {
+fn unwrap_wgpu_texture(texture: &super::Texture) -> Option<(&wgpu::Texture, PixelFormat)> {
     match &texture.0 {
         super::TextureInner::Wgpu(texture) => texture.tex.as_ref().map(|texture| {
             (
@@ -418,11 +418,11 @@ impl Rasterizer {
             })
             .forget_lifetime();
 
-        super::RenderTarget(super::RenderTargetInner::Wgpu(RenderTargetImpl {
+        super::RenderTarget(super::RenderTargetInner::Wgpu(Box::new(RenderTargetImpl {
             tex: texture,
             pass,
             encoder,
-        }))
+        })))
     }
 }
 
@@ -631,7 +631,7 @@ impl Rasterizer {
 
     pub fn submit_render(&mut self, target: super::RenderTarget<'_>) {
         if let Some(target) = unwrap_wgpu_render_target_owned(target) {
-            self.submit_render_impl(target);
+            self.submit_render_impl(*target);
         }
     }
 }
@@ -763,7 +763,7 @@ impl super::Rasterizer for Rasterizer {
         };
 
         super::Texture(super::TextureInner::Wgpu(TextureImpl {
-            tex: Some(self.submit_render_impl(target)),
+            tex: Some(self.submit_render_impl(*target)),
         }))
     }
 

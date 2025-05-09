@@ -574,8 +574,8 @@ fn unwrap_sw_texture<'a>(texture: &'a super::Texture) -> UnwrappedTexture<'a> {
             width: texture.width,
             height: texture.height,
             data: match &texture.data {
-                TextureData::OwnedMono(mono) => UnwrappedTextureData::Mono(&mono),
-                TextureData::OwnedBgra(bgra) => UnwrappedTextureData::Bgra(&bgra),
+                TextureData::OwnedMono(mono) => UnwrappedTextureData::Mono(mono),
+                TextureData::OwnedBgra(bgra) => UnwrappedTextureData::Bgra(bgra),
             },
         },
         target => panic!(
@@ -951,7 +951,7 @@ impl super::Rasterizer for Rasterizer {
 
         unsafe {
             blit::copy_monochrome_float_to_mono_u8_unchecked(
-                &mut Arc::get_mut(&mut unwrap_sw_render_texture(&mut target).buffer).unwrap(),
+                Arc::get_mut(&mut unwrap_sw_render_texture(&mut target).buffer).unwrap(),
                 self.blurer.width(),
                 0,
                 0,

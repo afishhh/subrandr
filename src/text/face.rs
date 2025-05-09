@@ -12,6 +12,7 @@ use std::{
     mem::MaybeUninit,
     ops::RangeInclusive,
     path::Path,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -472,7 +473,7 @@ pub struct Font {
     ft_face: FT_Face,
     coords: MmCoords,
     hb_font: *mut hb_font_t,
-    size: Arc<Size>,
+    size: Rc<Size>,
 }
 
 impl Font {
@@ -547,7 +548,7 @@ impl Font {
         Ok(Self {
             ft_face: face,
             coords,
-            size: Arc::new(Size {
+            size: Rc::new(Size {
                 ft_size: size,
                 metrics,
                 scale,
@@ -781,7 +782,7 @@ impl GlyphCache {
             Vec2::new(offset_trunc, I26Dot6::ZERO)
         };
 
-        unsafe { self.slot(font, index) }.bitmap[bucket_idx as usize]
+        unsafe { self.slot(font, index) }.bitmap[bucket_idx]
             .get_or_try_init(|| {
                 font.render_glyph_uncached(rasterizer, index, render_offset)
                     .map(Box::new)

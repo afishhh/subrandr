@@ -372,7 +372,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                                     &self.text,
                                     segment_slice.clone(),
                                     font_matcher.iterator(),
-                                    &font_arena,
+                                    font_arena,
                                     fonts,
                                 )?;
                                 (GlyphString::from_glyphs(&self.text, vec), metrics)
@@ -389,12 +389,11 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                             let max_width = wrap_width - current_x;
                             // A MAX_TRIES-wide ring buffer for breaking opportunities.
                             let mut candidate_breaks = [last; MAX_TRIES];
-                            let mut breaks =
-                                segmenter.segment_str(&self.text[segment_slice.clone()]);
+                            let breaks = segmenter.segment_str(&self.text[segment_slice.clone()]);
                             let mut glyph_it = glyphs.iter_glyphs().peekable();
 
                             let mut pos = I26Dot6::ZERO;
-                            while let Some(offset) = breaks.next() {
+                            for offset in breaks {
                                 let cluster = offset + segment_slice.start;
 
                                 while let Some(glyph) =

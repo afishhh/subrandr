@@ -147,6 +147,7 @@ enum DisplayHandle {
     X11(std::mem::ManuallyDrop<xcb::Connection>),
 }
 
+#[allow(clippy::large_enum_variant)] // this has only one instance that is never copied after construction
 enum WindowState {
     Software(SoftwareWindowState),
     #[cfg(feature = "wgpu")]

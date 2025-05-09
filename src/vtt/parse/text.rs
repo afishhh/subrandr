@@ -80,11 +80,7 @@ pub(crate) fn parse_cue_text<'a>(input: &'a str) -> Vec<Node<'a>> {
                     }
                     _ => continue,
                 };
-                node_info_stack.push((
-                    kind,
-                    start_tag.classes,
-                    language_stack.last().map(|lang| lang.clone()),
-                ));
+                node_info_stack.push((kind, start_tag.classes, language_stack.last().cloned()));
                 children_stack.push(Vec::new());
             }
             tokenizer::Token::EndTag(end_tag) => {

@@ -227,7 +227,7 @@ impl<'a, 'f> FontMatchIterator<'a, 'f> {
         match self.matcher.matched.get(self.index) {
             Some(&result) => {
                 self.index += 1;
-                return Ok(Some(result));
+                Ok(Some(result))
             }
             None => {
                 if self.index == self.matcher.matched.len() {
@@ -243,7 +243,7 @@ impl<'a, 'f> FontMatchIterator<'a, 'f> {
                         arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
                     )),
                     Err(super::SelectError::NotFound) => Ok(None),
-                    Err(err) => return Err(err),
+                    Err(err) => Err(err),
                 }
             }
         }

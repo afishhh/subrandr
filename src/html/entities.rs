@@ -97,7 +97,7 @@ unsafe fn traverse(ptr: *const u8, remaining: &[u8]) -> Option<(&'static str, u8
             let child_ptr = child_ptr_le.get().to_le();
             if let Some((terminal, len)) = traverse(
                 TRIE_DATA.0.as_ptr().add(child_ptr.into()),
-                &remaining.get_unchecked(usize::from(child_match_len)..),
+                remaining.get_unchecked(usize::from(child_match_len)..),
             ) {
                 return Some((terminal, len + child_match_len));
             }

@@ -249,31 +249,27 @@ pub struct StartTagToken<'a> {
 
 impl<'a> CueTextTokenizer<'a> {
     pub fn next<'t>(&'t mut self) -> Option<Token<'a>> {
-        loop {
-            if self.position >= self.input.len() {
-                return None;
-            }
+        if self.position >= self.input.len() {
+            return None;
+        }
 
-            let state = self.step();
-
-            return Some(match state {
-                TokenizerState::Data => Token::Text(Text(self.buffers[0])),
-                TokenizerState::Tag | TokenizerState::StartTag | TokenizerState::StartTagClass => {
-                    Token::StartTag(StartTagToken {
-                        name: self.buffers[0],
-                        classes: ClassList(self.buffers[1]),
-                        annotation: None,
-                    })
-                }
-                TokenizerState::StartTagAnnotation => Token::StartTag(StartTagToken {
+        Some(match self.step() {
+            TokenizerState::Data => Token::Text(Text(self.buffers[0])),
+            TokenizerState::Tag | TokenizerState::StartTag | TokenizerState::StartTagClass => {
+                Token::StartTag(StartTagToken {
                     name: self.buffers[0],
                     classes: ClassList(self.buffers[1]),
-                    annotation: Some(Annotation(self.buffers[2].trim_ascii())),
-                }),
-                TokenizerState::EndTag => Token::EndTag(self.buffers[0]),
-                TokenizerState::TimestampTag => Token::TimestampTag(self.buffers[0]),
-            });
-        }
+                    annotation: None,
+                })
+            }
+            TokenizerState::StartTagAnnotation => Token::StartTag(StartTagToken {
+                name: self.buffers[0],
+                classes: ClassList(self.buffers[1]),
+                annotation: Some(Annotation(self.buffers[2].trim_ascii())),
+            }),
+            TokenizerState::EndTag => Token::EndTag(self.buffers[0]),
+            TokenizerState::TimestampTag => Token::TimestampTag(self.buffers[0]),
+        })
     }
 }
 

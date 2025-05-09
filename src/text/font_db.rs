@@ -49,23 +49,23 @@ pub enum FontAxisValues {
 
 impl FontAxisValues {
     pub fn minimum(&self) -> I16Dot16 {
-        match self {
-            &FontAxisValues::Fixed(fixed) => fixed,
-            &FontAxisValues::Range(start, _) => start,
+        match *self {
+            FontAxisValues::Fixed(fixed) => fixed,
+            FontAxisValues::Range(start, _) => start,
         }
     }
 
     pub fn maximum(&self) -> I16Dot16 {
-        match self {
-            &FontAxisValues::Fixed(fixed) => fixed,
-            &FontAxisValues::Range(_, end) => end,
+        match *self {
+            FontAxisValues::Fixed(fixed) => fixed,
+            FontAxisValues::Range(_, end) => end,
         }
     }
 
     pub fn contains(&self, value: I16Dot16) -> bool {
-        match self {
-            &FontAxisValues::Fixed(fixed) => fixed == value,
-            &FontAxisValues::Range(start, end) => start <= value && value <= end,
+        match *self {
+            FontAxisValues::Fixed(fixed) => fixed == value,
+            FontAxisValues::Range(start, end) => start <= value && value <= end,
         }
     }
 }
@@ -106,11 +106,11 @@ fn choose<'a>(fonts: &'a [FaceInfo], style: &FontStyle) -> Option<&'a FaceInfo> 
             this_score += 1;
         }
 
-        match &font.weight {
-            &FontAxisValues::Fixed(weight) => {
+        match font.weight {
+            FontAxisValues::Fixed(weight) => {
                 this_score += (weight - style.weight).unsigned_abs().round_to_inner() / 100;
             }
-            &FontAxisValues::Range(start, end) => {
+            FontAxisValues::Range(start, end) => {
                 if style.weight < start || style.weight > end {
                     this_score += ((start - style.weight).unsigned_abs().round_to_inner() / 100)
                         .min((end - style.weight).unsigned_abs().round_to_inner() / 100);

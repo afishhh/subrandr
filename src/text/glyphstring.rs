@@ -81,7 +81,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
                         buffer.add(
-                            &self.text,
+                            self.text,
                             if concat_glyph.cluster < cluster {
                                 // This is left-to-right text
                                 concat_glyph.cluster..cluster
@@ -105,7 +105,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(&self.text, self.glyphs().first().unwrap().cluster..cluster);
+                buffer.add(self.text, self.glyphs().first().unwrap().cluster..cluster);
                 GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
             };
 
@@ -140,7 +140,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
                         buffer.add(
-                            &self.text,
+                            self.text,
                             if concat_glyph.cluster > cluster {
                                 // This is left-to-right text
                                 cluster..concat_glyph.cluster
@@ -164,7 +164,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(&self.text, cluster..self.glyphs().last().unwrap().cluster);
+                buffer.add(self.text, cluster..self.glyphs().last().unwrap().cluster);
                 GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
             };
 
@@ -221,7 +221,7 @@ impl<'a, 'f> GlyphString<'a, 'f> {
         }
 
         if result.is_empty() {
-            return None;
+            None
         } else {
             Some(GlyphString { segments: result })
         }

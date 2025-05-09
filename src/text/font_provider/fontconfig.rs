@@ -99,7 +99,7 @@ fn map_fontconfig_weight_to_opentype(fc_weight: I16Dot16) -> Option<I16Dot16> {
         return Some(WEIGHT_MAP[i].1);
     }
 
-    return Some({
+    Some({
         let fc_start = WEIGHT_MAP[i - 1].0;
         let fc_end = WEIGHT_MAP[i].0;
         let ot_start = WEIGHT_MAP[i - 1].1;
@@ -107,11 +107,11 @@ fn map_fontconfig_weight_to_opentype(fc_weight: I16Dot16) -> Option<I16Dot16> {
         let fc_diff = fc_end - fc_start;
         let ot_diff = ot_end - ot_start;
         ot_start + (fc_weight - fc_start) * ot_diff / fc_diff
-    });
+    })
 }
 
 fn map_opentype_weight_to_fontconfig(ot_weight: I16Dot16) -> Option<I16Dot16> {
-    if ot_weight < 0 || ot_weight > 1000 {
+    if !(I16Dot16::new(0)..=I16Dot16::new(1000)).contains(&ot_weight) {
         return None;
     }
 
@@ -127,7 +127,7 @@ fn map_opentype_weight_to_fontconfig(ot_weight: I16Dot16) -> Option<I16Dot16> {
         return Some(WEIGHT_MAP[i].0);
     }
 
-    return Some({
+    Some({
         let fc_start = WEIGHT_MAP[i - 1].0;
         let fc_end = WEIGHT_MAP[i].0;
         let ot_start = WEIGHT_MAP[i - 1].1;
@@ -135,67 +135,7 @@ fn map_opentype_weight_to_fontconfig(ot_weight: I16Dot16) -> Option<I16Dot16> {
         let fc_diff = fc_end - fc_start;
         let ot_diff = ot_end - ot_start;
         fc_start + (ot_weight - ot_start) * fc_diff / ot_diff
-    });
-}
-
-#[cfg(test)]
-mod test {
-    use std::ops::Range;
-
-    use super::*;
-
-    #[test]
-    fn test_fontconfig_to_opentype_weight_mapping() {
-        for &(fc, ot) in &WEIGHT_MAP[1..] {
-            assert_eq!(map_fontconfig_weight_to_opentype(fc), Some(ot));
-        }
-
-        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(-1)), None);
-        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(300)), None);
-
-        const LERP_CASES: &[(i32, Range<i32>)] = &[
-            (30, 100..200),
-            (60, 350..380),
-            (213, 900..1000),
-            (203, 700..800),
-        ];
-
-        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
-            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
-        }) {
-            println!("mapping {fc} to opentype, expecting a result in {ot_range:?}");
-            let result = map_fontconfig_weight_to_opentype(fc).unwrap();
-            println!("got: {result}");
-            assert!(ot_range.contains(&result));
-        }
-    }
-
-    #[test]
-    fn test_opentype_to_fontconfig_weight_mapping() {
-        for &(fc, ot) in WEIGHT_MAP {
-            assert_eq!(map_opentype_weight_to_fontconfig(ot), Some(fc));
-        }
-
-        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(-1)), None);
-        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(1100)), None);
-
-        const LERP_CASES: &[(i32, Range<i32>)] = &[
-            (150, FC_WEIGHT_THIN as i32..FC_WEIGHT_EXTRALIGHT as i32),
-            (250, FC_WEIGHT_EXTRALIGHT as i32..FC_WEIGHT_LIGHT as i32),
-            (375, FC_WEIGHT_DEMILIGHT as i32..FC_WEIGHT_BOOK as i32),
-            (750, FC_WEIGHT_BOLD as i32..FC_WEIGHT_EXTRABOLD as i32),
-            (950, FC_WEIGHT_BLACK as i32..FC_WEIGHT_EXTRABLACK as i32),
-        ];
-
-        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
-            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
-        }) {
-            println!("mapping {fc} to fontconfig, expecting a result in {ot_range:?}");
-            let result = map_opentype_weight_to_fontconfig(fc).unwrap();
-            println!("got: {result}");
-            assert!(ot_range.contains(&result));
-        }
-    }
+    })
 }
 
 unsafe fn pattern_get_axis_values(
@@ -206,24 +146,22 @@ unsafe fn pattern_get_axis_values(
     let mut range = MaybeUninit::uninit();
     if FcPatternGetInteger(pattern, object, 0, wght.as_mut_ptr()) == FcResultMatch {
         Some(FontAxisValues::Fixed(I16Dot16::new(wght.assume_init())))
-    } else {
-        if FcPatternGetRange(pattern, object, 0, range.as_mut_ptr()) == FcResultMatch {
-            let range = range.assume_init();
-            let mut begin = MaybeUninit::uninit();
-            let mut end = MaybeUninit::uninit();
-            if FcRangeGetDouble(range, begin.as_mut_ptr(), end.as_mut_ptr()) == 0 {
-                None
-            } else {
-                let begin = begin.assume_init() as f32;
-                let end = end.assume_init() as f32;
-                Some(FontAxisValues::Range(
-                    I16Dot16::from_f32(begin),
-                    I16Dot16::from_f32(end),
-                ))
-            }
-        } else {
+    } else if FcPatternGetRange(pattern, object, 0, range.as_mut_ptr()) == FcResultMatch {
+        let range = range.assume_init();
+        let mut begin = MaybeUninit::uninit();
+        let mut end = MaybeUninit::uninit();
+        if FcRangeGetDouble(range, begin.as_mut_ptr(), end.as_mut_ptr()) == 0 {
             None
+        } else {
+            let begin = begin.assume_init() as f32;
+            let end = end.assume_init() as f32;
+            Some(FontAxisValues::Range(
+                I16Dot16::from_f32(begin),
+                I16Dot16::from_f32(end),
+            ))
         }
+    } else {
+        None
     }
 }
 
@@ -523,5 +461,65 @@ impl FontProvider for FontconfigFontProvider {
         }
 
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::ops::Range;
+
+    use super::*;
+
+    #[test]
+    fn test_fontconfig_to_opentype_weight_mapping() {
+        for &(fc, ot) in &WEIGHT_MAP[1..] {
+            assert_eq!(map_fontconfig_weight_to_opentype(fc), Some(ot));
+        }
+
+        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(-1)), None);
+        assert_eq!(map_fontconfig_weight_to_opentype(I16Dot16::new(300)), None);
+
+        const LERP_CASES: &[(i32, Range<i32>)] = &[
+            (30, 100..200),
+            (60, 350..380),
+            (213, 900..1000),
+            (203, 700..800),
+        ];
+
+        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
+            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
+        }) {
+            println!("mapping {fc} to opentype, expecting a result in {ot_range:?}");
+            let result = map_fontconfig_weight_to_opentype(fc).unwrap();
+            println!("got: {result}");
+            assert!(ot_range.contains(&result));
+        }
+    }
+
+    #[test]
+    fn test_opentype_to_fontconfig_weight_mapping() {
+        for &(fc, ot) in WEIGHT_MAP {
+            assert_eq!(map_opentype_weight_to_fontconfig(ot), Some(fc));
+        }
+
+        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(-1)), None);
+        assert_eq!(map_opentype_weight_to_fontconfig(I16Dot16::new(1100)), None);
+
+        const LERP_CASES: &[(i32, Range<i32>)] = &[
+            (150, FC_WEIGHT_THIN as i32..FC_WEIGHT_EXTRALIGHT as i32),
+            (250, FC_WEIGHT_EXTRALIGHT as i32..FC_WEIGHT_LIGHT as i32),
+            (375, FC_WEIGHT_DEMILIGHT as i32..FC_WEIGHT_BOOK as i32),
+            (750, FC_WEIGHT_BOLD as i32..FC_WEIGHT_EXTRABOLD as i32),
+            (950, FC_WEIGHT_BLACK as i32..FC_WEIGHT_EXTRABLACK as i32),
+        ];
+
+        for (fc, ot_range) in LERP_CASES.iter().map(|&(fc, Range { start, end })| {
+            (I16Dot16::new(fc), I16Dot16::new(start)..I16Dot16::new(end))
+        }) {
+            println!("mapping {fc} to fontconfig, expecting a result in {ot_range:?}");
+            let result = map_opentype_weight_to_fontconfig(fc).unwrap();
+            println!("got: {result}");
+            assert!(ot_range.contains(&result));
+        }
     }
 }

@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 #![allow(clippy::missing_transmute_annotations)]
 
 use std::{
@@ -380,7 +381,7 @@ impl<'a> Renderer<'a> {
     ) -> Result<(), RenderError> {
         let font_arena = FontArena::new();
         let matches = text::FontMatcher::match_all(
-            &["monospace"],
+            ["monospace"],
             text::FontStyle::default(),
             size,
             self.dpi,

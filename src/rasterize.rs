@@ -29,7 +29,7 @@ enum RenderTargetInner<'a> {
     Software(sw::RenderTargetImpl<'a>),
     SoftwareTexture(sw::TextureRenderTargetImpl),
     #[cfg(feature = "wgpu")]
-    Wgpu(wgpu::RenderTargetImpl),
+    Wgpu(Box<wgpu::RenderTargetImpl>),
     #[cfg(feature = "wgpu")]
     // For zero-sized renders, TODO: move this logic into RenderTargetImpl
     WgpuEmpty,

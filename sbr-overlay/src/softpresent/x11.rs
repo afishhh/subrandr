@@ -116,7 +116,7 @@ impl Presenter {
             xcb::x::Drawable::Window(self.window),
             self.gc,
             buffer,
-            (offset.0 as i16, offset.1 as i16),
+            (offset.0, offset.1),
             width as u16,
             width as usize * 4,
             height as u16,

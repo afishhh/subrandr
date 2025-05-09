@@ -1,3 +1,5 @@
+#[allow(clippy::invisible_characters)]
+
 #[test]
 fn all_entites() {
 	assert_eq!(super::consume(b"AElig"), Some(("Æ", 5)));

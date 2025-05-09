@@ -357,7 +357,7 @@ fn parse_pen(
 
     match result_id {
         // TODO: This should be a warning only
-        None => return Err(Error::MissingAttribute("pen", "id")),
+        None => Err(Error::MissingAttribute("pen", "id")),
         Some(id) => Ok((id, result)),
     }
 }
@@ -396,7 +396,7 @@ fn parse_wp(
     }
 
     match result_id {
-        None => return Err(Error::MissingAttribute("wp", "id")),
+        None => Err(Error::MissingAttribute("wp", "id")),
         Some(id) => Ok((id, result)),
     }
 }

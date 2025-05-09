@@ -16,7 +16,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = []
-wgpu = ["rasterize/wgpu"]
+wgpu = ["rasterize/wgpu", "dep:wgpu", "dep:ash"]
 
 [dependencies]
 thiserror = "1"
@@ -34,6 +34,11 @@ rasterize = { workspace = true }
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, optional = true }
+# Must match wgpu's version
+ash = { version = "0.38", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = ["Win32_Graphics_DirectWrite"] }

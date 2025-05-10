@@ -8,7 +8,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = []
-wgpu = ["dep:wgpu"]
+wgpu = ["dep:wgpu", "dep:ash"]
 
 [dependencies]
 thiserror = "1"
@@ -22,9 +22,16 @@ wgpu = { version = "25", optional = true }
 
 icu_segmenter = { version = "1", features = ["compiled_data"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Must match wgpu's version
+ash = { version = "0.38", optional = true }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = ["Win32_Graphics_DirectWrite"] }
 windows-core = "0.61"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/afishhh/wgpu.git", branch = "public_physical_device_features" }
 
 [profile.release]
 panic = "abort"

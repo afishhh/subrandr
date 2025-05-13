@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, CString},
     hash::Hash,
-    mem::MaybeUninit,
+    mem::{ManuallyDrop, MaybeUninit},
     ops::RangeInclusive,
     path::Path,
     rc::Rc,
@@ -473,7 +473,7 @@ pub struct Font {
     ft_face: FT_Face,
     coords: MmCoords,
     hb_font: *mut hb_font_t,
-    size: Rc<Size>,
+    size: ManuallyDrop<Rc<Size>>,
 }
 
 impl Font {
@@ -548,13 +548,13 @@ impl Font {
         Ok(Self {
             ft_face: face,
             coords,
-            size: Rc::new(Size {
+            size: ManuallyDrop::new(Rc::new(Size {
                 ft_size: size,
                 metrics,
                 scale,
                 point_size,
                 dpi,
-            }),
+            })),
             hb_font: unsafe { hb_ft_font_create_referenced(face) },
         })
     }
@@ -679,7 +679,10 @@ impl Eq for Font {}
 
 impl Drop for Font {
     fn drop(&mut self) {
-        unsafe { hb_font_destroy(self.hb_font) };
+        unsafe {
+            _ = ManuallyDrop::take(&mut self.size);
+            hb_font_destroy(self.hb_font);
+        }
     }
 }
 

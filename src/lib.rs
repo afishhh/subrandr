@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     ops::Range,
+    rc::Rc,
 };
 
 use thiserror::Error;
@@ -444,7 +445,7 @@ impl Renderer<'_> {
         target: &mut RenderTarget,
         x: I26Dot6,
         y: I26Dot6,
-        glyphs: &GlyphString,
+        glyphs: &GlyphString<'_, Rc<str>>,
         color: BGRA8,
         decoration: &TextDecorations,
         shadows: &[TextShadow],
@@ -816,7 +817,7 @@ impl Renderer<'_> {
                         Ruby::Over => {
                             shaper.add_ruby_annotation(
                                 last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
-                                &segment.text,
+                                segment.text.as_str(),
                                 matcher,
                             );
                             last_ruby_base = None;

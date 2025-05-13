@@ -1,58 +1,58 @@
+use std::rc::Rc;
+
 use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
 use crate::{
     math::{I26Dot6, Point2, Rect2, Vec2},
-    text::{self},
+    text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
     HorizontalAlignment,
 };
 
-use super::{FontArena, FontDb, FontMatcher, GlyphString, TextMetrics};
-
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
 
-struct ShaperSegment<'a, 'f> {
-    content: Content<'a, 'f>,
+struct ShaperSegment<'f> {
+    content: Content<'f>,
     end: usize,
 }
 
-enum Content<'a, 'f> {
-    Text(TextContent<'a, 'f>),
+enum Content<'f> {
+    Text(TextContent<'f>),
     None,
 }
 
-struct TextContent<'a, 'f> {
+struct TextContent<'f> {
     font_matcher: FontMatcher<'f>,
     internal_breaks_allowed: bool,
-    ruby_annotation: Option<Box<RubyAnnotation<'a, 'f>>>,
+    ruby_annotation: Option<Box<RubyAnnotation<'f>>>,
 }
 
-struct RubyAnnotation<'a, 'f> {
+struct RubyAnnotation<'f> {
     font_matcher: FontMatcher<'f>,
     input_index: usize,
     // Note: Text does not shape or form ligatures across ruby annotations or bases, even merged ones, due to bidi isolation. See § 3.5 Bidi Reordering and CSS Text 3 § 7.3 Shaping Across Element Boundaries.
     // ^^ This means we can treat all ruby annotation as completely separate pieces of text.
-    text: &'a str,
+    text: Rc<str>,
 }
 
-pub struct MultilineTextShaper<'a, 'f> {
+pub struct MultilineTextShaper<'f> {
     text: String,
     explicit_line_bounaries: Vec</* end of line i */ usize>,
-    segments: Vec<ShaperSegment<'a, 'f>>,
+    segments: Vec<ShaperSegment<'f>>,
     intra_font_segment_splits: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedSegment<'a, 'f> {
-    pub glyphs: GlyphString<'a, 'f>,
+pub struct ShapedSegment<'f> {
+    pub glyphs: GlyphString<'f, Rc<str>>,
     pub baseline_offset: Point2<I26Dot6>,
     pub logical_rect: Rect2<I26Dot6>,
     pub corresponding_input_segment: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct ShapedLine<'a, 'f> {
-    pub segments: Vec<ShapedSegment<'a, 'f>>,
+pub struct ShapedLine<'f> {
+    pub segments: Vec<ShapedSegment<'f>>,
     pub bounding_rect: Rect2<I26Dot6>,
 }
 
@@ -65,7 +65,7 @@ pub enum LayoutError {
 }
 
 fn shape_simple_segment<'f>(
-    text: &str,
+    text: Rc<str>,
     range: impl text::ItemRange,
     font_iterator: text::FontMatchIterator<'_, 'f>,
     font_arena: &'f FontArena,
@@ -79,7 +79,7 @@ fn shape_simple_segment<'f>(
     let glyphs = {
         let mut buffer = text::ShapingBuffer::new();
         buffer.reset();
-        buffer.add(text, range);
+        buffer.add(&text, range);
         let direction = buffer.guess_properties();
         if !direction.is_horizontal() {
             buffer.set_direction(direction.to_horizontal());
@@ -140,7 +140,7 @@ pub struct RubyBaseId(usize);
 // *when the whole thing is in one block* but youtube uses inline-block so the sane
 // layout is correct.
 
-impl<'a, 'f> MultilineTextShaper<'a, 'f> {
+impl<'f> MultilineTextShaper<'f> {
     pub const fn new() -> Self {
         Self {
             text: String::new(),
@@ -222,7 +222,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
     pub fn add_ruby_annotation(
         &mut self,
         base: RubyBaseId,
-        text: &'a str,
+        text: impl Into<Rc<str>> + std::fmt::Debug,
         font_matcher: FontMatcher<'f>,
     ) {
         if MULTILINE_SHAPER_DEBUG_PRINT {
@@ -250,19 +250,19 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
         *ruby_annotation = Some(Box::new(RubyAnnotation {
             font_matcher,
             input_index: index,
-            text,
+            text: text.into(),
         }));
         self.skip_segment_for_output();
     }
 
     pub fn shape(
-        &'a mut self,
+        &mut self,
         line_alignment: HorizontalAlignment,
         wrap: TextWrapOptions,
         wrap_width: I26Dot6,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<(Vec<ShapedLine<'a, 'f>>, Rect2<I26Dot6>), LayoutError> {
+    ) -> Result<(Vec<ShapedLine<'f>>, Rect2<I26Dot6>), LayoutError> {
         while self
             .explicit_line_bounaries
             .pop_if(|i| *i == self.text.len())
@@ -292,6 +292,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
             options
         });
 
+        let text: Rc<str> = std::mem::take(&mut self.text).into();
         let mut lines: Vec<ShapedLine> = vec![];
         let mut current_line_y = I26Dot6::ZERO;
         let mut total_rect = Rect2::NOTHING;
@@ -305,7 +306,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                 .explicit_line_bounaries
                 .get(current_explicit_line)
                 .copied()
-                .unwrap_or(self.text.len());
+                .unwrap_or(text.len());
             let mut annotation_segments: Vec<ShapedSegment> = Vec::new();
             let mut segments: Vec<ShapedSegment> = Vec::new();
             let mut current_x = I26Dot6::ZERO;
@@ -334,7 +335,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                 current_segment += 1;
             }
 
-            let mut post_wrap_glyphs: Option<GlyphString<'a, 'f>> = None;
+            let mut post_wrap_glyphs: Option<GlyphString<'f, Rc<str>>> = None;
 
             loop {
                 let ShaperSegment {
@@ -369,13 +370,13 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                             }
                             None => {
                                 let (vec, metrics) = shape_simple_segment(
-                                    &self.text,
+                                    text.clone(),
                                     segment_slice.clone(),
                                     font_matcher.iterator(),
                                     font_arena,
                                     fonts,
                                 )?;
-                                (GlyphString::from_glyphs(&self.text, vec), metrics)
+                                (GlyphString::from_glyphs(text.clone(), vec), metrics)
                             }
                         };
 
@@ -389,7 +390,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                             let max_width = wrap_width - current_x;
                             // A MAX_TRIES-wide ring buffer for breaking opportunities.
                             let mut candidate_breaks = [last; MAX_TRIES];
-                            let breaks = segmenter.segment_str(&self.text[segment_slice.clone()]);
+                            let breaks = segmenter.segment_str(&text[segment_slice.clone()]);
                             let mut glyph_it = glyphs.iter_glyphs().peekable();
 
                             let mut pos = I26Dot6::ZERO;
@@ -455,7 +456,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
 
                         let ruby_padding = if let Some(annotation) = ruby_annotation {
                             let (glyphs, ruby_metrics) = shape_simple_segment(
-                                annotation.text,
+                                annotation.text.clone(),
                                 ..,
                                 annotation.font_matcher.iterator(),
                                 font_arena,
@@ -477,7 +478,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
                             // FIXME: Annotations seem to be slightly above where they should and
                             //        the logical rects also appear to be slightly too high.
                             annotation_segments.push(ShapedSegment {
-                                glyphs: GlyphString::from_glyphs(&self.text, glyphs),
+                                glyphs: GlyphString::from_glyphs(text.clone(), glyphs),
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
                                     current_line_y - extents.max_ascender,

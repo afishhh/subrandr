@@ -667,7 +667,7 @@ pub fn render(
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
-    glyphs: &GlyphString,
+    glyphs: &GlyphString<'_, impl GlyphStringText>,
 ) -> Result<Image, GlyphRenderError> {
     let mut result = Image {
         glyphs: Vec::new(),

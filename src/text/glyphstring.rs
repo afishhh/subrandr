@@ -8,16 +8,21 @@ use crate::I26Dot6;
 
 use super::{font_match::FontMatchIterator, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError};
 
+pub trait GlyphStringText: AsRef<str> + Clone {}
+
+impl<'a> GlyphStringText for &'a str {}
+impl GlyphStringText for Rc<str> {}
+
 #[derive(Debug, Clone)]
-pub struct GlyphString<'a, 'f> {
-    pub segments: LinkedList<GlyphStringSegment<'a, 'f>>,
+pub struct GlyphString<'f, T: GlyphStringText> {
+    pub segments: LinkedList<GlyphStringSegment<'f, T>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct GlyphStringSegment<'a, 'f> {
+pub struct GlyphStringSegment<'f, T: GlyphStringText> {
     /// Always refers to the original string that contains the whole context
     /// of this segment, not only the text of the glyphs themselves.
-    text: &'a str,
+    text: T,
     /// Some glyph slice which resulted from shaping the entirety or some subslice
     /// of the text in `text`. [`Glyph::cluster`] will be a valid index into `text`.
     storage: Rc<[Glyph<'f>]>,
@@ -25,8 +30,8 @@ pub struct GlyphStringSegment<'a, 'f> {
     range: Range<usize>,
 }
 
-impl<'a, 'f> GlyphStringSegment<'a, 'f> {
-    pub fn from_glyphs(text: &'a str, glyphs: Vec<Glyph<'f>>) -> Self {
+impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
+    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
         Self {
             text,
             range: 0..glyphs.len(),
@@ -40,7 +45,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
     fn break_unsafe_subslice(&self, range: Range<usize>) -> Self {
         Self {
-            text: self.text,
+            text: self.text.clone(),
             storage: self.storage.clone(),
             range: self.range.start + range.start..self.range.start + range.end,
         }
@@ -61,7 +66,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<GlyphString<'a, 'f>, ShapingError> {
+    ) -> Result<GlyphString<'f, T>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         // If the break is within a glyph (like a long ligature), we must
         // use the slow reshaping path.
@@ -81,7 +86,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
                         buffer.add(
-                            self.text,
+                            self.text.as_ref(),
                             if concat_glyph.cluster < cluster {
                                 // This is left-to-right text
                                 concat_glyph.cluster..cluster
@@ -94,7 +99,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         if glyphs.first().is_none_or(|first| !first.unsafe_to_concat()) {
                             break 'left GlyphString::from_array([
                                 self.break_unsafe_subslice(0..i),
-                                GlyphStringSegment::from_glyphs(self.text, glyphs),
+                                GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
                             ]);
                         } else {
                             // The result cannot be concatenated with the other part,
@@ -105,8 +110,14 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(self.text, self.glyphs().first().unwrap().cluster..cluster);
-                GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
+                buffer.add(
+                    self.text.as_ref(),
+                    self.glyphs().first().unwrap().cluster..cluster,
+                );
+                GlyphString::from_glyphs(
+                    self.text.clone(),
+                    buffer.shape(font_iterator, font_arena, fonts)?,
+                )
             };
 
             Ok(left)
@@ -121,12 +132,12 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<GlyphString<'a, 'f>, ShapingError> {
+    ) -> Result<GlyphString<'f, T>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         let can_reuse_split_glyph = split_glyph.cluster == cluster;
         if !split_glyph.unsafe_to_break() && can_reuse_split_glyph {
             let right = Self {
-                text: self.text,
+                text: self.text.clone(),
                 storage: self.storage.clone(),
                 range: self.range.start + glyph_index..self.range.end,
             };
@@ -140,7 +151,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
                         buffer.add(
-                            self.text,
+                            self.text.as_ref(),
                             if concat_glyph.cluster > cluster {
                                 // This is left-to-right text
                                 cluster..concat_glyph.cluster
@@ -152,7 +163,7 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
                         let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.last().is_none_or(|last| !last.unsafe_to_concat()) {
                             break 'right GlyphString::from_array([
-                                GlyphStringSegment::from_glyphs(self.text, glyphs),
+                                GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
                                 self.break_unsafe_subslice(i..self.range.len()),
                             ]);
                         } else {
@@ -164,8 +175,14 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(self.text, cluster..self.glyphs().last().unwrap().cluster);
-                GlyphString::from_glyphs(self.text, buffer.shape(font_iterator, font_arena, fonts)?)
+                buffer.add(
+                    self.text.as_ref(),
+                    cluster..self.glyphs().last().unwrap().cluster,
+                );
+                GlyphString::from_glyphs(
+                    self.text.clone(),
+                    buffer.shape(font_iterator, font_arena, fonts)?,
+                )
             };
 
             Ok(right)
@@ -174,16 +191,16 @@ impl<'a, 'f> GlyphStringSegment<'a, 'f> {
 }
 
 // TODO: linked_list_cursors feature would improve some of this code significantly
-impl<'a, 'f> GlyphString<'a, 'f> {
-    pub fn from_glyphs(text: &'a str, glyphs: Vec<Glyph<'f>>) -> Self {
+impl<'f, T: GlyphStringText> GlyphString<'f, T> {
+    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
         GlyphString {
             segments: LinkedList::from([GlyphStringSegment::from_glyphs(text, glyphs)]),
         }
     }
 
     pub fn from_array<const N: usize>(
-        segments: [GlyphStringSegment<'a, 'f>; N],
-    ) -> GlyphString<'a, 'f> {
+        segments: [GlyphStringSegment<'f, T>; N],
+    ) -> GlyphString<'f, T> {
         GlyphString {
             segments: LinkedList::from(segments),
         }

@@ -228,7 +228,7 @@ impl Layouter for Srv3Layouter {
         event: &Event,
     ) -> Point2f {
         let EventExtra::Srv3(extra) = &event.extra else {
-            panic!("Srv3Layouter received foreign event {:?}", event);
+            panic!("Srv3Layouter received foreign event {event:?}");
         };
 
         Point2::new(

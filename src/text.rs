@@ -330,7 +330,7 @@ impl ShapingBuffer {
         self.direction().unwrap()
     }
 
-    fn glyphs(&self) -> (&mut [hb_glyph_info_t], &mut [hb_glyph_position_t]) {
+    fn glyphs(&mut self) -> (&mut [hb_glyph_info_t], &mut [hb_glyph_position_t]) {
         let infos: &mut [hb_glyph_info_t] = unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_infos(self.buffer, &mut nglyphs);
@@ -383,7 +383,7 @@ impl ShapingBuffer {
 
             let (infos, positions) = self.glyphs();
 
-            result.reserve(self.glyphs().0.len());
+            result.reserve(infos.len());
             let mut invalid_range_start = None;
 
             let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {

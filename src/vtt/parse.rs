@@ -662,7 +662,7 @@ pub fn probe(content: &str) -> bool {
 }
 
 // https://www.w3.org/TR/webvtt1/#webvtt-parser-algorithm
-pub fn parse<'a>(input: &'a str) -> Option<Captions<'a>> {
+pub fn parse(input: &str) -> Option<Captions<'_>> {
     let mut input = ParsingBuffer::new(input);
 
     if !consume_magic(&mut input) {

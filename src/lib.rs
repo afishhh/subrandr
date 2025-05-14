@@ -367,7 +367,7 @@ pub enum RenderError {
     Layout(#[from] text::layout::LayoutError),
 }
 
-impl<'a> Renderer<'a> {
+impl Renderer<'_> {
     fn debug_text(
         &mut self,
         rasterizer: &mut dyn Rasterizer,
@@ -1021,7 +1021,7 @@ impl<'a> Renderer<'a> {
         self.unchanged_range = unchanged_range;
 
         let time = self.perf.end_frame();
-        trace!(self.sbr, "frame took {:.2}ms to render", time);
+        trace!(self.sbr, "frame took {time:.2}ms to render");
 
         Ok(())
     }

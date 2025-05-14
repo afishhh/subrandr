@@ -567,7 +567,7 @@ struct UnwrappedTexture<'a> {
     data: UnwrappedTextureData<'a>,
 }
 
-fn unwrap_sw_texture<'a>(texture: &'a super::Texture) -> UnwrappedTexture<'a> {
+fn unwrap_sw_texture(texture: &super::Texture) -> UnwrappedTexture<'_> {
     #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
     match &texture.0 {
         super::TextureInner::Software(texture) => UnwrappedTexture {

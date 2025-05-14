@@ -209,7 +209,7 @@ pub struct FontMatchIterator<'a, 'f> {
     index: usize,
 }
 
-impl<'a, 'f> FontMatchIterator<'a, 'f> {
+impl<'f> FontMatchIterator<'_, 'f> {
     pub fn matcher(&self) -> &FontMatcher<'f> {
         self.matcher
     }

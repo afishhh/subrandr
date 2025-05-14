@@ -262,7 +262,7 @@ impl VttLayouter {
 impl Layouter for VttLayouter {
     fn wrap_width(&self, ctx: &SubtitleContext, event: &crate::Event) -> I26Dot6 {
         let EventExtra::Vtt(extra) = &event.extra else {
-            panic!("VttLayouter::wrap_width received foreign event {:?}", event);
+            panic!("VttLayouter::wrap_width received foreign event {event:?}");
         };
 
         ctx.video_width * extra.size as f32 / 100
@@ -276,7 +276,7 @@ impl Layouter for VttLayouter {
         event: &crate::Event,
     ) -> crate::math::Point2f {
         let EventExtra::Vtt(extra) = &event.extra else {
-            panic!("VttLayouter::layout received foreign event {:?}", event);
+            panic!("VttLayouter::layout received foreign event {event:?}");
         };
 
         if lines.is_empty() {

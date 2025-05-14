@@ -295,7 +295,7 @@ fn debug_tag(tag: u32) -> impl std::fmt::Debug {
         if let Ok(s) = std::str::from_utf8(bytes) {
             write!(fmt, "{s:?}")
         } else {
-            write!(fmt, "{:?}", bytes)
+            write!(fmt, "{bytes:?}")
         }
     })
 }
@@ -533,6 +533,7 @@ impl Font {
                 }
             }
 
+            #[allow(clippy::unnecessary_cast)]
             let scale = I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
 
             unsafe {

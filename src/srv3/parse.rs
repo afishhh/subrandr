@@ -349,8 +349,7 @@ fn parse_pen(
         else other => {
             warning!(
                 sbr, once(unknown_pen_attribute, other),
-                "Unknown attribute encountered on pen: {}",
-                other,
+                "Unknown attribute encountered on pen: {other}",
             );
         }
     }
@@ -389,8 +388,7 @@ fn parse_wp(
         else other => {
             warning!(
                 sbr, once(unknown_wp_attribute, other),
-                "Unknown attribute encountered on wp: {}",
-                other,
+                "Unknown attribute encountered on wp: {other}",
             );
         }
     }

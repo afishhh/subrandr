@@ -627,7 +627,7 @@ impl<'a, 'f> MultilineTextShaper<'a, 'f> {
         }
 
         if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 RESULT: {:?} {:#?}", total_rect, lines);
+            println!("SHAPING V2 RESULT: {total_rect:?} {lines:#?}");
         }
 
         Ok((lines, total_rect))

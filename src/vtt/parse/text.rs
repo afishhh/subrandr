@@ -32,7 +32,7 @@ pub enum Node<'a> {
     Timestamp(u32),
 }
 
-pub(crate) fn parse_cue_text<'a>(input: &'a str) -> Vec<Node<'a>> {
+pub(crate) fn parse_cue_text(input: &str) -> Vec<Node<'_>> {
     let mut tokenizer = CueTextTokenizer::new(input);
 
     let mut node_info_stack: Vec<(InternalNodeKind, ClassList, Option<Cow<str>>)> = vec![];

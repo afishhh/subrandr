@@ -29,6 +29,7 @@ pub mod vtt;
 mod capi;
 mod color;
 mod html;
+mod layout;
 mod log;
 mod math;
 mod outline;
@@ -104,12 +105,11 @@ enum Ruby {
 }
 
 #[derive(Debug, Clone)]
-struct TextDecorations {
-    // TODO: f32 for size
-    underline: bool,
-    underline_color: BGRA8,
-    strike_out: bool,
-    strike_out_color: BGRA8,
+struct TextStyle {
+    color: BGRA8,
+    background_color: BGRA8,
+    decorations: TextDecorations,
+    shadows: Vec<TextShadow>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +124,15 @@ struct CssTextShadow {
     offset: Vec2f,
     blur_radius: I26Dot6,
     color: BGRA8,
+}
+
+#[derive(Debug, Clone)]
+struct TextDecorations {
+    // TODO: f32 for size
+    underline: bool,
+    underline_color: BGRA8,
+    strike_out: bool,
+    strike_out_color: BGRA8,
 }
 
 impl TextDecorations {

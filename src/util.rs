@@ -2,6 +2,9 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
+mod small_type_map;
+pub use small_type_map::*;
+
 pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }

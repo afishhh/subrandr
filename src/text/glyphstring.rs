@@ -10,7 +10,7 @@ use super::{font_match::FontMatchIterator, FontArena, FontDb, Glyph, ShapingBuff
 
 pub trait GlyphStringText: AsRef<str> + Clone {}
 
-impl<'a> GlyphStringText for &'a str {}
+impl GlyphStringText for &str {}
 impl GlyphStringText for Rc<str> {}
 
 #[derive(Debug, Clone)]

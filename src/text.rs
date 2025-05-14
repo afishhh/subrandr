@@ -5,7 +5,6 @@ use std::{
     ops::{Range, RangeFrom, RangeFull},
 };
 
-use font_match::FontMatchIterator;
 use text_sys::*;
 use thiserror::Error;
 

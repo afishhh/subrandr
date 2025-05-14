@@ -80,13 +80,6 @@ impl<const MAX_VALUE_SIZE: usize> SmallTypeMap<MAX_VALUE_SIZE> {
             .map(|erased| unsafe { &*erased.data.as_ptr().cast() })
     }
 
-    pub fn get_copy_or_default<V: Default + Copy + 'static>(&self) -> V {
-        match self.get::<V>() {
-            Some(value) => *value,
-            None => V::default(),
-        }
-    }
-
     pub fn merge(&mut self, other: &Self) {
         for (key, slot) in other.values.iter() {
             let new_slot = self
@@ -98,6 +91,12 @@ impl<const MAX_VALUE_SIZE: usize> SmallTypeMap<MAX_VALUE_SIZE> {
                 (slot.vtable.clone)(slot.data.as_ptr().cast(), new_slot.data.as_mut_ptr().cast());
             }
         }
+    }
+}
+
+impl<const MAX_VALUE_SIZE: usize> Default for SmallTypeMap<MAX_VALUE_SIZE> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

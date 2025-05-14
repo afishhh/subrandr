@@ -8,13 +8,13 @@ use crate::{
         layout::{MultilineTextShaper, TextWrapMode, TextWrapOptions},
         FontArena, FontDb,
     },
-    HorizontalAlignment, I26Dot6, Ruby, TextStyle,
+    FontSlant, HorizontalAlignment, I26Dot6, Ruby, TextStyle,
 };
 
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
-use style::{CascadingStyleMap, FontSlant, StyleMap};
+use style::{CascadingStyleMap, StyleMap};
 
 pub mod style;
 
@@ -29,76 +29,82 @@ pub type FixedL = I26Dot6;
 pub type Point2L = Point2<FixedL>;
 pub type Vec2L = Vec2<FixedL>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FragmentBox {
-    offset: Vec2L,
-    size: Vec2L,
-}
-
-#[derive(Debug)]
-pub enum Fragment {
-    Text(TextFragment),
-    LineBox(LineBoxFragment),
-    InlineContainer(InlineContainerFragment),
-    BlockContainer(BlockContainerFragment),
+    pub size: Vec2L,
 }
 
 #[derive(Debug)]
 pub struct TextFragment {
-    fbox: FragmentBox,
-    style: Rc<TextStyle>,
+    pub fbox: FragmentBox,
+    pub style: Rc<TextStyle>,
     // self-referential
     glyphs: text::GlyphString<'static, Rc<str>>,
-    font_arena: Rc<FontArena>,
-    baseline_offset: Vec2L,
+    _font_arena: Rc<FontArena>,
+    pub baseline_offset: Vec2L,
 }
 
-#[derive(Debug)]
+impl TextFragment {
+    pub fn glyphs(&self) -> &text::GlyphString<'_, Rc<str>> {
+        &self.glyphs
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct LineBoxFragment {
-    fbox: FragmentBox,
-    children: Vec<Rc<TextFragment>>,
+    pub fbox: FragmentBox,
+    pub children: Vec<(Vec2L, Rc<TextFragment>)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InlineContainerFragment {
-    fbox: FragmentBox,
-    children: Vec<Rc<LineBoxFragment>>,
+    pub fbox: FragmentBox,
+    pub lines: Vec<(Vec2L, Rc<LineBoxFragment>)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockContainerFragment {
-    fbox: FragmentBox,
-    children: Vec<Rc<InlineContainerFragment>>,
+    pub fbox: FragmentBox,
+    pub children: Vec<(Vec2L, Rc<InlineContainerFragment>)>,
+}
+
+impl BlockContainerFragment {
+    pub const fn empty() -> Self {
+        Self {
+            fbox: FragmentBox { size: Vec2L::ZERO },
+            children: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct LayoutContext<'l, 'a> {
-    dpi: u32,
-    fonts: &'l mut FontDb<'a>,
+    pub dpi: u32,
+    pub fonts: &'l mut FontDb<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutConstraints {
-    size: Vec2L,
+    pub size: Vec2L,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct BlockContainer {
-    style: StyleMap,
-    contents: Vec<InlineContainer>,
+    pub style: StyleMap,
+    pub contents: Vec<InlineContainer>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct InlineContainer {
-    style: StyleMap,
-    contents: Vec<InlineText>,
+    pub style: StyleMap,
+    pub contents: Vec<InlineText>,
 }
 
 #[derive(Debug, Clone)]
 pub struct InlineText {
-    style: StyleMap,
-    text: Rc<str>,
-    ruby: Ruby,
+    pub style: StyleMap,
+    pub text: Rc<str>,
+    pub ruby: Ruby,
 }
 
 #[derive(Debug, Error)]
@@ -110,7 +116,6 @@ pub enum InlineLayoutError {
 }
 
 fn layout_inline(
-    offset: Vec2L,
     context: &mut LayoutContext,
     constraints: &LayoutConstraints,
     parent_style: &CascadingStyleMap,
@@ -125,20 +130,15 @@ fn layout_inline(
     for segment in container.contents.iter() {
         let style = container_style.push(&segment.style);
         let matcher = text::FontMatcher::match_all(
-            style
-                .get::<style::FontFamily>()
-                .map(|f| f.0.as_slice())
-                .unwrap_or_default()
-                .iter()
-                .map(|b| &**b),
+            style.get::<style::FontFamily>(),
             text::FontStyle {
-                weight: style.get_unwrap_copy_or::<style::FontWeight>(I16Dot16::new(400)),
-                italic: match style.get_copy_or::<style::FontSlant>(FontSlant::Regular) {
+                weight: style.get_copy_or::<style::FontWeight, _>(I16Dot16::new(400)),
+                italic: match style.get_copy_or_default::<style::FontStyle, _>() {
                     FontSlant::Regular => false,
                     FontSlant::Italic => true,
                 },
             },
-            style.get_unwrap_copy_or::<style::FontSize>(I26Dot6::new(16) * context.dpi as i32 / 72),
+            style.get_copy_or::<style::FontSize, _>(I26Dot6::new(16) * context.dpi as i32 / 72),
             context.dpi,
             unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
             context.fonts,
@@ -163,13 +163,13 @@ fn layout_inline(
     }
 
     let (lines, total_rect) = shaper.shape(
-        parent_style.get_unwrap_copy_or::<style::TextAlign>(HorizontalAlignment::Left),
+        parent_style.get_copy_or::<style::TextAlign, _>(HorizontalAlignment::Left),
         TextWrapOptions {
-            mode: parent_style.get_copy_or::<TextWrapMode>(TextWrapMode::Normal),
+            mode: parent_style.get_copy_or::<style::TextWrapStyle, _>(TextWrapMode::Normal),
             strictness: parent_style
-                .get_copy_or::<LineBreakStrictness>(LineBreakStrictness::Normal),
+                .get_copy_or::<style::LineBreak, _>(LineBreakStrictness::Normal),
             word_break: parent_style
-                .get_copy_or::<LineBreakWordOption>(LineBreakWordOption::Normal),
+                .get_copy_or::<style::WordBreak, _>(LineBreakWordOption::Normal),
         },
         constraints.size.x,
         unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
@@ -178,16 +178,15 @@ fn layout_inline(
 
     let mut result = InlineContainerFragment {
         fbox: FragmentBox {
-            offset,
             size: total_rect.size(),
         },
-        children: Vec::new(),
+        lines: Vec::new(),
     };
 
     for line in lines {
+        let offset = line.bounding_rect.min - total_rect.min;
         let mut line_box = LineBoxFragment {
             fbox: FragmentBox {
-                offset: line.bounding_rect.min - total_rect.min,
                 size: line.bounding_rect.size(),
             },
             children: Vec::new(),
@@ -196,34 +195,39 @@ fn layout_inline(
         for segment in line.segments {
             let style = container_style
                 .push(&container.contents[segment.corresponding_input_segment].style);
-            line_box.children.push(Rc::new(TextFragment {
-                fbox: FragmentBox {
-                    offset: segment.logical_rect.min - line.bounding_rect.min,
-                    size: segment.logical_rect.size(),
-                },
-                style: Rc::new(TextStyle {
-                    color: style.get_unwrap_copy_or::<style::Color>(BGRA8::WHITE),
-                    background_color: style
-                        .get_unwrap_copy_or::<style::BackgroundColor>(BGRA8::ZERO),
-                    // TODO: text decorations should be propagated somewhat differently
-                    decorations: crate::TextDecorations::default(),
-                    // TODO: text shadows should be propagated somewhat differently
-                    shadows: Vec::new(),
+            let offset = segment.logical_rect.min - line.bounding_rect.min;
+
+            line_box.children.push((
+                offset,
+                Rc::new(TextFragment {
+                    fbox: FragmentBox {
+                        size: segment.logical_rect.size(),
+                    },
+                    style: Rc::new(TextStyle {
+                        color: style.get_copy_or::<style::Color, _>(BGRA8::WHITE),
+                        background_color: style
+                            .get_copy_or::<style::BackgroundColor, _>(BGRA8::ZERO),
+                        font_size: style.get_copy_or::<style::FontSize, _>(I26Dot6::new(16)),
+                        // TODO: text decorations should be propagated somewhat differently
+                        //       note that this is more the fault of the input
+                        //       tree and not this code here
+                        decorations: style.get_copy_or_default::<style::TextDecoration, _>(),
+                        shadows: style.get::<style::TextShadows>(),
+                    }),
+                    glyphs: segment.glyphs,
+                    _font_arena: font_arena.clone(),
+                    baseline_offset: segment.baseline_offset - segment.logical_rect.min,
                 }),
-                glyphs: segment.glyphs,
-                font_arena: font_arena.clone(),
-                baseline_offset: segment.baseline_offset - segment.logical_rect.min,
-            }));
+            ));
         }
 
-        result.children.push(Rc::new(line_box));
+        result.lines.push((offset, Rc::new(line_box)));
     }
 
     Ok(result)
 }
 
 fn layout_block(
-    offset: Vec2L,
     context: &mut LayoutContext,
     constraints: &LayoutConstraints,
     parent_style: &CascadingStyleMap,
@@ -232,16 +236,12 @@ fn layout_block(
     let container_style = parent_style.push(&container.style);
 
     let mut result = BlockContainerFragment {
-        fbox: FragmentBox {
-            offset,
-            size: Vec2L::ZERO,
-        },
+        fbox: FragmentBox { size: Vec2L::ZERO },
         children: Vec::new(),
     };
-
     for child in &container.contents {
+        let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.size.y);
         let fragment = layout_inline(
-            Vec2L::new(FixedL::ZERO, result.fbox.size.y),
             context,
             &LayoutConstraints {
                 size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
@@ -253,25 +253,19 @@ fn layout_block(
         result.fbox.size.x = result.fbox.size.x.max(fragment.fbox.size.x);
         result.fbox.size.y += fragment.fbox.size.y;
 
-        result.children.push(fragment.into());
+        result.children.push((child_offset, Rc::new(fragment)));
     }
 
     Ok(result)
 }
 
 pub fn layout(
-    mut context: LayoutContext,
+    context: &mut LayoutContext,
     constraints: LayoutConstraints,
     root: &BlockContainer,
     style: &StyleMap,
 ) -> Result<BlockContainerFragment, InlineLayoutError> {
-    layout_block(
-        Vec2L::ZERO,
-        &mut context,
-        &constraints,
-        &CascadingStyleMap::new(style),
-        root,
-    )
+    layout_block(context, &constraints, &CascadingStyleMap::new(style), root)
 }
 
 // TODO: Once a built-in tofu font is added some tests could be made
@@ -314,12 +308,12 @@ mod test {
 
         let style = {
             let mut s = StyleMap::new();
-            s.set(style::FontFamily(vec!["Noto Sans CJK JP".into()]));
+            s.set::<style::FontFamily>(vec!["Noto Sans".into()]);
             s
         };
 
         let fragment = layout(
-            LayoutContext {
+            &mut LayoutContext {
                 dpi: 72,
                 fonts: &mut FontDb::new(&crate::Subrandr::init()).unwrap(),
             },

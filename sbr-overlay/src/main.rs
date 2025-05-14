@@ -1,6 +1,7 @@
 use std::{
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -494,11 +495,12 @@ impl winit::application::ApplicationHandler for App<'_> {
                             WindowState::Software(soft) => {
                                 soft.buffer.resize(s_width as usize * s_height as usize, 0);
                                 if let Some(subs) = self.subs.as_ref() {
+                                    // TODO: Do this properly instead
+                                    self.renderer.set_subtitles(Some(subs));
                                     self.renderer
                                         .render(
                                             &ctx,
                                             t,
-                                            subs,
                                             unsafe {
                                                 std::mem::transmute::<&mut [u32], &mut [_]>(
                                                     soft.buffer.as_mut_slice(),
@@ -534,8 +536,9 @@ impl winit::application::ApplicationHandler for App<'_> {
                                     let target = wgpu
                                         .rasterizer
                                         .target_from_texture(surface_texture.texture.clone());
+                                    self.renderer.set_subtitles(Some(subs));
                                     self.renderer
-                                        .render_to_wgpu(&mut wgpu.rasterizer, target, &ctx, t, subs)
+                                        .render_to_wgpu(&mut wgpu.rasterizer, target, &ctx, t)
                                         .unwrap();
 
                                     surface_texture.present();
@@ -582,12 +585,12 @@ fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitle
     Ok(match path.extension().and_then(|x| x.to_str()) {
         Some("srv3" | "ytt") => {
             let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
-            subrandr::srv3::convert(sbr, document)
+            Subtitles::Srv3(Rc::new(subrandr::srv3::convert(sbr, document)))
         }
         Some("vtt") => {
             let text = std::fs::read_to_string(path).unwrap();
             let captions = subrandr::vtt::parse(&text).unwrap();
-            subrandr::vtt::convert(sbr, captions)
+            Subtitles::Vtt(Rc::new(subrandr::vtt::convert(sbr, captions)))
         }
         _ => bail!("Unrecognised subtitle file extension"),
     })

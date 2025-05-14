@@ -71,13 +71,12 @@ SBR_UNSTABLE sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
+void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
 bool sbr_renderer_did_change(
     sbr_renderer *, sbr_subtitle_context const *, uint32_t t
 );
 int sbr_renderer_render(
     sbr_renderer *, sbr_subtitle_context const *,
-    // subtitles to render, on change invalidate the cache before rendering
-    sbr_subtitles *,
     // current time value in milliseconds
     uint32_t t,
     // BGRA8 pixel buffer

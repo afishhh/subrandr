@@ -4,6 +4,7 @@ use std::{
     ffi::{c_char, c_int, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -263,19 +264,19 @@ unsafe extern "C" fn sbr_load_file(sbr: &Subrandr, path: *const c_char) -> *mut 
     let bytes = ctrywrap!(InvalidArgument("Path is not valid UTF-8"), str.to_str());
     if bytes.ends_with(".srv3") {
         let text = ctry!(std::fs::read_to_string(bytes));
-        Box::into_raw(Box::new(crate::srv3::convert(
+        Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(crate::srv3::convert(
             sbr,
             ctry!(crate::srv3::parse(sbr, &text)),
-        )))
+        )))))
     } else if bytes.ends_with(".vtt") {
         let text = ctry!(std::fs::read_to_string(bytes));
-        Box::into_raw(Box::new(crate::vtt::convert(
+        Box::into_raw(Box::new(Subtitles::Vtt(Rc::new(crate::vtt::convert(
             sbr,
             match crate::vtt::parse(&text) {
                 Some(captions) => captions,
                 None => cthrow!(Other, "Invalid WebVTT"),
             },
-        )))
+        )))))
     } else {
         cthrow!(UnrecognizedFormat, "Unrecognized file format")
     }
@@ -320,17 +321,18 @@ unsafe extern "C" fn sbr_load_text(
     }
 
     match format {
-        SubtitleFormat::Srv3 => Box::into_raw(Box::new(crate::srv3::convert(
-            sbr,
-            ctry!(crate::srv3::parse(sbr, content)),
-        ))),
-        SubtitleFormat::WebVTT => Box::into_raw(Box::new(crate::vtt::convert(
-            sbr,
-            match crate::vtt::parse(content) {
-                Some(captions) => captions,
-                None => cthrow!(Other, "Invalid WebVTT"),
-            },
-        ))),
+        SubtitleFormat::Srv3 => Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(
+            crate::srv3::convert(sbr, ctry!(crate::srv3::parse(sbr, content))),
+        )))),
+        SubtitleFormat::WebVTT => {
+            Box::into_raw(Box::new(Subtitles::Vtt(Rc::new(crate::vtt::convert(
+                sbr,
+                match crate::vtt::parse(content) {
+                    Some(captions) => captions,
+                    None => cthrow!(Other, "Invalid WebVTT"),
+                },
+            )))))
+        }
         SubtitleFormat::Unknown => {
             cthrow!(UnrecognizedFormat, "Unrecognized subtitle format")
         }
@@ -384,6 +386,14 @@ unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut Renderer<'s
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_set_subtitles(
+    renderer: *mut Renderer<'static>,
+    subtitles: *const Subtitles,
+) {
+    (*renderer).set_subtitles(subtitles.as_ref());
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_did_change(
     renderer: *mut Renderer<'static>,
     ctx: *const SubtitleContext,
@@ -396,7 +406,6 @@ unsafe extern "C" fn sbr_renderer_did_change(
 unsafe extern "C" fn sbr_renderer_render(
     renderer: *mut Renderer<'static>,
     ctx: *const SubtitleContext,
-    subs: *const Subtitles,
     t: u32,
     buffer: *mut BGRA8,
     width: u32,
@@ -404,7 +413,7 @@ unsafe extern "C" fn sbr_renderer_render(
     stride: u32,
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
-    ctry!((*renderer).render(&*ctx, t, unsafe { &*subs }, buffer, width, height, stride));
+    ctry!((*renderer).render(&*ctx, t, buffer, width, height, stride));
     0
 }
 

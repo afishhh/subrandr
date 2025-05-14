@@ -1,15 +1,23 @@
+use std::{ops::Range, rc::Rc};
+
 /// Converts parsed SRV3 subtitles into Subtitles.
 ///
 /// Was initially based on YTSubConverter, now also reverse engineered from YouTube's captions.js.
 use crate::{
     color::BGRA8,
+    layout::{
+        self,
+        style::{self, StyleMap},
+        BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText, LayoutConstraints,
+        LayoutContext, Point2L, Vec2L,
+    },
     log::{log_once_state, warning},
-    math::{I16Dot16, I26Dot6, Point2, Point2f, Vec2f},
-    CssTextShadow, Event, EventExtra, Layouter, Ruby, Subrandr, SubtitleClass, SubtitleContext,
-    Subtitles, TextDecorations, TextSegment,
+    math::{I16Dot16, I26Dot6, Vec2f},
+    Alignment, FontSlant, FrameLayoutPass, HorizontalAlignment, Ruby, Subrandr, SubtitleContext,
+    TextShadow, VerticalAlignment,
 };
 
-use super::{Document, EdgeType, RubyPart};
+use super::{Document, EdgeType, Pen, RubyPart};
 
 const SRV3_FONTS: &[&[&str]] = &[
     &[
@@ -145,7 +153,7 @@ pub struct Srv3TextShadow {
 }
 
 impl Srv3TextShadow {
-    pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<CssTextShadow>) {
+    pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
         let a = font_scale_from_ctx(ctx) / 32.0;
         let e = a.max(1.0);
         let l = (2.0 * a).max(1.0);
@@ -153,7 +161,7 @@ impl Srv3TextShadow {
         let c = (5.0 * a).max(1.0);
 
         match self.kind {
-            EdgeType::None => unreachable!(),
+            EdgeType::None => (),
             EdgeType::HardShadow => {
                 // in captions.js it is window.devicePixelRatio >= 2 ? 0.5 : 1
                 // BUT that is NOT what we want, I think they do this to increase fidelity on displays
@@ -163,7 +171,7 @@ impl Srv3TextShadow {
                 let step = (ctx.dpi >= 144) as i32 as f32 * 0.5 + 0.5;
                 let mut x = e;
                 while x <= t {
-                    out.push(CssTextShadow {
+                    out.push(TextShadow {
                         offset: Vec2f::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
                         blur_radius: I26Dot6::ZERO,
                         color: self.color,
@@ -173,19 +181,19 @@ impl Srv3TextShadow {
             }
             EdgeType::Bevel => {
                 let offset = Vec2f::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
-                out.push(CssTextShadow {
+                out.push(TextShadow {
                     offset,
                     blur_radius: I26Dot6::ZERO,
                     color: self.color,
                 });
-                out.push(CssTextShadow {
+                out.push(TextShadow {
                     offset: -offset,
                     blur_radius: I26Dot6::ZERO,
                     color: self.color,
                 });
             }
             EdgeType::Glow => out.extend(std::iter::repeat_n(
-                CssTextShadow {
+                TextShadow {
                     offset: Vec2f::ZERO,
                     blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(l)),
                     color: self.color,
@@ -195,7 +203,7 @@ impl Srv3TextShadow {
             EdgeType::SoftShadow => {
                 let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
                 while t <= c {
-                    out.push(CssTextShadow {
+                    out.push(TextShadow {
                         offset,
                         blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(t)),
                         color: self.color,
@@ -207,87 +215,159 @@ impl Srv3TextShadow {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Srv3Event {
+#[derive(Debug)]
+pub struct Subtitles {
+    root_style: StyleMap,
+    events: Vec<Event>,
+}
+
+#[derive(Debug)]
+struct Event {
     x: f32,
     y: f32,
+    range: Range<u32>,
+    alignment: Alignment,
+    segments: Vec<Segment>,
 }
 
-struct Srv3Layouter;
+#[derive(Debug, Clone)]
+struct Segment {
+    base_style: StyleMap,
+    font_size: u16,
+    text: Rc<str>,
+    shadow: Srv3TextShadow,
+    ruby: Ruby,
+}
 
-impl Layouter for Srv3Layouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, _event: &Event) -> I26Dot6 {
-        ctx.player_width() * 0.96
-    }
+impl Event {
+    pub fn layout(
+        &self,
+        sub_context: &SubtitleContext,
+        context: &mut LayoutContext,
+        style: &StyleMap,
+    ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
+        let segments = self
+            .segments
+            .iter()
+            .map(|srv| InlineText {
+                style: {
+                    let mut result = srv.base_style.clone();
 
-    fn layout(
-        &mut self,
-        ctx: &SubtitleContext,
-        _lines: &mut Vec<crate::text::layout::ShapedLine>,
-        _total_rect: &mut crate::math::Rect2<crate::math::I26Dot6>,
-        event: &Event,
-    ) -> Point2f {
-        let EventExtra::Srv3(extra) = &event.extra else {
-            panic!("Srv3Layouter received foreign event {event:?}");
+                    let mut size = pixels_to_points(font_size_to_pixels(srv.font_size) * 0.75)
+                        * font_scale_from_ctx(sub_context);
+                    if matches!(srv.ruby, Ruby::Over) {
+                        size /= 2.0;
+                    }
+
+                    result.set::<style::FontSize>(I26Dot6::from(size));
+
+                    let mut shadows = vec![];
+                    srv.shadow.to_css(sub_context, &mut shadows);
+
+                    if !shadows.is_empty() {
+                        result.set::<style::TextShadows>(shadows)
+                    }
+
+                    result
+                },
+                text: srv.text.clone(),
+                ruby: srv.ruby,
+            })
+            .collect();
+
+        let block = BlockContainer {
+            style: {
+                let mut result = StyleMap::new();
+
+                if self.alignment.0 != HorizontalAlignment::Left {
+                    result.set::<style::TextAlign>(self.alignment.0);
+                }
+
+                result
+            },
+            contents: vec![InlineContainer {
+                contents: segments,
+                ..InlineContainer::default()
+            }],
         };
 
-        Point2::new(
-            extra.x * ctx.player_width().into_f32(),
-            extra.y * ctx.player_height().into_f32(),
-        )
+        let constraints = LayoutConstraints {
+            size: Vec2L::new(sub_context.player_width() * 96 / 100, FixedL::MAX),
+        };
+
+        let fragment = layout::layout(context, constraints, &block, style)?;
+
+        let mut pos = Point2L::new(
+            (self.x * sub_context.player_width().into_f32()).into(),
+            (self.y * sub_context.player_height().into_f32()).into(),
+        );
+
+        match self.alignment.0 {
+            HorizontalAlignment::Left => (),
+            HorizontalAlignment::Center => pos.x -= fragment.fbox.size.x / 2,
+            HorizontalAlignment::Right => pos.x -= fragment.fbox.size.x,
+        }
+
+        match self.alignment.1 {
+            VerticalAlignment::Top => (),
+            VerticalAlignment::Center => pos.y -= fragment.fbox.size.y / 2,
+            VerticalAlignment::Bottom => pos.y -= fragment.fbox.size.y,
+        }
+
+        Ok((pos, fragment))
     }
 }
 
-fn convert_segment(segment: &super::Segment, ruby: Ruby) -> crate::TextSegment {
-    let mut shadows = Vec::new();
+fn pen_to_size_independent_styles(pen: &Pen, set_default: bool) -> StyleMap {
+    let mut result = StyleMap::new();
 
-    if segment.pen().edge_type != EdgeType::None {
-        let edge_color = BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000);
-        shadows.push(crate::TextShadow::Srv3(Srv3TextShadow {
-            kind: segment.pen().edge_type,
-            color: edge_color,
-        }));
+    if set_default || pen.font_style != Pen::DEFAULT.font_style {
+        result.set::<style::FontFamily>(
+            font_style_to_name(pen.font_style)
+                .iter()
+                .copied()
+                .map(Box::<str>::from)
+                .collect(),
+        );
     }
 
-    TextSegment {
-        font: font_style_to_name(segment.pen().font_style)
-            .iter()
-            .copied()
-            .map(str::to_owned)
-            .collect(),
-        font_size: {
-            let mut base = pixels_to_points(font_size_to_pixels(segment.pen().font_size) * 0.75);
-            if matches!(ruby, Ruby::Over) {
-                base /= 2.0;
-            }
-            I26Dot6::from_f32(base)
+    if pen.bold {
+        result.set::<style::FontWeight>(I16Dot16::new(700));
+    }
+
+    if pen.italic {
+        result.set::<style::FontStyle>(FontSlant::Italic);
+    }
+
+    if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {
+        result.set::<style::Color>(BGRA8::from_rgba32(pen.foreground_color));
+    }
+
+    if set_default || pen.background_color != Pen::DEFAULT.background_color {
+        result.set::<style::BackgroundColor>(BGRA8::from_rgba32(pen.background_color));
+    }
+
+    result
+}
+
+fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
+    let style = pen_to_size_independent_styles(segment.pen(), false);
+
+    Segment {
+        base_style: style,
+        font_size: segment.pen().font_size,
+        text: segment.text.as_str().into(),
+        shadow: Srv3TextShadow {
+            kind: segment.pen().edge_type,
+            color: BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000),
         },
-        font_weight: if segment.pen().bold {
-            I16Dot16::new(700)
-        } else {
-            I16Dot16::new(400)
-        },
-        italic: segment.pen().italic,
-        decorations: TextDecorations {
-            ..Default::default()
-        },
-        color: BGRA8::from_rgba32(segment.pen().foreground_color),
-        background_color: BGRA8::from_rgba32(segment.pen().background_color),
-        text: segment.text.clone(),
-        shadows,
         ruby,
     }
 }
 
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut result = Subtitles {
-        class: &SubtitleClass {
-            name: "srv3",
-            get_font_size: |ctx, _event, segment| -> I26Dot6 {
-                segment.font_size * font_scale_from_ctx(ctx)
-            },
-            create_layouter: || Box::new(Srv3Layouter),
-        },
+        root_style: pen_to_size_independent_styles(&Pen::DEFAULT, true),
         events: vec![],
     };
 
@@ -345,55 +425,80 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
             segments.push(convert_segment(segment, Ruby::None));
         }
 
+        let alignment = match event.position().point {
+            super::Point::TopLeft => crate::Alignment(
+                crate::HorizontalAlignment::Left,
+                crate::VerticalAlignment::Top,
+            ),
+            super::Point::TopCenter => crate::Alignment(
+                crate::HorizontalAlignment::Center,
+                crate::VerticalAlignment::Top,
+            ),
+            super::Point::TopRight => crate::Alignment(
+                crate::HorizontalAlignment::Right,
+                crate::VerticalAlignment::Top,
+            ),
+            super::Point::MiddleLeft => crate::Alignment(
+                crate::HorizontalAlignment::Left,
+                crate::VerticalAlignment::Center,
+            ),
+            super::Point::MiddleCenter => crate::Alignment(
+                crate::HorizontalAlignment::Center,
+                crate::VerticalAlignment::Center,
+            ),
+            super::Point::MiddleRight => crate::Alignment(
+                crate::HorizontalAlignment::Right,
+                crate::VerticalAlignment::Center,
+            ),
+            super::Point::BottomLeft => crate::Alignment(
+                crate::HorizontalAlignment::Left,
+                crate::VerticalAlignment::Bottom,
+            ),
+            super::Point::BottomCenter => crate::Alignment(
+                crate::HorizontalAlignment::Center,
+                crate::VerticalAlignment::Bottom,
+            ),
+            super::Point::BottomRight => crate::Alignment(
+                crate::HorizontalAlignment::Right,
+                crate::VerticalAlignment::Bottom,
+            ),
+        };
+
         result.events.push(Event {
-            start: event.time,
-            end: event.time + event.duration,
-            extra: EventExtra::Srv3(Srv3Event {
-                x: convert_coordinate(event.position().x as f32),
-                y: convert_coordinate(event.position().y as f32),
-            }),
-            alignment: match event.position().point {
-                super::Point::TopLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::TopCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::TopRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::Top,
-                ),
-                super::Point::MiddleLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::MiddleCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::MiddleRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::BaselineCentered,
-                ),
-                super::Point::BottomLeft => crate::Alignment(
-                    crate::HorizontalAlignment::Left,
-                    crate::VerticalAlignment::Bottom,
-                ),
-                super::Point::BottomCenter => crate::Alignment(
-                    crate::HorizontalAlignment::Center,
-                    crate::VerticalAlignment::Bottom,
-                ),
-                super::Point::BottomRight => crate::Alignment(
-                    crate::HorizontalAlignment::Right,
-                    crate::VerticalAlignment::Bottom,
-                ),
-            },
-            text_wrap: crate::TextWrapOptions::default(),
+            x: convert_coordinate(event.position().x as f32),
+            y: convert_coordinate(event.position().y as f32),
+            range: event.time..event.time + event.duration,
+            alignment,
             segments,
         })
     }
 
     result
+}
+
+pub struct Layouter {
+    subtitles: Rc<Subtitles>,
+}
+
+impl Layouter {
+    pub fn new(subtitles: Rc<Subtitles>) -> Self {
+        Self { subtitles }
+    }
+
+    pub fn subtitles(&self) -> &Rc<Subtitles> {
+        &self.subtitles
+    }
+
+    pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
+        for event in &self.subtitles.events {
+            if !pass.add_event_range(event.range.clone()) {
+                continue;
+            }
+
+            let (pos, block) = event.layout(pass.sctx, pass.lctx, &self.subtitles.root_style)?;
+            pass.emit_fragment(pos, block);
+        }
+
+        Ok(())
+    }
 }

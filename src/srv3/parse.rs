@@ -46,23 +46,25 @@ pub struct Pen {
     pub background_color: u32,
 }
 
-const DEFAULT_PEN: Pen = Pen {
-    font_size: 100,
-    font_style: 0,
-    bold: false,
-    italic: false,
-    edge_type: EdgeType::None,
-    edge_color: 0x020202,
-    ruby_part: RubyPart::None,
-    foreground_color: 0xFFFFFFFF,
-    // The default opacity is 0.75
-    // round(0.75 * 255) = 0xBF
-    background_color: 0x080808BF,
-};
+impl Pen {
+    pub const DEFAULT: Self = Self {
+        font_size: 100,
+        font_style: 0,
+        bold: false,
+        italic: false,
+        edge_type: EdgeType::None,
+        edge_color: 0x020202,
+        ruby_part: RubyPart::None,
+        foreground_color: 0xFFFFFFFF,
+        // The default opacity is 0.75
+        // round(0.75 * 255) = 0xBF
+        background_color: 0x080808BF,
+    };
+}
 
 impl Default for Pen {
     fn default() -> Self {
-        DEFAULT_PEN
+        Self::DEFAULT
     }
 }
 
@@ -486,7 +488,7 @@ fn parse_body(
         };
     }
 
-    let mut current_event_pen = &DEFAULT_PEN;
+    let mut current_event_pen = &Pen::DEFAULT;
     let mut current_segment_pen = current_event_pen;
     let mut current_text = String::new();
     let mut current = None;
@@ -543,7 +545,7 @@ fn parse_body(
                             segments: vec![],
                         };
 
-                        current_event_pen = &DEFAULT_PEN;
+                        current_event_pen = &Pen::DEFAULT;
 
                         match_attributes! {
                             element.attributes(),

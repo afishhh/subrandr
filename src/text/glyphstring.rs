@@ -1,5 +1,6 @@
 use std::{
     collections::LinkedList,
+    fmt::Debug,
     ops::{Add as _, Range},
     rc::Rc,
 };
@@ -13,9 +14,15 @@ pub trait GlyphStringText: AsRef<str> + Clone {}
 impl GlyphStringText for &str {}
 impl GlyphStringText for Rc<str> {}
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GlyphString<'f, T: GlyphStringText> {
     pub segments: LinkedList<GlyphStringSegment<'f, T>>,
+}
+
+impl<T: GlyphStringText> Debug for GlyphString<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlyphString").finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]

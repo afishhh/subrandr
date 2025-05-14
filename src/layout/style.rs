@@ -3,13 +3,60 @@ use std::fmt::Debug;
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
 
 use crate::{
-    color::BGRA8, math::I16Dot16, text::layout::TextWrapMode, util::SmallTypeMap,
-    HorizontalAlignment, I26Dot6, TextShadow,
+    color::BGRA8, math::I16Dot16, text::layout::TextWrapMode, util::SmallTypeMap, FontSlant,
+    HorizontalAlignment, I26Dot6, TextDecorations, TextShadow,
 };
 
-pub trait StyleValue: Debug + Clone + 'static {}
+#[doc(hidden)]
+pub trait StyleValue: 'static {
+    type Inner: Debug + Clone + 'static;
+    type Inherited<'a>;
 
-#[derive(Debug, Clone)]
+    fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a>;
+}
+
+fn retrieve_inherited_default<'a, V: StyleValue>(
+    map: &CascadingStyleMap<'a>,
+) -> Option<&'a V::Inner> {
+    for map in map.iter_chain() {
+        if let Some(value) = map.get::<V>() {
+            return Some(value);
+        }
+    }
+
+    None
+}
+
+fn retrieve_inherited_list<T: Clone, V: StyleValue<Inner = Vec<T>>>(
+    map: &CascadingStyleMap,
+) -> Vec<T> {
+    let mut result = Vec::new();
+
+    for map in map.iter_chain() {
+        if let Some(value) = map.get::<V>() {
+            result.extend(value.iter().rev().cloned());
+        }
+    }
+
+    result
+}
+
+#[repr(transparent)]
+struct StyleSlot<V: StyleValue>(V::Inner);
+
+impl<V: StyleValue> Clone for StyleSlot<V> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<V: StyleValue> Debug for StyleSlot<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <V::Inner as Debug>::fmt(&self.0, f)
+    }
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct StyleMap(SmallTypeMap<32>);
 
 impl StyleMap {
@@ -17,20 +64,19 @@ impl StyleMap {
         Self(SmallTypeMap::new())
     }
 
-    pub fn set<V: StyleValue>(&mut self, value: V) {
-        self.0.set(value);
+    pub fn set<V: StyleValue>(&mut self, value: V::Inner) {
+        self.0.set::<StyleSlot<V>>(StyleSlot(value));
     }
 
-    pub fn get<V: StyleValue>(&self) -> Option<&V> {
-        self.0.get::<V>()
+    pub fn get<V: StyleValue>(&self) -> Option<&V::Inner> {
+        self.0.get::<StyleSlot<V>>().map(|x| &x.0)
     }
 
-    pub fn get_copy_or_default<V: Default + Copy + StyleValue>(&self) -> V {
-        self.0.get_copy_or_default::<V>()
-    }
-
-    pub fn merge(&mut self, other: &Self) {
-        self.0.merge(&other.0);
+    pub fn get_copy_or<V: StyleValue<Inner: Copy>>(&self, default: V::Inner) -> V::Inner {
+        match self.get::<V>() {
+            Some(value) => *value,
+            None => default,
+        }
     }
 }
 
@@ -44,44 +90,35 @@ impl<'a> CascadingStyleMap<'a> {
         Self { prev: None, map }
     }
 
-    pub fn get<V: StyleValue>(&self) -> Option<&V> {
-        let mut current = self;
-        loop {
-            if let Some(value) = current.map.get::<V>() {
-                return Some(value);
-            }
-
-            if let Some(prev) = current.prev {
-                current = prev;
-            } else {
-                break;
-            }
+    fn iter_chain(&self) -> IterChain<'_, 'a> {
+        IterChain {
+            current: Some(self),
         }
-
-        None
     }
 
-    pub fn get_copy_or<V: Copy + StyleValue>(&self, default: V) -> V {
+    pub fn get<V: StyleValue>(&self) -> V::Inherited<'a> {
+        V::retrieve_inherited(self)
+    }
+
+    pub fn get_copy_or<V: StyleValue<Inherited<'a> = Option<&'a T>>, T: Copy + 'static>(
+        &self,
+        default: T,
+    ) -> T {
         match self.get::<V>() {
             Some(value) => *value,
             None => default,
         }
     }
 
-    pub fn get_unwrap_copy_or<V: StyleWrapperValue>(&self, default: V::Inner) -> V::Inner
-    where
-        V::Inner: Copy,
-    {
-        match self.get::<V>() {
-            Some(value) => *value.unwrap_ref(),
-            None => default,
-        }
-    }
-
-    pub fn get_copy_or_default<V: Default + Copy + StyleValue>(&self) -> V {
+    pub fn get_copy_or_default<
+        V: StyleValue<Inherited<'a> = Option<&'a T>>,
+        T: Default + Copy + 'static,
+    >(
+        &self,
+    ) -> T {
         match self.get::<V>() {
             Some(value) => *value,
-            None => V::default(),
+            None => T::default(),
         }
     }
 
@@ -94,57 +131,103 @@ impl<'a> CascadingStyleMap<'a> {
     }
 }
 
-pub trait StyleWrapperValue: StyleValue {
-    type Inner;
-    fn unwrap(self) -> Self::Inner;
-    fn unwrap_ref(&self) -> &Self::Inner;
+struct IterChain<'i, 'a> {
+    current: Option<&'i CascadingStyleMap<'a>>,
 }
 
-macro_rules! make_wrappers {
+impl<'a> Iterator for IterChain<'_, 'a> {
+    type Item = &'a StyleMap;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current?;
+        self.current = current.prev;
+        Some(current.map)
+    }
+}
+
+macro_rules! make_keys {
     (
-        $($(#[$attr: meta])* pub struct $name: ident(pub $inner: ty);)*
+        $($(#[$($attrs: tt)*])*
+        pub struct $name: ident: $inner: ty;)*
     ) => {
         $(
-            #[derive(Debug, Clone)]
-            $(#[$attr])*
-            pub(crate) struct $name(pub $inner);
-            impl StyleValue for $name {}
-            impl StyleWrapperValue for $name {
+            make_keys!(@build_struct {$name $inner}; {}; $([$($attrs)*])*);
+
+            #[automatically_derived]
+            impl StyleValue for $name {
                 type Inner = $inner;
-                fn unwrap(self) -> Self::Inner { self.0 }
-                fn unwrap_ref(&self) -> &Self::Inner { &self.0 }
+
+                make_keys!(@build_impl {$name $inner}; {(inherit)}; $([$($attrs)*])*);
             }
         )*
     };
+    (@build_struct {$name: ident $inner: ty}; { $($processed: tt)* };) => {
+        #[derive(Debug, Clone)]
+        $($processed)*
+        // FIXME: I think I actually managed to trigger a `dead_code` false positive with this
+        //        trait :)
+        pub(crate) struct $name(#[allow(dead_code)] $inner);
+    };
+    (@build_struct $pt: tt; { $($processed: tt)* }; [inherit$($args: tt)*] $($rest: tt)*) => {
+        make_keys!(@build_struct $pt; { $($processed)* }; $($rest)*);
+    };
+    (@build_struct $pt: tt; { $($processed: tt)* }; [copy] $($rest: tt)*) => {
+        make_keys!(@build_struct $pt; { $($processed)* #[derive(Copy) ]}; $($rest)*);
+    };
+    (@build_struct { $($processed: tt)* }; $($value: tt)*) => { #[$($value)*] };
+
+    (@build_impl $pt: tt; {$seen_inherit: tt};) => { make_keys!(@default_inherit $seen_inherit); };
+    (@default_inherit ()) => { };
+    (@default_inherit (inherit)) => { make_keys!(@inherit (default)); };
+
+    (@build_impl $pt: tt; {$seen_ignore: tt $($seen_rest: tt)*}; [inherit$($args: tt)*] $($rest: tt)*) => {
+        make_keys!(@inherit $($args)*);
+        make_keys!(@build_impl $pt; {() $($seen_rest)*}; $($rest)*);
+    };
+    (@build_impl $pt: tt; $seen: tt; [copy$($args: tt)*] $($rest: tt)*) => {
+        make_keys!(@build_impl $pt; $seen; $($rest)*);
+    };
+
+    (@inherit (default)) => {
+        type Inherited<'a> = Option<&'a Self::Inner>;
+
+        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
+            retrieve_inherited_default::<Self>(map)
+        }
+    };
+    (@inherit (list)) => {
+        type Inherited<'a> = Self::Inner;
+
+        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
+            retrieve_inherited_list::<_, Self>(map)
+        }
+    };
+    (@inherit (no)) => {
+        type Inherited<'a> = Option<&'a Self::Inner>;
+
+        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
+            map.map.get::<Self>()
+        }
+    };
 }
 
-make_wrappers! {
-    pub struct Color(pub BGRA8);
-    pub struct BackgroundColor(pub BGRA8);
+make_keys! {
+    #[copy] pub struct Color: BGRA8;
+    #[copy] pub struct BackgroundColor: BGRA8;
 
-    pub struct FontFamily(pub Vec<Box<str>>);
+    #[inherit(list)]
+    pub struct FontFamily: Vec<Box<str>>;
+    #[copy] pub struct FontWeight: I16Dot16;
+    #[copy] pub struct FontSize: I26Dot6;
+    #[copy] pub struct FontStyle: FontSlant;
 
-    #[derive(Copy)]
-    pub struct FontWeight(pub I16Dot16);
+    #[copy] pub struct TextAlign: HorizontalAlignment;
+    #[inherit(list)]
+    pub struct TextShadows: Vec<TextShadow>;
+    #[inherit(no)]
+    pub struct TextDecoration: TextDecorations;
 
-    pub struct FontSize(pub I26Dot6);
-
-    #[derive(Copy)]
-    pub struct TextAlign(pub HorizontalAlignment);
-
-    pub struct TextShadows(pub Vec<TextShadow>);
+    #[copy] pub struct TextWrapStyle: TextWrapMode;
+    #[copy] pub struct LineBreak: LineBreakStrictness;
+    #[copy] pub struct WordBreak: LineBreakWordOption;
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum FontSlant {
-    Regular,
-    Italic,
-}
-impl StyleValue for FontSlant {}
-
-// text-wrap-style in CSS land.
-impl StyleValue for TextWrapMode {}
-// line-break in CSS land.
-impl StyleValue for LineBreakStrictness {}
-// word-break in CSS land.
-impl StyleValue for LineBreakWordOption {}

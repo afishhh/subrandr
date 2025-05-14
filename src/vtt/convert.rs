@@ -1,8 +1,16 @@
+use std::{ops::Range, rc::Rc};
+
 use crate::{
     color::BGRA8,
+    layout::{
+        self,
+        style::{self, StyleMap},
+        BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
+        InlineText, LineBoxFragment, Point2L, Vec2L,
+    },
     log::{log_once_state, warning, LogOnceSet},
-    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
-    vtt, EventExtra, Layouter, Subrandr, SubtitleClass, SubtitleContext,
+    math::{I16Dot16, Point2, Rect2},
+    vtt, FontSlant, FrameLayoutPass, HorizontalAlignment, Subrandr, SubtitleContext,
 };
 
 #[derive(Debug)]
@@ -79,28 +87,112 @@ impl vtt::Cue<'_> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct VttEvent {
+struct Event {
+    range: Range<u32>,
     writing_direction: vtt::WritingDirection,
     text_alignment: vtt::TextAlignment,
+    horizontal_alignment: HorizontalAlignment,
     line: vtt::Line,
     size: f64,
+    segments: Vec<InlineText>,
     x: f64,
     y: f64,
 }
 
-struct VttLayouter {
-    output: Vec<Rect2<I26Dot6>>,
-}
+impl Event {
+    fn layout(
+        &self,
+        sctx: &SubtitleContext,
+        lctx: &mut layout::LayoutContext<'_, '_>,
+        style: &layout::style::StyleMap,
+        output: &mut Vec<Rect2<FixedL>>,
+    ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
+        let mut fragment = layout::layout(
+            lctx,
+            layout::LayoutConstraints {
+                size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
+            },
+            &BlockContainer {
+                style: {
+                    let mut result = StyleMap::new();
+                    result.set::<style::TextAlign>(self.horizontal_alignment);
+                    result
+                },
+                contents: vec![InlineContainer {
+                    style: StyleMap::new(),
+                    contents: self.segments.clone(),
+                }],
+            },
+            style,
+        )?;
 
-impl VttLayouter {
+        let container = Rc::make_mut(&mut fragment.children[0].1);
+
+        let lines = &mut container.lines;
+        if lines.is_empty() {
+            return Ok((Point2L::ZERO, BlockContainerFragment::empty()));
+        }
+
+        let mut result = Point2L::new(
+            (self.x as f32 * sctx.video_width.into_f32()).into(),
+            (self.y as f32 * sctx.video_height.into_f32()).into(),
+        );
+
+        if self.writing_direction.is_horizontal() {
+            // emulate width = size vw
+            result.x += match self.text_alignment {
+                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
+                vtt::TextAlignment::Center => sctx.video_width.into_f32() * self.size as f32 / 200.,
+                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
+                    sctx.video_width.into_f32() * self.size as f32 / 100.
+                }
+            };
+        } else {
+            // emulate height = size vh
+            result.y += match self.text_alignment {
+                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
+                vtt::TextAlignment::Center => {
+                    sctx.video_height.into_f32() * self.size as f32 / 200.
+                }
+                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
+                    sctx.video_height.into_f32() * self.size as f32 / 100.
+                }
+            };
+        }
+
+        match self.horizontal_alignment {
+            HorizontalAlignment::Left => (),
+            HorizontalAlignment::Center => result.x -= fragment.fbox.size.x / 2,
+            HorizontalAlignment::Right => result.x -= fragment.fbox.size.x,
+        }
+
+        Self::process_cue_settings_adjust_boxes(
+            output,
+            sctx,
+            &mut result,
+            lines,
+            Rect2::from_min_size(Point2L::ZERO, container.fbox.size),
+            self,
+        );
+
+        for &(off, ref line) in &lines[..] {
+            output.push(Rect2::from_min_size(result + off, line.fbox.size));
+        }
+
+        result.x += sctx.padding_left;
+        result.y += sctx.padding_top;
+
+        Ok((result, fragment))
+    }
+
     // https://www.w3.org/TR/webvtt1/#processing-cue-settings
     fn process_cue_settings_adjust_boxes(
-        &mut self,
+        output: &[Rect2<FixedL>],
         ctx: &SubtitleContext,
-        result: &mut Point2<f32>,
-        lines: &mut Vec<crate::text::layout::ShapedLine>,
-        total_rect: Rect2<I26Dot6>,
-        extra: &VttEvent,
+        result: &mut Point2L,
+        lines: &mut Vec<(Vec2L, Rc<LineBoxFragment>)>,
+        total_rect: Rect2<FixedL>,
+        extra: &Event,
     ) {
         match extra.line.computed(0) {
             ComputedLine::Lines(line) => {
@@ -114,14 +206,14 @@ impl VttLayouter {
 
                 let mut step = if extra.writing_direction.is_horizontal() {
                     // 2. Horizontal: Let step be the height of the first line box in boxes.
-                    lines[0].bounding_rect.height()
+                    lines[0].1.fbox.size.y
                 } else {
                     // 2. Vertical: Let step be the width of the first line box in boxes.
-                    lines[0].bounding_rect.width()
+                    lines[0].1.fbox.size.x
                 };
 
                 // 3. If step is zero, then jump to the step labeled done positioning below.
-                if step == I26Dot6::ZERO {
+                if step == FixedL::ZERO {
                     return;
                 }
 
@@ -168,18 +260,15 @@ impl VttLayouter {
                 let mut switched = false;
                 loop {
                     let mut done = true;
-                    'check: for line in &lines[..] {
-                        let effective_rect = line.bounding_rect.translate(Vec2::new(
-                            I26Dot6::from_f32(result.x),
-                            I26Dot6::from_f32(result.y),
-                        ));
+                    'check: for &(off, ref line) in &lines[..] {
+                        let effective_rect = Rect2::from_min_size(*result + off, line.fbox.size);
 
                         if !title_area.includes(effective_rect) {
                             done = false;
                             break 'check;
                         }
 
-                        for out in &self.output {
+                        for out in output.iter() {
                             if effective_rect.intersects(out) {
                                 done = false;
                                 break 'check;
@@ -192,21 +281,18 @@ impl VttLayouter {
                     }
 
                     let mut switch_direction = false;
-                    let first_line_box = lines[0].bounding_rect.translate(Vec2::new(
-                        I26Dot6::from_f32(result.x),
-                        I26Dot6::from_f32(result.y),
-                    ));
+                    let first_line_box = Rect2::from_min_size(*result, lines[0].1.fbox.size);
                     if extra.writing_direction.is_horizontal() {
                         // Horizontal: If step is negative and the top of the first line box in boxes is now above the top of the title area, or if step is positive and the bottom of the first line box in boxes is now below the bottom of the title area, jump to the step labeled switch direction.
-                        if (step < I26Dot6::ZERO && first_line_box.min.y < title_area.min.y)
-                            || (step > I26Dot6::ZERO && first_line_box.max.y > title_area.max.y)
+                        if (step < FixedL::ZERO && first_line_box.min.y < title_area.min.y)
+                            || (step > FixedL::ZERO && first_line_box.max.y > title_area.max.y)
                         {
                             switch_direction = true;
                         }
                     } else {
                         // Vertical: If step is negative and the left edge of the first line box in boxes is now to the left of the left edge of the title area, or if step is positive and the right edge of the first line box in boxes is now to the right of the right edge of the title area, jump to the step labeled switch direction.
-                        if (step < I26Dot6::ZERO && first_line_box.min.x < title_area.min.x)
-                            || (step > I26Dot6::ZERO && first_line_box.max.x > title_area.max.x)
+                        if (step < FixedL::ZERO && first_line_box.min.x < title_area.min.x)
+                            || (step > FixedL::ZERO && first_line_box.max.x > title_area.max.x)
                         {
                             switch_direction = true;
                         }
@@ -259,102 +345,37 @@ impl VttLayouter {
     }
 }
 
-impl Layouter for VttLayouter {
-    fn wrap_width(&self, ctx: &SubtitleContext, event: &crate::Event) -> I26Dot6 {
-        let EventExtra::Vtt(extra) = &event.extra else {
-            panic!("VttLayouter::wrap_width received foreign event {event:?}");
-        };
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum InternalNodeKind<'a> {
+//     Class,
+//     Italic,
+//     Bold,
+//     Underline,
+//     Ruby,
+//     RubyText,
+//     Voice { value: Annotation<'a> },
+//     Language,
+// }
 
-        ctx.video_width * extra.size as f32 / 100
-    }
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub struct InternalNode<'a> {
+//     pub kind: InternalNodeKind<'a>,
+//     pub classes: ClassList<'a>,
+//     pub language: Option<Cow<'a, str>>,
+//     pub children: Vec<Node<'a>>,
+// }
 
-    fn layout(
-        &mut self,
-        ctx: &SubtitleContext,
-        lines: &mut Vec<crate::text::layout::ShapedLine>,
-        total_rect: &mut crate::math::Rect2<crate::math::I26Dot6>,
-        event: &crate::Event,
-    ) -> crate::math::Point2f {
-        let EventExtra::Vtt(extra) = &event.extra else {
-            panic!("VttLayouter::layout received foreign event {event:?}");
-        };
-
-        if lines.is_empty() {
-            return Point2::ZERO;
-        }
-
-        let mut result = Point2::new(
-            extra.x as f32 * ctx.video_width.into_f32(),
-            extra.y as f32 * ctx.video_height.into_f32(),
-        );
-
-        if extra.writing_direction.is_horizontal() {
-            // emulate width = size vw
-            result.x += match extra.text_alignment {
-                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => ctx.video_width.into_f32() * extra.size as f32 / 200.,
-                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
-                    ctx.video_width.into_f32() * extra.size as f32 / 100.
-                }
-            };
-        } else {
-            // emulate height = size vh
-            result.y += match extra.text_alignment {
-                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => {
-                    ctx.video_height.into_f32() * extra.size as f32 / 200.
-                }
-                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
-                    ctx.video_height.into_f32() * extra.size as f32 / 100.
-                }
-            };
-        }
-
-        self.process_cue_settings_adjust_boxes(ctx, &mut result, lines, *total_rect, extra);
-
-        for line in &lines[..] {
-            self.output.push(line.bounding_rect.translate(Vec2::new(
-                I26Dot6::from_f32(result.x),
-                I26Dot6::from_f32(result.y),
-            )));
-        }
-
-        result.x += ctx.padding_left.into_f32();
-        result.y += ctx.padding_top.into_f32();
-
-        result
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Style {
-    color: BGRA8,
-    background_color: BGRA8,
-    fonts: Vec<String>,
-    font_size: f32,
-    font_weight: f32,
-    italic: bool,
-    underline: bool,
-}
-
-impl Default for Style {
-    fn default() -> Self {
-        Self {
-            fonts: vec!["sans-serif".to_owned()],
-            font_size: f32::INFINITY,
-            font_weight: 400.,
-            color: BGRA8::WHITE,
-            background_color: BGRA8::new(0, 0, 0, (0.8 * 255.0) as u8),
-            italic: false,
-            underline: false,
-        }
-    }
-}
+// #[derive(Debug, Clone, PartialEq, Eq)]
+// pub enum Node<'a> {
+//     Internal(InternalNode<'a>),
+//     Text(Text<'a>),
+//     Timestamp(u32),
+// }
 
 // TODO: Ruby
 struct TextConverter {
-    style: Style,
-    segments: Vec<crate::TextSegment>,
+    style: StyleMap,
+    segments: Vec<InlineText>,
 }
 
 impl TextConverter {
@@ -363,30 +384,44 @@ impl TextConverter {
             vtt::Node::Internal(internal) => {
                 let old = self.style.clone();
                 match internal.kind {
-                    vtt::InternalNodeKind::Italic => self.style.italic = true,
-                    vtt::InternalNodeKind::Bold => self.style.font_weight = 700.,
-                    vtt::InternalNodeKind::Underline => self.style.underline = true,
+                    vtt::InternalNodeKind::Italic => {
+                        self.style.set::<style::FontStyle>(FontSlant::Italic)
+                    }
+                    vtt::InternalNodeKind::Bold => {
+                        self.style.set::<style::FontWeight>(I16Dot16::new(700))
+                    }
+                    vtt::InternalNodeKind::Underline => {
+                        self.style
+                            .set::<style::TextDecoration>(crate::TextDecorations {
+                                underline: true,
+                                underline_color: self
+                                    .style
+                                    .get_copy_or::<style::Color>(BGRA8::WHITE),
+                                strike_out: false,
+                                strike_out_color: BGRA8::ZERO,
+                            })
+                    }
                     _ => (),
                 }
 
                 for class in internal.classes.iter() {
                     match class {
-                        "white" => self.style.color = BGRA8::WHITE,
-                        "lime" => self.style.color = BGRA8::LIME,
-                        "cyan" => self.style.color = BGRA8::CYAN,
-                        "red" => self.style.color = BGRA8::RED,
-                        "yellow" => self.style.color = BGRA8::YELLOW,
-                        "magenta" => self.style.color = BGRA8::MAGENTA,
-                        "blue" => self.style.color = BGRA8::BLUE,
-                        "black" => self.style.color = BGRA8::BLACK,
-                        "bg_white" => self.style.background_color = BGRA8::WHITE,
-                        "bg_lime" => self.style.background_color = BGRA8::LIME,
-                        "bg_cyan" => self.style.background_color = BGRA8::CYAN,
-                        "bg_red" => self.style.background_color = BGRA8::RED,
-                        "bg_yellow" => self.style.background_color = BGRA8::YELLOW,
-                        "bg_magenta" => self.style.background_color = BGRA8::MAGENTA,
-                        "bg_blue" => self.style.background_color = BGRA8::BLUE,
-                        "bg_black" => self.style.background_color = BGRA8::BLACK,
+                        "white" => self.style.set::<style::Color>(BGRA8::WHITE),
+                        "lime" => self.style.set::<style::Color>(BGRA8::LIME),
+                        "cyan" => self.style.set::<style::Color>(BGRA8::CYAN),
+                        "red" => self.style.set::<style::Color>(BGRA8::RED),
+                        "yellow" => self.style.set::<style::Color>(BGRA8::YELLOW),
+                        "magenta" => self.style.set::<style::Color>(BGRA8::MAGENTA),
+                        "blue" => self.style.set::<style::Color>(BGRA8::BLUE),
+                        "black" => self.style.set::<style::Color>(BGRA8::BLACK),
+                        "bg_white" => self.style.set::<style::BackgroundColor>(BGRA8::WHITE),
+                        "bg_lime" => self.style.set::<style::BackgroundColor>(BGRA8::LIME),
+                        "bg_cyan" => self.style.set::<style::BackgroundColor>(BGRA8::CYAN),
+                        "bg_red" => self.style.set::<style::BackgroundColor>(BGRA8::RED),
+                        "bg_yellow" => self.style.set::<style::BackgroundColor>(BGRA8::YELLOW),
+                        "bg_magenta" => self.style.set::<style::BackgroundColor>(BGRA8::MAGENTA),
+                        "bg_blue" => self.style.set::<style::BackgroundColor>(BGRA8::BLUE),
+                        "bg_black" => self.style.set::<style::BackgroundColor>(BGRA8::BLACK),
                         _ => (),
                     }
                 }
@@ -397,30 +432,19 @@ impl TextConverter {
 
                 self.style = old;
             }
-            vtt::Node::Text(text) => self.segments.push(crate::TextSegment {
-                font: self.style.fonts.clone(),
-                font_size: I26Dot6::from_f32(self.style.font_size),
-                font_weight: I16Dot16::from_f32(self.style.font_weight),
-                italic: self.style.italic,
-                decorations: crate::TextDecorations {
-                    underline: self.style.underline,
-                    underline_color: self.style.color,
-                    ..Default::default()
-                },
-                color: self.style.color,
-                background_color: self.style.background_color,
-                text: text.content().into_owned(),
-                shadows: Vec::new(),
+            vtt::Node::Text(text) => self.segments.push(InlineText {
+                style: self.style.clone(),
                 ruby: crate::Ruby::None,
+                text: text.content().into(),
             }),
             vtt::Node::Timestamp(_) => (),
         }
     }
 }
 
-fn convert_text(text: &str) -> Vec<crate::TextSegment> {
+fn convert_text(text: &str) -> Vec<InlineText> {
     let mut converter = TextConverter {
-        style: Style::default(),
+        style: StyleMap::new(),
         segments: Vec::new(),
     };
 
@@ -431,16 +455,22 @@ fn convert_text(text: &str) -> Vec<crate::TextSegment> {
     converter.segments
 }
 
-pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
-    let mut subtitles = crate::Subtitles {
-        class: &SubtitleClass {
-            name: "vtt",
-            get_font_size: |ctx, _event, _segment| -> I26Dot6 {
-                // Standard says 5vh, but browser engines use 5vmin.
-                // See https://github.com/w3c/webvtt/issues/529
-                ctx.video_height.min(ctx.video_width) * 0.05 / ctx.pixel_scale()
-            },
-            create_layouter: || Box::new(VttLayouter { output: Vec::new() }),
+#[derive(Debug)]
+pub struct Subtitles {
+    root_style: StyleMap,
+    events: Vec<Event>,
+}
+
+pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
+    let mut subtitles = Subtitles {
+        root_style: {
+            let mut result = StyleMap::new();
+
+            result.set::<style::FontFamily>(vec!["sans-serif".into()]);
+            result.set::<style::Color>(BGRA8::WHITE);
+            result.set::<style::BackgroundColor>(BGRA8::new(0, 0, 0, /* 255 * 80% */ 204));
+
+            result
         },
         events: Vec::new(),
     };
@@ -512,31 +542,67 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> crate::Subtitles {
 
         let horizontal_alignment = match cue.text_alignment {
             // TODO: Start and End alignment is not supported yet
-            vtt::TextAlignment::Start => crate::HorizontalAlignment::Left,
-            vtt::TextAlignment::End => crate::HorizontalAlignment::Right,
-            vtt::TextAlignment::Left => crate::HorizontalAlignment::Left,
-            vtt::TextAlignment::Right => crate::HorizontalAlignment::Right,
-            vtt::TextAlignment::Center => crate::HorizontalAlignment::Center,
+            vtt::TextAlignment::Start => HorizontalAlignment::Left,
+            vtt::TextAlignment::End => HorizontalAlignment::Right,
+            vtt::TextAlignment::Left => HorizontalAlignment::Left,
+            vtt::TextAlignment::Right => HorizontalAlignment::Right,
+            vtt::TextAlignment::Center => HorizontalAlignment::Center,
         };
 
-        subtitles.events.push(crate::Event {
-            start: cue.start_time,
-            end: cue.end_time,
+        subtitles.events.push(Event {
+            range: cue.start_time..cue.end_time,
             // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
             // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
-            alignment: crate::Alignment(horizontal_alignment, crate::VerticalAlignment::Top),
+            writing_direction: cue.writing_direction,
+            text_alignment: cue.text_alignment,
+            horizontal_alignment,
+            line: cue.line,
+            size,
+            x: x_position / 100.,
+            y: y_position / 100.,
             segments: convert_text(cue.text),
-            text_wrap: crate::TextWrapOptions::default(),
-            extra: crate::EventExtra::Vtt(VttEvent {
-                writing_direction: cue.writing_direction,
-                text_alignment: cue.text_alignment,
-                line: cue.line,
-                size,
-                x: x_position / 100.,
-                y: y_position / 100.,
-            }),
         });
     }
 
     subtitles
+}
+
+pub struct Layouter {
+    subtitles: Rc<Subtitles>,
+}
+
+impl Layouter {
+    pub fn new(subtitles: Rc<Subtitles>) -> Self {
+        Self { subtitles }
+    }
+
+    pub fn subtitles(&self) -> &Rc<Subtitles> {
+        &self.subtitles
+    }
+
+    pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
+        // TODO: This should actually be persisted between frames.
+        let mut output = Vec::new();
+
+        let style = {
+            let mut result = self.subtitles.root_style.clone();
+            result.set::<style::FontSize>(
+                // Standard says 5vh, but browser engines use 5vmin.
+                // See https://github.com/w3c/webvtt/issues/529
+                pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale(),
+            );
+            result
+        };
+
+        for event in &self.subtitles.events {
+            if !pass.add_event_range(event.range.clone()) {
+                continue;
+            }
+
+            let (pos, block) = event.layout(pass.sctx, pass.lctx, &style, &mut output)?;
+            pass.emit_fragment(pos, block);
+        }
+
+        Ok(())
+    }
 }

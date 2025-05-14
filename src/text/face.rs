@@ -454,7 +454,7 @@ unsafe fn build_font_metrics(
 struct Size {
     ft_size: FT_Size,
     metrics: FontMetrics,
-    scale: I26Dot6,
+    bitmap_scale: I26Dot6,
     point_size: I26Dot6,
     dpi: u32,
 }
@@ -495,24 +495,12 @@ impl Font {
 
         let dpi_scale = I26Dot6::from_quotient(dpi as i32, 72);
 
-        let (metrics, scale) = if unsafe {
-            (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) == 0
-        } {
-            unsafe {
-                fttry!(FT_Set_Char_Size(
-                    face,
-                    point_size.into_ft(),
-                    point_size.into_ft(),
-                    dpi,
-                    dpi
-                ))?;
-            }
+        let is_scalable = unsafe { (*face).face_flags & (FT_FACE_FLAG_SCALABLE as FT_Long) != 0 };
+        let has_bitmaps =
+            unsafe { (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) != 0 };
+        let mut bitmap_scale = I26Dot6::ONE;
 
-            (
-                unsafe { build_font_metrics(face, &(*size).metrics, I26Dot6::ONE, dpi_scale) },
-                I26Dot6::ONE,
-            )
-        } else {
+        if has_bitmaps {
             let sizes = unsafe {
                 std::slice::from_raw_parts_mut(
                     (*face).available_sizes,
@@ -538,15 +526,37 @@ impl Font {
             }
 
             #[allow(clippy::unnecessary_cast)]
-            let scale = I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
+            let new_scale =
+                I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
+            bitmap_scale = new_scale;
 
             unsafe {
                 fttry!(FT_Select_Size(face, picked_size_index as i32))?;
             }
+        }
 
-            (
-                unsafe { build_font_metrics(face, &(*size).metrics, scale, dpi_scale) },
-                scale,
+        if is_scalable {
+            unsafe {
+                fttry!(FT_Set_Char_Size(
+                    face,
+                    point_size.into_ft(),
+                    point_size.into_ft(),
+                    dpi,
+                    dpi
+                ))?;
+            }
+        };
+
+        let metrics = unsafe {
+            build_font_metrics(
+                face,
+                &(*size).metrics,
+                if is_scalable {
+                    I26Dot6::ONE
+                } else {
+                    bitmap_scale
+                },
+                dpi_scale,
             )
         };
 
@@ -556,7 +566,7 @@ impl Font {
             size: ManuallyDrop::new(Rc::new(Size {
                 ft_size: size,
                 metrics,
-                scale,
+                bitmap_scale,
                 point_size,
                 dpi,
             })),
@@ -931,7 +941,7 @@ impl Font {
             (*(*face).glyph).metrics
         };
 
-        let scale = self.size.scale;
+        let scale = self.size.bitmap_scale;
         if scale != I26Dot6::ONE {
             macro_rules! scale_field {
                 ($name: ident) => {
@@ -984,6 +994,7 @@ impl Font {
             let face = self.with_applied_size()?;
 
             fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
+            let is_bitmap;
             let glyph = {
                 let slot = (*face).glyph;
                 let mut glyph = {
@@ -992,20 +1003,29 @@ impl Font {
                     FtGlyph(glyph.assume_init())
                 };
 
-                fttry!(FT_Glyph_To_Bitmap(
-                    &mut glyph.0,
-                    FT_RENDER_MODE_NORMAL,
-                    &FT_Vector {
-                        x: offset.x.into_ft(),
-                        y: offset.y.into_ft()
-                    },
-                    1
-                ))?;
+                is_bitmap = (*glyph.0).format == FT_GLYPH_FORMAT_BITMAP;
+
+                if !is_bitmap {
+                    fttry!(FT_Glyph_To_Bitmap(
+                        &mut glyph.0,
+                        FT_RENDER_MODE_NORMAL,
+                        &FT_Vector {
+                            x: offset.x.into_ft(),
+                            y: offset.y.into_ft()
+                        },
+                        1
+                    ))?;
+                }
 
                 glyph
             };
 
-            let scale6 = self.size.scale.into_raw();
+            let scale = if is_bitmap {
+                self.size.bitmap_scale
+            } else {
+                I26Dot6::ONE
+            };
+            let scale6 = scale.into_raw();
 
             // I don't think this can happen but let's be safe
             if (*glyph.0).format != FT_GLYPH_FORMAT_BITMAP {
@@ -1049,7 +1069,7 @@ impl Font {
                                 bitmap.rows as u32,
                                 buffer_data,
                                 stride,
-                                self.size.scale,
+                                scale,
                                 scaled_width,
                                 scaled_height,
                             )

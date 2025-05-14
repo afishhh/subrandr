@@ -528,7 +528,11 @@ impl Font {
             let mut picked_size_index = 0usize;
             for (i, size) in sizes.iter().enumerate() {
                 #[allow(clippy::useless_conversion)] // c_ulong conversion
-                if i64::from(size.x_ppem) > ppem && size.x_ppem < sizes[picked_size_index].x_ppem {
+                if (i64::from(sizes[picked_size_index].x_ppem) < ppem
+                    && size.x_ppem > sizes[picked_size_index].x_ppem)
+                    || (i64::from(size.x_ppem) > ppem
+                        && size.x_ppem < sizes[picked_size_index].x_ppem)
+                {
                     picked_size_index = i;
                 }
             }

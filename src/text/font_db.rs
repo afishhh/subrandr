@@ -328,15 +328,19 @@ impl<'a> FontDb<'a> {
             return Ok(existing);
         }
 
+        trace!(self.sbr, "Querying font provider for font family {name:?}");
+
         let result = self
             .provider
             .query_family(name)
             .map_err(SelectError::Provider)?;
-        Ok(unsafe {
-            (*family_cache)
-                .entry(name.into())
-                .insert_entry(result)
-                .into_mut()
-        })
+
+        trace!(self.sbr, "Font family query {name:?} returned {result:?}");
+
+        Ok(self
+            .family_cache
+            .entry(name.into())
+            .insert_entry(result)
+            .into_mut())
     }
 }

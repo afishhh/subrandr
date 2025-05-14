@@ -39,7 +39,7 @@ jobs:
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
 
       - run: cargo fmt --all -- --check
-      - run: cargo check -p subrandr --all-features
+      - run: cargo clippy -p subrandr --all-features
       - run: cargo xtask install --prefix prefix
 
   check-wasi:
@@ -85,6 +85,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
       - shell: msys2 {0}
-        run: cargo check -p subrandr --all-features
+        run: cargo clippy -p subrandr --all-features
       - shell: msys2 {0}
         run: cargo xtask install --prefix prefix

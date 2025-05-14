@@ -805,6 +805,120 @@ pub struct SingleGlyphBitmap {
     pub texture: Texture,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum CopyPixelMode {
+    Mono8 = 0,
+    Bgra32 = 1,
+}
+
+const COPY_PIXEL_MODE_MONO8: u8 = CopyPixelMode::Mono8 as u8;
+const COPY_PIXEL_MODE_BGRA32: u8 = CopyPixelMode::Bgra32 as u8;
+
+fn copy_font_bitmap<const PIXEL_MODE: u8>(
+    input_data: *const u8,
+    input_stride: isize,
+    input_width: u32,
+    input_height: u32,
+    out_data: &mut [MaybeUninit<u8>],
+    out_stride: usize,
+    scale: I26Dot6,
+    out_width: u32,
+    out_height: u32,
+) {
+    const { assert!(PIXEL_MODE < 2) };
+
+    let pixel_width: u8 = match PIXEL_MODE {
+        COPY_PIXEL_MODE_MONO8 => 1,
+        COPY_PIXEL_MODE_BGRA32 => 4,
+        _ => unreachable!(),
+    };
+
+    let scale6 = scale.into_raw() as u32;
+    for biy in 0..out_height {
+        for bix in 0..out_width {
+            // TODO: replace with a macro?
+            let get_pixel_values = |x: u32, y: u32| -> [u8; 4] {
+                match PIXEL_MODE {
+                    COPY_PIXEL_MODE_MONO8 => [
+                        unsafe {
+                            input_data
+                                .offset(y as isize * input_stride + x as isize)
+                                .read()
+                        },
+                        0,
+                        0,
+                        0,
+                    ],
+                    COPY_PIXEL_MODE_BGRA32 => unsafe {
+                        input_data
+                            .offset(y as isize * input_stride + (x as isize) * 4)
+                            .cast::<[u8; 4]>()
+                            .read()
+                    },
+                    _ => unreachable!(),
+                }
+            };
+
+            let interpolate_pixel_values = |a: [u8; 4], fa: u32, b: [u8; 4], fb: u32| {
+                let mut r = [0; 4];
+                for i in 0..pixel_width as usize {
+                    r[i] = (((a[i] as u32 * fa) + (b[i] as u32 * fb)) >> 6) as u8;
+                }
+                r
+            };
+
+            let pixel_data = if scale6 == 64 {
+                get_pixel_values(bix, biy)
+            } else {
+                // bilinear scaling
+                let source_pixel_x6 = (bix << 12) / scale6;
+                let source_pixel_y6 = (biy << 12) / scale6;
+
+                let floor_x = source_pixel_x6 >> 6;
+                let floor_y = source_pixel_y6 >> 6;
+                let next_x = floor_x + 1;
+                let next_y = floor_y + 1;
+
+                let factor_floor_x = 64 - (source_pixel_x6 & 0x3F);
+                let factor_next_x = source_pixel_x6 & 0x3F;
+                let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
+                let factor_next_y = source_pixel_y6 & 0x3F;
+
+                if next_x >= input_width {
+                    if next_y >= input_height {
+                        get_pixel_values(floor_x, floor_y)
+                    } else {
+                        let a = get_pixel_values(floor_x, floor_y);
+                        let b = get_pixel_values(floor_x, next_y);
+                        interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+                    }
+                } else if next_y >= input_height {
+                    let a = get_pixel_values(floor_x, floor_y);
+                    let b = get_pixel_values(next_x, floor_y);
+                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+                } else {
+                    let a = {
+                        let a = get_pixel_values(floor_x, floor_y);
+                        let b = get_pixel_values(next_x, floor_y);
+                        interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
+                    };
+                    let b = {
+                        let a = get_pixel_values(floor_x, next_y);
+                        let b = get_pixel_values(next_x, next_y);
+                        interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
+                    };
+                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
+                }
+            };
+
+            let i = bix as usize * pixel_width as usize + biy as usize * out_stride;
+            out_data[i..i + pixel_width as usize].copy_from_slice(unsafe {
+                std::mem::transmute(&pixel_data[..pixel_width as usize])
+            });
+        }
+    }
+}
+
 impl Font {
     fn glyph_extents_uncached(&self, index: u32) -> Result<GlyphMetrics, FreeTypeError> {
         let face = self.with_applied_size()?;
@@ -911,113 +1025,40 @@ impl Font {
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
 
-            const MAX_PIXEL_WIDTH: usize = 4;
-
-            let pixel_width = match bitmap.pixel_mode.into() {
-                FT_PIXEL_MODE_GRAY => 1,
-                FT_PIXEL_MODE_BGRA => 4,
+            let pixel_mode = match bitmap.pixel_mode.into() {
+                FT_PIXEL_MODE_GRAY => CopyPixelMode::Mono8,
+                FT_PIXEL_MODE_BGRA => CopyPixelMode::Bgra32,
                 _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
             };
 
             let texture = rasterizer.create_texture_mapped(
                 scaled_width,
                 scaled_height,
-                if pixel_width == 1 {
-                    PixelFormat::Mono
-                } else {
+                if matches!(pixel_mode, CopyPixelMode::Bgra32) {
                     PixelFormat::Bgra
+                } else {
+                    PixelFormat::Mono
                 },
                 Box::new(|buffer_data, stride| {
-                    for biy in 0..scaled_height {
-                        for bix in 0..scaled_width {
-                            let get_pixel_values = |x: u32, y: u32| -> [u8; MAX_PIXEL_WIDTH] {
-                                let bpos = (y as i32 * bitmap.pitch) + (x * pixel_width) as i32;
-                                let bslice = std::slice::from_raw_parts(
-                                    bitmap.buffer.offset(bpos as isize),
-                                    pixel_width as usize,
-                                );
-                                let mut pixel_data: [u8; MAX_PIXEL_WIDTH] = [0; 4];
-                                pixel_data[..pixel_width as usize].copy_from_slice(bslice);
-                                pixel_data
-                            };
+                    macro_rules! copy_font_bitmap_with {
+                        ($pixel_mode: expr) => {
+                            copy_font_bitmap::<$pixel_mode>(
+                                bitmap.buffer.cast_const(),
+                                bitmap.pitch as isize,
+                                bitmap.width as u32,
+                                bitmap.rows as u32,
+                                buffer_data,
+                                stride,
+                                self.size.scale,
+                                scaled_width,
+                                scaled_height,
+                            )
+                        };
+                    }
 
-                            let interpolate_pixel_values =
-                                |a: [u8; MAX_PIXEL_WIDTH],
-                                 fa: u32,
-                                 b: [u8; MAX_PIXEL_WIDTH],
-                                 fb: u32| {
-                                    let mut r = [0; MAX_PIXEL_WIDTH];
-                                    for i in 0..pixel_width as usize {
-                                        r[i] =
-                                            (((a[i] as u32 * fa) + (b[i] as u32 * fb)) >> 6) as u8;
-                                    }
-                                    r
-                                };
-
-                            let pixel_data = if scale6 == 64 {
-                                get_pixel_values(bix, biy)
-                            } else {
-                                // bilinear scaling
-                                let source_pixel_x6 = (bix << 12) / scale6 as u32;
-                                let source_pixel_y6 = (biy << 12) / scale6 as u32;
-
-                                let floor_x = source_pixel_x6 >> 6;
-                                let floor_y = source_pixel_y6 >> 6;
-                                let next_x = floor_x + 1;
-                                let next_y = floor_y + 1;
-
-                                let factor_floor_x = 64 - (source_pixel_x6 & 0x3F);
-                                let factor_next_x = source_pixel_x6 & 0x3F;
-                                let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
-                                let factor_next_y = source_pixel_y6 & 0x3F;
-
-                                if next_x >= bitmap.width {
-                                    if next_y >= bitmap.rows {
-                                        get_pixel_values(floor_x, floor_y)
-                                    } else {
-                                        let a = get_pixel_values(floor_x, floor_y);
-                                        let b = get_pixel_values(floor_x, next_y);
-                                        interpolate_pixel_values(
-                                            a,
-                                            factor_floor_y,
-                                            b,
-                                            factor_next_y,
-                                        )
-                                    }
-                                } else if next_y >= bitmap.rows {
-                                    let a = get_pixel_values(floor_x, floor_y);
-                                    let b = get_pixel_values(next_x, floor_y);
-                                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                                } else {
-                                    let a = {
-                                        let a = get_pixel_values(floor_x, floor_y);
-                                        let b = get_pixel_values(next_x, floor_y);
-                                        interpolate_pixel_values(
-                                            a,
-                                            factor_floor_x,
-                                            b,
-                                            factor_next_x,
-                                        )
-                                    };
-                                    let b = {
-                                        let a = get_pixel_values(floor_x, next_y);
-                                        let b = get_pixel_values(next_x, next_y);
-                                        interpolate_pixel_values(
-                                            a,
-                                            factor_floor_x,
-                                            b,
-                                            factor_next_x,
-                                        )
-                                    };
-                                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                                }
-                            };
-
-                            let i = bix as usize * pixel_width as usize + biy as usize * stride;
-                            buffer_data[i..i + pixel_width as usize].copy_from_slice(
-                                std::mem::transmute(&pixel_data[..pixel_width as usize]),
-                            );
-                        }
+                    match pixel_mode {
+                        CopyPixelMode::Mono8 => copy_font_bitmap_with!(COPY_PIXEL_MODE_MONO8),
+                        CopyPixelMode::Bgra32 => copy_font_bitmap_with!(COPY_PIXEL_MODE_BGRA32),
                     }
                 }),
             );

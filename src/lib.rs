@@ -282,6 +282,14 @@ impl<'s, 'frame> FrameLayoutPass<'s, 'frame> {
         }
     }
 
+    fn add_animation_point(&mut self, point: u32) {
+        if point < self.t {
+            self.unchanged_range.start = self.unchanged_range.start.max(point);
+        } else {
+            self.unchanged_range.end = self.unchanged_range.end.min(point);
+        }
+    }
+
     fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
         self.fragments.push((pos, block));
     }

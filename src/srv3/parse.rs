@@ -133,6 +133,7 @@ impl Document {
 #[derive(Debug, Clone)]
 pub struct Segment {
     pen: &'static Pen,
+    pub time_offset: u32,
     pub text: String,
 }
 
@@ -490,6 +491,7 @@ fn parse_body(
 
     let mut current_event_pen = &Pen::DEFAULT;
     let mut current_segment_pen = current_event_pen;
+    let mut current_segment_time_offset = 0;
     let mut current_text = String::new();
     let mut current = None;
     let mut depth = 0;
@@ -591,16 +593,21 @@ fn parse_body(
                         if !current_text.is_empty() {
                             current.as_mut().unwrap().segments.push(Segment {
                                 pen: current_event_pen,
+                                time_offset: current_segment_time_offset,
                                 text: std::mem::take(&mut current_text),
                             });
                         }
 
                         current_segment_pen = current_event_pen;
+                        current_segment_time_offset = 0;
 
                         match_attributes! {
                             element.attributes(),
                             "p"(id: &str) => {
                                 set_or_log!(current_segment_pen, pens, id, non_existant_pen, "Pen");
+                            },
+                            "t"(time_offset: u32) => {
+                                current_segment_time_offset = time_offset;
                             },
                             else other => {
                                 warning!(
@@ -639,6 +646,7 @@ fn parse_body(
                 if !current_text.is_empty() {
                     current.as_mut().unwrap().segments.push(Segment {
                         pen: current_segment_pen,
+                        time_offset: current_segment_time_offset,
                         text: std::mem::take(&mut current_text),
                     });
                 }
@@ -648,6 +656,7 @@ fn parse_body(
                 if !current_text.is_empty() {
                     current.as_mut().unwrap().segments.push(Segment {
                         pen: current_event_pen,
+                        time_offset: current_segment_time_offset,
                         text: std::mem::take(&mut current_text),
                     });
                 }

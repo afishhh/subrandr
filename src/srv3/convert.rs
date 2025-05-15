@@ -9,7 +9,7 @@ use crate::{
         self,
         style::{self, StyleMap},
         BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText, LayoutConstraints,
-        LayoutContext, Point2L, Vec2L,
+        Point2L, Vec2L,
     },
     log::{log_once_state, warning},
     math::{I16Dot16, I26Dot6, Vec2f},
@@ -234,6 +234,7 @@ struct Event {
 struct Segment {
     base_style: StyleMap,
     font_size: u16,
+    time_offset: u32,
     text: Rc<str>,
     shadow: Srv3TextShadow,
     ruby: Ruby,
@@ -242,36 +243,44 @@ struct Segment {
 impl Event {
     pub fn layout(
         &self,
-        sub_context: &SubtitleContext,
-        context: &mut LayoutContext,
+        pass: &mut FrameLayoutPass,
         style: &StyleMap,
     ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
         let segments = self
             .segments
             .iter()
-            .map(|srv| InlineText {
-                style: {
-                    let mut result = srv.base_style.clone();
+            .filter_map(|segment| {
+                pass.add_animation_point(self.range.start + segment.time_offset);
 
-                    let mut size = pixels_to_points(font_size_to_pixels(srv.font_size) * 0.75)
-                        * font_scale_from_ctx(sub_context);
-                    if matches!(srv.ruby, Ruby::Over) {
-                        size /= 2.0;
-                    }
+                if segment.time_offset <= pass.t - self.range.start {
+                    Some(InlineText {
+                        style: {
+                            let mut result = segment.base_style.clone();
 
-                    result.set::<style::FontSize>(I26Dot6::from(size));
+                            let mut size =
+                                pixels_to_points(font_size_to_pixels(segment.font_size) * 0.75)
+                                    * font_scale_from_ctx(pass.sctx);
+                            if matches!(segment.ruby, Ruby::Over) {
+                                size /= 2.0;
+                            }
 
-                    let mut shadows = vec![];
-                    srv.shadow.to_css(sub_context, &mut shadows);
+                            result.set::<style::FontSize>(I26Dot6::from(size));
 
-                    if !shadows.is_empty() {
-                        result.set::<style::TextShadows>(shadows)
-                    }
+                            let mut shadows = vec![];
+                            segment.shadow.to_css(pass.sctx, &mut shadows);
 
-                    result
-                },
-                text: srv.text.clone(),
-                ruby: srv.ruby,
+                            if !shadows.is_empty() {
+                                result.set::<style::TextShadows>(shadows)
+                            }
+
+                            result
+                        },
+                        text: segment.text.clone(),
+                        ruby: segment.ruby,
+                    })
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -292,14 +301,14 @@ impl Event {
         };
 
         let constraints = LayoutConstraints {
-            size: Vec2L::new(sub_context.player_width() * 96 / 100, FixedL::MAX),
+            size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment = layout::layout(context, constraints, &block, style)?;
+        let fragment = layout::layout(pass.lctx, constraints, &block, style)?;
 
         let mut pos = Point2L::new(
-            (self.x * sub_context.player_width().into_f32()).into(),
-            (self.y * sub_context.player_height().into_f32()).into(),
+            (self.x * pass.sctx.player_width().into_f32()).into(),
+            (self.y * pass.sctx.player_height().into_f32()).into(),
         );
 
         match self.alignment.0 {
@@ -356,6 +365,7 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
     Segment {
         base_style: style,
         font_size: segment.pen().font_size,
+        time_offset: segment.time_offset,
         text: segment.text.as_str().into(),
         shadow: Srv3TextShadow {
             kind: segment.pen().edge_type,
@@ -495,7 +505,7 @@ impl Layouter {
                 continue;
             }
 
-            let (pos, block) = event.layout(pass.sctx, pass.lctx, &self.subtitles.root_style)?;
+            let (pos, block) = event.layout(pass, &self.subtitles.root_style)?;
             pass.emit_fragment(pos, block);
         }
 

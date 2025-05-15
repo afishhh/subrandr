@@ -6,15 +6,18 @@ use std::{ops::Range, rc::Rc};
 use crate::{
     color::BGRA8,
     layout::{
-        self,
-        style::{self, StyleMap},
-        BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText, LayoutConstraints,
-        Point2L, Vec2L,
+        self, BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText,
+        LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning},
     math::{I16Dot16, I26Dot6, Vec2f},
-    Alignment, FontSlant, FrameLayoutPass, HorizontalAlignment, Ruby, Subrandr, SubtitleContext,
-    TextShadow, VerticalAlignment,
+    renderer::FrameLayoutPass,
+    style::{
+        self,
+        types::{Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment},
+        StyleMap,
+    },
+    Subrandr, SubtitleContext,
 };
 
 use super::{Document, EdgeType, Pen, RubyPart};
@@ -436,42 +439,29 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
         }
 
         let alignment = match event.position().point {
-            super::Point::TopLeft => crate::Alignment(
-                crate::HorizontalAlignment::Left,
-                crate::VerticalAlignment::Top,
-            ),
-            super::Point::TopCenter => crate::Alignment(
-                crate::HorizontalAlignment::Center,
-                crate::VerticalAlignment::Top,
-            ),
-            super::Point::TopRight => crate::Alignment(
-                crate::HorizontalAlignment::Right,
-                crate::VerticalAlignment::Top,
-            ),
-            super::Point::MiddleLeft => crate::Alignment(
-                crate::HorizontalAlignment::Left,
-                crate::VerticalAlignment::Center,
-            ),
-            super::Point::MiddleCenter => crate::Alignment(
-                crate::HorizontalAlignment::Center,
-                crate::VerticalAlignment::Center,
-            ),
-            super::Point::MiddleRight => crate::Alignment(
-                crate::HorizontalAlignment::Right,
-                crate::VerticalAlignment::Center,
-            ),
-            super::Point::BottomLeft => crate::Alignment(
-                crate::HorizontalAlignment::Left,
-                crate::VerticalAlignment::Bottom,
-            ),
-            super::Point::BottomCenter => crate::Alignment(
-                crate::HorizontalAlignment::Center,
-                crate::VerticalAlignment::Bottom,
-            ),
-            super::Point::BottomRight => crate::Alignment(
-                crate::HorizontalAlignment::Right,
-                crate::VerticalAlignment::Bottom,
-            ),
+            super::Point::TopLeft => Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+            super::Point::TopCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Top)
+            }
+            super::Point::TopRight => Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
+            super::Point::MiddleLeft => {
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Center)
+            }
+            super::Point::MiddleCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Center)
+            }
+            super::Point::MiddleRight => {
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Center)
+            }
+            super::Point::BottomLeft => {
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom)
+            }
+            super::Point::BottomCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom)
+            }
+            super::Point::BottomRight => {
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom)
+            }
         };
 
         result.events.push(Event {
@@ -486,7 +476,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     result
 }
 
-pub struct Layouter {
+pub(crate) struct Layouter {
     subtitles: Rc<Subtitles>,
 }
 

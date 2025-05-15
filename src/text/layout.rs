@@ -5,8 +5,8 @@ use thiserror::Error;
 
 use crate::{
     math::{I26Dot6, Point2, Rect2, Vec2},
+    style::types::HorizontalAlignment,
     text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
-    HorizontalAlignment,
 };
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;

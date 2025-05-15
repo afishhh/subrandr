@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 
-use crate::{math::I16Dot16, I26Dot6};
+use crate::math::{I16Dot16, I26Dot6};
 
 use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontFallbackRequest, FontStyle};
 

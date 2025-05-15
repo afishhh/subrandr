@@ -3,9 +3,13 @@ use std::fmt::Debug;
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
 
 use crate::{
-    color::BGRA8, math::I16Dot16, text::layout::TextWrapMode, util::SmallTypeMap, FontSlant,
-    HorizontalAlignment, I26Dot6, TextDecorations, TextShadow,
+    color::BGRA8,
+    math::{I16Dot16, I26Dot6},
+    text::layout::TextWrapMode,
+    util::SmallTypeMap,
 };
+
+pub mod types;
 
 #[doc(hidden)]
 pub trait StyleValue: 'static {
@@ -219,13 +223,13 @@ make_keys! {
     pub struct FontFamily: Vec<Box<str>>;
     #[copy] pub struct FontWeight: I16Dot16;
     #[copy] pub struct FontSize: I26Dot6;
-    #[copy] pub struct FontStyle: FontSlant;
+    #[copy] pub struct FontStyle: types::FontSlant;
 
-    #[copy] pub struct TextAlign: HorizontalAlignment;
+    #[copy] pub struct TextAlign: types::HorizontalAlignment;
     #[inherit(list)]
-    pub struct TextShadows: Vec<TextShadow>;
+    pub struct TextShadows: Vec<types::TextShadow>;
     #[inherit(no)]
-    pub struct TextDecoration: TextDecorations;
+    pub struct TextDecoration: types::TextDecorations;
 
     #[copy] pub struct TextWrapStyle: TextWrapMode;
     #[copy] pub struct LineBreak: LineBreakStrictness;

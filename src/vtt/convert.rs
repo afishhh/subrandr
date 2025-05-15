@@ -3,14 +3,18 @@ use std::{ops::Range, rc::Rc};
 use crate::{
     color::BGRA8,
     layout::{
-        self,
-        style::{self, StyleMap},
-        BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
+        self, BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
         InlineText, LineBoxFragment, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
     math::{I16Dot16, Point2, Rect2},
-    vtt, FontSlant, FrameLayoutPass, HorizontalAlignment, Subrandr, SubtitleContext,
+    renderer::FrameLayoutPass,
+    style::{
+        self,
+        types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
+        StyleMap,
+    },
+    vtt, Subrandr, SubtitleContext,
 };
 
 #[derive(Debug)]
@@ -104,7 +108,7 @@ impl Event {
         &self,
         sctx: &SubtitleContext,
         lctx: &mut layout::LayoutContext<'_, '_>,
-        style: &layout::style::StyleMap,
+        style: &style::StyleMap,
         output: &mut Vec<Rect2<FixedL>>,
     ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
         let mut fragment = layout::layout(
@@ -391,15 +395,12 @@ impl TextConverter {
                         self.style.set::<style::FontWeight>(I16Dot16::new(700))
                     }
                     vtt::InternalNodeKind::Underline => {
-                        self.style
-                            .set::<style::TextDecoration>(crate::TextDecorations {
-                                underline: true,
-                                underline_color: self
-                                    .style
-                                    .get_copy_or::<style::Color>(BGRA8::WHITE),
-                                strike_out: false,
-                                strike_out_color: BGRA8::ZERO,
-                            })
+                        self.style.set::<style::TextDecoration>(TextDecorations {
+                            underline: true,
+                            underline_color: self.style.get_copy_or::<style::Color>(BGRA8::WHITE),
+                            strike_out: false,
+                            strike_out_color: BGRA8::ZERO,
+                        })
                     }
                     _ => (),
                 }
@@ -434,7 +435,7 @@ impl TextConverter {
             }
             vtt::Node::Text(text) => self.segments.push(InlineText {
                 style: self.style.clone(),
-                ruby: crate::Ruby::None,
+                ruby: Ruby::None,
                 text: text.content().into(),
             }),
             vtt::Node::Timestamp(_) => (),
@@ -567,7 +568,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
     subtitles
 }
 
-pub struct Layouter {
+pub(crate) struct Layouter {
     subtitles: Rc<Subtitles>,
 }
 

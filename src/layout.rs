@@ -1,22 +1,22 @@
 use std::rc::Rc;
 
+use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
+use thiserror::Error;
+
 use crate::{
     color::BGRA8,
-    math::{I16Dot16, Point2, Vec2},
+    math::{I16Dot16, I26Dot6, Point2, Vec2},
+    style::{
+        self,
+        types::{FontSlant, HorizontalAlignment, Ruby, TextStyle},
+        CascadingStyleMap, StyleMap,
+    },
     text::{
         self,
         layout::{MultilineTextShaper, TextWrapMode, TextWrapOptions},
         FontArena, FontDb,
     },
-    FontSlant, HorizontalAlignment, I26Dot6, Ruby, TextStyle,
 };
-
-use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
-use thiserror::Error;
-
-use style::{CascadingStyleMap, StyleMap};
-
-pub mod style;
 
 // Layout engine coordinate space:
 // Vec2::x, Point2::x = inline axis
@@ -277,7 +277,7 @@ mod test {
 
     use super::{
         layout,
-        style::{self, StyleMap},
+        style::{self, types::Ruby, StyleMap},
         BlockContainer, FixedL, InlineContainer, InlineText, LayoutConstraints, LayoutContext,
         Vec2L,
     };
@@ -292,7 +292,7 @@ mod test {
                     contents: vec![InlineText {
                         style: StyleMap::new(),
                         text: "hello world".into(),
-                        ruby: crate::Ruby::None,
+                        ruby: Ruby::None,
                     }],
                 },
                 InlineContainer {
@@ -300,7 +300,7 @@ mod test {
                     contents: vec![InlineText {
                         style: StyleMap::new(),
                         text: "this is a separate inline container".into(),
-                        ruby: crate::Ruby::None,
+                        ruby: Ruby::None,
                     }],
                 },
             ],

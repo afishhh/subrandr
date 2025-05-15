@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::Hash, path::PathBuf};
 
 use thiserror::Error;
 
-use crate::{math::I16Dot16, text, trace, util::AnyError, Subrandr};
+use crate::{log::trace, math::I16Dot16, text, util::AnyError, Subrandr};
 
 use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 

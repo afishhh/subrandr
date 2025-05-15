@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::I26Dot6;
+use crate::math::I26Dot6;
 
 use super::{font_match::FontMatchIterator, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError};
 

@@ -403,7 +403,6 @@ impl PerfStats {
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     pub(crate) fonts: text::FontDb<'a>,
-    dpi: u32,
     perf: PerfStats,
 
     unchanged_range: Range<u32>,
@@ -429,7 +428,6 @@ impl<'a> Renderer<'a> {
         Self {
             sbr,
             fonts: text::FontDb::new(sbr).unwrap(),
-            dpi: 0,
             perf: PerfStats::new(),
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
@@ -551,8 +549,6 @@ impl Renderer<'_> {
 
         self.perf.start_frame();
         self.fonts.advance_cache_generation();
-
-        self.dpi = ctx.dpi;
 
         let subtitle_class_name = self.layouter.as_ref().map_or("none", |layouter| {
             let this = &layouter;

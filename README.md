@@ -81,10 +81,10 @@ int main() {
     exit(1);
   }
 
+  sbr_renderer_set_subtitles(renderer, subs);
   if(sbr_renderer_render(
     renderer,
     &ctx,
-    subs,
     t,
     pixel_buffer,
     width,

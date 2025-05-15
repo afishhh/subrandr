@@ -550,6 +550,11 @@ impl Renderer<'_> {
         self.perf.start_frame();
         self.fonts.advance_cache_generation();
 
+        let ctx = SubtitleContext {
+            dpi: self.sbr.debug.dpi_override.unwrap_or(ctx.dpi),
+            ..*ctx
+        };
+
         let subtitle_class_name = self.layouter.as_ref().map_or("none", |layouter| {
             let this = &layouter;
             match this {
@@ -566,7 +571,7 @@ impl Renderer<'_> {
         self.perf.start_layout();
         let fragments = {
             let mut pass = FrameLayoutPass {
-                sctx: ctx,
+                sctx: &ctx,
                 lctx: &mut LayoutContext {
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
@@ -589,7 +594,7 @@ impl Renderer<'_> {
 
         {
             let mut pass = FrameRenderPass {
-                sctx: ctx,
+                sctx: &ctx,
                 fonts: &mut self.fonts,
                 rasterizer,
             };

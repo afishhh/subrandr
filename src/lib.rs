@@ -28,6 +28,7 @@ struct DebugFlags {
     draw_version_string: bool,
     draw_perf_info: bool,
     draw_layout_info: bool,
+    dpi_override: Option<u32>,
 }
 
 impl DebugFlags {
@@ -40,7 +41,15 @@ impl DebugFlags {
                     "draw_version" => result.draw_version_string = true,
                     "draw_perf" => result.draw_perf_info = true,
                     "draw_layout" => result.draw_layout_info = true,
-                    _ => (),
+                    #[allow(clippy::single_match)]
+                    _ => match token.split_once("=") {
+                        Some(("override_dpi", value_str)) => {
+                            if let Ok(value) = value_str.parse::<u32>() {
+                                result.dpi_override = Some(value)
+                            }
+                        }
+                        _ => (),
+                    },
                 }
             }
         }

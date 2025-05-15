@@ -623,25 +623,6 @@ impl Font {
         &self.size.metrics
     }
 
-    // TODO: Make these result in Fixed<> values
-    pub fn horizontal_extents(&self) -> hb_font_extents_t {
-        let mut result = MaybeUninit::uninit();
-        unsafe {
-            assert!(hb_font_get_h_extents(self.hb_font, result.as_mut_ptr()) > 0);
-            result.assume_init()
-        }
-    }
-
-    // TODO: Vertical text is not supported yet
-    #[expect(dead_code)]
-    pub fn vertical_extents(&self) -> hb_font_extents_t {
-        let mut result = MaybeUninit::uninit();
-        unsafe {
-            assert!(hb_font_get_v_extents(self.hb_font, result.as_mut_ptr()) > 0);
-            result.assume_init()
-        }
-    }
-
     pub fn face(&self) -> &Face {
         unsafe { std::mem::transmute(self) }
     }

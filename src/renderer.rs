@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     color::BGRA8,
-    layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L},
+    layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
     math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
     rasterize::{self, Rasterizer, RenderTarget},
@@ -121,8 +121,7 @@ impl FrameRenderPass<'_, '_> {
     fn debug_text(
         &mut self,
         target: &mut RenderTarget,
-        x: i32,
-        y: i32,
+        pos: Point2L,
         text: &str,
         alignment: Alignment,
         size: I26Dot6,
@@ -138,15 +137,15 @@ impl FrameRenderPass<'_, '_> {
             self.fonts,
         )?;
         let glyphs = text::simple_shape_text(matches.iterator(), &font_arena, text, self.fonts)?;
-        let (ox, oy) = Self::translate_for_aligned_text(
-            match matches.primary(&font_arena, self.fonts)? {
-                Some(font) => font,
-                None => return Ok(()),
-            },
-            true,
-            &text::compute_extents_ex(true, &glyphs)?,
-            alignment,
-        );
+        let final_pos = pos
+            + Self::translate_for_aligned_text(
+                match matches.primary(&font_arena, self.fonts)? {
+                    Some(font) => font,
+                    None => return Ok(()),
+                },
+                &text::compute_extents_ex(true, &glyphs)?,
+                alignment,
+            );
 
         let image = text::render(
             self.rasterizer,
@@ -154,36 +153,38 @@ impl FrameRenderPass<'_, '_> {
             I26Dot6::ZERO,
             &GlyphString::from_glyphs(text, glyphs),
         )?;
-        image.blit(self.rasterizer, target, x + ox, y + oy, color);
+        image.blit(
+            self.rasterizer,
+            target,
+            final_pos.x.round_to_inner(),
+            final_pos.y.round_to_inner(),
+            color,
+        );
 
         Ok(())
     }
 
     fn translate_for_aligned_text(
         font: &text::Font,
-        horizontal: bool,
         extents: &TextMetrics,
         alignment: Alignment,
-    ) -> (i32, i32) {
-        assert!(horizontal);
-
+    ) -> Vec2L {
         let Alignment(horizontal, vertical) = alignment;
 
+        let width = extents.paint_size.x + extents.trailing_advance;
         let ox = match horizontal {
-            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
-            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
-            HorizontalAlignment::Right => (-extents.paint_size.x
-                + I26Dot6::from_raw(font.horizontal_extents().descender))
-            .trunc_to_inner(),
+            HorizontalAlignment::Left => FixedL::ZERO,
+            HorizontalAlignment::Center => -width / 2,
+            HorizontalAlignment::Right => -width,
         };
 
         let oy = match vertical {
-            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
-            VerticalAlignment::Center => 0,
-            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
+            VerticalAlignment::Top => font.metrics().ascender / 64,
+            VerticalAlignment::Center => FixedL::ZERO,
+            VerticalAlignment::Bottom => font.metrics().descender / 64,
         };
 
-        (ox, oy)
+        Vec2L::new(ox, oy)
     }
 
     fn draw_text_full(
@@ -608,8 +609,7 @@ impl Renderer<'_> {
                 let mut y = debug_line_height;
                 pass.debug_text(
                     target,
-                    0,
-                    y.round_to_inner(),
+                    Point2L::new(FixedL::ZERO, y),
                     concat!(
                         "subrandr ",
                         env!("CARGO_PKG_VERSION"),
@@ -624,8 +624,7 @@ impl Renderer<'_> {
 
                 pass.debug_text(
                     target,
-                    0,
-                    y.round_to_inner(),
+                    Point2L::new(FixedL::ZERO, y),
                     &format!("subtitle class: {subtitle_class_name}"),
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                     debug_font_size,
@@ -636,8 +635,7 @@ impl Renderer<'_> {
                 let rasterizer_line = format!("rasterizer: {}", pass.rasterizer.name());
                 pass.debug_text(
                     target,
-                    0,
-                    y.round_to_inner(),
+                    Point2L::new(FixedL::ZERO, y),
                     &rasterizer_line,
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                     debug_font_size,
@@ -648,8 +646,7 @@ impl Renderer<'_> {
                 if let Some(adapter_line) = pass.rasterizer.adapter_info_string() {
                     pass.debug_text(
                         target,
-                        0,
-                        y.round_to_inner(),
+                        Point2L::new(FixedL::ZERO, y),
                         &adapter_line,
                         Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                         debug_font_size,
@@ -663,8 +660,7 @@ impl Renderer<'_> {
                 let mut y = debug_line_height;
                 pass.debug_text(
                     target,
-                    (ctx.padding_left + ctx.video_width).round_to_inner(),
-                    y.round_to_inner(),
+                    Point2L::new(ctx.padding_left + ctx.video_width, y),
                     &format!(
                         "{:.2}x{:.2} dpi:{}",
                         ctx.video_width, ctx.video_height, ctx.dpi
@@ -677,8 +673,7 @@ impl Renderer<'_> {
 
                 pass.debug_text(
                     target,
-                    (ctx.padding_left + ctx.video_width).round_to_inner(),
-                    y.round_to_inner(),
+                    Point2L::new(ctx.padding_left + ctx.video_width, y),
                     &format!(
                         "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                         ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
@@ -697,8 +692,7 @@ impl Renderer<'_> {
 
                             pass.debug_text(
                                 target,
-                                (ctx.padding_left + ctx.video_width).round_to_inner(),
-                                y.round_to_inner(),
+                                Point2L::new(ctx.padding_left + ctx.video_width, y),
                                 &format!(
                                 "{name} min={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
                                 min,
@@ -724,8 +718,7 @@ impl Renderer<'_> {
                     if let Some(last) = self.perf.whole.last() {
                         pass.debug_text(
                             target,
-                            (ctx.padding_left + ctx.video_width).round_to_inner(),
-                            y.round_to_inner(),
+                            Point2L::new(ctx.padding_left + ctx.video_width, y),
                             &format!("last={:.1}ms ({:.1}/s)", last, 1000.0 / last),
                             Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                             debug_font_size,
@@ -805,8 +798,10 @@ impl Renderer<'_> {
                 if self.sbr.debug.draw_layout_info {
                     pass.debug_text(
                         target,
-                        (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
-                        (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
+                        Point2L::new(
+                            final_total_rect.min.x + final_total_rect.width() / 2,
+                            final_total_rect.min.y + total_position_debug_pos.0,
+                        ),
                         &format!(
                             "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
                             final_total_rect.x(),
@@ -858,14 +853,13 @@ impl Renderer<'_> {
                         for &(offset, ref text) in &line.children {
                             let current = current + offset;
 
-                            let final_logical_box =
-                                convert_rect(Rect2::from_min_size(current, text.fbox.size));
-
                             if self.sbr.debug.draw_layout_info {
+                                let final_logical_box =
+                                    Rect2::from_min_size(current, text.fbox.size);
+
                                 pass.debug_text(
                                     target,
-                                    final_logical_box.min.x as i32,
-                                    final_logical_box.min.y as i32,
+                                    final_logical_box.min,
                                     &format!("{:.0},{:.0}", current.x, current.y),
                                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
                                     debug_font_size,
@@ -874,8 +868,7 @@ impl Renderer<'_> {
 
                                 pass.debug_text(
                                     target,
-                                    final_logical_box.min.x as i32,
-                                    final_logical_box.max.y as i32,
+                                    Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
                                     &format!("{:.1}", offset.x + text.baseline_offset.x),
                                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                                     debug_font_size,
@@ -884,8 +877,7 @@ impl Renderer<'_> {
 
                                 pass.debug_text(
                                     target,
-                                    final_logical_box.max.x as i32,
-                                    final_logical_box.min.y as i32,
+                                    Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
                                     &format!("{:.0}pt", text.style.font_size),
                                     Alignment(
                                         HorizontalAlignment::Right,
@@ -895,17 +887,19 @@ impl Renderer<'_> {
                                     BGRA8::GOLD,
                                 )?;
 
+                                let final_logical_boxf = convert_rect(final_logical_box);
+
                                 pass.rasterizer.stroke_axis_aligned_rect(
                                     target,
-                                    final_logical_box,
+                                    final_logical_boxf,
                                     BGRA8::BLUE,
                                 );
 
                                 pass.rasterizer.horizontal_line(
                                     target,
                                     (current.y + text.baseline_offset.y).into_f32(),
-                                    final_logical_box.min.x,
-                                    final_logical_box.max.x,
+                                    final_logical_boxf.min.x,
+                                    final_logical_boxf.max.x,
                                     BGRA8::GREEN,
                                 );
                             }

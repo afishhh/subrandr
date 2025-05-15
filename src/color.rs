@@ -29,6 +29,8 @@ impl BGRA8 {
 
     pub const ZERO: Self = Self::new(0, 0, 0, 0);
 
+    pub const ORANGERED: Self = Self::new(0xFF, 0x45, 0x00, 255);
+
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }

@@ -10,7 +10,7 @@ use std::{
     rc::Rc,
 };
 
-use layout::{BlockContainerFragment, LayoutContext, Point2L};
+use layout::{BlockContainerFragment, FixedL, LayoutContext, Point2L};
 use thiserror::Error;
 
 use color::BGRA8;
@@ -203,34 +203,38 @@ impl log::AsLogger for Subrandr {
     }
 }
 
-struct PerfStats {
-    start: std::time::Instant,
-    times: VecDeque<f32>,
-    times_sum: f32,
+struct PerfTimes {
+    frames: VecDeque<f32>,
+    sum: f32,
 }
 
-impl PerfStats {
+impl PerfTimes {
     fn new() -> Self {
         Self {
-            start: std::time::Instant::now(),
-            times: VecDeque::new(),
-            times_sum: 0.0,
+            frames: VecDeque::new(),
+            sum: 0.0,
         }
     }
 
-    fn start_frame(&mut self) {
-        self.start = std::time::Instant::now();
+    fn add(&mut self, duration: std::time::Duration) -> f32 {
+        let time = duration.as_secs_f32() * 1000.;
+        if self.frames.len() >= 100 {
+            self.sum -= self.frames.pop_front().unwrap();
+        }
+        self.frames.push_back(time);
+        self.sum += time;
+        time
     }
 
     fn avg_frame_time(&self) -> f32 {
-        self.times_sum / self.times.len() as f32
+        self.sum / self.frames.len() as f32
     }
 
     fn minmax_frame_times(&self) -> (f32, f32) {
         let mut min = f32::MAX;
         let mut max = f32::MIN;
 
-        for time in self.times.iter() {
+        for time in self.frames.iter() {
             min = min.min(*time);
             max = max.max(*time);
         }
@@ -238,15 +242,66 @@ impl PerfStats {
         (min, max)
     }
 
+    fn last(&self) -> Option<f32> {
+        self.frames.back().copied()
+    }
+}
+
+struct PerfStats {
+    start: std::time::Instant,
+
+    layout_start: std::time::Instant,
+    layout_end: std::time::Instant,
+    debug_raster_end: std::time::Instant,
+
+    whole: PerfTimes,
+    layout: PerfTimes,
+    debug_raster: PerfTimes,
+    raster: PerfTimes,
+}
+
+impl PerfStats {
+    fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            start: now,
+            layout_start: now,
+            layout_end: now,
+            debug_raster_end: now,
+            whole: PerfTimes::new(),
+            layout: PerfTimes::new(),
+            debug_raster: PerfTimes::new(),
+            raster: PerfTimes::new(),
+        }
+    }
+
+    fn start_frame(&mut self) {
+        self.start = std::time::Instant::now();
+    }
+
+    fn start_layout(&mut self) {
+        self.layout_start = std::time::Instant::now();
+    }
+
+    fn end_layout(&mut self) {
+        self.layout_end = std::time::Instant::now();
+    }
+
+    fn end_debug_raster(&mut self) {
+        self.debug_raster_end = std::time::Instant::now();
+    }
+
     fn end_frame(&mut self) -> f32 {
         let end = std::time::Instant::now();
-        let time = (end - self.start).as_secs_f32() * 1000.;
-        if self.times.len() >= 100 {
-            self.times_sum -= self.times.pop_front().unwrap();
-        }
-        self.times.push_back(time);
-        self.times_sum += time;
-        time
+        self.layout.add(self.layout_end - self.layout_start);
+        self.debug_raster
+            .add(self.debug_raster_end - self.layout_end);
+        self.raster.add(end - self.debug_raster_end);
+        self.whole.add(end - self.start)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.whole.frames.is_empty()
     }
 }
 
@@ -263,7 +318,7 @@ pub struct FrameLayoutPass<'s, 'frame> {
     fragments: Vec<(Point2L, BlockContainerFragment)>,
 }
 
-impl<'s, 'frame> FrameLayoutPass<'s, 'frame> {
+impl FrameLayoutPass<'_, '_> {
     fn add_event_range(&mut self, event: Range<u32>) -> bool {
         let r = self.unchanged_range.clone();
 
@@ -292,6 +347,193 @@ impl<'s, 'frame> FrameLayoutPass<'s, 'frame> {
 
     fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
         self.fragments.push((pos, block));
+    }
+}
+
+pub struct FrameRenderPass<'s, 'frame> {
+    sctx: &'frame SubtitleContext,
+    fonts: &'frame mut text::FontDb<'s>,
+    rasterizer: &'frame mut dyn Rasterizer,
+}
+
+impl FrameRenderPass<'_, '_> {
+    fn debug_text(
+        &mut self,
+        target: &mut RenderTarget,
+        x: i32,
+        y: i32,
+        text: &str,
+        alignment: Alignment,
+        size: I26Dot6,
+        color: BGRA8,
+    ) -> Result<(), RenderError> {
+        let font_arena = FontArena::new();
+        let matches = text::FontMatcher::match_all(
+            ["monospace"],
+            text::FontStyle::default(),
+            size,
+            self.sctx.dpi,
+            &font_arena,
+            self.fonts,
+        )?;
+        let glyphs = text::simple_shape_text(matches.iterator(), &font_arena, text, self.fonts)?;
+        let (ox, oy) = Self::translate_for_aligned_text(
+            match matches.primary(&font_arena, self.fonts)? {
+                Some(font) => font,
+                None => return Ok(()),
+            },
+            true,
+            &text::compute_extents_ex(true, &glyphs)?,
+            alignment,
+        );
+
+        let image = text::render(
+            self.rasterizer,
+            I26Dot6::ZERO,
+            I26Dot6::ZERO,
+            &GlyphString::from_glyphs(text, glyphs),
+        )?;
+        image.blit(self.rasterizer, target, x + ox, y + oy, color);
+
+        Ok(())
+    }
+
+    fn translate_for_aligned_text(
+        font: &text::Font,
+        horizontal: bool,
+        extents: &TextMetrics,
+        alignment: Alignment,
+    ) -> (i32, i32) {
+        assert!(horizontal);
+
+        let Alignment(horizontal, vertical) = alignment;
+
+        let ox = match horizontal {
+            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
+            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
+            HorizontalAlignment::Right => (-extents.paint_size.x
+                + I26Dot6::from_raw(font.horizontal_extents().descender))
+            .trunc_to_inner(),
+        };
+
+        let oy = match vertical {
+            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
+            VerticalAlignment::Center => 0,
+            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
+        };
+
+        (ox, oy)
+    }
+
+    fn draw_text_full(
+        &mut self,
+        target: &mut RenderTarget,
+        x: I26Dot6,
+        y: I26Dot6,
+        glyphs: &GlyphString<'_, Rc<str>>,
+        color: BGRA8,
+        decoration: &TextDecorations,
+        shadows: &[TextShadow],
+    ) -> Result<(), RenderError> {
+        if glyphs.is_empty() {
+            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
+            return Ok(());
+        }
+
+        let image = text::render(self.rasterizer, x.fract(), y.fract(), glyphs)?;
+
+        let mut blurs = HashMap::new();
+
+        // TODO: This should also draw an offset underline I think and possibly strike through?
+        for shadow in shadows.iter().rev() {
+            if shadow.color.a > 0 {
+                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
+                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
+                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
+                    // ... by applying to the shadow a Gaussian blur with a standard deviation
+                    // equal to half the blur radius.
+                    let sigma = shadow.blur_radius / 2;
+
+                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
+                        let offset = image.prepare_for_blur(self.rasterizer, sigma.into_f32());
+                        let padding = self.rasterizer.blur_padding();
+                        (
+                            self.rasterizer.blur_to_mono_texture(),
+                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
+                        )
+                    });
+
+                    self.rasterizer.blit(
+                        target,
+                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
+                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
+                        blurred,
+                        shadow.color,
+                    );
+                } else {
+                    let monochrome = image.monochrome(self.rasterizer);
+                    monochrome.blit(
+                        self.rasterizer,
+                        target,
+                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
+                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
+                        shadow.color,
+                    );
+                }
+            }
+        }
+
+        let text_end_x = {
+            let mut end_x = x;
+
+            // TODO: Should this somehow ignore trailing advance?
+            //       The issue with that is that it causes issues with cross-segment decorations
+            //       so it would have to take those into account.
+            for glyph in glyphs.iter_glyphs() {
+                end_x += glyph.x_advance;
+            }
+
+            end_x
+        };
+
+        image.blit(
+            self.rasterizer,
+            target,
+            x.trunc_to_inner(),
+            y.trunc_to_inner(),
+            color,
+        );
+
+        // FIXME: This should use the main font for the segment, not the font
+        //        of the first glyph..
+        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
+
+        if decoration.underline {
+            let thickness = font_metrics.underline_thickness;
+            self.rasterizer.fill_axis_aligned_antialias_rect(
+                target,
+                Rect2::new(
+                    Point2::new(x.into_f32(), y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
+                ),
+                decoration.underline_color,
+            );
+        }
+
+        if decoration.strike_out {
+            let strike_y = y + font_metrics.strikeout_top_offset;
+            let thickness = font_metrics.strikeout_thickness;
+            self.rasterizer.fill_axis_aligned_antialias_rect(
+                target,
+                Rect2::new(
+                    Point2::new(x.into_f32(), strike_y.into_f32()),
+                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
+                ),
+                decoration.strike_out_color,
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -395,188 +637,6 @@ pub enum RenderError {
 }
 
 impl Renderer<'_> {
-    fn debug_text(
-        &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        x: i32,
-        y: i32,
-        text: &str,
-        alignment: Alignment,
-        size: I26Dot6,
-        color: BGRA8,
-    ) -> Result<(), RenderError> {
-        let font_arena = FontArena::new();
-        let matches = text::FontMatcher::match_all(
-            ["monospace"],
-            text::FontStyle::default(),
-            size,
-            self.dpi,
-            &font_arena,
-            &mut self.fonts,
-        )?;
-        let glyphs =
-            text::simple_shape_text(matches.iterator(), &font_arena, text, &mut self.fonts)?;
-        let (ox, oy) = Self::translate_for_aligned_text(
-            match matches.primary(&font_arena, &mut self.fonts)? {
-                Some(font) => font,
-                None => return Ok(()),
-            },
-            true,
-            &text::compute_extents_ex(true, &glyphs)?,
-            alignment,
-        );
-
-        let image = text::render(
-            rasterizer,
-            I26Dot6::ZERO,
-            I26Dot6::ZERO,
-            &GlyphString::from_glyphs(text, glyphs),
-        )?;
-        image.blit(rasterizer, target, x + ox, y + oy, color);
-
-        Ok(())
-    }
-
-    fn translate_for_aligned_text(
-        font: &text::Font,
-        horizontal: bool,
-        extents: &TextMetrics,
-        alignment: Alignment,
-    ) -> (i32, i32) {
-        assert!(horizontal);
-
-        let Alignment(horizontal, vertical) = alignment;
-
-        let ox = match horizontal {
-            HorizontalAlignment::Left => -font.horizontal_extents().descender / 64 / 2,
-            HorizontalAlignment::Center => -extents.paint_size.x.trunc_to_inner() / 2,
-            HorizontalAlignment::Right => (-extents.paint_size.x
-                + I26Dot6::from_raw(font.horizontal_extents().descender))
-            .trunc_to_inner(),
-        };
-
-        let oy = match vertical {
-            VerticalAlignment::Top => font.horizontal_extents().ascender / 64,
-            VerticalAlignment::Center => 0,
-            VerticalAlignment::Bottom => font.horizontal_extents().descender / 64,
-        };
-
-        (ox, oy)
-    }
-
-    fn draw_text_full(
-        &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        x: I26Dot6,
-        y: I26Dot6,
-        glyphs: &GlyphString<'_, Rc<str>>,
-        color: BGRA8,
-        decoration: &TextDecorations,
-        shadows: &[TextShadow],
-    ) -> Result<(), RenderError> {
-        if glyphs.is_empty() {
-            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
-            return Ok(());
-        }
-
-        let image = text::render(rasterizer, x.fract(), y.fract(), glyphs)?;
-
-        let mut blurs = HashMap::new();
-
-        // TODO: This should also draw an offset underline I think and possibly strike through?
-        for shadow in shadows.iter().rev() {
-            if shadow.color.a > 0 {
-                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
-                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
-                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
-                    // ... by applying to the shadow a Gaussian blur with a standard deviation
-                    // equal to half the blur radius.
-                    let sigma = shadow.blur_radius / 2;
-
-                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
-                        let offset = image.prepare_for_blur(rasterizer, sigma.into_f32());
-                        let padding = rasterizer.blur_padding();
-                        (
-                            rasterizer.blur_to_mono_texture(),
-                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
-                        )
-                    });
-
-                    rasterizer.blit(
-                        target,
-                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
-                        blurred,
-                        shadow.color,
-                    );
-                } else {
-                    let monochrome = image.monochrome(rasterizer);
-                    monochrome.blit(
-                        rasterizer,
-                        target,
-                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
-                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
-                        shadow.color,
-                    );
-                }
-            }
-        }
-
-        let text_end_x = {
-            let mut end_x = x;
-
-            // TODO: Should this somehow ignore trailing advance?
-            //       The issue with that is that it causes issues with cross-segment decorations
-            //       so it would have to take those into account.
-            for glyph in glyphs.iter_glyphs() {
-                end_x += glyph.x_advance;
-            }
-
-            end_x
-        };
-
-        image.blit(
-            rasterizer,
-            target,
-            x.trunc_to_inner(),
-            y.trunc_to_inner(),
-            color,
-        );
-
-        // FIXME: This should use the main font for the segment, not the font
-        //        of the first glyph..
-        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
-
-        if decoration.underline {
-            let thickness = font_metrics.underline_thickness;
-            rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
-                ),
-                decoration.underline_color,
-            );
-        }
-
-        if decoration.strike_out {
-            let strike_y = y + font_metrics.strikeout_top_offset;
-            let thickness = font_metrics.strikeout_thickness;
-            rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), strike_y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
-                ),
-                decoration.strike_out_color,
-            );
-        }
-
-        Ok(())
-    }
-
     pub fn render(
         &mut self,
         ctx: &SubtitleContext,
@@ -644,151 +704,7 @@ impl Renderer<'_> {
             "rendering frame (class={subtitle_class_name} ctx={ctx:?} t={t}ms)",
         );
 
-        // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
-        //        to a subtitle renderer so this doesn't work.
-        let debug_font_size = I26Dot6::new(16);
-        let debug_line_height = I26Dot6::new(20) * ctx.pixel_scale();
-
-        if self.sbr.debug.draw_version_string {
-            self.debug_text(
-                rasterizer,
-                target,
-                0,
-                0,
-                concat!(
-                    "subrandr ",
-                    env!("CARGO_PKG_VERSION"),
-                    " rev ",
-                    env!("BUILD_REV")
-                ),
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
-                BGRA8::WHITE,
-            )?;
-
-            self.debug_text(
-                rasterizer,
-                target,
-                0,
-                debug_line_height.round_to_inner(),
-                &format!("subtitle class: {subtitle_class_name}"),
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
-                BGRA8::WHITE,
-            )?;
-
-            let rasterizer_line = format!("rasterizer: {}", rasterizer.name());
-            self.debug_text(
-                rasterizer,
-                target,
-                0,
-                (debug_line_height * 2).round_to_inner(),
-                &rasterizer_line,
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                debug_font_size,
-                BGRA8::WHITE,
-            )?;
-
-            if let Some(adapter_line) = rasterizer.adapter_info_string() {
-                self.debug_text(
-                    rasterizer,
-                    target,
-                    0,
-                    (debug_line_height * 3).round_to_inner(),
-                    &adapter_line,
-                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    debug_font_size,
-                    BGRA8::WHITE,
-                )?;
-            }
-        }
-
-        if self.sbr.debug.draw_perf_info {
-            self.debug_text(
-                rasterizer,
-                target,
-                (ctx.padding_left + ctx.video_width).round_to_inner(),
-                debug_line_height.round_to_inner(),
-                &format!(
-                    "{:.2}x{:.2} dpi:{}",
-                    ctx.video_width, ctx.video_height, ctx.dpi
-                ),
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                debug_font_size,
-                BGRA8::WHITE,
-            )?;
-
-            self.debug_text(
-                rasterizer,
-                target,
-                (ctx.padding_left + ctx.video_width).round_to_inner(),
-                (debug_line_height * 2).round_to_inner(),
-                &format!(
-                    "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
-                    ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
-                ),
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                debug_font_size,
-                BGRA8::WHITE,
-            )?;
-
-            if !self.perf.times.is_empty() {
-                let (min, max) = self.perf.minmax_frame_times();
-                let avg = self.perf.avg_frame_time();
-
-                self.debug_text(
-                    rasterizer,
-                    target,
-                    (ctx.padding_left + ctx.video_width).round_to_inner(),
-                    (debug_line_height * 3).round_to_inner(),
-                    &format!(
-                        "min={:.1}ms avg={:.1}ms ({:.1}fps) max={:.1}ms ({:.1}fps)",
-                        min,
-                        avg,
-                        1000.0 / avg,
-                        max,
-                        1000.0 / max
-                    ),
-                    Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                    debug_font_size,
-                    BGRA8::WHITE,
-                )?;
-
-                if let Some(&last) = self.perf.times.iter().last() {
-                    self.debug_text(
-                        rasterizer,
-                        target,
-                        (ctx.padding_left + ctx.video_width).round_to_inner(),
-                        (debug_line_height * 4).round_to_inner(),
-                        &format!("last={:.1}ms ({:.1}fps)", last, 1000.0 / last),
-                        Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                        debug_font_size,
-                        BGRA8::WHITE,
-                    )?;
-                }
-
-                let graph_width = I26Dot6::new(300) * ctx.pixel_scale();
-                let graph_height = I26Dot6::new(50) * ctx.pixel_scale();
-                let offx = (ctx.padding_left + ctx.video_width - graph_width).round_to_inner();
-                let mut polyline = vec![];
-                for (i, time) in self.perf.times.iter().copied().enumerate() {
-                    let x = (graph_width * i as i32 / self.perf.times.len() as i32).into_f32();
-                    let y = -(graph_height * time / max).into_f32();
-                    polyline.push(Point2f::new(x, y));
-                }
-
-                rasterizer.stroke_polyline(
-                    target,
-                    Vec2::new(
-                        offx as f32,
-                        ((debug_line_height * 5.5) + graph_height).into_f32(),
-                    ),
-                    &polyline,
-                    BGRA8::new(255, 255, 0, 255),
-                );
-            }
-        }
-
+        self.perf.start_layout();
         let fragments = {
             let mut pass = FrameLayoutPass {
                 sctx: ctx,
@@ -810,161 +726,336 @@ impl Renderer<'_> {
             self.unchanged_range = pass.unchanged_range;
             pass.fragments
         };
+        self.perf.end_layout();
 
-        for &(pos, ref fragment) in &fragments {
-            let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
-
-            if self.sbr.debug.draw_layout_info {
-                rasterizer.stroke_axis_aligned_rect(
-                    target,
-                    Rect2::new(
-                        Point2::new(
-                            final_total_rect.min.x.into_f32() - 1.,
-                            final_total_rect.min.y.into_f32() - 1.,
-                        ),
-                        Point2::new(
-                            final_total_rect.max.x.into_f32() + 2.,
-                            final_total_rect.max.y.into_f32() + 2.,
-                        ),
-                    ),
-                    BGRA8::MAGENTA,
-                );
-            }
-
-            let total_position_debug_pos = match VerticalAlignment::Top {
-                VerticalAlignment::Top => (
-                    fragment.fbox.size.y + 20,
-                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                ),
-                VerticalAlignment::Center => (
-                    fragment.fbox.size.y + 20,
-                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                ),
-                VerticalAlignment::Bottom => (
-                    I26Dot6::new(-24),
-                    Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
-                ),
+        {
+            let mut pass = FrameRenderPass {
+                sctx: ctx,
+                fonts: &mut self.fonts,
+                rasterizer,
             };
 
-            if self.sbr.debug.draw_layout_info {
-                self.debug_text(
-                    rasterizer,
+            // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
+            //        to a subtitle renderer so this doesn't work.
+            let debug_font_size = I26Dot6::new(16);
+            let debug_line_height = FixedL::new(20) * ctx.pixel_scale();
+
+            if self.sbr.debug.draw_version_string {
+                let mut y = debug_line_height;
+                pass.debug_text(
                     target,
-                    (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
-                    (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
-                    &format!(
-                        "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
-                        final_total_rect.x(),
-                        final_total_rect.y(),
-                        final_total_rect.width(),
-                        final_total_rect.height()
+                    0,
+                    y.round_to_inner(),
+                    concat!(
+                        "subrandr ",
+                        env!("CARGO_PKG_VERSION"),
+                        " rev ",
+                        env!("BUILD_REV")
                     ),
-                    total_position_debug_pos.1,
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                     debug_font_size,
-                    BGRA8::MAGENTA,
+                    BGRA8::WHITE,
                 )?;
-            }
+                y += debug_line_height;
 
-            // TODO: A trait for casting these types?
-            fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
-                Rect2::new(
-                    Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
-                    Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
-                )
-            }
+                pass.debug_text(
+                    target,
+                    0,
+                    y.round_to_inner(),
+                    &format!("subtitle class: {subtitle_class_name}"),
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                    debug_font_size,
+                    BGRA8::WHITE,
+                )?;
+                y += debug_line_height;
 
-            for &(offset, ref container) in &fragment.children {
-                let current = pos + offset;
+                let rasterizer_line = format!("rasterizer: {}", pass.rasterizer.name());
+                pass.debug_text(
+                    target,
+                    0,
+                    y.round_to_inner(),
+                    &rasterizer_line,
+                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                    debug_font_size,
+                    BGRA8::WHITE,
+                )?;
+                y += debug_line_height;
 
-                for &(offset, ref line) in &container.lines {
-                    let current = current + offset;
-
-                    for &(offset, ref text) in &line.children {
-                        let current = current + offset;
-
-                        if text.style.background_color.a != 0 {
-                            // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
-                            rasterizer.fill_axis_aligned_rect(
-                                target,
-                                convert_rect(Rect2::from_min_size(current, text.fbox.size)),
-                                text.style.background_color,
-                            );
-                        }
-                    }
+                if let Some(adapter_line) = pass.rasterizer.adapter_info_string() {
+                    pass.debug_text(
+                        target,
+                        0,
+                        y.round_to_inner(),
+                        &adapter_line,
+                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                        debug_font_size,
+                        BGRA8::WHITE,
+                    )?;
+                    y += debug_line_height;
                 }
             }
 
-            for &(offset, ref container) in &fragment.children {
-                let current = pos + offset;
+            if self.sbr.debug.draw_perf_info {
+                let mut y = debug_line_height;
+                pass.debug_text(
+                    target,
+                    (ctx.padding_left + ctx.video_width).round_to_inner(),
+                    y.round_to_inner(),
+                    &format!(
+                        "{:.2}x{:.2} dpi:{}",
+                        ctx.video_width, ctx.video_height, ctx.dpi
+                    ),
+                    Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
+                    debug_font_size,
+                    BGRA8::WHITE,
+                )?;
+                y += debug_line_height;
 
-                for &(offset, ref line) in &container.lines {
-                    let current = current + offset;
+                pass.debug_text(
+                    target,
+                    (ctx.padding_left + ctx.video_width).round_to_inner(),
+                    y.round_to_inner(),
+                    &format!(
+                        "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
+                        ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
+                    ),
+                    Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
+                    debug_font_size,
+                    BGRA8::WHITE,
+                )?;
+                y += debug_line_height;
 
-                    for &(offset, ref text) in &line.children {
-                        let current = current + offset;
+                if !self.perf.is_empty() {
+                    let mut draw_times =
+                        |name: &str, times: &PerfTimes| -> Result<(), RenderError> {
+                            let (min, max) = times.minmax_frame_times();
+                            let avg = times.avg_frame_time();
 
-                        let final_logical_box =
-                            convert_rect(Rect2::from_min_size(current, text.fbox.size));
-
-                        if self.sbr.debug.draw_layout_info {
-                            self.debug_text(
-                                rasterizer,
+                            pass.debug_text(
                                 target,
-                                final_logical_box.min.x as i32,
-                                final_logical_box.min.y as i32,
-                                &format!("{:.0},{:.0}", current.x, current.y),
-                                Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
+                                (ctx.padding_left + ctx.video_width).round_to_inner(),
+                                y.round_to_inner(),
+                                &format!(
+                                "{name} min={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
+                                min,
+                                avg,
+                                1000.0 / avg,
+                                max,
+                                1000.0 / max
+                            ),
+                                Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
                                 debug_font_size,
-                                BGRA8::RED,
+                                BGRA8::WHITE,
                             )?;
+                            y += debug_line_height;
 
-                            self.debug_text(
-                                rasterizer,
-                                target,
-                                final_logical_box.min.x as i32,
-                                final_logical_box.max.y as i32,
-                                &format!("{:.1}", offset.x + text.baseline_offset.x),
-                                Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                                debug_font_size,
-                                BGRA8::RED,
-                            )?;
+                            Ok(())
+                        };
 
-                            self.debug_text(
-                                rasterizer,
-                                target,
-                                final_logical_box.max.x as i32,
-                                final_logical_box.min.y as i32,
-                                &format!("{:.0}pt", text.style.font_size),
-                                Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
-                                debug_font_size,
-                                BGRA8::GOLD,
-                            )?;
+                    draw_times("whole", &self.perf.whole)?;
+                    draw_times("layout", &self.perf.layout)?;
+                    draw_times("raster", &self.perf.raster)?;
+                    draw_times("draster", &self.perf.debug_raster)?;
 
-                            rasterizer.stroke_axis_aligned_rect(
-                                target,
-                                final_logical_box,
-                                BGRA8::BLUE,
-                            );
+                    if let Some(last) = self.perf.whole.last() {
+                        pass.debug_text(
+                            target,
+                            (ctx.padding_left + ctx.video_width).round_to_inner(),
+                            y.round_to_inner(),
+                            &format!("last={:.1}ms ({:.1}/s)", last, 1000.0 / last),
+                            Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
+                            debug_font_size,
+                            BGRA8::WHITE,
+                        )?;
+                    }
+                    y += debug_line_height;
 
-                            rasterizer.horizontal_line(
-                                target,
-                                (current.y + text.baseline_offset.y).into_f32(),
-                                final_logical_box.min.x,
-                                final_logical_box.max.x,
-                                BGRA8::GREEN,
-                            );
+                    let wmax = self.perf.whole.minmax_frame_times().1;
+                    let lmax = self.perf.layout.minmax_frame_times().1;
+                    let rmax = self.perf.raster.minmax_frame_times().1;
+                    let gmax = wmax.max(lmax).max(rmax);
+
+                    let graph_width = I26Dot6::new(400) * ctx.pixel_scale();
+                    let graph_height = I26Dot6::new(50) * ctx.pixel_scale();
+                    let offx = ctx.padding_left + ctx.video_width - graph_width;
+
+                    let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
+                        let mut polyline = vec![];
+                        for (i, time) in times.frames.iter().copied().enumerate() {
+                            let x = (graph_width * i as i32 / times.frames.len() as i32).into_f32();
+                            let y = -(graph_height * time / gmax).into_f32();
+                            polyline.push(Point2f::new(x, y));
                         }
 
-                        self.draw_text_full(
-                            rasterizer,
+                        pass.rasterizer.stroke_polyline(
                             target,
-                            current.x + text.baseline_offset.x,
-                            current.y + text.baseline_offset.y,
-                            text.glyphs(),
-                            text.style.color,
-                            &text.style.decorations,
-                            &text.style.shadows,
-                        )?;
+                            Vec2::new(offx.into_f32(), (y + graph_height).into_f32()),
+                            &polyline,
+                            color,
+                        );
+                    };
+
+                    draw_polyline(&self.perf.whole, BGRA8::YELLOW);
+                    draw_polyline(&self.perf.layout, BGRA8::CYAN);
+                    draw_polyline(&self.perf.raster, BGRA8::ORANGERED);
+                    y += graph_height;
+                }
+            }
+            self.perf.end_debug_raster();
+
+            for &(pos, ref fragment) in &fragments {
+                let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
+
+                if self.sbr.debug.draw_layout_info {
+                    pass.rasterizer.stroke_axis_aligned_rect(
+                        target,
+                        Rect2::new(
+                            Point2::new(
+                                final_total_rect.min.x.into_f32() - 1.,
+                                final_total_rect.min.y.into_f32() - 1.,
+                            ),
+                            Point2::new(
+                                final_total_rect.max.x.into_f32() + 2.,
+                                final_total_rect.max.y.into_f32() + 2.,
+                            ),
+                        ),
+                        BGRA8::MAGENTA,
+                    );
+                }
+
+                let total_position_debug_pos = match VerticalAlignment::Top {
+                    VerticalAlignment::Top => (
+                        fragment.fbox.size.y + 20,
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                    ),
+                    VerticalAlignment::Center => (
+                        fragment.fbox.size.y + 20,
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
+                    ),
+                    VerticalAlignment::Bottom => (
+                        I26Dot6::new(-24),
+                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
+                    ),
+                };
+
+                if self.sbr.debug.draw_layout_info {
+                    pass.debug_text(
+                        target,
+                        (final_total_rect.min.x + final_total_rect.width() / 2).trunc_to_inner(),
+                        (final_total_rect.min.y + total_position_debug_pos.0).trunc_to_inner(),
+                        &format!(
+                            "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
+                            final_total_rect.x(),
+                            final_total_rect.y(),
+                            final_total_rect.width(),
+                            final_total_rect.height()
+                        ),
+                        total_position_debug_pos.1,
+                        debug_font_size,
+                        BGRA8::MAGENTA,
+                    )?;
+                }
+
+                // TODO: A trait for casting these types?
+                fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
+                    Rect2::new(
+                        Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
+                        Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
+                    )
+                }
+
+                for &(offset, ref container) in &fragment.children {
+                    let current = pos + offset;
+
+                    for &(offset, ref line) in &container.lines {
+                        let current = current + offset;
+
+                        for &(offset, ref text) in &line.children {
+                            let current = current + offset;
+
+                            if text.style.background_color.a != 0 {
+                                // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
+                                pass.rasterizer.fill_axis_aligned_rect(
+                                    target,
+                                    convert_rect(Rect2::from_min_size(current, text.fbox.size)),
+                                    text.style.background_color,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                for &(offset, ref container) in &fragment.children {
+                    let current = pos + offset;
+
+                    for &(offset, ref line) in &container.lines {
+                        let current = current + offset;
+
+                        for &(offset, ref text) in &line.children {
+                            let current = current + offset;
+
+                            let final_logical_box =
+                                convert_rect(Rect2::from_min_size(current, text.fbox.size));
+
+                            if self.sbr.debug.draw_layout_info {
+                                pass.debug_text(
+                                    target,
+                                    final_logical_box.min.x as i32,
+                                    final_logical_box.min.y as i32,
+                                    &format!("{:.0},{:.0}", current.x, current.y),
+                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
+                                    debug_font_size,
+                                    BGRA8::RED,
+                                )?;
+
+                                pass.debug_text(
+                                    target,
+                                    final_logical_box.min.x as i32,
+                                    final_logical_box.max.y as i32,
+                                    &format!("{:.1}", offset.x + text.baseline_offset.x),
+                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                                    debug_font_size,
+                                    BGRA8::RED,
+                                )?;
+
+                                pass.debug_text(
+                                    target,
+                                    final_logical_box.max.x as i32,
+                                    final_logical_box.min.y as i32,
+                                    &format!("{:.0}pt", text.style.font_size),
+                                    Alignment(
+                                        HorizontalAlignment::Right,
+                                        VerticalAlignment::Bottom,
+                                    ),
+                                    debug_font_size,
+                                    BGRA8::GOLD,
+                                )?;
+
+                                pass.rasterizer.stroke_axis_aligned_rect(
+                                    target,
+                                    final_logical_box,
+                                    BGRA8::BLUE,
+                                );
+
+                                pass.rasterizer.horizontal_line(
+                                    target,
+                                    (current.y + text.baseline_offset.y).into_f32(),
+                                    final_logical_box.min.x,
+                                    final_logical_box.max.x,
+                                    BGRA8::GREEN,
+                                );
+                            }
+
+                            pass.draw_text_full(
+                                target,
+                                current.x + text.baseline_offset.x,
+                                current.y + text.baseline_offset.y,
+                                text.glyphs(),
+                                text.style.color,
+                                &text.style.decorations,
+                                &text.style.shadows,
+                            )?;
+                        }
                     }
                 }
             }

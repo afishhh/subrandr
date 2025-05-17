@@ -1,4 +1,4 @@
-use std::{ops::Range, rc::Rc};
+use std::{collections::HashMap, ops::Range, rc::Rc};
 
 /// Converts parsed SRV3 subtitles into Subtitles.
 ///
@@ -218,18 +218,57 @@ impl Srv3TextShadow {
     }
 }
 
-#[derive(Debug)]
-pub struct Subtitles {
-    root_style: StyleMap,
-    events: Vec<Event>,
+impl super::Point {
+    pub fn to_alignment(self) -> Alignment {
+        match self {
+            super::Point::TopLeft => Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+            super::Point::TopCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Top)
+            }
+            super::Point::TopRight => Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
+            super::Point::MiddleLeft => {
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Center)
+            }
+            super::Point::MiddleCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Center)
+            }
+            super::Point::MiddleRight => {
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Center)
+            }
+            super::Point::BottomLeft => {
+                Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom)
+            }
+            super::Point::BottomCenter => {
+                Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom)
+            }
+            super::Point::BottomRight => {
+                Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
-struct Event {
+pub struct Subtitles {
+    root_style: StyleMap,
+    windows: Vec<Window>,
+}
+
+#[derive(Debug)]
+struct Window {
     x: f32,
     y: f32,
+    // TODO: What the heck does this do
+    //       How does a timestamp on a window work?
+    //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
     alignment: Alignment,
+    events: Vec<WindowEvent>,
+}
+
+#[derive(Debug)]
+struct WindowEvent {
+    range: Range<u32>,
     segments: Vec<Segment>,
 }
 
@@ -243,49 +282,73 @@ struct Segment {
     ruby: Ruby,
 }
 
-impl Event {
+fn segments_to_inline(
+    pass: &mut FrameLayoutPass,
+    event_time: u32,
+    segments: &[Segment],
+) -> Vec<InlineText> {
+    segments
+        .iter()
+        .filter_map(|segment| {
+            pass.add_animation_point(event_time + segment.time_offset);
+
+            if segment.time_offset <= pass.t - event_time {
+                Some(InlineText {
+                    style: {
+                        let mut result = segment.base_style.clone();
+
+                        let mut size =
+                            pixels_to_points(font_size_to_pixels(segment.font_size) * 0.75)
+                                * font_scale_from_ctx(pass.sctx);
+                        if matches!(segment.ruby, Ruby::Over) {
+                            size /= 2.0;
+                        }
+
+                        result.set::<style::FontSize>(I26Dot6::from(size));
+
+                        let mut shadows = vec![];
+                        segment.shadow.to_css(pass.sctx, &mut shadows);
+
+                        if !shadows.is_empty() {
+                            result.set::<style::TextShadows>(shadows)
+                        }
+
+                        result
+                    },
+                    text: segment.text.clone(),
+                    ruby: segment.ruby,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
         style: &StyleMap,
-    ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
-        let segments = self
-            .segments
+    ) -> Result<Option<(Point2L, layout::BlockContainerFragment)>, layout::InlineLayoutError> {
+        let contents: Vec<InlineContainer> = self
+            .events
             .iter()
-            .filter_map(|segment| {
-                pass.add_animation_point(self.range.start + segment.time_offset);
-
-                if segment.time_offset <= pass.t - self.range.start {
-                    Some(InlineText {
-                        style: {
-                            let mut result = segment.base_style.clone();
-
-                            let mut size =
-                                pixels_to_points(font_size_to_pixels(segment.font_size) * 0.75)
-                                    * font_scale_from_ctx(pass.sctx);
-                            if matches!(segment.ruby, Ruby::Over) {
-                                size /= 2.0;
-                            }
-
-                            result.set::<style::FontSize>(I26Dot6::from(size));
-
-                            let mut shadows = vec![];
-                            segment.shadow.to_css(pass.sctx, &mut shadows);
-
-                            if !shadows.is_empty() {
-                                result.set::<style::TextShadows>(shadows)
-                            }
-
-                            result
-                        },
-                        text: segment.text.clone(),
-                        ruby: segment.ruby,
+            .filter_map(|line| {
+                if pass.add_event_range(line.range.clone()) {
+                    Some(InlineContainer {
+                        contents: segments_to_inline(pass, line.range.start, &line.segments),
+                        ..InlineContainer::default()
                     })
                 } else {
                     None
                 }
             })
             .collect();
+
+        if contents.is_empty() {
+            return Ok(None);
+        }
 
         let block = BlockContainer {
             style: {
@@ -297,10 +360,7 @@ impl Event {
 
                 result
             },
-            contents: vec![InlineContainer {
-                contents: segments,
-                ..InlineContainer::default()
-            }],
+            contents,
         };
 
         let constraints = LayoutConstraints {
@@ -326,7 +386,7 @@ impl Event {
             VerticalAlignment::Bottom => pos.y -= fragment.fbox.size.y,
         }
 
-        Ok((pos, fragment))
+        Ok(Some((pos, fragment)))
     }
 }
 
@@ -381,21 +441,25 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut result = Subtitles {
         root_style: pen_to_size_independent_styles(&Pen::DEFAULT, true),
-        events: vec![],
+        windows: Vec::new(),
     };
 
-    log_once_state!(ruby_under_unsupported, window_unsupported);
+    log_once_state!(ruby_under_unsupported);
+
+    let mut wname_to_index = HashMap::new();
+    for (name, window) in document.windows() {
+        wname_to_index.insert(&**name, result.windows.len());
+        result.windows.push(Window {
+            x: convert_coordinate(window.position().x as f32),
+            y: convert_coordinate(window.position().y as f32),
+            range: window.time..window.time + window.duration,
+            alignment: window.position().point.to_alignment(),
+            events: Vec::new(),
+        });
+    }
 
     for event in document.events() {
         let mut segments = vec![];
-
-        if event.window_id.is_some() {
-            warning!(
-                sbr,
-                once(window_unsupported),
-                "Explicit windows on events are not supported yet"
-            )
-        }
 
         let mut it = event.segments.iter();
         'segment_loop: while let Some(segment) = it.next() {
@@ -438,39 +502,28 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
             segments.push(convert_segment(segment, Ruby::None));
         }
 
-        let alignment = match event.position().point {
-            super::Point::TopLeft => Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-            super::Point::TopCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Top)
-            }
-            super::Point::TopRight => Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-            super::Point::MiddleLeft => {
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Center)
-            }
-            super::Point::MiddleCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Center)
-            }
-            super::Point::MiddleRight => {
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Center)
-            }
-            super::Point::BottomLeft => {
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom)
-            }
-            super::Point::BottomCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom)
-            }
-            super::Point::BottomRight => {
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom)
-            }
-        };
-
-        result.events.push(Event {
-            x: convert_coordinate(event.position().x as f32),
-            y: convert_coordinate(event.position().y as f32),
-            range: event.time..event.time + event.duration,
-            alignment,
-            segments,
-        })
+        if let Some(&widx) = event
+            .window_id
+            .as_ref()
+            .and_then(|wname| wname_to_index.get(&**wname))
+        {
+            let window = &mut result.windows[widx];
+            window.events.push(WindowEvent {
+                range: event.time..event.time + event.duration,
+                segments,
+            });
+        } else {
+            result.windows.push(Window {
+                x: convert_coordinate(event.position().x as f32),
+                y: convert_coordinate(event.position().y as f32),
+                range: event.time..event.time + event.duration,
+                alignment: event.position().point.to_alignment(),
+                events: vec![WindowEvent {
+                    range: event.time..event.time + event.duration,
+                    segments,
+                }],
+            });
+        }
     }
 
     result
@@ -490,15 +543,15 @@ impl Layouter {
     }
 
     pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
-        for event in &self.subtitles.events {
-            if !pass.add_event_range(event.range.clone()) {
+        for window in &self.subtitles.windows {
+            if !pass.add_event_range(window.range.clone()) {
                 continue;
             }
 
-            let (pos, block) = event.layout(pass, &self.subtitles.root_style)?;
-            pass.emit_fragment(pos, block);
+            if let Some((pos, block)) = window.layout(pass, &self.subtitles.root_style)? {
+                pass.emit_fragment(pos, block);
+            }
         }
-
         Ok(())
     }
 }

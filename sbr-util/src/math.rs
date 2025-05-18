@@ -52,7 +52,7 @@ impl<N: Debug> Debug for Point2<N> {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Vec2<N> {
     pub x: N,

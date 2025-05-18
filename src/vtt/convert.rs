@@ -13,7 +13,7 @@ use crate::{
     style::{
         self,
         types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
-        StyleMap,
+        ComputedStyle, StyleMap,
     },
     vtt, Subrandr, SubtitleContext,
 };
@@ -121,17 +121,17 @@ impl Event {
                 style: {
                     let mut result = StyleMap::new();
                     result.set::<style::TextAlign>(self.horizontal_alignment);
-                    result
+                    result;
+                    todo!()
                 },
                 contents: vec![InlineContainer {
-                    style: StyleMap::new(),
+                    style: ComputedStyle::default(),
                     contents: self.segments.clone(),
                 }],
             },
-            style,
         )?;
 
-        let container = Rc::make_mut(&mut fragment.children[0].1);
+        let container = &mut fragment.children[0].1;
 
         let lines = &mut container.lines;
         if lines.is_empty() {
@@ -195,7 +195,7 @@ impl Event {
         output: &[Rect2<FixedL>],
         ctx: &SubtitleContext,
         result: &mut Point2L,
-        lines: &mut Vec<(Vec2L, Rc<LineBoxFragment>)>,
+        lines: &mut Vec<(Vec2L, LineBoxFragment)>,
         total_rect: Rect2<FixedL>,
         extra: &Event,
     ) {
@@ -378,26 +378,25 @@ impl Event {
 
 // TODO: Ruby
 struct TextConverter {
-    style: StyleMap,
     segments: Vec<InlineText>,
 }
 
 impl TextConverter {
-    fn process_node(&mut self, node: &vtt::Node) {
+    fn process_node(&mut self, node: &vtt::Node, style: ComputedStyle) {
         match node {
             vtt::Node::Internal(internal) => {
-                let old = self.style.clone();
+                let mut style = StyleMap::new();
                 match internal.kind {
                     vtt::InternalNodeKind::Italic => {
-                        self.style.set::<style::FontStyle>(FontSlant::Italic)
+                        style.set::<style::FontStyle>(FontSlant::Italic)
                     }
                     vtt::InternalNodeKind::Bold => {
-                        self.style.set::<style::FontWeight>(I16Dot16::new(700))
+                        style.set::<style::FontWeight>(I16Dot16::new(700))
                     }
                     vtt::InternalNodeKind::Underline => {
-                        self.style.set::<style::TextDecoration>(TextDecorations {
+                        style.set::<style::TextDecoration>(TextDecorations {
                             underline: true,
-                            underline_color: self.style.get_copy_or::<style::Color>(BGRA8::WHITE),
+                            underline_color: style.get_copy_or::<style::Color>(BGRA8::WHITE),
                             strike_out: false,
                             strike_out_color: BGRA8::ZERO,
                         })
@@ -407,34 +406,32 @@ impl TextConverter {
 
                 for class in internal.classes.iter() {
                     match class {
-                        "white" => self.style.set::<style::Color>(BGRA8::WHITE),
-                        "lime" => self.style.set::<style::Color>(BGRA8::LIME),
-                        "cyan" => self.style.set::<style::Color>(BGRA8::CYAN),
-                        "red" => self.style.set::<style::Color>(BGRA8::RED),
-                        "yellow" => self.style.set::<style::Color>(BGRA8::YELLOW),
-                        "magenta" => self.style.set::<style::Color>(BGRA8::MAGENTA),
-                        "blue" => self.style.set::<style::Color>(BGRA8::BLUE),
-                        "black" => self.style.set::<style::Color>(BGRA8::BLACK),
-                        "bg_white" => self.style.set::<style::BackgroundColor>(BGRA8::WHITE),
-                        "bg_lime" => self.style.set::<style::BackgroundColor>(BGRA8::LIME),
-                        "bg_cyan" => self.style.set::<style::BackgroundColor>(BGRA8::CYAN),
-                        "bg_red" => self.style.set::<style::BackgroundColor>(BGRA8::RED),
-                        "bg_yellow" => self.style.set::<style::BackgroundColor>(BGRA8::YELLOW),
-                        "bg_magenta" => self.style.set::<style::BackgroundColor>(BGRA8::MAGENTA),
-                        "bg_blue" => self.style.set::<style::BackgroundColor>(BGRA8::BLUE),
-                        "bg_black" => self.style.set::<style::BackgroundColor>(BGRA8::BLACK),
+                        "white" => style.set::<style::Color>(BGRA8::WHITE),
+                        "lime" => style.set::<style::Color>(BGRA8::LIME),
+                        "cyan" => style.set::<style::Color>(BGRA8::CYAN),
+                        "red" => style.set::<style::Color>(BGRA8::RED),
+                        "yellow" => style.set::<style::Color>(BGRA8::YELLOW),
+                        "magenta" => style.set::<style::Color>(BGRA8::MAGENTA),
+                        "blue" => style.set::<style::Color>(BGRA8::BLUE),
+                        "black" => style.set::<style::Color>(BGRA8::BLACK),
+                        "bg_white" => style.set::<style::BackgroundColor>(BGRA8::WHITE),
+                        "bg_lime" => style.set::<style::BackgroundColor>(BGRA8::LIME),
+                        "bg_cyan" => style.set::<style::BackgroundColor>(BGRA8::CYAN),
+                        "bg_red" => style.set::<style::BackgroundColor>(BGRA8::RED),
+                        "bg_yellow" => style.set::<style::BackgroundColor>(BGRA8::YELLOW),
+                        "bg_magenta" => style.set::<style::BackgroundColor>(BGRA8::MAGENTA),
+                        "bg_blue" => style.set::<style::BackgroundColor>(BGRA8::BLUE),
+                        "bg_black" => style.set::<style::BackgroundColor>(BGRA8::BLACK),
                         _ => (),
                     }
                 }
 
                 for child in &internal.children {
-                    self.process_node(child);
+                    self.process_node(child, todo!());
                 }
-
-                self.style = old;
             }
             vtt::Node::Text(text) => self.segments.push(InlineText {
-                style: self.style.clone(),
+                style: style.clone(),
                 ruby: Ruby::None,
                 text: text.content().into(),
             }),
@@ -445,12 +442,11 @@ impl TextConverter {
 
 fn convert_text(text: &str) -> Vec<InlineText> {
     let mut converter = TextConverter {
-        style: StyleMap::new(),
         segments: Vec::new(),
     };
 
     for node in vtt::parse_cue_text(text) {
-        converter.process_node(&node);
+        converter.process_node(&node, ComputedStyle::default());
     }
 
     converter.segments
@@ -467,7 +463,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
         root_style: {
             let mut result = StyleMap::new();
 
-            result.set::<style::FontFamily>(vec!["sans-serif".into()]);
+            result.set::<style::FontFamily>(Rc::new(["sans-serif".into()]));
             result.set::<style::Color>(BGRA8::WHITE);
             result.set::<style::BackgroundColor>(BGRA8::new(0, 0, 0, /* 255 * 80% */ 204));
 

@@ -316,10 +316,11 @@ fn segments_to_inline(
                         segment.shadow.to_css(pass.sctx, &mut shadows);
 
                         if !shadows.is_empty() {
-                            result.set::<style::TextShadows>(shadows)
+                            result.set::<style::TextShadows>(shadows.into())
                         }
 
-                        result
+                        result;
+                        todo!()
                     },
                     text: segment.text.clone(),
                     ruby: segment.ruby,
@@ -364,7 +365,8 @@ impl Window {
                     result.set::<style::TextAlign>(self.alignment.0);
                 }
 
-                result
+                result;
+                todo!()
             },
             contents,
         };
@@ -373,7 +375,7 @@ impl Window {
             size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment = layout::layout(pass.lctx, constraints, &block, style)?;
+        let fragment = layout::layout(pass.lctx, constraints, &block)?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),
@@ -404,7 +406,7 @@ fn pen_to_size_independent_styles(pen: &Pen, set_default: bool) -> StyleMap {
             font_style_to_name(pen.font_style)
                 .iter()
                 .copied()
-                .map(Box::<str>::from)
+                .map(Rc::<str>::from)
                 .collect(),
         );
     }

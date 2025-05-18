@@ -28,6 +28,7 @@ once_cell = "1"
 text-sys = { path = "./text-sys" }
 
 icu_segmenter = { version = "1", features = ["compiled_data"] }
+subrandr-macros = { version = "0.1.0", path = "subrandr-macros" }
 
 util = { workspace = true }
 rasterize = { workspace = true }
@@ -52,6 +53,7 @@ members = [
   "sbr-util",
   "sbr-rasterize",
   "sbr-overlay",
+  "subrandr-macros",
   "xtask"
 ]
 

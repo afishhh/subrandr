@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
 use rasterize::color::BGRA8;
@@ -14,35 +14,6 @@ pub mod types;
 #[doc(hidden)]
 pub trait StyleValue: 'static {
     type Inner: Debug + Clone + 'static;
-    type Inherited<'a>;
-
-    fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a>;
-}
-
-fn retrieve_inherited_default<'a, V: StyleValue>(
-    map: &CascadingStyleMap<'a>,
-) -> Option<&'a V::Inner> {
-    for map in map.iter_chain() {
-        if let Some(value) = map.get::<V>() {
-            return Some(value);
-        }
-    }
-
-    None
-}
-
-fn retrieve_inherited_list<T: Clone, V: StyleValue<Inner = Vec<T>>>(
-    map: &CascadingStyleMap,
-) -> Vec<T> {
-    let mut result = Vec::new();
-
-    for map in map.iter_chain() {
-        if let Some(value) = map.get::<V>() {
-            result.extend(value.iter().rev().cloned());
-        }
-    }
-
-    result
 }
 
 #[repr(transparent)]
@@ -84,154 +55,109 @@ impl StyleMap {
     }
 }
 
-pub struct CascadingStyleMap<'a> {
-    prev: Option<&'a CascadingStyleMap<'a>>,
-    map: &'a StyleMap,
-}
-
-impl<'a> CascadingStyleMap<'a> {
-    pub fn new(map: &'a StyleMap) -> Self {
-        Self { prev: None, map }
+// Generates style keys for all properties along with `ComputedStyle`.
+//
+// `ComputedStyle` is bascially a tree of `Rc`s, property access has to
+// deref through all groups on the path while modification has to `make_mut`
+// all of them. Immutable and mutable getters are automatically generated
+// and the tree structure itself is entirely private.
+//
+// Also currently the macro only supports one layer but it's not like that's
+// too difficult to change.
+subrandr_macros::implement_style_module! {
+    rc font {
+        #[copy(no)] font_family: [Rc<str>] = Rc::new(["serif".into()]),
+        font_weight: I16Dot16 = I16Dot16::new(400),
+        // TODO: This would ideally scale with DPI but we can also just
+        //       not let it fall back to this value :)
+        //       Actually the correct solution would probably be to make scaling by
+        //       the context pixel scale happen during layout.
+        font_size: I26Dot6 = I26Dot6::new(16),
+        font_style: types::FontSlant,
     }
 
-    fn iter_chain(&self) -> IterChain<'_, 'a> {
-        IterChain {
-            current: Some(self),
-        }
+    rc text_inherited {
+        #[copy(no)] text_shadows: [types::TextShadow],
+        text_wrap_style: TextWrapMode,
+        line_break: LineBreakStrictness = LineBreakStrictness::Normal,
+        word_break: LineBreakWordOption = LineBreakWordOption::Normal,
+        text_align: types::HorizontalAlignment = types::HorizontalAlignment::Left,
     }
 
-    pub fn get<V: StyleValue>(&self) -> V::Inherited<'a> {
-        V::retrieve_inherited(self)
+    rc uninherited {
+        #[inherit(no)] text_decoration: types::TextDecorations,
     }
 
-    pub fn get_copy_or<V: StyleValue<Inherited<'a> = Option<&'a T>>, T: Copy + 'static>(
-        &self,
-        default: T,
-    ) -> T {
-        match self.get::<V>() {
-            Some(value) => *value,
-            None => default,
-        }
-    }
-
-    pub fn get_copy_or_default<
-        V: StyleValue<Inherited<'a> = Option<&'a T>>,
-        T: Default + Copy + 'static,
-    >(
-        &self,
-    ) -> T {
-        match self.get::<V>() {
-            Some(value) => *value,
-            None => T::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn push<'b: 'a>(&'b self, next: &'b StyleMap) -> CascadingStyleMap<'b> {
-        Self {
-            prev: Some(self),
-            map: next,
-        }
+    rc misc {
+        color: BGRA8 = BGRA8::WHITE,
+        background_color: BGRA8 = BGRA8::ZERO,
     }
 }
 
-struct IterChain<'i, 'a> {
-    current: Option<&'i CascadingStyleMap<'a>>,
-}
+#[cfg(test)]
+mod test {
+    use std::rc::Rc;
 
-impl<'a> Iterator for IterChain<'_, 'a> {
-    type Item = &'a StyleMap;
+    use rasterize::color::BGRA8;
+    use util::math::{I16Dot16, Vec2};
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current?;
-        self.current = current.prev;
-        Some(current.map)
+    use crate::{
+        style::{
+            self,
+            types::{TextDecorations, TextShadow},
+            ComputedStyle, StyleMap,
+        },
+        I26Dot6,
+    };
+
+    #[test]
+    fn computed_style() {
+        let style = ComputedStyle::default();
+
+        let mut child = style.create_child();
+
+        assert!(child.text_shadows().is_empty());
+        assert_eq!(child.text_decoration(), TextDecorations::default());
+
+        let new_shadows = Rc::new([TextShadow {
+            offset: Vec2::ZERO,
+            blur_radius: I26Dot6::new(10),
+            color: BGRA8::ORANGERED,
+        }]);
+        child.apply_all(&{
+            let mut map = StyleMap::new();
+            map.set::<style::FontWeight>(I16Dot16::new(700));
+            map.set::<style::TextShadows>(new_shadows.clone());
+            map
+        });
+        *child.make_text_decoration_mut() = TextDecorations {
+            underline: true,
+            underline_color: BGRA8::RED,
+            ..Default::default()
+        };
+
+        assert_eq!(child.font_weight(), I16Dot16::new(700));
+        assert_eq!(child.text_shadows(), &*new_shadows);
+
+        let mut child_of_child = child.create_child();
+
+        assert_eq!(child.font_weight(), I16Dot16::new(700));
+        assert_eq!(child_of_child.text_shadows(), &*new_shadows);
+        assert_eq!(child_of_child.text_decoration(), TextDecorations::default());
+
+        child_of_child.apply_all(&{
+            let mut map = StyleMap::new();
+            map.set::<style::TextShadows>(new_shadows.clone());
+            map
+        });
+
+        assert_eq!(
+            child_of_child.text_shadows(),
+            &new_shadows
+                .iter()
+                .chain(new_shadows.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+        );
     }
-}
-
-macro_rules! make_keys {
-    (
-        $($(#[$($attrs: tt)*])*
-        pub struct $name: ident: $inner: ty;)*
-    ) => {
-        $(
-            make_keys!(@build_struct {$name $inner}; {}; $([$($attrs)*])*);
-
-            #[automatically_derived]
-            impl StyleValue for $name {
-                type Inner = $inner;
-
-                make_keys!(@build_impl {$name $inner}; {(inherit)}; $([$($attrs)*])*);
-            }
-        )*
-    };
-    (@build_struct {$name: ident $inner: ty}; { $($processed: tt)* };) => {
-        #[derive(Debug, Clone)]
-        $($processed)*
-        // FIXME: I think I actually managed to trigger a `dead_code` false positive with this
-        //        trait :)
-        pub(crate) struct $name(#[allow(dead_code)] $inner);
-    };
-    (@build_struct $pt: tt; { $($processed: tt)* }; [inherit$($args: tt)*] $($rest: tt)*) => {
-        make_keys!(@build_struct $pt; { $($processed)* }; $($rest)*);
-    };
-    (@build_struct $pt: tt; { $($processed: tt)* }; [copy] $($rest: tt)*) => {
-        make_keys!(@build_struct $pt; { $($processed)* #[derive(Copy) ]}; $($rest)*);
-    };
-    (@build_struct { $($processed: tt)* }; $($value: tt)*) => { #[$($value)*] };
-
-    (@build_impl $pt: tt; {$seen_inherit: tt};) => { make_keys!(@default_inherit $seen_inherit); };
-    (@default_inherit ()) => { };
-    (@default_inherit (inherit)) => { make_keys!(@inherit (default)); };
-
-    (@build_impl $pt: tt; {$seen_ignore: tt $($seen_rest: tt)*}; [inherit$($args: tt)*] $($rest: tt)*) => {
-        make_keys!(@inherit $($args)*);
-        make_keys!(@build_impl $pt; {() $($seen_rest)*}; $($rest)*);
-    };
-    (@build_impl $pt: tt; $seen: tt; [copy$($args: tt)*] $($rest: tt)*) => {
-        make_keys!(@build_impl $pt; $seen; $($rest)*);
-    };
-
-    (@inherit (default)) => {
-        type Inherited<'a> = Option<&'a Self::Inner>;
-
-        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
-            retrieve_inherited_default::<Self>(map)
-        }
-    };
-    (@inherit (list)) => {
-        type Inherited<'a> = Self::Inner;
-
-        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
-            retrieve_inherited_list::<_, Self>(map)
-        }
-    };
-    (@inherit (no)) => {
-        type Inherited<'a> = Option<&'a Self::Inner>;
-
-        fn retrieve_inherited<'a>(map: &CascadingStyleMap<'a>) -> Self::Inherited<'a> {
-            map.map.get::<Self>()
-        }
-    };
-}
-
-make_keys! {
-    #[copy] pub struct Color: BGRA8;
-    #[copy] pub struct BackgroundColor: BGRA8;
-
-    #[inherit(list)]
-    pub struct FontFamily: Vec<Box<str>>;
-    #[copy] pub struct FontWeight: I16Dot16;
-    #[copy] pub struct FontSize: I26Dot6;
-    #[copy] pub struct FontStyle: types::FontSlant;
-
-    #[copy] pub struct TextAlign: types::HorizontalAlignment;
-    #[inherit(list)]
-    pub struct TextShadows: Vec<types::TextShadow>;
-    #[inherit(no)]
-    pub struct TextDecoration: types::TextDecorations;
-
-    #[copy] pub struct TextWrapStyle: TextWrapMode;
-    #[copy] pub struct LineBreak: LineBreakStrictness;
-    #[copy] pub struct WordBreak: LineBreakWordOption;
 }

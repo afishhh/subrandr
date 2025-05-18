@@ -833,7 +833,6 @@ impl Renderer<'_> {
                             let current = current + offset;
 
                             if text.style.background_color.a != 0 {
-                                // FIXME: Background boxes should have corner radius (with SRV3, not WebVTT)
                                 pass.rasterizer.fill_axis_aligned_rect(
                                     target,
                                     convert_rect(Rect2::from_min_size(current, text.fbox.size)),

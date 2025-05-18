@@ -151,17 +151,17 @@ macro_rules! define_fixed_for_type {
             }
         }
 
-        impl<const P: u32> Div for Fixed<P, $type> {
+        impl<const P1: u32, const P2: u32> Div<Fixed<P2, $type>> for Fixed<P1, $type> {
             type Output = Self;
 
-            fn div(self, rhs: Self) -> Self::Output {
-                let wide_result = ((self.0 as $wide) << P) / rhs.0 as $wide;
+            fn div(self, rhs: Fixed<P2, $type>) -> Self::Output {
+                let wide_result = ((self.0 as $wide) << P2) / rhs.0 as $wide;
                 Self(wide_result as $type)
             }
         }
 
-        impl<const P: u32> DivAssign for Fixed<P, $type> {
-            fn div_assign(&mut self, rhs: Self) {
+        impl<const P1: u32, const P2: u32> DivAssign<Fixed<P2, $type>> for Fixed<P1, $type> {
+            fn div_assign(&mut self, rhs: Fixed<P2, $type>) {
                 *self = *self / rhs;
             }
         }
@@ -514,6 +514,24 @@ mod test_other {
         assert_eq!(
             I16Dot16::new(100) * I26Dot6::from_quotient(11, 2),
             I16Dot16::new(550)
+        );
+    }
+
+    #[test]
+    fn test_cross_precision_div() {
+        assert_eq!(
+            I26Dot6::from_quotient(1, 4) / I16Dot16::from_quotient(1, 2),
+            I26Dot6::from_quotient(1, 2)
+        );
+
+        assert_eq!(
+            I26Dot6::new(17) / I16Dot16::from_quotient(1, 64),
+            I26Dot6::new(17 * 64)
+        );
+
+        assert_eq!(
+            I16Dot16::new(113) / I26Dot6::new(100),
+            I16Dot16::from_quotient(113, 100)
         );
     }
 }

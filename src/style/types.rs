@@ -1,5 +1,7 @@
 use rasterize::color::BGRA8;
-use util::math::{I26Dot6, Vec2f};
+use util::math::I26Dot6;
+
+use crate::layout::Vec2L;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -34,7 +36,7 @@ pub enum Ruby {
 
 #[derive(Debug, Clone)]
 pub struct TextShadow {
-    pub offset: Vec2f,
+    pub offset: Vec2L,
     pub blur_radius: I26Dot6,
     pub color: BGRA8,
 }

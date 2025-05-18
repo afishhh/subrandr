@@ -590,7 +590,9 @@ impl Layouter {
             result.set::<style::FontSize>(
                 // Standard says 5vh, but browser engines use 5vmin.
                 // See https://github.com/w3c/webvtt/issues/529
-                pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale(),
+                pass.sctx.video_height.min(pass.sctx.video_width) * 5
+                    / 100
+                    / pass.sctx.pixel_scale(),
             );
             result
         };

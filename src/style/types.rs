@@ -31,16 +31,15 @@ pub enum Ruby {
     Over,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextShadow {
     pub offset: Vec2L,
     pub blur_radius: I26Dot6,
     pub color: BGRA8,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextDecorations {
-    // TODO: f32 for size
     pub underline: bool,
     pub underline_color: BGRA8,
     pub strike_out: bool,

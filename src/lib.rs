@@ -1,3 +1,4 @@
+#![allow(dead_code)] // tmp
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::missing_transmute_annotations)]

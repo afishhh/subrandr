@@ -832,11 +832,11 @@ impl Renderer<'_> {
                         for &(offset, ref text) in &line.children {
                             let current = current + offset;
 
-                            if text.style.background_color.a != 0 {
+                            if text.style.background_color().a != 0 {
                                 pass.rasterizer.fill_axis_aligned_rect(
                                     target,
                                     convert_rect(Rect2::from_min_size(current, text.fbox.size)),
-                                    text.style.background_color,
+                                    text.style.background_color(),
                                 );
                             }
                         }
@@ -877,7 +877,7 @@ impl Renderer<'_> {
                                 pass.debug_text(
                                     target,
                                     Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                                    &format!("{:.0}pt", text.style.font_size),
+                                    &format!("{:.0}pt", text.style.font_size()),
                                     Alignment(
                                         HorizontalAlignment::Right,
                                         VerticalAlignment::Bottom,
@@ -908,9 +908,9 @@ impl Renderer<'_> {
                                 current.x + text.baseline_offset.x,
                                 current.y + text.baseline_offset.y,
                                 text.glyphs(),
-                                text.style.color,
-                                &text.style.decorations,
-                                &text.style.shadows,
+                                text.style.color(),
+                                &text.style.text_decoration(),
+                                &text.style.text_shadows(),
                             )?;
                         }
                     }

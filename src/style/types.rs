@@ -1,7 +1,4 @@
-use crate::{
-    color::BGRA8,
-    math::{I26Dot6, Vec2f},
-};
+use crate::{color::BGRA8, layout::Vec2L, math::I26Dot6};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -36,7 +33,7 @@ pub enum Ruby {
 
 #[derive(Debug, Clone)]
 pub struct TextShadow {
-    pub offset: Vec2f,
+    pub offset: Vec2L,
     pub blur_radius: I26Dot6,
     pub color: BGRA8,
 }

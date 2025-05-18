@@ -10,7 +10,7 @@ use crate::{
         LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning},
-    math::{I16Dot16, I26Dot6, Vec2f},
+    math::{I16Dot16, I26Dot6},
     renderer::FrameLayoutPass,
     style::{
         self,
@@ -109,10 +109,10 @@ fn calculate_font_scale(
 
 fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     calculate_font_scale(
-        ctx.pixels_to_css(ctx.video_width.into_f32()),
-        ctx.pixels_to_css(ctx.video_height.into_f32()),
-        ctx.pixels_to_css(ctx.player_width().into_f32()),
-        ctx.pixels_to_css(ctx.player_height().into_f32()),
+        ctx.pixels_to_css(ctx.video_width).into_f32(),
+        ctx.pixels_to_css(ctx.video_height).into_f32(),
+        ctx.pixels_to_css(ctx.player_width()).into_f32(),
+        ctx.pixels_to_css(ctx.player_height()).into_f32(),
     )
 }
 
@@ -130,16 +130,16 @@ fn font_size_to_pixels(size: u16) -> f32 {
 
 trait SubtitleContextCssExt {
     // 1px = 1/96in
-    fn pixels_to_css(&self, physical_pixels: f32) -> f32;
-    fn pixels_from_css(&self, css_pixels: f32) -> f32;
+    fn pixels_to_css(&self, physical_pixels: FixedL) -> FixedL;
+    fn pixels_from_css(&self, css_pixels: FixedL) -> FixedL;
 }
 
 impl SubtitleContextCssExt for SubtitleContext {
-    fn pixels_to_css(&self, physical_pixels: f32) -> f32 {
+    fn pixels_to_css(&self, physical_pixels: FixedL) -> FixedL {
         physical_pixels / self.pixel_scale()
     }
 
-    fn pixels_from_css(&self, css_pixels: f32) -> f32 {
+    fn pixels_from_css(&self, css_pixels: FixedL) -> FixedL {
         css_pixels * self.pixel_scale()
     }
 }
@@ -175,7 +175,10 @@ impl Srv3TextShadow {
                 let mut x = e;
                 while x <= t {
                     out.push(TextShadow {
-                        offset: Vec2f::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
+                        offset: Vec2L::new(
+                            ctx.pixels_from_css(x.into()),
+                            ctx.pixels_from_css(x.into()),
+                        ),
                         blur_radius: I26Dot6::ZERO,
                         color: self.color,
                     });
@@ -183,7 +186,8 @@ impl Srv3TextShadow {
                 }
             }
             EdgeType::Bevel => {
-                let offset = Vec2f::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
+                let offset =
+                    Vec2L::new(ctx.pixels_from_css(e.into()), ctx.pixels_from_css(e.into()));
                 out.push(TextShadow {
                     offset,
                     blur_radius: I26Dot6::ZERO,
@@ -197,18 +201,19 @@ impl Srv3TextShadow {
             }
             EdgeType::Glow => out.extend(std::iter::repeat_n(
                 TextShadow {
-                    offset: Vec2f::ZERO,
-                    blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(l)),
+                    offset: Vec2L::ZERO,
+                    blur_radius: ctx.pixels_from_css(l.into()),
                     color: self.color,
                 },
                 5,
             )),
             EdgeType::SoftShadow => {
-                let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
+                let offset =
+                    Vec2L::new(ctx.pixels_from_css(l.into()), ctx.pixels_from_css(l.into()));
                 while t <= c {
                     out.push(TextShadow {
                         offset,
-                        blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(t)),
+                        blur_radius: ctx.pixels_from_css(t.into()),
                         color: self.color,
                     });
                     t += a;

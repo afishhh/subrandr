@@ -11,7 +11,7 @@ use crate::{
     color::BGRA8,
     layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
-    math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
+    math::{I16Dot16, I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
     rasterize::{self, Rasterizer, RenderTarget},
     srv3,
     style::types::{
@@ -39,8 +39,8 @@ impl SubtitleContext {
         self.dpi * 96 / 72
     }
 
-    pub fn pixel_scale(&self) -> f32 {
-        self.dpi as f32 / 72.0
+    pub fn pixel_scale(&self) -> I16Dot16 {
+        I16Dot16::from_quotient(self.dpi as i32, 72)
     }
 
     pub fn padding_width(&self) -> I26Dot6 {

@@ -255,7 +255,7 @@ impl Event {
                 }
 
                 // Remember the position of all the boxes in boxes as their specified position.
-                let mut specified_position = lines.to_vec();
+                // NOTE: We never move actually move the boxes so this is not necessary.
 
                 // Let title area be a box that covers all of the video’s rendering area.
                 let title_area =
@@ -319,7 +319,6 @@ impl Event {
                         }
 
                         // Otherwise, move all the boxes in boxes back to their specified position as determined in the earlier step.
-                        *lines = std::mem::take(&mut specified_position);
 
                         // Negate step.
                         step = -step;

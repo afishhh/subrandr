@@ -137,16 +137,16 @@ macro_rules! define_fixed_for_type {
 
         define_fixed_for_type!(@$signedness $type, $wide $(, $unsigned)?);
 
-        impl<const P: u32> Mul for Fixed<P, $type> {
+        impl<const P1: u32, const P2: u32> Mul<Fixed<P2, $type>> for Fixed<P1, $type> {
             type Output = Self;
 
-            fn mul(self, rhs: Self) -> Self::Output {
-                Self(((self.0 as $wide * rhs.0 as $wide) >> P) as $type)
+            fn mul(self, rhs: Fixed<P2, $type>) -> Self::Output {
+                Self(((self.0 as $wide * rhs.0 as $wide) >> P2) as $type)
             }
         }
 
-        impl<const P: u32> MulAssign for Fixed<P, $type> {
-            fn mul_assign(&mut self, rhs: Self) {
+        impl<const P1: u32, const P2: u32> MulAssign<Fixed<P2, $type>> for Fixed<P1, $type> {
+            fn mul_assign(&mut self, rhs: Fixed<P2, $type>) {
                 *self = *self * rhs;
             }
         }
@@ -493,4 +493,27 @@ mod test_signed_24_dot_8 {
 #[cfg(test)]
 mod test_unsigned_24_dot_8 {
     test_module!(Fixed<8, u32>, signed = false);
+}
+
+#[cfg(test)]
+mod test_other {
+    use super::{I16Dot16, I26Dot6};
+
+    #[test]
+    fn test_cross_precision_multiply() {
+        assert_eq!(
+            I26Dot6::from_quotient(1, 4) * I16Dot16::from_quotient(1, 2),
+            I26Dot6::from_quotient(1, 8)
+        );
+
+        assert_eq!(
+            I26Dot6::new(17) * I16Dot16::from_quotient(1, 56),
+            I26Dot6::from_quotient(17, 56)
+        );
+
+        assert_eq!(
+            I16Dot16::new(100) * I26Dot6::from_quotient(11, 2),
+            I16Dot16::new(550)
+        );
+    }
 }

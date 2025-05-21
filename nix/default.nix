@@ -1,5 +1,5 @@
 buildRevision:
-{ pkgs
+{ rustPlatform
 , stdenv
 , pkg-config
 , jq
@@ -12,7 +12,7 @@ buildRevision:
 let
   cargoTomlPackage = (builtins.fromTOML (builtins.readFile ../Cargo.toml)).package;
 in
-pkgs.rustPlatform.buildRustPackage {
+rustPlatform.buildRustPackage {
   pname = cargoTomlPackage.name;
   version = cargoTomlPackage.version;
 
@@ -33,6 +33,6 @@ pkgs.rustPlatform.buildRustPackage {
   ];
 
   installPhase = ''
-    cargo xtask install -p $out --target ${stdenv.hostPlatform.rust.rustcTarget}
+    cargo xtask install -p $out --target ${stdenv.targetPlatform.rust.rustcTarget}
   '';
 }

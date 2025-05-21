@@ -12,6 +12,7 @@ pub mod vtt;
 
 mod capi;
 mod color;
+mod css;
 mod html;
 mod log;
 mod math;

@@ -102,7 +102,23 @@ pub struct BlockContainer {
 #[derive(Default, Debug, Clone)]
 pub struct InlineContainer {
     pub style: ComputedStyle,
-    pub contents: Vec<InlineText>,
+    // TODO: flatten tree here already
+    //       it makes things easier
+    pub contents: Vec<InlineChild>,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct RubyContainer {
+    pub style: ComputedStyle,
+    pub contents: Vec<InlineChild>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InlineChild {
+    // Container(InlineContainer),
+    Ruby(RubyContainer),
+    // AtomicBlock(BlockContainer),
+    Text(InlineText),
 }
 
 #[derive(Debug, Clone)]
@@ -134,39 +150,66 @@ fn flow_layout_inline(
     let font_arena = Rc::new(FontArena::new());
 
     let mut shaper = MultilineTextShaper::new();
-    let mut last_ruby_base = None;
-    for segment in container.contents.iter() {
-        let matcher = text::FontMatcher::match_all(
-            segment.style.font_family(),
-            text::FontStyle {
-                weight: segment.style.font_weight(),
-                italic: match segment.style.font_style() {
-                    FontSlant::Italic => true,
-                    FontSlant::Regular => false,
-                },
-            },
-            segment.style.font_size(),
-            context.dpi,
-            unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
-            context.fonts,
-        )?;
 
-        match segment.ruby {
-            Ruby::None => {
-                shaper.add_text(&segment.text, matcher);
-            }
-            Ruby::Base => {
-                last_ruby_base = Some(shaper.add_ruby_base(&segment.text, matcher));
-            }
-            Ruby::Over => {
-                shaper.add_ruby_annotation(
-                    last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
-                    segment.text.clone(),
-                    matcher,
-                );
-                last_ruby_base = None;
+    let mut styles = vec![];
+
+    fn rec(
+        shaper: &mut MultilineTextShaper,
+        ctx: &mut LayoutContext,
+        styles: &mut Vec<ComputedStyle>,
+        font_arena: &'static FontArena,
+        child: &InlineChild,
+    ) -> Result<(), InlineLayoutError> {
+        match child {
+            InlineChild::Ruby(ruby) => {}
+            InlineChild::Text(text) => {
+                let matcher = text::FontMatcher::match_all(
+                    text.style.font_family(),
+                    text::FontStyle {
+                        weight: text.style.font_weight(),
+                        italic: match text.style.font_style() {
+                            FontSlant::Italic => true,
+                            FontSlant::Regular => false,
+                        },
+                    },
+                    text.style.font_size(),
+                    ctx.dpi,
+                    font_arena,
+                    ctx.fonts,
+                )?;
+
+                styles.push(text.style.clone());
+
+                match text.ruby {
+                    Ruby::None => {
+                        shaper.add_text(&text.text, matcher);
+                    }
+                    Ruby::Base => {
+                        // last_ruby_base = Some(shaper.add_ruby_base(&segment.text, matcher));
+                    }
+                    Ruby::Over => {
+                        // shaper.add_ruby_annotation(
+                        //     last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
+                        //     segment.text.clone(),
+                        //     matcher,
+                        // );
+                        // last_ruby_base = None;
+                    }
+                }
             }
         }
+
+        Ok(())
+    }
+
+    for segment in container.contents.iter() {
+        rec(
+            &mut shaper,
+            context,
+            &mut styles,
+            unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
+            segment,
+        )?
     }
 
     let (lines, total_rect) = shaper.shape(
@@ -199,7 +242,7 @@ fn flow_layout_inline(
         };
 
         for segment in line.segments {
-            let style = &container.contents[segment.corresponding_input_segment].style;
+            let style = &styles[segment.corresponding_input_segment];
             let offset = segment.logical_rect.min - line.bounding_rect.min;
 
             line_box.children.push((
@@ -282,6 +325,27 @@ pub fn layout(
     flow_layout_block(context, &constraints, root)
 }
 
+#[derive(Debug)]
+pub enum ContainerFragment {
+    Inline(InlineContainerFragment),
+    Block(BlockContainerFragment),
+}
+
+pub fn layout_any(
+    context: &mut LayoutContext,
+    constraints: LayoutConstraints,
+    root: &Container,
+) -> Result<ContainerFragment, InlineLayoutError> {
+    match root {
+        Container::Inline(inline) => {
+            flow_layout_inline(context, &constraints, inline).map(ContainerFragment::Inline)
+        }
+        Container::Block(block) => {
+            flow_layout_block(context, &constraints, block).map(ContainerFragment::Block)
+        }
+    }
+}
+
 // TODO: Once a built-in tofu font is added some tests could be made
 //       that use this tofu font as a mock font for reliable metrics.
 //       Using system fonts for tests is a bad idea for many reasons.
@@ -290,7 +354,10 @@ mod test {
     use std::rc::Rc;
 
     use crate::{
-        miniweb::style::{types::Ruby, ComputedStyle},
+        miniweb::{
+            layout::InlineChild,
+            style::{types::Ruby, ComputedStyle},
+        },
         text::FontDb,
     };
 
@@ -312,19 +379,19 @@ mod test {
             contents: vec![
                 Container::Inline(InlineContainer {
                     style: style.clone(),
-                    contents: vec![InlineText {
+                    contents: vec![InlineChild::Text(InlineText {
                         style: style.clone(),
                         text: "hello world".into(),
                         ruby: Ruby::None,
-                    }],
+                    })],
                 }),
                 Container::Inline(InlineContainer {
                     style,
-                    contents: vec![InlineText {
+                    contents: vec![InlineChild::Text(InlineText {
                         style: ComputedStyle::default(),
                         text: "this is a separate inline container".into(),
                         ruby: Ruby::None,
-                    }],
+                    })],
                 }),
             ],
         };

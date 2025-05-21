@@ -13,6 +13,7 @@ use crate::{
     log::{info, trace},
     miniweb::{
         layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
+        render::Renderable as _,
         style::types::{
             Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
         },
@@ -113,13 +114,16 @@ impl FrameLayoutPass<'_, '_> {
 }
 
 pub struct FrameRenderPass<'s, 'frame> {
-    sctx: &'frame SubtitleContext,
-    fonts: &'frame mut text::FontDb<'s>,
-    rasterizer: &'frame mut dyn Rasterizer,
+    pub(crate) sbr: &'s Subrandr,
+    pub(crate) sctx: &'frame SubtitleContext,
+    pub(crate) fonts: &'frame mut text::FontDb<'s>,
+    pub(crate) rasterizer: &'frame mut dyn Rasterizer,
+    pub(crate) debug_font_size: I26Dot6,
+    pub(crate) debug_line_height: I26Dot6,
 }
 
 impl FrameRenderPass<'_, '_> {
-    fn debug_text(
+    pub(crate) fn debug_text(
         &mut self,
         target: &mut RenderTarget,
         pos: Point2L,
@@ -185,7 +189,7 @@ impl FrameRenderPass<'_, '_> {
         Vec2L::new(ox, oy)
     }
 
-    fn draw_text_full(
+    pub(crate) fn draw_text_full(
         &mut self,
         target: &mut RenderTarget,
         x: I26Dot6,
@@ -586,8 +590,8 @@ impl Renderer<'_> {
             };
 
             match self.layouter {
-                Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(&mut pass)?,
-                Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.layout(&mut pass)?,
+                Some(FormatLayouter::Srv3(ref mut layouter)) => todo!(), //layouter.layout(&mut pass)?,
+                Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.update(&mut pass)?,
                 None => (),
             }
 
@@ -597,16 +601,19 @@ impl Renderer<'_> {
         self.perf.end_layout();
 
         {
-            let mut pass = FrameRenderPass {
-                sctx: &ctx,
-                fonts: &mut self.fonts,
-                rasterizer,
-            };
-
             // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
             //        to a subtitle renderer so this doesn't work.
             let debug_font_size = I26Dot6::new(16);
             let debug_line_height = FixedL::new(20) * ctx.pixel_scale();
+
+            let mut pass = FrameRenderPass {
+                sbr: self.sbr,
+                sctx: &ctx,
+                fonts: &mut self.fonts,
+                rasterizer,
+                debug_font_size,
+                debug_line_height,
+            };
 
             if self.sbr.debug.draw_version_string {
                 let mut y = debug_line_height;
@@ -770,6 +777,7 @@ impl Renderer<'_> {
             self.perf.end_debug_raster();
 
             for &(pos, ref fragment) in &fragments {
+<<<<<<< HEAD
                 let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
 
                 if self.sbr.debug.draw_layout_info {
@@ -845,79 +853,7 @@ impl Renderer<'_> {
                     // }
                 }
 
-                for &(offset, ref container) in &fragment.children {
-                    let current = pos + offset;
-
-                    todo!()
-                    // for &(offset, ref line) in &container.lines {
-                    //     let current = current + offset;
-
-                    //     for &(offset, ref text) in &line.children {
-                    //         let current = current + offset;
-
-                    //         if self.sbr.debug.draw_layout_info {
-                    //             let final_logical_box =
-                    //                 Rect2::from_min_size(current, text.fbox.size);
-
-                    //             pass.debug_text(
-                    //                 target,
-                    //                 final_logical_box.min,
-                    //                 &format!("{:.0},{:.0}", current.x, current.y),
-                    //                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
-                    //                 debug_font_size,
-                    //                 BGRA8::RED,
-                    //             )?;
-
-                    //             pass.debug_text(
-                    //                 target,
-                    //                 Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
-                    //                 &format!("{:.1}", offset.x + text.baseline_offset.x),
-                    //                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    //                 debug_font_size,
-                    //                 BGRA8::RED,
-                    //             )?;
-
-                    //             pass.debug_text(
-                    //                 target,
-                    //                 Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                    //                 &format!("{:.0}pt", text.style.font_size()),
-                    //                 Alignment(
-                    //                     HorizontalAlignment::Right,
-                    //                     VerticalAlignment::Bottom,
-                    //                 ),
-                    //                 debug_font_size,
-                    //                 BGRA8::GOLD,
-                    //             )?;
-
-                    //             let final_logical_boxf = Rect2::to_float(final_logical_box);
-
-                    //             pass.rasterizer.stroke_axis_aligned_rect(
-                    //                 target,
-                    //                 final_logical_boxf,
-                    //                 BGRA8::BLUE,
-                    //             );
-
-                    //             pass.rasterizer.horizontal_line(
-                    //                 target,
-                    //                 (current.y + text.baseline_offset.y).into_f32(),
-                    //                 final_logical_boxf.min.x,
-                    //                 final_logical_boxf.max.x,
-                    //                 BGRA8::GREEN,
-                    //             );
-                    //         }
-
-                    //         pass.draw_text_full(
-                    //             target,
-                    //             current.x + text.baseline_offset.x,
-                    //             current.y + text.baseline_offset.y,
-                    //             text.glyphs(),
-                    //             text.style.color(),
-                    //             &text.style.text_decoration(),
-                    //             &text.style.text_shadows(),
-                    //         )?;
-                    //     }
-                    // }
-                }
+                fragment.render(&mut pass, pos, target)?;
             }
 
             // Make sure all batched draws are flushed, although currently this is not

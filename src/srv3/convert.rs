@@ -5,27 +5,29 @@ use std::{collections::HashMap, ops::Range, rc::Rc};
 use rasterize::color::BGRA8;
 use util::math::{I16Dot16, I26Dot6, Vec2f};
 
+use super::{Document, EdgeType, Pen};
 use crate::{
     log::{log_once_state, warning},
     miniweb::{
+        self,
         layout::{
-            self, BlockContainer, Container, FixedL, InlineContainer, InlineLayoutError,
-            InlineText, LayoutConstraints, Point2L, Vec2L,
+            self, BlockContainer, Container, FixedL, InlineChild, InlineContainer, InlineText,
+            LayoutConstraints, Point2L, Vec2L,
         },
+        realm::Realm,
         style::{
             self,
             types::{
-                Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment,
+                Alignment, Display, FontSlant, HorizontalAlignment, Ruby, TextShadow,
+                VerticalAlignment,
             },
-            StyleMap,
+            ComputedStyle, StyleMap,
         },
     },
     renderer::FrameLayoutPass,
     srv3::RubyPosition,
     Subrandr, SubtitleContext,
 };
-
-use super::{Document, EdgeType, Pen, RubyPart};
 
 const SRV3_FONTS: &[&[&str]] = &[
     &[
@@ -296,14 +298,14 @@ fn segments_to_inline(
     pass: &mut FrameLayoutPass,
     event_time: u32,
     segments: &[Segment],
-) -> Vec<InlineText> {
+) -> Vec<InlineChild> {
     segments
         .iter()
         .filter_map(|segment| {
             pass.add_animation_point(event_time + segment.time_offset);
 
             if segment.time_offset <= pass.t - event_time {
-                Some(InlineText {
+                Some(InlineChild::Text(InlineText {
                     style: {
                         let mut result = segment.base_style.clone();
 
@@ -323,12 +325,13 @@ fn segments_to_inline(
                             result.set::<style::TextShadows>(shadows.into())
                         }
 
-                        result;
-                        todo!()
+                        let mut r = ComputedStyle::default();
+                        r.apply_all(&result);
+                        r
                     },
                     text: segment.text.clone(),
                     ruby: segment.ruby,
-                })
+                }))
             } else {
                 None
             }
@@ -369,8 +372,11 @@ impl Window {
                     result.set::<style::TextAlign>(self.alignment.0);
                 }
 
-                result;
-                todo!()
+                let mut r = ComputedStyle::default();
+                r.apply_all(style);
+                let mut r = r.create_child();
+                r.apply_all(&result);
+                r
             },
             contents,
         };
@@ -451,90 +457,91 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
 }
 
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
-    let mut result = Subtitles {
-        root_style: pen_to_size_independent_styles(&Pen::DEFAULT, true),
-        windows: Vec::new(),
-    };
+    // let mut result = Subtitles {
+    //     root_style: pen_to_size_independent_styles(&Pen::DEFAULT, true),
+    //     windows: Vec::new(),
+    // };
 
-    log_once_state!(ruby_under_unsupported);
+    // log_once_state!(ruby_under_unsupported);
 
-    let mut wname_to_index = HashMap::new();
-    for (name, window) in document.windows() {
-        wname_to_index.insert(&**name, result.windows.len());
-        result.windows.push(Window {
-            x: convert_coordinate(window.position().x as f32),
-            y: convert_coordinate(window.position().y as f32),
-            range: window.time..window.time + window.duration,
-            alignment: window.position().point.to_alignment(),
-            events: Vec::new(),
-        });
-    }
+    // let mut wname_to_index = HashMap::new();
+    // for (name, window) in document.windows() {
+    //     wname_to_index.insert(&**name, result.windows.len());
+    //     result.windows.push(Window {
+    //         x: convert_coordinate(window.position().x as f32),
+    //         y: convert_coordinate(window.position().y as f32),
+    //         range: window.time..window.time + window.duration,
+    //         alignment: window.position().point.to_alignment(),
+    //         events: Vec::new(),
+    //     });
+    // }
 
-    for event in document.events() {
-        let mut segments = vec![];
+    // for event in document.events() {
+    //     let mut segments = vec![];
 
-        let mut it = event.segments.iter();
-        'segment_loop: while let Some(segment) = it.next() {
-            'ruby_failed: {
-                if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
-                    let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
+    //     let mut it = event.segments.iter();
+    //     'segment_loop: while let Some(segment) = it.next() {
+    //         'ruby_failed: {
+    //             if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
+    //                 let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
 
-                    let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
-                        ruby_block.each_ref().map(|s| s.pen().ruby_part)
-                    else {
-                        break 'ruby_failed;
-                    };
+    // let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
+    //     ruby_block.each_ref().map(|s| s.pen().ruby_part)
+    // else {
+    //     break 'ruby_failed;
+    // };
 
-                    let ruby = match part.position {
-                        RubyPosition::Alternate => Ruby::Over,
-                        RubyPosition::Over => Ruby::Over,
-                        RubyPosition::Under => {
-                            warning!(
-                                sbr,
-                                once(ruby_under_unsupported),
-                                "`ruby-position: under`-style ruby text is not supported yet"
-                            );
-                            break 'ruby_failed;
-                        }
-                    };
+    // let ruby = match part.position {
+    //     RubyPosition::Alternate => Ruby::Over,
+    //     RubyPosition::Over => Ruby::Over,
+    //     RubyPosition::Under => {
+    //         warning!(
+    //             sbr,
+    //             once(ruby_under_unsupported),
+    //             "`ruby-position: under`-style ruby text is not supported yet"
+    //         );
+    //         break 'ruby_failed;
+    //     }
+    // };
 
-                    segments.push(convert_segment(segment, Ruby::Base));
-                    _ = it.next().unwrap();
-                    segments.push(convert_segment(it.next().unwrap(), ruby));
-                    _ = it.next().unwrap();
+    //                 segments.push(convert_segment(segment, Ruby::Base));
+    //                 _ = it.next().unwrap();
+    //                 segments.push(convert_segment(it.next().unwrap(), ruby));
+    //                 _ = it.next().unwrap();
 
-                    continue 'segment_loop;
-                }
-            }
+    //                 continue 'segment_loop;
+    //             }
+    //         }
 
-            segments.push(convert_segment(segment, Ruby::None));
-        }
+    //         segments.push(convert_segment(segment, Ruby::None));
+    //     }
 
-        if let Some(&widx) = event
-            .window_id
-            .as_ref()
-            .and_then(|wname| wname_to_index.get(&**wname))
-        {
-            let window = &mut result.windows[widx];
-            window.events.push(WindowEvent {
-                range: event.time..event.time + event.duration,
-                segments,
-            });
-        } else {
-            result.windows.push(Window {
-                x: convert_coordinate(event.position().x as f32),
-                y: convert_coordinate(event.position().y as f32),
-                range: event.time..event.time + event.duration,
-                alignment: event.position().point.to_alignment(),
-                events: vec![WindowEvent {
-                    range: event.time..event.time + event.duration,
-                    segments,
-                }],
-            });
-        }
-    }
+    //     if let Some(&widx) = event
+    //         .window_id
+    //         .as_ref()
+    //         .and_then(|wname| wname_to_index.get(&**wname))
+    //     {
+    //         let window = &mut result.windows[widx];
+    //         window.events.push(WindowEvent {
+    //             range: event.time..event.time + event.duration,
+    //             segments,
+    //         });
+    //     } else {
+    //         result.windows.push(Window {
+    //             x: convert_coordinate(event.position().x as f32),
+    //             y: convert_coordinate(event.position().y as f32),
+    //             range: event.time..event.time + event.duration,
+    //             alignment: event.position().point.to_alignment(),
+    //             events: vec![WindowEvent {
+    //                 range: event.time..event.time + event.duration,
+    //                 segments,
+    //             }],
+    //         });
+    //     }
+    // }
 
-    result
+    // result
+    todo!()
 }
 
 pub(crate) struct Layouter {
@@ -550,16 +557,43 @@ impl Layouter {
         &self.subtitles
     }
 
-    pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
-        for window in &self.subtitles.windows {
-            if !pass.add_event_range(window.range.clone()) {
-                continue;
-            }
+    pub fn create(&mut self, realm: &Rc<Realm>) -> miniweb::dom::Document {
+        let mut document = miniweb::dom::Document::new(realm.clone());
 
-            if let Some((pos, block)) = window.layout(pass, &self.subtitles.root_style)? {
-                pass.emit_fragment(pos, block);
-            }
-        }
-        Ok(())
+        document.style_rules.push(miniweb::dom::Rule {
+            selectors: vec![miniweb::dom::Selector {
+                name: Some(realm.symbol("window")),
+                id: None,
+                classes: Vec::new(),
+                time_interval: 0..u32::MAX,
+                future: false,
+                past: false,
+            }],
+            specificity: 0,
+            declarations: {
+                let mut result = StyleMap::new();
+
+                result.set::<style::Display>(Display::NONE);
+
+                result
+            },
+        });
+
+        document
+    }
+
+    pub fn update(&mut self, document: &mut miniweb::dom::Document) {
+        document.root().children.clear();
+
+        // for window in &self.subtitles.windows {
+        //     if !pass.add_event_range(window.range.clone()) {
+        //         continue;
+        //     }
+
+        //     if let Some((pos, block)) = window.layout(pass, &self.subtitles.root_style)? {
+        //         pass.emit_fragment(pos, block);
+        //     }
+        // }
+        // Ok(())
     }
 }

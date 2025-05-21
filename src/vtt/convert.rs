@@ -6,10 +6,11 @@ use util::math::{I16Dot16, Point2, Rect2};
 use crate::{
     log::{log_once_state, warning, LogOnceSet},
     miniweb::{
+        dom::Document,
         layout::{
-            self, BlockContainer, BlockContainerFragment, Container, FixedL, InlineContainer,
-            InlineContainerFragment, InlineLayoutError, InlineText, LineBoxFragment, Point2L,
-            Vec2L,
+            self, BlockContainer, BlockContainerFragment, Container, FixedL, InlineChild,
+            InlineContainer, InlineContainerFragment, InlineLayoutError, InlineText,
+            LineBoxFragment, Point2L, Vec2L,
         },
         style::{
             self,
@@ -102,7 +103,7 @@ struct Event {
     horizontal_alignment: HorizontalAlignment,
     line: vtt::Line,
     size: f64,
-    segments: Vec<InlineText>,
+    segments: Vec<InlineChild>,
     x: f64,
     y: f64,
 }
@@ -381,7 +382,7 @@ impl Event {
 
 // TODO: Ruby
 struct TextConverter {
-    segments: Vec<InlineText>,
+    segments: Vec<InlineChild>,
 }
 
 impl TextConverter {
@@ -433,17 +434,17 @@ impl TextConverter {
                     self.process_node(child, todo!());
                 }
             }
-            vtt::Node::Text(text) => self.segments.push(InlineText {
+            vtt::Node::Text(text) => self.segments.push(InlineChild::Text(InlineText {
                 style: style.clone(),
                 ruby: Ruby::None,
                 text: text.content().into(),
-            }),
+            })),
             vtt::Node::Timestamp(_) => (),
         }
     }
 }
 
-fn convert_text(text: &str) -> Vec<InlineText> {
+fn convert_text(text: &str) -> Vec<InlineChild> {
     let mut converter = TextConverter {
         segments: Vec::new(),
     };
@@ -580,7 +581,37 @@ impl Layouter {
         &self.subtitles
     }
 
-    pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
+    pub fn craete(&mut self) -> Result<Document, InlineLayoutError> {
+        todo!()
+        // TODO: This should actually be persisted between frames.
+        //       Also see for possible designs https://bit.ly/3vfUajH
+        //       (https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/html/track/vtt/vtt_cue_layout_algorithm.h;drc=047c7dc4ee1ce908d7fea38ca063fa2f80f92c77;l=26)
+
+        // let style = {
+        //     let mut result = self.subtitles.root_style.clone();
+        //     result.set::<style::FontSize>(
+        //         // Standard says 5vh, but browser engines use 5vmin.
+        //         // See https://github.com/w3c/webvtt/issues/529
+        //         pass.sctx.video_height.min(pass.sctx.video_width) * 5
+        //             / 100
+        //             / pass.sctx.pixel_scale(),
+        //     );
+        //     result
+        // };
+
+        // for event in &self.subtitles.events {
+        //     if !pass.add_event_range(event.range.clone()) {
+        //         continue;
+        //     }
+
+        //     let (pos, block) = event.layout(pass.sctx, pass.lctx, &style, &mut output)?;
+        //     pass.emit_fragment(pos, block);
+        // }
+
+        // Ok(())
+    }
+
+    pub fn update(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
         // TODO: This should actually be persisted between frames.
         let mut output = Vec::new();
 

@@ -268,6 +268,7 @@ impl FontconfigFontProvider {
                 FC_WIDTH,
                 FC_WEIGHT,
                 FC_FILE,
+                std::ptr::null::<*const i8>(),
             )
         };
 

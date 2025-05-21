@@ -10,12 +10,14 @@ use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f};
 
 use crate::{
-    layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
-    srv3,
-    style::types::{
-        Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
+    miniweb::{
+        layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
+        style::types::{
+            Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
+        },
     },
+    srv3,
     text::{self, FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics},
     vtt, Subrandr,
 };
@@ -825,94 +827,96 @@ impl Renderer<'_> {
                 for &(offset, ref container) in &fragment.children {
                     let current = pos + offset;
 
-                    for &(offset, ref line) in &container.lines {
-                        let current = current + offset;
+                    todo!()
+                    // for &(offset, ref line) in &container.lines {
+                    //     let current = current + offset;
 
-                        for &(offset, ref text) in &line.children {
-                            let current = current + offset;
+                    //     for &(offset, ref text) in &line.children {
+                    //         let current = current + offset;
 
-                            if text.style.background_color().a != 0 {
-                                pass.rasterizer.fill_axis_aligned_rect(
-                                    target,
-                                    Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
-                                    text.style.background_color(),
-                                );
-                            }
-                        }
-                    }
+                    //         if text.style.background_color().a != 0 {
+                    //             pass.rasterizer.fill_axis_aligned_rect(
+                    //                 target,
+                    //                 Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
+                    //                 text.style.background_color(),
+                    //             );
+                    //         }
+                    //     }
+                    // }
                 }
 
                 for &(offset, ref container) in &fragment.children {
                     let current = pos + offset;
 
-                    for &(offset, ref line) in &container.lines {
-                        let current = current + offset;
+                    todo!()
+                    // for &(offset, ref line) in &container.lines {
+                    //     let current = current + offset;
 
-                        for &(offset, ref text) in &line.children {
-                            let current = current + offset;
+                    //     for &(offset, ref text) in &line.children {
+                    //         let current = current + offset;
 
-                            if self.sbr.debug.draw_layout_info {
-                                let final_logical_box =
-                                    Rect2::from_min_size(current, text.fbox.size);
+                    //         if self.sbr.debug.draw_layout_info {
+                    //             let final_logical_box =
+                    //                 Rect2::from_min_size(current, text.fbox.size);
 
-                                pass.debug_text(
-                                    target,
-                                    final_logical_box.min,
-                                    &format!("{:.0},{:.0}", current.x, current.y),
-                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
-                                    debug_font_size,
-                                    BGRA8::RED,
-                                )?;
+                    //             pass.debug_text(
+                    //                 target,
+                    //                 final_logical_box.min,
+                    //                 &format!("{:.0},{:.0}", current.x, current.y),
+                    //                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
+                    //                 debug_font_size,
+                    //                 BGRA8::RED,
+                    //             )?;
 
-                                pass.debug_text(
-                                    target,
-                                    Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
-                                    &format!("{:.1}", offset.x + text.baseline_offset.x),
-                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                                    debug_font_size,
-                                    BGRA8::RED,
-                                )?;
+                    //             pass.debug_text(
+                    //                 target,
+                    //                 Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
+                    //                 &format!("{:.1}", offset.x + text.baseline_offset.x),
+                    //                 Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                    //                 debug_font_size,
+                    //                 BGRA8::RED,
+                    //             )?;
 
-                                pass.debug_text(
-                                    target,
-                                    Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                                    &format!("{:.0}pt", text.style.font_size()),
-                                    Alignment(
-                                        HorizontalAlignment::Right,
-                                        VerticalAlignment::Bottom,
-                                    ),
-                                    debug_font_size,
-                                    BGRA8::GOLD,
-                                )?;
+                    //             pass.debug_text(
+                    //                 target,
+                    //                 Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
+                    //                 &format!("{:.0}pt", text.style.font_size()),
+                    //                 Alignment(
+                    //                     HorizontalAlignment::Right,
+                    //                     VerticalAlignment::Bottom,
+                    //                 ),
+                    //                 debug_font_size,
+                    //                 BGRA8::GOLD,
+                    //             )?;
 
-                                let final_logical_boxf = Rect2::to_float(final_logical_box);
+                    //             let final_logical_boxf = Rect2::to_float(final_logical_box);
 
-                                pass.rasterizer.stroke_axis_aligned_rect(
-                                    target,
-                                    final_logical_boxf,
-                                    BGRA8::BLUE,
-                                );
+                    //             pass.rasterizer.stroke_axis_aligned_rect(
+                    //                 target,
+                    //                 final_logical_boxf,
+                    //                 BGRA8::BLUE,
+                    //             );
 
-                                pass.rasterizer.horizontal_line(
-                                    target,
-                                    (current.y + text.baseline_offset.y).into_f32(),
-                                    final_logical_boxf.min.x,
-                                    final_logical_boxf.max.x,
-                                    BGRA8::GREEN,
-                                );
-                            }
+                    //             pass.rasterizer.horizontal_line(
+                    //                 target,
+                    //                 (current.y + text.baseline_offset.y).into_f32(),
+                    //                 final_logical_boxf.min.x,
+                    //                 final_logical_boxf.max.x,
+                    //                 BGRA8::GREEN,
+                    //             );
+                    //         }
 
-                            pass.draw_text_full(
-                                target,
-                                current.x + text.baseline_offset.x,
-                                current.y + text.baseline_offset.y,
-                                text.glyphs(),
-                                text.style.color(),
-                                &text.style.text_decoration(),
-                                &text.style.text_shadows(),
-                            )?;
-                        }
-                    }
+                    //         pass.draw_text_full(
+                    //             target,
+                    //             current.x + text.baseline_offset.x,
+                    //             current.y + text.baseline_offset.y,
+                    //             text.glyphs(),
+                    //             text.style.color(),
+                    //             &text.style.text_decoration(),
+                    //             &text.style.text_shadows(),
+                    //         )?;
+                    //     }
+                    // }
                 }
             }
 

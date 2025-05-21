@@ -6,18 +6,22 @@ use rasterize::color::BGRA8;
 use util::math::{I16Dot16, I26Dot6, Vec2f};
 
 use crate::{
-    layout::{
-        self, BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText,
-        LayoutConstraints, Point2L, Vec2L,
-    },
     log::{log_once_state, warning},
+    miniweb::{
+        layout::{
+            self, BlockContainer, Container, FixedL, InlineContainer, InlineLayoutError,
+            InlineText, LayoutConstraints, Point2L, Vec2L,
+        },
+        style::{
+            self,
+            types::{
+                Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment,
+            },
+            StyleMap,
+        },
+    },
     renderer::FrameLayoutPass,
     srv3::RubyPosition,
-    style::{
-        self,
-        types::{Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment},
-        StyleMap,
-    },
     Subrandr, SubtitleContext,
 };
 
@@ -338,15 +342,15 @@ impl Window {
         pass: &mut FrameLayoutPass,
         style: &StyleMap,
     ) -> Result<Option<(Point2L, layout::BlockContainerFragment)>, layout::InlineLayoutError> {
-        let contents: Vec<InlineContainer> = self
+        let contents: Vec<Container> = self
             .events
             .iter()
             .filter_map(|line| {
                 if pass.add_event_range(line.range.clone()) {
-                    Some(InlineContainer {
+                    Some(Container::Inline(InlineContainer {
                         contents: segments_to_inline(pass, line.range.start, &line.segments),
                         ..InlineContainer::default()
-                    })
+                    }))
                 } else {
                     None
                 }

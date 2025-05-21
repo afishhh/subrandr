@@ -16,7 +16,7 @@ use util::{
 };
 
 use super::{FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, SingleGlyphBitmap};
-use crate::layout::{FixedL, Vec2L};
+use crate::miniweb::layout::{FixedL, Vec2L};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Face;

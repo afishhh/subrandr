@@ -15,9 +15,9 @@ pub mod vtt;
 
 mod capi;
 mod html;
-mod layout;
 mod log;
-mod style;
+mod miniweb;
+mod symbol;
 mod text;
 
 #[derive(Default, Debug, Clone)]

@@ -293,6 +293,11 @@ pub fn implement_style_module(ts: proc_macro::TokenStream) -> proc_macro::TokenS
     let mut computed_style_fields = TokenStream2::new();
     let mut computed_style_impl = TokenStream2::new();
     let mut create_child_impl = TokenStream2::new();
+    // PERF: Currently `ComputedStyle::apply_all` optimizes for amount of `Rc::make_mut` calls
+    //       instead of for amount of `StyleMap` lookups. Maybe the other way ends up being
+    //       better because `Rc::make_mut` on an already unique `Rc` should be very cheap but
+    //       `StyleMap` lookups are always `HashMap` lookups.
+    //       On this scale it probably doesn't matter much yet though.
     let mut apply_all_impl = TokenStream2::new();
     for group in &input.groups {
         let group_name = &group.name;

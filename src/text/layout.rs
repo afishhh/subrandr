@@ -5,7 +5,7 @@ use thiserror::Error;
 use util::math::{I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{
-    style::types::HorizontalAlignment,
+    miniweb::style::types::HorizontalAlignment,
     text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
 };
 

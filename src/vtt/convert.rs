@@ -2,18 +2,21 @@ use std::{ops::Range, rc::Rc};
 
 use crate::{
     color::BGRA8,
-    layout::{
-        self, BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
-        InlineText, LineBoxFragment, Point2L, Vec2L,
-    },
     log::{log_once_state, warning, LogOnceSet},
     math::{I16Dot16, Point2, Rect2},
-    renderer::FrameLayoutPass,
-    style::{
-        self,
-        types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
-        ComputedStyle, StyleMap,
+    miniweb::{
+        layout::{
+            self, BlockContainer, BlockContainerFragment, Container, FixedL, InlineContainer,
+            InlineContainerFragment, InlineLayoutError, InlineText, LineBoxFragment, Point2L,
+            Vec2L,
+        },
+        style::{
+            self,
+            types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
+            ComputedStyle, StyleMap,
+        },
     },
+    renderer::FrameLayoutPass,
     vtt, Subrandr, SubtitleContext,
 };
 
@@ -123,14 +126,14 @@ impl Event {
                     result;
                     todo!()
                 },
-                contents: vec![InlineContainer {
+                contents: vec![Container::Inline(InlineContainer {
                     style: ComputedStyle::default(),
                     contents: self.segments.clone(),
-                }],
+                })],
             },
         )?;
 
-        let container = &mut fragment.children[0].1;
+        let container: &mut InlineContainerFragment = todo!(); //&mut fragment.children[0].1;
 
         let lines = &mut container.lines;
         if lines.is_empty() {

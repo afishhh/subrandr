@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     math::{I26Dot6, Point2, Vec2},
-    style::{
+    miniweb::style::{
         types::{FontSlant, Ruby},
         ComputedStyle,
     },
@@ -62,7 +62,7 @@ pub struct InlineContainerFragment {
 #[derive(Debug)]
 pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
-    pub children: Vec<(Vec2L, InlineContainerFragment)>,
+    pub children: Vec<(Vec2L, BlockFragmentChild)>,
 }
 
 impl BlockContainerFragment {
@@ -72,6 +72,12 @@ impl BlockContainerFragment {
             children: Vec::new(),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum BlockFragmentChild {
+    Inline(InlineContainerFragment),
+    Block(BlockContainerFragment),
 }
 
 #[derive(Debug)]
@@ -88,13 +94,19 @@ pub struct LayoutConstraints {
 #[derive(Default, Debug, Clone)]
 pub struct BlockContainer {
     pub style: ComputedStyle,
-    pub contents: Vec<InlineContainer>,
+    pub contents: Vec<Container>,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct InlineContainer {
     pub style: ComputedStyle,
     pub contents: Vec<InlineText>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Container {
+    Inline(InlineContainer),
+    Block(BlockContainer),
 }
 
 #[derive(Debug, Clone)]
@@ -112,7 +124,7 @@ pub enum InlineLayoutError {
     TextLayout(#[from] text::layout::LayoutError),
 }
 
-fn layout_inline(
+fn flow_layout_inline(
     context: &mut LayoutContext,
     constraints: &LayoutConstraints,
     container: &InlineContainer,
@@ -207,7 +219,7 @@ fn layout_inline(
     Ok(result)
 }
 
-fn layout_block(
+fn flow_layout_block(
     context: &mut LayoutContext,
     constraints: &LayoutConstraints,
     container: &BlockContainer,
@@ -218,16 +230,40 @@ fn layout_block(
     };
     for child in &container.contents {
         let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.size.y);
-        let fragment = layout_inline(
-            context,
-            &LayoutConstraints {
-                size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
-            },
-            child,
-        )?;
 
-        result.fbox.size.x = result.fbox.size.x.max(fragment.fbox.size.x);
-        result.fbox.size.y += fragment.fbox.size.y;
+        let (fbox, fragment) = match child {
+            Container::Inline(inline) => {
+                let fragment = flow_layout_inline(
+                    context,
+                    &LayoutConstraints {
+                        size: Vec2L::new(
+                            constraints.size.x,
+                            constraints.size.y - result.fbox.size.y,
+                        ),
+                    },
+                    inline,
+                )?;
+
+                (fragment.fbox, BlockFragmentChild::Inline(fragment))
+            }
+            Container::Block(block) => {
+                let fragment = flow_layout_block(
+                    context,
+                    &LayoutConstraints {
+                        size: Vec2L::new(
+                            constraints.size.x,
+                            constraints.size.y - result.fbox.size.y,
+                        ),
+                    },
+                    block,
+                )?;
+
+                (fragment.fbox, BlockFragmentChild::Block(fragment))
+            }
+        };
+
+        result.fbox.size.x = result.fbox.size.x.max(fbox.size.x);
+        result.fbox.size.y += fbox.size.y;
 
         result.children.push((child_offset, fragment));
     }
@@ -240,7 +276,7 @@ pub fn layout(
     constraints: LayoutConstraints,
     root: &BlockContainer,
 ) -> Result<BlockContainerFragment, InlineLayoutError> {
-    layout_block(context, &constraints, root)
+    flow_layout_block(context, &constraints, root)
 }
 
 // TODO: Once a built-in tofu font is added some tests could be made
@@ -251,16 +287,16 @@ mod test {
     use std::rc::Rc;
 
     use crate::{
-        style::{types::Ruby, ComputedStyle},
+        miniweb::style::{types::Ruby, ComputedStyle},
         text::FontDb,
     };
 
     use super::{
-        layout, BlockContainer, FixedL, InlineContainer, InlineText, LayoutConstraints,
+        layout, BlockContainer, Container, FixedL, InlineContainer, InlineText, LayoutConstraints,
         LayoutContext, Vec2L,
     };
 
-    #[test]
+    #[cfg_attr(not(miri), test)]
     fn does_not_crash() {
         let style = {
             let mut result = ComputedStyle::default();
@@ -271,22 +307,22 @@ mod test {
         let tree = BlockContainer {
             style: style.clone(),
             contents: vec![
-                InlineContainer {
+                Container::Inline(InlineContainer {
                     style: style.clone(),
                     contents: vec![InlineText {
                         style: style.clone(),
                         text: "hello world".into(),
                         ruby: Ruby::None,
                     }],
-                },
-                InlineContainer {
+                }),
+                Container::Inline(InlineContainer {
                     style,
                     contents: vec![InlineText {
                         style: ComputedStyle::default(),
                         text: "this is a separate inline container".into(),
                         ruby: Ruby::None,
                     }],
-                },
+                }),
             ],
         };
 

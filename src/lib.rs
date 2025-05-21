@@ -13,12 +13,12 @@ pub mod vtt;
 mod capi;
 mod color;
 mod html;
-mod layout;
 mod log;
 mod math;
+mod miniweb;
 mod outline;
 pub mod rasterize;
-mod style;
+mod symbol;
 mod text;
 mod util;
 

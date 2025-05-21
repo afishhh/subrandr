@@ -1,4 +1,4 @@
-use crate::{color::BGRA8, layout::Vec2L, math::I26Dot6};
+use crate::{color::BGRA8, math::I26Dot6, miniweb::layout::Vec2L};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -70,4 +70,52 @@ impl Default for TextDecorations {
     fn default() -> Self {
         Self::none()
     }
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum OutsideDisplayType {
+    Block,
+    #[default]
+    Inline,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum InsideDisplayType {
+    #[default]
+    Flow,
+    FlowRoot,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct FullDisplay {
+    pub outer: OutsideDisplayType,
+    pub inner: InsideDisplayType,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Display {
+    None,
+    Full(FullDisplay),
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Self::Full(FullDisplay::default())
+    }
+}
+
+impl Display {
+    pub const NONE: Display = Display::None;
+    pub const BLOCK: Display = Display::Full(FullDisplay {
+        outer: OutsideDisplayType::Block,
+        inner: InsideDisplayType::Flow,
+    });
+    pub const INLINE: Display = Display::Full(FullDisplay {
+        outer: OutsideDisplayType::Inline,
+        inner: InsideDisplayType::Flow,
+    });
+    pub const INLINE_BLOCK: Display = Display::Full(FullDisplay {
+        outer: OutsideDisplayType::Inline,
+        inner: InsideDisplayType::FlowRoot,
+    });
 }

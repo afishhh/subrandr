@@ -85,6 +85,7 @@ subrandr_macros::implement_style_module! {
     }
 
     rc uninherited {
+        #[inherit(no)] display: types::Display,
         #[inherit(no)] text_decoration: types::TextDecorations,
     }
 
@@ -101,7 +102,7 @@ mod test {
     use crate::{
         color::BGRA8,
         math::{I16Dot16, Vec2},
-        style::{
+        miniweb::style::{
             self,
             types::{TextDecorations, TextShadow},
             ComputedStyle, StyleMap,

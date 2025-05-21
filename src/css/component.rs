@@ -8,7 +8,6 @@ use super::{
     },
     properties::AnyPropertyValue,
     selector::CompoundSelectorList,
-    values::CssWideKeywordOr,
 };
 
 /// Implements parsing algorithms defined in <https://drafts.csswg.org/css-syntax-3/#parsing>.
@@ -522,7 +521,7 @@ impl<'a> TokenParser<'a> {
             }
         }
 
-        match super::properties::PROPERTY_MAP.get(&*name) {
+        match super::properties::property_to_parser(&*name) {
             Some(parser) => Some(PropertyDeclaration {
                 value: parse_whole_with(ParseStream::new(value), parser).ok()?,
                 important,
@@ -726,7 +725,7 @@ mod test {
 
     #[test]
     fn does_not_crash() {
-        let rules = dbg!(TokenParser::new(
+        dbg!(TokenParser::new(
             r#"
 ::cue(:lang(en-US, brazil\!\!\!)) {
     /* color: blue !important; */

@@ -26,6 +26,8 @@ struct InstallCommand {
     target: Triple,
     #[clap(short = 'p', long = "prefix")]
     prefix: Option<PathBuf>,
+    #[clap(long = "destdir")]
+    destdir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +202,10 @@ fn main() -> Result<()> {
                 .context(
                     "Either of `--prefix` or the `PREFIX` environment variable is required.",
                 )?;
+            let destdir = install
+                .destdir
+                .or_else(|| std::env::var_os("DESTDIR").map(PathBuf::from))
+                .unwrap_or_else(|| prefix.clone());
 
             let status = Command::new(env!("CARGO"))
                 .arg("build")
@@ -224,10 +230,10 @@ fn main() -> Result<()> {
             let abiver = manifest.package.metadata.capi.abiver;
 
             (|| -> Result<()> {
-                std::fs::create_dir_all(prefix.join("lib").join("pkgconfig"))?;
-                std::fs::create_dir_all(prefix.join("include").join("subrandr"))?;
+                std::fs::create_dir_all(destdir.join("lib").join("pkgconfig"))?;
+                std::fs::create_dir_all(destdir.join("include").join("subrandr"))?;
                 if install.target.is_windows() {
-                    std::fs::create_dir_all(prefix.join("bin"))?;
+                    std::fs::create_dir_all(destdir.join("bin"))?;
                 }
                 Ok(())
             })()
@@ -235,7 +241,7 @@ fn main() -> Result<()> {
 
             copy_dir_all(
                 &project_dir.join("include"),
-                &prefix.join("include").join("subrandr"),
+                &destdir.join("include").join("subrandr"),
             )
             .context("Failed to copy headers")?;
 
@@ -244,7 +250,7 @@ fn main() -> Result<()> {
                 .join(install.target.to_string())
                 .join("release");
 
-            let libdir = prefix.join("lib");
+            let libdir = destdir.join("lib");
 
             copy_file(&target_dir, &libdir, "libsubrandr.a")?;
 
@@ -256,7 +262,7 @@ fn main() -> Result<()> {
 
             std::fs::copy(
                 target_dir.join(shared_in),
-                prefix.join(shared_dir).join(&shared_out),
+                destdir.join(shared_dir).join(&shared_out),
             )
             .with_context(|| format!("Failed to copy `{shared_in}`"))?;
 

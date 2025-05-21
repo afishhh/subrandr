@@ -18,7 +18,6 @@ mod math;
 mod miniweb;
 mod outline;
 pub mod rasterize;
-mod symbol;
 mod text;
 mod util;
 

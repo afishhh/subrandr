@@ -84,6 +84,17 @@ pub enum InsideDisplayType {
     #[default]
     Flow,
     FlowRoot,
+    Ruby,
+}
+
+#[derive(Debug, Clone, Copy)]
+// clippy shaming me for not supporting tables
+#[allow(clippy::enum_variant_names)]
+pub enum InternalDisplay {
+    RubyBase,
+    RubyText,
+    RubyBaseContainer,
+    RubyTextContainer,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -96,6 +107,7 @@ pub struct FullDisplay {
 pub enum Display {
     None,
     Full(FullDisplay),
+    Internal(InternalDisplay),
 }
 
 impl Default for Display {
@@ -117,5 +129,9 @@ impl Display {
     pub const INLINE_BLOCK: Display = Display::Full(FullDisplay {
         outer: OutsideDisplayType::Inline,
         inner: InsideDisplayType::FlowRoot,
+    });
+    pub const RUBY: Display = Display::Full(FullDisplay {
+        outer: OutsideDisplayType::Inline,
+        inner: InsideDisplayType::Ruby,
     });
 }

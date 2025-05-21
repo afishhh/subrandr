@@ -5,4 +5,6 @@
 //! simple web-like gui framework.
 pub mod dom;
 pub mod layout;
+pub mod realm;
+pub mod render;
 pub mod style;

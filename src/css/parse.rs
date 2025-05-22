@@ -508,6 +508,27 @@ pub mod tokens {
         keyword Under       [under]     ("under");
         keyword InterCharacter [inter-character] ("inter-character");
 
+        keyword Block [block] ("block");
+        keyword Inline        [inline]      ("inline");
+        keyword RunIn       [run-in]     ("run-in");
+        keyword Flow [flow] ("flow");
+        keyword FlowRoot [flow-root] ("flow-root");
+        keyword Table [table] ("table");
+        keyword Flex [flex] ("flex");
+        keyword Grid [grid] ("grid");
+        keyword Ruby [ruby] ("ruby");
+        keyword ListItem [list-item] ("list-item");
+        keyword RubyBase [ruby-base] ("ruby-base");
+        keyword RubyText [ruby-text] ("ruby-text");
+        keyword RubyBaseContainer [ruby-base-container] ("ruby-base-container");
+        keyword RubyTextContainer [ruby-text-container] ("ruby-text-container");
+        keyword Contents [contents] ("contents");
+        keyword None [none] ("none");
+        keyword InlineBlock [inline-block] ("inline-block");
+        keyword InlineTable [inline-table] ("inline-table");
+        keyword InlineFlex [inline-flex] ("inline-flex");
+        keyword InlineGrid [inline-grid] ("inline-grid");
+
         function_keyword LangFunction [lang(..)] ("lang");
         function_keyword CueFunction [cue(..)] ("cue");
     }

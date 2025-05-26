@@ -232,14 +232,12 @@ pub(crate) trait Rasterizer {
     /// Flush pending buffered draws.
     ///
     /// Some rasterizers, like the wgpu one, may batch some operations to reduce the amount of
-    /// binding and draw calls. These batched operations should eventually be flushed, and this
-    /// should be done soon enough to allow the GPU to get to work early but late enough that
-    /// the calls are batched enough to result in a performance increase.
+    /// binding and draw calls. These batched operations may be flushed to ensure they're executed
+    /// now rather than on the next batch-incompatible operation.
     ///
-    /// Note that this *should* be called at least somewhat frequently even if automatic flushing
-    /// would work correctly because the wgpu rasterizer also does defragmentation of texture atlases
-    /// here, without which it may use unbounded video memory.
-    fn flush(&mut self) {}
+    /// Note that currently this function will also defragment texture atlases although this may
+    /// be changed in the future to use a separate once per-frame housekeeping function.
+    fn flush(&mut self, _target: &mut RenderTarget) {}
 
     fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
     fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);

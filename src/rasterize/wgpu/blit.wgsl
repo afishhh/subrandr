@@ -7,21 +7,18 @@ struct VertexOutput {
     @interpolate(flat) @location(1) color: vec4<f32>
 }
 
-struct VertexInput {
-    @location(0) vertex: vec2<f32>,
-    @builtin(vertex_index) index: u32,
-}
-
 struct InstanceInput {
-    @location(1) pos: vec2<f32>,
-    @location(2) size: vec2<f32>,
-    @location(3) color: vec4<f32>
+    @location(0) src_pos: vec2<f32>,
+    @location(1) src_uv_size: vec2<f32>,
+    @location(2) dst_pos: vec2<f32>,
+    @location(3) size: vec2<f32>,
+    @location(4) color: vec4<f32>
 }
 
 @vertex
 fn vs_main(
-    vertex: VertexInput,
     instance: InstanceInput,
+    @builtin(vertex_index) index: u32,
 ) -> VertexOutput {
     let vertices = array<vec2<f32>, 4>(
         vec2<f32>(0.0, 1.0),
@@ -31,9 +28,11 @@ fn vs_main(
     );
 
     var out: VertexOutput;
-    out.src_coord = vertex.vertex;
+    out.src_coord = vec2<f32>(
+        instance.src_pos + (vertices[index] * instance.src_uv_size),
+    );
     out.position = vec4<f32>(
-        instance.pos + (vertices[vertex.index] * 2.0 - vec2f(1.0, 1.0)) * instance.size + instance.size,
+        instance.dst_pos + (vertices[index] * 2.0 - vec2f(1.0, 1.0)) * instance.size + instance.size,
         0.0, 1.0
     );
     out.color = instance.color;

@@ -765,6 +765,8 @@ impl Renderer<'_> {
                     draw_polyline(&self.perf.raster, BGRA8::ORANGERED);
                     y += graph_height;
                 }
+
+                pass.rasterizer.flush(target);
             }
             self.perf.end_debug_raster();
 
@@ -925,7 +927,9 @@ impl Renderer<'_> {
                 }
             }
 
-            pass.rasterizer.flush();
+            // Make sure all batched draws are flushed, although currently this is not
+            // necessary because the wgpu rasterizer flushes automatically on `submit_render`.
+            pass.rasterizer.flush(target);
         }
 
         let time = self.perf.end_frame();

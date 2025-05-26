@@ -59,6 +59,31 @@ struct Blitter {
     pipeline_xxxa_to_mono: wgpu::RenderPipeline,
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+struct BlitInstanceInput {
+    src_pos: Point2f,
+    src_uv_size: Vec2f,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+struct BlitInstanceOutput {
+    dst_pos: Point2f,
+    size: Vec2f,
+    color: [f32; 4],
+}
+
+#[derive(Debug)]
+struct BlitBatch {
+    pipeline: wgpu::RenderPipeline,
+    texture: wgpu::Texture,
+    // These are split in two because of the vertex buffer stride limit which
+    // is 32 bytes.
+    inputs: Vec<BlitInstanceInput>,
+    outputs: Vec<BlitInstanceOutput>,
+}
+
 impl Blitter {
     fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(include_wgsl!("./wgpu/blit.wgsl"));
@@ -105,19 +130,20 @@ impl Blitter {
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[
                         wgpu::VertexBufferLayout {
-                            array_stride: 8,
-                            step_mode: wgpu::VertexStepMode::Vertex,
+                            array_stride: size_of::<BlitInstanceInput>() as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &vertex_attr_array![
-                                0 => Float32x2
+                                0 => Float32x2,
+                                1 => Float32x2,
                             ],
                         },
                         wgpu::VertexBufferLayout {
-                            array_stride: 32,
+                            array_stride: size_of::<BlitInstanceOutput>() as wgpu::BufferAddress,
                             step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &vertex_attr_array![
-                                1 => Float32x2,
                                 2 => Float32x2,
-                                3 => Float32x4
+                                3 => Float32x2,
+                                4 => Float32x4
                             ],
                         },
                     ],
@@ -191,6 +217,7 @@ impl Blitter {
 struct BlurState {
     encoder: wgpu::CommandEncoder,
     blit_pass: wgpu::RenderPass<'static>,
+    blit_batch: Option<BlitBatch>,
     front_texture: wgpu::Texture,
     radius: u32,
 }
@@ -200,31 +227,69 @@ pub(super) struct RenderTargetImpl {
     pub tex: wgpu::Texture,
     pass: wgpu::RenderPass<'static>,
     encoder: wgpu::CommandEncoder,
+    blit_batch: Option<BlitBatch>,
 }
 
-fn unwrap_wgpu_render_target<'a>(
-    target: &'a mut super::RenderTarget<'_>,
-) -> Option<&'a mut RenderTargetImpl> {
-    match &mut target.0 {
-        super::RenderTargetInner::Wgpu(target) => Some(target),
-        super::RenderTargetInner::WgpuEmpty => None,
-        target => panic!(
-            "Incompatible render target {:?} passed to wgpu rasterizer (expected: wgpu)",
-            target.variant_name()
-        ),
+/// Describes what an unwrapped render target will be used for and is used to
+/// determine what kinds of buffered should be flushed before releasing the
+/// underlying render target to subsequent drawing code.
+///
+/// For example a [`RenderTargetUse::Blit`] will not flush the blit batch because
+/// the render target will be used for blitting and the usage site must be aware of
+/// the batching and integrate with it. But a [`RenderTargetUse::Other`] will flush
+/// any pending blits so that drawing a rectangle on top of a blitted batch will have
+/// the expected draw order.
+#[derive(Debug, Clone, Copy)]
+enum RenderTargetUse {
+    /// Will not flush the current blit batch
+    Blit,
+    /// Will flush all pending buffered operations
+    Other,
+}
+
+impl Rasterizer {
+    fn flush_render_target_for_use(&self, target: &mut RenderTargetImpl, use_: RenderTargetUse) {
+        if !matches!(use_, RenderTargetUse::Blit) {
+            if let Some(batch) = target.blit_batch.take() {
+                batch.execute(&self.device, &mut target.pass, &self.blitter);
+            }
+        }
     }
-}
 
-fn unwrap_wgpu_render_target_owned(
-    target: super::RenderTarget<'_>,
-) -> Option<Box<RenderTargetImpl>> {
-    match target.0 {
-        super::RenderTargetInner::Wgpu(target) => Some(target),
-        super::RenderTargetInner::WgpuEmpty => None,
-        target => panic!(
-            "Incompatible render target {:?} passed to wgpu rasterizer (expected: wgpu)",
-            target.variant_name()
-        ),
+    fn unwrap_render_target<'a>(
+        &self,
+        target: &'a mut super::RenderTarget<'_>,
+        use_: RenderTargetUse,
+    ) -> Option<&'a mut RenderTargetImpl> {
+        match &mut target.0 {
+            super::RenderTargetInner::Wgpu(target) => {
+                self.flush_render_target_for_use(target, use_);
+                Some(target)
+            }
+            super::RenderTargetInner::WgpuEmpty => None,
+            target => panic!(
+                "Incompatible render target {:?} passed to wgpu rasterizer (expected: wgpu)",
+                target.variant_name()
+            ),
+        }
+    }
+
+    fn unwrap_render_target_owned(
+        &self,
+        target: super::RenderTarget<'_>,
+        use_: RenderTargetUse,
+    ) -> Option<Box<RenderTargetImpl>> {
+        match target.0 {
+            super::RenderTargetInner::Wgpu(mut target) => {
+                self.flush_render_target_for_use(&mut target, use_);
+                Some(target)
+            }
+            super::RenderTargetInner::WgpuEmpty => None,
+            target => panic!(
+                "Incompatible render target {:?} passed to wgpu rasterizer (expected: wgpu)",
+                target.variant_name()
+            ),
+        }
     }
 }
 
@@ -519,6 +584,7 @@ impl Rasterizer {
             tex: texture,
             pass,
             encoder,
+            blit_batch: None,
         })))
     }
 }
@@ -532,7 +598,7 @@ impl Rasterizer {
         closed: bool,
         color: BGRA8,
     ) {
-        let Some(target) = unwrap_wgpu_render_target(target) else {
+        let Some(target) = self.unwrap_render_target(target, RenderTargetUse::Other) else {
             return;
         };
 
@@ -608,7 +674,7 @@ impl Rasterizer {
         vertices: &[Point2f; N],
         color: BGRA8,
     ) {
-        let Some(target) = unwrap_wgpu_render_target(target) else {
+        let Some(target) = self.unwrap_render_target(target, RenderTargetUse::Other) else {
             return;
         };
 
@@ -705,14 +771,6 @@ impl<const SIZE: usize> StructBuilder<SIZE> {
         self.offset += size_of_val(data);
     }
 
-    pub fn write_f32s(&mut self, data: &[f32]) {
-        self.write_u32s(unsafe { std::mem::transmute::<&[f32], &[u32]>(data) });
-    }
-
-    pub fn write_point2(&mut self, data: &Point2f) {
-        self.write_u32s(unsafe { std::mem::transmute::<&Point2f, &[u32; 2]>(data) });
-    }
-
     fn finish(self) -> [u8; SIZE] {
         assert_eq!(self.offset, SIZE);
         *unsafe { std::mem::transmute::<&[MaybeUninit<u8>; SIZE], &[u8; SIZE]>(&self.data) }
@@ -721,13 +779,14 @@ impl<const SIZE: usize> StructBuilder<SIZE> {
 
 impl Rasterizer {
     fn submit_render_impl(&mut self, target: RenderTargetImpl) -> wgpu::Texture {
+        assert!(target.blit_batch.is_none());
         drop(target.pass);
         self.queue.submit([target.encoder.finish()]);
         target.tex
     }
 
     pub fn submit_render(&mut self, target: super::RenderTarget<'_>) {
-        if let Some(target) = unwrap_wgpu_render_target_owned(target) {
+        if let Some(target) = self.unwrap_render_target_owned(target, RenderTargetUse::Other) {
             self.submit_render_impl(*target);
         }
     }
@@ -892,7 +951,7 @@ impl super::Rasterizer for Rasterizer {
     }
 
     fn finalize_texture_render(&mut self, target: super::RenderTarget<'static>) -> super::Texture {
-        let Some(target) = unwrap_wgpu_render_target_owned(target) else {
+        let Some(target) = self.unwrap_render_target_owned(target, RenderTargetUse::Other) else {
             return super::Texture(super::TextureInner::Wgpu(TextureImpl::Empty));
         };
 
@@ -909,7 +968,7 @@ impl super::Rasterizer for Rasterizer {
         texture: &super::Texture,
         color: BGRA8,
     ) {
-        let Some(target) = unwrap_wgpu_render_target(target) else {
+        let Some(target) = self.unwrap_render_target(target, RenderTargetUse::Blit) else {
             return;
         };
 
@@ -917,6 +976,7 @@ impl super::Rasterizer for Rasterizer {
             self.blitter.do_blit(
                 &self.device,
                 &mut target.pass,
+                &mut target.blit_batch,
                 super::PixelFormat::Bgra,
                 target.tex.width(),
                 target.tex.height(),
@@ -935,7 +995,7 @@ impl super::Rasterizer for Rasterizer {
         dy: i32,
         texture: &super::Texture,
     ) {
-        let Some(target) = unwrap_wgpu_render_target(target) else {
+        let Some(target) = self.unwrap_render_target(target, RenderTargetUse::Blit) else {
             return;
         };
 
@@ -943,6 +1003,7 @@ impl super::Rasterizer for Rasterizer {
             self.blitter.do_blit(
                 &self.device,
                 &mut target.pass,
+                &mut target.blit_batch,
                 super::PixelFormat::Mono,
                 target.tex.width(),
                 target.tex.height(),
@@ -954,7 +1015,9 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn flush(&mut self) {
+    fn flush(&mut self, target: &mut super::RenderTarget) {
+        _ = self.unwrap_render_target(target, RenderTargetUse::Other);
+
         self.packers.mono.defragment();
         self.packers.bgra.defragment();
     }
@@ -1063,6 +1126,7 @@ impl super::Rasterizer for Rasterizer {
                     occlusion_query_set: None,
                 })
                 .forget_lifetime(),
+            blit_batch: None,
             encoder,
             front_texture: texture,
             radius,
@@ -1079,6 +1143,7 @@ impl super::Rasterizer for Rasterizer {
             self.blitter.do_blit(
                 &self.device,
                 &mut state.blit_pass,
+                &mut state.blit_batch,
                 PixelFormat::Mono,
                 state.front_texture.width(),
                 state.front_texture.height(),
@@ -1104,6 +1169,10 @@ impl super::Rasterizer for Rasterizer {
             .blur_state
             .take()
             .expect("Rasterizer::blur_to_mono_texture called without an active blur pass");
+
+        if let Some(batch) = state.blit_batch.take() {
+            batch.execute(&self.device, &mut state.blit_pass, &self.blitter);
+        }
 
         drop(state.blit_pass);
 
@@ -1249,11 +1318,66 @@ impl Rasterizer {
     }
 }
 
+impl BlitBatch {
+    fn execute(self, device: &wgpu::Device, pass: &mut wgpu::RenderPass, blitter: &Blitter) {
+        let inputs_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: unsafe {
+                std::slice::from_raw_parts(
+                    self.inputs.as_ptr().cast::<u8>(),
+                    size_of_val(self.inputs.as_slice()),
+                )
+            },
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let outputs_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: unsafe {
+                std::slice::from_raw_parts(
+                    self.outputs.as_ptr().cast::<u8>(),
+                    size_of_val(self.outputs.as_slice()),
+                )
+            },
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(
+            0,
+            Some(&device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &blitter.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&blitter.nearest_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.texture.create_view(
+                            &wgpu::TextureViewDescriptor {
+                                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
+                                ..Default::default()
+                            },
+                        )),
+                    },
+                ],
+            })),
+            &[],
+        );
+        pass.set_vertex_buffer(0, inputs_buffer.slice(..));
+        pass.set_vertex_buffer(1, outputs_buffer.slice(..));
+        pass.draw(0..4, 0..self.outputs.len() as u32);
+    }
+}
+
 impl Blitter {
     fn do_blit(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         pass: &mut wgpu::RenderPass,
+        blit_batch: &mut Option<BlitBatch>,
         pass_format: PixelFormat,
         twidth: u32,
         theight: u32,
@@ -1262,115 +1386,58 @@ impl Blitter {
         unwrapped: &UnwrappedTexture,
         color: BGRA8,
     ) {
-        let instance = {
-            let mut builder = StructBuilder::<32>::new();
+        let pipeline = match (pass_format, unwrapped.format) {
+            (PixelFormat::Bgra, PixelFormat::Bgra) => &self.pipeline_color_to_bgra,
+            (PixelFormat::Bgra, PixelFormat::Mono) => &self.pipeline_mono_to_bgra,
+            (PixelFormat::Mono, PixelFormat::Bgra) => &self.pipeline_xxxa_to_mono,
+            (PixelFormat::Mono, PixelFormat::Mono) => &self.pipeline_mono_to_mono,
+        };
 
-            builder.write_point2(&target_transform_point(
-                twidth,
-                theight,
-                Point2::new(dx as f32, dy as f32),
-            ));
+        if let Some(batch) = blit_batch
+            .take_if(|batch| &batch.texture != unwrapped.texture || &batch.pipeline != pipeline)
+        {
+            batch.execute(device, pass, self);
+        }
 
-            builder.write_point2(&Point2::new(
+        let batch = blit_batch.get_or_insert_with(|| BlitBatch {
+            pipeline: pipeline.clone(),
+            texture: unwrapped.texture.clone(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        });
+
+        batch.outputs.push(BlitInstanceOutput {
+            dst_pos: target_transform_point(twidth, theight, Point2::new(dx as f32, dy as f32)),
+            size: Vec2::new(
                 unwrapped.size.x as f32 / twidth as f32,
                 -(unwrapped.size.y as f32 / theight as f32),
-            ));
-
-            builder.write_f32s(&[
+            ),
+            color: [
                 color.r as f32 / 255.0,
                 color.g as f32 / 255.0,
                 color.b as f32 / 255.0,
                 color.a as f32 / 255.0,
-            ]);
-
-            builder.finish()
-        };
-
-        let vertex_data = {
-            let mut result = Vec::new();
-
-            let in_fsz = Vec2::new(
-                unwrapped.texture.width() as f32,
-                unwrapped.texture.height() as f32,
-            );
-
-            let uv_pos = Point2::new(
-                unwrapped.position.x as f32 / in_fsz.x,
-                unwrapped.position.y as f32 / in_fsz.y,
-            );
-
-            let uv_size = Point2::new(
-                unwrapped.size.x as f32 / in_fsz.x,
-                unwrapped.size.y as f32 / in_fsz.y,
-            );
-
-            result.extend([
-                [uv_pos.x, uv_pos.y + uv_size.y],
-                [uv_pos.x + uv_size.x, uv_pos.y + uv_size.y],
-                [uv_pos.x, uv_pos.y],
-                [uv_pos.x + uv_size.x, uv_pos.y],
-            ]);
-
-            result
-        };
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: unsafe {
-                std::slice::from_raw_parts(
-                    vertex_data.as_ptr().cast::<u8>(),
-                    size_of_val(vertex_data.as_slice()),
-                )
-            },
-            usage: wgpu::BufferUsages::VERTEX,
+            ],
         });
 
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: &instance,
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        match (pass_format, unwrapped.format) {
-            (PixelFormat::Bgra, PixelFormat::Bgra) => {
-                pass.set_pipeline(&self.pipeline_color_to_bgra);
-            }
-            (PixelFormat::Bgra, PixelFormat::Mono) => {
-                pass.set_pipeline(&self.pipeline_mono_to_bgra);
-            }
-            (PixelFormat::Mono, PixelFormat::Bgra) => {
-                pass.set_pipeline(&self.pipeline_xxxa_to_mono);
-            }
-            (PixelFormat::Mono, PixelFormat::Mono) => {
-                pass.set_pipeline(&self.pipeline_mono_to_mono);
-            }
-        }
-
-        pass.set_bind_group(
-            0,
-            Some(&device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Sampler(&self.nearest_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(
-                            &unwrapped.texture.create_view(&wgpu::TextureViewDescriptor {
-                                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
-                                ..Default::default()
-                            }),
-                        ),
-                    },
-                ],
-            })),
-            &[],
+        let in_fsz = Vec2::new(
+            unwrapped.texture.width() as f32,
+            unwrapped.texture.height() as f32,
         );
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_vertex_buffer(1, instance_buffer.slice(..));
-        pass.draw(0..4, 0..1);
+
+        let uv_pos = Point2::new(
+            unwrapped.position.x as f32 / in_fsz.x,
+            unwrapped.position.y as f32 / in_fsz.y,
+        );
+
+        let uv_size = Vec2::new(
+            unwrapped.size.x as f32 / in_fsz.x,
+            unwrapped.size.y as f32 / in_fsz.y,
+        );
+
+        batch.inputs.push(BlitInstanceInput {
+            src_pos: uv_pos,
+            src_uv_size: uv_size,
+        });
     }
 }

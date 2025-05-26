@@ -22,6 +22,20 @@ pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
     (ptr, len, capacity)
 }
 
+pub trait BoolExt {
+    fn implies(self, value: bool) -> bool;
+}
+
+impl BoolExt for bool {
+    fn implies(self, value: bool) -> bool {
+        if self {
+            value
+        } else {
+            true
+        }
+    }
+}
+
 // Formatting helpers
 // Remove once [debug_closure_helpers](https://github.com/rust-lang/rust/issues/117729) is stabilized.
 

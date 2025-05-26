@@ -1,18 +1,27 @@
-use std::{ops::Range, pin::Pin, rc::Rc};
+use std::rc::Rc;
 
 use crate::miniweb::{
     layout,
     realm::symbol::Symbol,
     style::{
-        types::{Display, FullDisplay, InsideDisplayType, OutsideDisplayType, Ruby},
-        ComputedStyle, StyleMap,
+        computed::{
+            Display, FullDisplay, InsideDisplayType, InternalDisplay, OutsideDisplayType, Ruby,
+        },
+        ComputedStyle,
     },
 };
 
-use super::realm::Realm;
+use super::{
+    realm::Realm,
+    style::{
+        restyle::{StylesheetIndex, StylingContext},
+        sheet::{selector, Origin, Rule, Stylesheet},
+        style_map,
+    },
+};
 
 #[derive(Debug, Clone)]
-pub struct DomObject {
+pub struct DomElement {
     pub name: Symbol,
     pub id: Option<Symbol>,
     pub classes: Vec<Symbol>,
@@ -20,8 +29,8 @@ pub struct DomObject {
     pub time: u32,
 }
 
-impl DomObject {
-    fn new(name: Symbol, id: Option<Symbol>, classes: Vec<Symbol>, time: u32) -> Self {
+impl DomElement {
+    pub fn new(name: Symbol, id: Option<Symbol>, classes: Vec<Symbol>, time: u32) -> Self {
         Self {
             name,
             id,
@@ -34,7 +43,7 @@ impl DomObject {
 
 #[derive(Debug, Clone)]
 pub struct Element {
-    pub object: DomObject,
+    pub object: DomElement,
     pub children: Vec<ElementOrText>,
 }
 
@@ -202,123 +211,38 @@ impl Element {
     }
 }
 
-pub struct StylingContext {
-    pub time: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct Selector {
-    pub name: Option<Symbol>,
-    pub id: Option<Symbol>,
-    pub classes: Vec<Symbol>,
-    pub time_interval: Range<u32>,
-    pub future: bool,
-    pub past: bool,
-}
-
-impl Default for Selector {
-    fn default() -> Self {
-        Self {
-            name: None,
-            id: None,
-            classes: Vec::new(),
-            time_interval: 0..u32::MAX,
-            future: false,
-            past: false,
-        }
-    }
-}
-
-impl Selector {
-    pub fn matches(&self, ctx: &StylingContext, object: &DomObject) -> bool {
-        self.time_interval.contains(&ctx.time)
-            && self.name.as_ref().is_none_or(|name| name == &object.name)
-            && self
-                .id
-                .as_ref()
-                .is_none_or(|id| Some(id) == object.id.as_ref())
-            && self
-                .classes
-                .iter()
-                .all(|class| object.classes.contains(class))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Rule {
-    pub selectors: Vec<Selector>,
-    pub specificity: u32,
-    pub declarations: StyleMap,
-}
-
-impl Rule {
-    pub fn for_name(name: Symbol, declarations: StyleMap) -> Self {
-        Self {
-            selectors: vec![Selector {
-                name: Some(name),
-                ..Default::default()
-            }],
-            specificity: 0,
-            declarations,
-        }
-    }
-
-    pub fn matches(&self, ctx: &StylingContext, object: &DomObject) -> bool {
-        self.selectors
-            .iter()
-            .any(|selector| selector.matches(ctx, object))
-    }
-
-    pub fn apply_if_matches(&self, ctx: &StylingContext, object: &mut DomObject) {
-        if self.matches(ctx, object) {
-            object.style.apply_all(&self.declarations);
-        }
-    }
-}
-
 pub struct Document {
     root: Element,
     realm: Rc<Realm>,
-    pub style_rules: Vec<Rule>,
+    styles: StylesheetIndex,
 }
 
 impl Document {
     pub fn new(realm: Rc<Realm>) -> Self {
         Self {
             root: Element {
-                object: DomObject::new(realm.symbol("root"), None, Vec::new(), 0),
+                object: DomElement::new(realm.symbol("root"), None, Vec::new(), 0),
                 children: Vec::new(),
             },
             realm,
-            style_rules: Vec::new(),
+            styles: StylesheetIndex::new(),
         }
     }
 
-    fn recompute_styles_for_element(rules: &[Rule], ctx: &StylingContext, element: &mut Element) {
-        for rule in rules {
-            rule.apply_if_matches(ctx, &mut element.object);
-        }
-
-        for child in &mut element.children {
-            match child {
-                ElementOrText::Element(element) => {
-                    Self::recompute_styles_for_element(rules, ctx, element);
-                }
-                ElementOrText::Text(_) => (),
-            }
-        }
-    }
-
-    pub fn recompute_styles(&mut self, ctx: &StylingContext) {
-        Self::recompute_styles_for_element(&self.style_rules, ctx, &mut self.root);
-    }
-
-    pub fn root(&mut self) -> Pin<&mut Element> {
-        Pin::new(&mut self.root)
+    pub fn root(&mut self) -> &mut Element {
+        &mut self.root
     }
 
     pub fn realm(&self) -> &Rc<Realm> {
         &self.realm
+    }
+
+    pub fn add_stylesheet(&mut self, sheet: Stylesheet) {
+        self.styles.add_stylesheet(sheet);
+    }
+
+    pub fn restyle(&mut self, ctx: &StylingContext) {
+        self.styles.restyle(ctx, &mut self.root);
     }
 
     pub fn make_layout_tree(&mut self) -> layout::Container {
@@ -336,18 +260,14 @@ impl Document {
 
 #[cfg(test)]
 mod test {
-    use crate::miniweb::style;
+    use crate::miniweb::{layout::Vec2L, style::restyle::StylingContext};
 
     use super::*;
 
     #[test]
-    pub fn xd() {
+    pub fn does_not_crash() {
         let realm = Realm::create();
         let mut document = Document::new(realm.clone());
-
-        let span = realm.symbol("span");
-        let root = realm.symbol("root");
-        let ruby = realm.symbol("ruby");
 
         document.root().children.extend([
             ElementOrText::Text(TextSequence {
@@ -355,7 +275,7 @@ mod test {
                 ruby: Ruby::None,
             }),
             ElementOrText::Element(Box::new(Element {
-                object: DomObject::new(span.clone(), None, Vec::new(), 0),
+                object: DomElement::new(realm.symbol("span"), None, Vec::new(), 0),
                 children: vec![ElementOrText::Text(TextSequence {
                     text: "more text".into(),
                     ruby: Ruby::None,
@@ -363,52 +283,136 @@ mod test {
             })),
         ]);
 
-        document.style_rules.push(Rule::for_name(root, {
-            let mut result = StyleMap::new();
-            result.set::<style::Display>(Display::BLOCK);
-            result
-        }));
+        let mut stylesheet = Stylesheet::new(Origin::UserAgent);
 
-        document.style_rules.push(Rule::for_name(span, {
-            let mut result = StyleMap::new();
-            result.set::<style::Display>(Display::INLINE);
-            result
-        }));
+        stylesheet.rules.push(Rule::new(
+            vec![selector!(in realm; "root")],
+            style_map! {
+                Display: Display::BLOCK;
+            },
+        ));
 
-        document.style_rules.push(Rule::for_name(ruby, {
-            let mut result = StyleMap::new();
-            result.set::<style::Display>(Display::RUBY);
-            result
-        }));
+        stylesheet.rules.push(Rule::new(
+            vec![selector!(in realm; "span")],
+            style_map! {
+                Display: Display::INLINE;
+            },
+        ));
 
-        document.recompute_styles(&StylingContext { time: 0 });
+        document.add_stylesheet(stylesheet);
+        document.add_stylesheet(ruby_ua_stylesheet(&realm));
+
+        document.restyle(&StylingContext {
+            time: 0,
+            viewport_size: Vec2L::ZERO,
+        });
 
         dbg!(document.root());
-
         dbg!(document.make_layout_tree());
     }
 }
 
 // https://www.w3.org/TR/css-ruby-1/#default-ua-ruby
-// ruby { display: ruby; }
-// rp   { display: none; }
-// rbc  { display: ruby-base-container; }
-// rtc  { display: ruby-text-container; }
-// rb   { display: ruby-base; white-space: nowrap; }
-// rt   { display: ruby-text; }
-// ruby, rb, rt, rbc, rtc { unicode-bidi: isolate; }
+pub fn ruby_ua_stylesheet(realm: &Realm) -> Stylesheet {
+    let mut stylesheet = Stylesheet::new(Origin::UserAgent);
 
-// rtc, rt {
-//   font-variant-east-asian: ruby;  /* See [[CSS-FONTS-3]] */
-//   text-justify: ruby;             /* See [[CSS-TEXT-4]] */
-//   text-emphasis: none;            /* See [[CSS-TEXT-DECOR-3]] */
-//   white-space: nowrap;
-//   line-height: 1; }
+    // ruby { display: ruby; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "ruby")],
+        style_map!(
+            Display: Display::RUBY;
+        ),
+    ));
 
-// rtc, :not(rtc) > rt {
-//   font-size: 50%;
-// }
-// rtc:lang(zh-TW), :not(rtc) > rt:lang(zh-TW),
-// rtc:lang(zh-Hanb), :not(rtc) > rt:lang(zh-Hanb), {
-//   font-size: 30%;                /* bopomofo */
-// }
+    // rp   { display: none; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rp")],
+        style_map!(
+            Display: Display::NONE;
+        ),
+    ));
+
+    // rbc  { display: ruby-base-container; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rbc")],
+        style_map!(
+            Display: Display::Internal(InternalDisplay::RubyBaseContainer);
+        ),
+    ));
+
+    // rtc  { display: ruby-text-container; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rtc")],
+        style_map!(
+            Display: Display::Internal(InternalDisplay::RubyTextContainer);
+        ),
+    ));
+
+    // rb   { display: ruby-base; white-space: nowrap; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rb")],
+        style_map!(
+            Display: Display::Internal(InternalDisplay::RubyBase);
+            // TODO: white-space: nowrap;
+        ),
+    ));
+
+    // rt   { display: ruby-text; }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rt")],
+        style_map!(
+            Display: Display::Internal(InternalDisplay::RubyText);
+        ),
+    ));
+
+    // ruby, rb, rt, rbc, rtc { unicode-bidi: isolate; }
+    stylesheet.rules.push(Rule::new(
+        vec![
+            selector!(in realm; "ruby"),
+            selector!(in realm; "rb"),
+            selector!(in realm; "rt"),
+            selector!(in realm; "rbc"),
+            selector!(in realm; "rtc"),
+        ],
+        style_map!(
+            // unicode-bidi: isolate
+        ),
+    ));
+
+    // rtc, rt {
+    //   font-variant-east-asian: ruby;  /* See [[CSS-FONTS-3]] */
+    //   text-justify: ruby;             /* See [[CSS-TEXT-4]] */
+    //   text-emphasis: none;            /* See [[CSS-TEXT-DECOR-3]] */
+    //   white-space: nowrap;
+    //   line-height: 1;
+    // }
+    stylesheet.rules.push(Rule::new(
+        vec![selector!(in realm; "rtc"), selector!(in realm; "rt")],
+        style_map!(
+            // TODO: font-variant-east-asian: ruby;  /* See [[CSS-FONTS-3]] */
+            // TODO: text-justify: ruby;
+            // TODO: text-emphasis: none;
+            // TODO: white-space: nowrap;
+            // TODO: line-height: 1;
+        ),
+    ));
+
+    // rtc, :not(rtc) > rt {
+    //   font-size: 50%;
+    // }
+    stylesheet.rules.push(Rule::new(
+        // FIXME: should be rtc, :not(rtc) > rt
+        vec![selector!(in realm; "rt")],
+        style_map!(
+            // TODO: font-size: 50%;
+        ),
+    ));
+
+    // TODO:
+    // rtc:lang(zh-TW), :not(rtc) > rt:lang(zh-TW),
+    // rtc:lang(zh-Hanb), :not(rtc) > rt:lang(zh-Hanb), {
+    //   font-size: 30%;                /* bopomofo */
+    // }
+
+    stylesheet
+}

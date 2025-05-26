@@ -1,7 +1,8 @@
 use rasterize::color::BGRA8;
 use util::math::I26Dot6;
 
-use crate::miniweb::layout::Vec2L;
+use super::specified::Percentage;
+use crate::miniweb::layout::{FixedL, Vec2L};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -75,14 +76,15 @@ impl Default for TextDecorations {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+// TODO: remove partialeq
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutsideDisplayType {
     Block,
     #[default]
     Inline,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsideDisplayType {
     #[default]
     Flow,
@@ -90,7 +92,7 @@ pub enum InsideDisplayType {
     Ruby,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // clippy shaming me for not supporting tables
 #[allow(clippy::enum_variant_names)]
 pub enum InternalDisplay {
@@ -100,13 +102,13 @@ pub enum InternalDisplay {
     RubyTextContainer,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FullDisplay {
     pub outer: OutsideDisplayType,
     pub inner: InsideDisplayType,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
     None,
     Full(FullDisplay),
@@ -137,4 +139,27 @@ impl Display {
         outer: OutsideDisplayType::Inline,
         inner: InsideDisplayType::Ruby,
     });
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum Position {
+    #[default]
+    Static,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pixels(pub FixedL);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelsOrPercentage {
+    Pixels(Pixels),
+    Percentage(Percentage),
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum SbrSimpleTransform {
+    TranslateForAlignment(Alignment),
+    #[default]
+    None,
 }

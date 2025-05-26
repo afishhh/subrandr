@@ -7,7 +7,7 @@ use util::math::{I16Dot16, I26Dot6, Point2, Vec2};
 
 use crate::{
     miniweb::style::{
-        types::{FontSlant, Ruby},
+        computed::{FontSlant, Ruby},
         ComputedStyle,
     },
     text::{
@@ -356,7 +356,7 @@ mod test {
     use crate::{
         miniweb::{
             layout::InlineChild,
-            style::{types::Ruby, ComputedStyle},
+            style::{computed::Ruby, ComputedStyle},
         },
         text::FontDb,
     };

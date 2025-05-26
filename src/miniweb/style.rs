@@ -7,9 +7,12 @@ use util::{
     small_type_map::SmallTypeMap,
 };
 
-use crate::text::layout::TextWrapMode;
+use crate::{miniweb::style::restyle::StylingContext, text::layout::TextWrapMode};
 
-pub mod types;
+pub mod computed;
+pub mod restyle;
+pub mod sheet;
+pub mod specified;
 
 #[doc(hidden)]
 pub trait StyleValue: 'static {
@@ -32,9 +35,9 @@ impl<V: StyleValue> Debug for StyleSlot<V> {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct StyleMap(SmallTypeMap<32>);
+pub struct DeclarationMap(SmallTypeMap<32>);
 
-impl StyleMap {
+impl DeclarationMap {
     pub fn new() -> Self {
         Self(SmallTypeMap::new())
     }
@@ -53,7 +56,31 @@ impl StyleMap {
             None => default,
         }
     }
+
+    fn merge(&mut self, other: &Self) {
+        self.0.merge(&other.0);
+    }
 }
+
+macro_rules! style_map {
+    (@main $result: ident; $key: ident : $value: expr; $($rest: tt)*) => {
+        $result.set::<$crate::miniweb::style::$key>($value);
+        style_map!(@main $result; $($rest)*);
+    };
+    (@main $result: ident;) => {};
+    (@main $result: ident; $($rest: tt)*) => {
+        compile_error!("style_map! syntax error")
+    };
+    () => { $crate::miniweb::style::DeclarationMap::new() };
+    ($($args: tt)*) => {{
+        let mut result = $crate::miniweb::style::DeclarationMap::new();
+        style_map!(@main result; $($args)*);
+        result
+    }};
+}
+pub(crate) use style_map;
+
+use super::layout::FixedL;
 
 // Generates style keys for all properties along with `ComputedStyle`.
 //
@@ -68,30 +95,46 @@ subrandr_macros::implement_style_module! {
     rc font {
         #[copy(no)] font_family: [Rc<str>] = Rc::new(["serif".into()]),
         font_weight: I16Dot16 = I16Dot16::new(400),
-        // TODO: This would ideally scale with DPI but we can also just
-        //       not let it fall back to this value :)
-        //       Actually the correct solution would probably be to make scaling by
-        //       the context pixel scale happen during layout.
         font_size: I26Dot6 = I26Dot6::new(16),
-        font_style: types::FontSlant,
+        font_style: computed::FontSlant,
+
+        // compute font_size {
+        //     value.compute(parent.font_size())
+        // };
     }
 
     rc text_inherited {
-        #[copy(no)] text_shadows: [types::TextShadow],
+        #[copy(no)] text_shadows: [computed::TextShadow],
         text_wrap_style: TextWrapMode,
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
-        text_align: types::HorizontalAlignment = types::HorizontalAlignment::Left,
+        text_align: computed::HorizontalAlignment = computed::HorizontalAlignment::Left,
     }
 
     rc uninherited {
-        #[inherit(no)] display: types::Display,
-        #[inherit(no)] text_decoration: types::TextDecorations,
+        #[inherit(no)] display: computed::Display,
+        #[inherit(no)] text_decoration: computed::TextDecorations,
     }
 
     rc misc {
         color: BGRA8 = BGRA8::WHITE,
         background_color: BGRA8 = BGRA8::ZERO,
+
+        // compute background_color {
+        //     in color;
+
+        //     value.compute(color);
+        // };
+
+        position: computed::Position,
+        // These should theoretically default to `auto` but we don't support that
+        left: specified::LengthOrPercentage -> computed::PixelsOrPercentage
+            = computed::PixelsOrPercentage::Pixels(computed::Pixels(FixedL::ZERO)),
+        top: specified::LengthOrPercentage -> computed::PixelsOrPercentage
+            = computed::PixelsOrPercentage::Pixels(computed::Pixels(FixedL::ZERO)),
+
+        #[inherit(no)]
+        sbr_simple_transform: computed::SbrSimpleTransform,
     }
 }
 
@@ -105,17 +148,22 @@ mod test {
     use crate::{
         miniweb::style::{
             self,
-            types::{TextDecorations, TextShadow},
-            ComputedStyle, StyleMap,
+            computed::{TextDecorations, TextShadow},
+            restyle::StylingContext,
+            ComputedStyle, DeclarationMap,
         },
         I26Dot6,
     };
 
     #[test]
     fn computed_style() {
+        let ctx = StylingContext {
+            time: 0,
+            viewport_size: Vec2::ZERO,
+        };
         let style = ComputedStyle::default();
 
-        let mut child = style.create_child();
+        let child = style.create_child();
 
         assert!(child.text_shadows().is_empty());
         assert_eq!(child.text_decoration(), TextDecorations::default());
@@ -125,35 +173,37 @@ mod test {
             blur_radius: I26Dot6::new(10),
             color: BGRA8::ORANGERED,
         }]);
-        child.apply_all(&{
-            let mut map = StyleMap::new();
+
+        let mut child_of_child = child.create_child_with(&ctx, &{
+            let mut map = DeclarationMap::new();
             map.set::<style::FontWeight>(I16Dot16::new(700));
             map.set::<style::TextShadows>(new_shadows.clone());
             map
         });
-        *child.make_text_decoration_mut() = TextDecorations {
+
+        *child_of_child.make_text_decoration_mut() = TextDecorations {
             underline: true,
             underline_color: BGRA8::RED,
             ..Default::default()
         };
 
-        assert_eq!(child.font_weight(), I16Dot16::new(700));
-        assert_eq!(child.text_shadows(), &*new_shadows);
-
-        let mut child_of_child = child.create_child();
-
-        assert_eq!(child.font_weight(), I16Dot16::new(700));
+        assert_eq!(child_of_child.font_weight(), I16Dot16::new(700));
         assert_eq!(child_of_child.text_shadows(), &*new_shadows);
-        assert_eq!(child_of_child.text_decoration(), TextDecorations::default());
 
-        child_of_child.apply_all(&{
-            let mut map = StyleMap::new();
+        let another_child = child_of_child.create_child();
+
+        assert_eq!(child_of_child.font_weight(), I16Dot16::new(700));
+        assert_eq!(another_child.text_shadows(), &*new_shadows);
+        assert_eq!(another_child.text_decoration(), TextDecorations::default());
+
+        let more_child = another_child.create_child_with(&ctx, &{
+            let mut map = DeclarationMap::new();
             map.set::<style::TextShadows>(new_shadows.clone());
             map
         });
 
         assert_eq!(
-            child_of_child.text_shadows(),
+            more_child.text_shadows(),
             &new_shadows
                 .iter()
                 .chain(new_shadows.iter())

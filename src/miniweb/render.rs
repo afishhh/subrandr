@@ -1,20 +1,20 @@
-use crate::{
-    color::BGRA8,
-    math::{Point2, Rect2},
-    rasterize::RenderTarget,
-    renderer::{FrameRenderPass, RenderError},
-    I26Dot6,
-};
+use rasterize::color::BGRA8;
+use util::math::{Point2, Rect2};
 
 use super::{
     layout::{
-        BlockContainerFragment, BlockFragmentChild, FragmentBox, InlineContainerFragment,
-        LineBoxFragment, Point2L, TextFragment,
+        BlockContainerFragment, BlockFragmentChild, ContainerFragment, FragmentBox,
+        InlineContainerFragment, LineBoxFragment, Point2L, TextFragment,
     },
     style::{
-        types::{Alignment, HorizontalAlignment, VerticalAlignment},
+        computed::{Alignment, HorizontalAlignment, VerticalAlignment},
         ComputedStyle,
     },
+};
+use crate::{
+    rasterize::RenderTarget,
+    renderer::{FrameRenderPass, RenderError},
+    I26Dot6,
 };
 
 pub struct RenderContext {}
@@ -242,5 +242,19 @@ impl Renderable for BlockContainerFragment {
         }
 
         Ok(())
+    }
+}
+
+impl Renderable for ContainerFragment {
+    fn render(
+        &self,
+        pass: &mut FrameRenderPass,
+        pos: Point2L,
+        target: &mut RenderTarget,
+    ) -> Result<(), RenderError> {
+        match self {
+            ContainerFragment::Inline(inline) => inline.render(pass, pos, target),
+            ContainerFragment::Block(block) => block.render(pass, pos, target),
+        }
     }
 }

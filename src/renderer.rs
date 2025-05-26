@@ -12,9 +12,11 @@ use util::math::{I16Dot16, I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f};
 use crate::{
     log::{info, trace},
     miniweb::{
-        layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
+        layout::{
+            self, BlockContainerFragment, ContainerFragment, FixedL, LayoutContext, Point2L, Vec2L,
+        },
         render::Renderable as _,
-        style::types::{
+        style::computed::{
             Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
         },
     },
@@ -78,7 +80,7 @@ pub(crate) struct FrameLayoutPass<'s, 'frame> {
     pub lctx: &'frame mut LayoutContext<'frame, 's>,
     pub t: u32,
     unchanged_range: Range<u32>,
-    fragments: Vec<(Point2L, BlockContainerFragment)>,
+    fragments: Vec<(Point2L, ContainerFragment)>,
 }
 
 impl FrameLayoutPass<'_, '_> {
@@ -109,6 +111,10 @@ impl FrameLayoutPass<'_, '_> {
     }
 
     pub fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
+        self.fragments.push((pos, ContainerFragment::Block(block)));
+    }
+
+    pub fn emit_any_fragment(&mut self, pos: Point2L, block: ContainerFragment) {
         self.fragments.push((pos, block));
     }
 }
@@ -474,7 +480,10 @@ impl<'a> Renderer<'a> {
                     if Rc::ptr_eq(srv3.subtitles(), srv3_subs) {}
                 }
 
-                Some(FormatLayouter::Srv3(srv3::Layouter::new(srv3_subs.clone())))
+                Some(FormatLayouter::Srv3(srv3::Layouter::create(
+                    &self.sbr.realm,
+                    srv3_subs.clone(),
+                )))
             }
             Some(Subtitles::Vtt(vtt_subs)) => {
                 if let Some(FormatLayouter::Vtt(vtt)) = self.layouter.as_ref() {
@@ -590,7 +599,7 @@ impl Renderer<'_> {
             };
 
             match self.layouter {
-                Some(FormatLayouter::Srv3(ref mut layouter)) => todo!(), //layouter.layout(&mut pass)?,
+                Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(&mut pass)?,
                 Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.update(&mut pass)?,
                 None => (),
             }
@@ -777,82 +786,6 @@ impl Renderer<'_> {
             self.perf.end_debug_raster();
 
             for &(pos, ref fragment) in &fragments {
-<<<<<<< HEAD
-                let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
-
-                if self.sbr.debug.draw_layout_info {
-                    pass.rasterizer.stroke_axis_aligned_rect(
-                        target,
-                        Rect2::new(
-                            Point2::new(
-                                final_total_rect.min.x.into_f32() - 1.,
-                                final_total_rect.min.y.into_f32() - 1.,
-                            ),
-                            Point2::new(
-                                final_total_rect.max.x.into_f32() + 2.,
-                                final_total_rect.max.y.into_f32() + 2.,
-                            ),
-                        ),
-                        BGRA8::MAGENTA,
-                    );
-                }
-
-                let total_position_debug_pos = match VerticalAlignment::Top {
-                    VerticalAlignment::Top => (
-                        fragment.fbox.size.y + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::Center => (
-                        fragment.fbox.size.y + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::Bottom => (
-                        I26Dot6::new(-24),
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
-                    ),
-                };
-
-                if self.sbr.debug.draw_layout_info {
-                    pass.debug_text(
-                        target,
-                        Point2L::new(
-                            final_total_rect.min.x + final_total_rect.width() / 2,
-                            final_total_rect.min.y + total_position_debug_pos.0,
-                        ),
-                        &format!(
-                            "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
-                            final_total_rect.x(),
-                            final_total_rect.y(),
-                            final_total_rect.width(),
-                            final_total_rect.height()
-                        ),
-                        total_position_debug_pos.1,
-                        debug_font_size,
-                        BGRA8::MAGENTA,
-                    )?;
-                }
-
-                for &(offset, ref container) in &fragment.children {
-                    let current = pos + offset;
-
-                    todo!()
-                    // for &(offset, ref line) in &container.lines {
-                    //     let current = current + offset;
-
-                    //     for &(offset, ref text) in &line.children {
-                    //         let current = current + offset;
-
-                    //         if text.style.background_color().a != 0 {
-                    //             pass.rasterizer.fill_axis_aligned_rect(
-                    //                 target,
-                    //                 Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
-                    //                 text.style.background_color(),
-                    //             );
-                    //         }
-                    //     }
-                    // }
-                }
-
                 fragment.render(&mut pass, pos, target)?;
             }
 

@@ -198,6 +198,7 @@ impl Hash for Symbol {
     }
 }
 
+#[derive(Debug)]
 pub struct SymbolInterner {
     symbols: UnsafeCell<HashSet<SymbolRc>>,
 }

@@ -3,7 +3,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, fmt::Debug};
+use std::{cell::Cell, fmt::Debug, rc::Rc};
 
 pub use rasterize;
 pub use util::math::I26Dot6;
@@ -17,7 +17,6 @@ mod capi;
 mod html;
 mod log;
 mod miniweb;
-mod symbol;
 mod text;
 
 #[derive(Default, Debug, Clone)]
@@ -60,6 +59,7 @@ pub struct Subrandr {
     logger: log::Logger,
     did_log_version: Cell<bool>,
     debug: DebugFlags,
+    realm: Rc<Realm>,
 }
 
 impl Subrandr {
@@ -68,6 +68,7 @@ impl Subrandr {
             logger: log::Logger::Default,
             did_log_version: Cell::new(false),
             debug: DebugFlags::from_env(),
+            realm: Realm::create(),
         }
     }
 }
@@ -80,4 +81,5 @@ impl log::AsLogger for Subrandr {
 }
 
 mod renderer;
+use miniweb::realm::Realm;
 pub use renderer::{Renderer, SubtitleContext, Subtitles};

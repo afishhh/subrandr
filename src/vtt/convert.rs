@@ -14,8 +14,8 @@ use crate::{
         },
         style::{
             self,
-            types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
-            ComputedStyle, StyleMap,
+            computed::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
+            ComputedStyle, DeclarationMap,
         },
     },
     renderer::FrameLayoutPass,
@@ -113,7 +113,7 @@ impl Event {
         &self,
         sctx: &SubtitleContext,
         lctx: &mut layout::LayoutContext<'_, '_>,
-        style: &style::StyleMap,
+        style: &style::DeclarationMap,
         output: &mut Vec<Rect2<FixedL>>,
     ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
         let mut fragment = layout::layout(
@@ -123,7 +123,7 @@ impl Event {
             },
             &BlockContainer {
                 style: {
-                    let mut result = StyleMap::new();
+                    let mut result = DeclarationMap::new();
                     result.set::<style::TextAlign>(self.horizontal_alignment);
                     result;
                     todo!()
@@ -389,7 +389,7 @@ impl TextConverter {
     fn process_node(&mut self, node: &vtt::Node, style: ComputedStyle) {
         match node {
             vtt::Node::Internal(internal) => {
-                let mut style = StyleMap::new();
+                let mut style = DeclarationMap::new();
                 match internal.kind {
                     vtt::InternalNodeKind::Italic => {
                         style.set::<style::FontStyle>(FontSlant::Italic)
@@ -458,14 +458,14 @@ fn convert_text(text: &str) -> Vec<InlineChild> {
 
 #[derive(Debug)]
 pub struct Subtitles {
-    root_style: StyleMap,
+    root_style: DeclarationMap,
     events: Vec<Event>,
 }
 
 pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
     let mut subtitles = Subtitles {
         root_style: {
-            let mut result = StyleMap::new();
+            let mut result = DeclarationMap::new();
 
             result.set::<style::FontFamily>(Rc::new(["sans-serif".into()]));
             result.set::<style::Color>(BGRA8::WHITE);

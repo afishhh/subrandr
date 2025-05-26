@@ -9,11 +9,31 @@ use crate::{
 #[derive(Debug, Clone)]
 struct Property {
     name: syn::Ident,
+    // Assumed to be `value_type` if not provided.
+    specified_type: Option<syn::Type>,
     value_type: syn::Type,
     inherit: bool,
     append: bool,
     copy: bool,
     default: Option<syn::Expr>,
+}
+
+/// A computer is basically a function with the following signature:
+/// ```ignore
+/// fn compute(
+///     ctx: &StylingContext,
+///     parent: &ComputedStyle,
+///     value: SpecifiedType,
+///     /* input (computed) properties */
+/// ) -> ValueType;
+/// ```
+///
+/// If one is not provided explicitly then `SpecifiedType::compute` will be called,
+/// and it is assumed that its signature looks like above but without any input properties.
+#[derive(Debug, Clone)]
+struct Computer {
+    expression: syn::Expr,
+    input_properties: Vec<syn::Ident>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,10 +104,29 @@ impl Group {
                 continue;
             };
 
-            let Ok(type_) = buffer.parse::<syn::Type>().report_in(ctx) else {
+            let Ok(first_type_) = buffer.parse::<syn::Type>().report_in(ctx) else {
                 errored = true;
                 advance_past_punct(buffer, ',');
                 continue;
+            };
+
+            let Ok(arrow) = buffer.parse::<Option<Token![->]>>().report_in(ctx) else {
+                errored = true;
+                advance_past_punct(buffer, ',');
+                continue;
+            };
+
+            let (specified_type, value_type) = match arrow {
+                Some(_) => {
+                    let Ok(value_type_) = buffer.parse::<syn::Type>().report_in(ctx) else {
+                        errored = true;
+                        advance_past_punct(buffer, ',');
+                        continue;
+                    };
+
+                    (Some(first_type_), value_type_)
+                }
+                None => (None, first_type_),
             };
 
             let default = if buffer.parse::<Token![=]>().is_ok() {
@@ -104,10 +143,11 @@ impl Group {
 
             result.push(Property {
                 name,
-                append: append.unwrap_or(matches!(type_, syn::Type::Slice(..))),
+                append: append.unwrap_or(matches!(value_type, syn::Type::Slice(..))),
                 inherit,
                 copy,
-                value_type: type_,
+                specified_type,
+                value_type,
                 default,
             });
 
@@ -188,6 +228,12 @@ impl Property {
         }
     }
 
+    fn specified_type(&self) -> syn::Type {
+        self.specified_type
+            .clone()
+            .unwrap_or_else(|| self.rcified_type())
+    }
+
     fn effective_default(&self) -> syn::Expr {
         if let Some(default) = &self.default {
             default.clone()
@@ -224,12 +270,12 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
     for prop in input.groups.iter().flat_map(|g| g.properties.iter()) {
         let pascal_name = snake_case_to_pascal_case(&prop.name);
-        let type_ = prop.rcified_type();
+        let specified_type_ = prop.specified_type();
         result.extend(quote! {
-            pub struct #pascal_name(#type_);
+            pub struct #pascal_name(#specified_type_);
 
             impl StyleValue for #pascal_name {
-                type Inner = #type_;
+                type Inner = #specified_type_;
             }
         });
     }
@@ -265,12 +311,12 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
     let mut computed_style_fields = TokenStream2::new();
     let mut computed_style_impl = TokenStream2::new();
     let mut create_child_impl = TokenStream2::new();
-    // PERF: Currently `ComputedStyle::apply_all` optimizes for amount of `Rc::make_mut` calls
-    //       instead of for amount of `StyleMap` lookups. Maybe the other way ends up being
+    // PERF: Currently `ComputedStyle::create_child_with` optimizes for amount of `Rc::make_mut` calls
+    //       instead of for amount of `DeclarationMap` lookups. Maybe the other way ends up being
     //       better because `Rc::make_mut` on an already unique `Rc` should be very cheap but
-    //       `StyleMap` lookups are always `HashMap` lookups.
+    //       `DeclarationMap` lookups are always `HashMap` lookups.
     //       On this scale it probably doesn't matter much yet though.
-    let mut apply_all_impl = TokenStream2::new();
+    let mut create_child_with_impl = TokenStream2::new();
     for group in &input.groups {
         let group_name = &group.name;
         let group_type_name = snake_case_to_pascal_case(&group.name);
@@ -281,7 +327,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
         let inherit_whole_group = group.properties.iter().all(|prop| prop.inherit);
         let mut group_apply_vars = TokenStream2::new();
-        let mut group_apply_block = TokenStream2::new();
+        let mut group_apply_fields = TokenStream2::new();
         let mut group_create_child_impl = TokenStream2::new();
 
         for prop in &group.properties {
@@ -307,46 +353,54 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                 }
             });
 
-            if !inherit_whole_group {
-                if prop.inherit {
-                    group_create_child_impl.extend(quote! {
-                        #name: self.#group_name.#name.clone(),
-                    })
-                } else {
-                    let default = prop.effective_default();
-                    group_create_child_impl.extend(quote! { #name: #default, })
+            let inherit_expr = if prop.inherit {
+                syn::parse_quote! {
+                    self.#group_name.#name.clone()
                 }
+            } else {
+                prop.effective_default()
+            };
+
+            if !inherit_whole_group {
+                group_create_child_impl.extend(quote! {
+                    #name: #inherit_expr,
+                })
             }
 
             group_apply_vars.extend(quote! {
                 let #name = map.get::<#type_name>();
             });
 
-            group_apply_block.extend(quote! {
-                if let Some(value) = #name
-            });
-
-            if prop.append {
-                group_apply_block.extend(quote! { {
-                    let inherited = group.#name.iter();
-                    let new = value.iter();
-                    group.#name = inherited.chain(new).cloned().collect();
-                } })
+            if let Some(specified_type) = prop.specified_type.as_ref() {
+                group_apply_fields.extend(quote! {
+                    #name: if let Some(value) = #name {
+                        <#specified_type>::compute(ctx, self, value)
+                    } else {
+                        #inherit_expr
+                    },
+                })
+            } else if prop.append {
+                group_apply_fields.extend(quote! {
+                    #name: if let Some(value) = #name {
+                        let inherited = self.#group_name.#name.iter();
+                        let new = value.iter();
+                        inherited.chain(new).cloned().collect()
+                    } else {
+                        #inherit_expr
+                    },
+                })
             } else {
-                group_apply_block.extend(quote! { {
-                    group.#name = ::std::clone::Clone::clone(value);
-                } })
+                group_apply_fields.extend(quote! {
+                    #name: if let Some(value) = #name {
+                        ::std::clone::Clone::clone(value)
+                    } else {
+                        #inherit_expr
+                    },
+                })
             }
         }
 
         let prop_names = group.properties.iter().map(|prop| &prop.name);
-        group_apply_vars.extend(quote! {
-            if #(#prop_names.is_some())||* {
-                let mut group = ::std::rc::Rc::make_mut(&mut self.#group_name);
-
-                #group_apply_block
-            }
-        });
 
         if inherit_whole_group {
             create_child_impl.extend(quote! { #group_name: self.#group_name.clone(), });
@@ -358,7 +412,18 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             });
         }
 
-        apply_all_impl.extend(quote! { { #group_apply_vars } });
+        create_child_with_impl.extend(quote! {
+            #group_name: {
+                #group_apply_vars
+                if #(#prop_names.is_some())||* {
+                    Rc::new(#group_type_name {
+                        #group_apply_fields
+                    })
+                } else {
+                    self.#group_name.clone()
+                }
+            },
+        });
     }
 
     result.extend(quote! {
@@ -370,13 +435,15 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         impl ComputedStyle {
             #computed_style_impl
 
-            pub fn apply_all(&mut self, map: &StyleMap) {
-                #apply_all_impl
-            }
-
             pub fn create_child(&self) -> Self {
                 Self {
                     #create_child_impl
+                }
+            }
+
+            pub fn create_child_with(&self, ctx: &StylingContext, map: &DeclarationMap) -> Self {
+                Self {
+                    #create_child_with_impl
                 }
             }
         }

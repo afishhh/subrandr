@@ -3,6 +3,7 @@ use std::rc::Rc;
 pub mod symbol;
 use symbol::{Symbol, SymbolInterner};
 
+#[derive(Debug)]
 pub struct Realm {
     symbols: SymbolInterner,
 }

@@ -66,6 +66,13 @@ impl<N> Vec2<N> {
 }
 
 #[expect(dead_code)]
+impl<N: Number + Signed> Vec2<N> {
+    pub fn normal(self) -> Self {
+        Self::new(self.y, -self.x)
+    }
+}
+
+#[expect(dead_code)]
 impl<N: Number> Vec2<N> {
     pub fn length(self) -> N
     where
@@ -77,11 +84,6 @@ impl<N: Number> Vec2<N> {
     pub fn length_sq(self) -> N {
         self.x * self.x + self.y * self.y
     }
-
-    pub fn normal(self) -> Self {
-        Self::new(self.y, -self.x)
-    }
-
     /// Calculates the dot product of two vectors.
     ///
     /// The dot product of two (2d) vectors is defined for vector u and v as:
@@ -202,7 +204,7 @@ impl_binop!(
     Point2, -, _, Point2, Vec2
 );
 
-impl<N: Number> Neg for Vec2<N> {
+impl<N: Number + Signed> Neg for Vec2<N> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {

@@ -646,16 +646,21 @@ impl Renderer<'_> {
                 )?;
                 y += debug_line_height;
 
-                if let Some(adapter_line) = pass.rasterizer.adapter_info_string() {
-                    pass.debug_text(
-                        target,
-                        Point2L::new(FixedL::ZERO, y),
-                        &adapter_line,
-                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                        debug_font_size,
-                        BGRA8::WHITE,
-                    )?;
-                    y += debug_line_height;
+                {
+                    let mut rasterizer_debug_info = String::new();
+                    _ = pass.rasterizer.write_debug_info(&mut rasterizer_debug_info);
+
+                    for line in rasterizer_debug_info.lines() {
+                        pass.debug_text(
+                            target,
+                            Point2L::new(FixedL::ZERO, y),
+                            line,
+                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                            debug_font_size,
+                            BGRA8::WHITE,
+                        )?;
+                        y += debug_line_height;
+                    }
                 }
             }
 
@@ -919,6 +924,8 @@ impl Renderer<'_> {
                     }
                 }
             }
+
+            pass.rasterizer.flush();
         }
 
         let time = self.perf.end_frame();

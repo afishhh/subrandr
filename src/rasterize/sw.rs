@@ -602,10 +602,6 @@ impl super::Rasterizer for Rasterizer {
         "software"
     }
 
-    fn adapter_info_string(&self) -> Option<String> {
-        None
-    }
-
     unsafe fn create_texture_mapped(
         &mut self,
         width: u32,

@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use std::{fmt::Write, mem::MaybeUninit};
 
 use crate::{
     color::BGRA8,
@@ -100,9 +100,7 @@ impl Texture {
         match &self.0 {
             TextureInner::Software(sw) => sw.width,
             #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu::TextureImpl { tex }) => {
-                tex.as_ref().map_or(0, |tex| tex.width())
-            }
+            TextureInner::Wgpu(wgpu) => wgpu.width(),
         }
     }
 
@@ -110,17 +108,17 @@ impl Texture {
         match &self.0 {
             TextureInner::Software(sw) => sw.height,
             #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu::TextureImpl { tex }) => {
-                tex.as_ref().map_or(0, |tex| tex.height())
-            }
+            TextureInner::Wgpu(wgpu) => wgpu.height(),
         }
     }
 }
 
 pub(crate) trait Rasterizer {
-    // Used for display debug information
+    // Used for displaying debug information
     fn name(&self) -> &'static str;
-    fn adapter_info_string(&self) -> Option<String>;
+    fn write_debug_info(&self, _writer: &mut dyn Write) -> std::fmt::Result {
+        Ok(())
+    }
 
     #[allow(clippy::type_complexity)]
     unsafe fn create_texture_mapped(
@@ -131,6 +129,18 @@ pub(crate) trait Rasterizer {
         // FIXME: ugly box...
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
     ) -> Texture;
+
+    #[allow(clippy::type_complexity)]
+    unsafe fn create_packed_texture_mapped(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        // FIXME: ugly box...
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+    ) -> Texture {
+        self.create_texture_mapped(width, height, format, callback)
+    }
 
     fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
     fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture;
@@ -218,6 +228,18 @@ pub(crate) trait Rasterizer {
         dy: i32,
         texture: &Texture,
     );
+
+    /// Flush pending buffered draws.
+    ///
+    /// Some rasterizers, like the wgpu one, may batch some operations to reduce the amount of
+    /// binding and draw calls. These batched operations should eventually be flushed, and this
+    /// should be done soon enough to allow the GPU to get to work early but late enough that
+    /// the calls are batched enough to result in a performance increase.
+    ///
+    /// Note that this *should* be called at least somewhat frequently even if automatic flushing
+    /// would work correctly because the wgpu rasterizer also does defragmentation of texture atlases
+    /// here, without which it may use unbounded video memory.
+    fn flush(&mut self) {}
 
     fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
     fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);

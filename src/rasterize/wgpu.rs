@@ -1,5 +1,6 @@
 use std::mem::MaybeUninit;
 
+use packer::{PackedTexture, TexturePacker};
 use wgpu::{include_wgsl, util::DeviceExt, vertex_attr_array};
 
 use crate::{
@@ -8,6 +9,8 @@ use crate::{
 };
 
 use super::{sw::blur::gaussian_sigma_to_box_radius, PixelFormat};
+
+mod packer;
 
 pub struct Rasterizer {
     device: wgpu::Device,
@@ -18,11 +21,33 @@ pub struct Rasterizer {
     stroke_pipeline: wgpu::RenderPipeline,
     fill_pipeline: wgpu::RenderPipeline,
 
+    packers: Packers,
     blitter: Blitter,
 
     blur_bind_group_layout: wgpu::BindGroupLayout,
     blur_pipeline: wgpu::ComputePipeline,
     blur_state: Option<BlurState>,
+}
+
+struct Packers {
+    mono: TexturePacker,
+    bgra: TexturePacker,
+}
+
+impl Packers {
+    fn for_format(&self, pixel_format: PixelFormat) -> &TexturePacker {
+        match pixel_format {
+            PixelFormat::Mono => &self.mono,
+            PixelFormat::Bgra => &self.bgra,
+        }
+    }
+
+    fn for_format_mut(&mut self, pixel_format: PixelFormat) -> &mut TexturePacker {
+        match pixel_format {
+            PixelFormat::Mono => &mut self.mono,
+            PixelFormat::Bgra => &mut self.bgra,
+        }
+    }
 }
 
 struct Blitter {
@@ -57,16 +82,6 @@ impl Blitter {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
             ],
         });
 
@@ -88,7 +103,24 @@ impl Blitter {
                     module: &module,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[],
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: 8,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &vertex_attr_array![
+                                0 => Float32x2
+                            ],
+                        },
+                        wgpu::VertexBufferLayout {
+                            array_stride: 32,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &vertex_attr_array![
+                                1 => Float32x2,
+                                2 => Float32x2,
+                                3 => Float32x4
+                            ],
+                        },
+                    ],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -197,26 +229,79 @@ fn unwrap_wgpu_render_target_owned(
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct TextureImpl {
-    // None if the texture is zero sized
-    pub tex: Option<wgpu::Texture>,
+pub(super) enum TextureImpl {
+    // TODO: Get rid of the need for this
+    //       i.e. per-glyph blur
+    Full(wgpu::Texture),
+    Packed(PackedTexture, PixelFormat),
+    Empty,
+}
+impl TextureImpl {
+    pub fn width(&self) -> u32 {
+        match self {
+            TextureImpl::Full(texture) => texture.width(),
+            TextureImpl::Packed(packed, _) => packed.size().x,
+            TextureImpl::Empty => 0,
+        }
+    }
+
+    pub fn height(&self) -> u32 {
+        match self {
+            TextureImpl::Full(texture) => texture.height(),
+            TextureImpl::Packed(packed, _) => packed.size().y,
+            TextureImpl::Empty => 0,
+        }
+    }
 }
 
-fn unwrap_wgpu_texture(texture: &super::Texture) -> Option<(&wgpu::Texture, PixelFormat)> {
+struct UnwrappedTexture<'a> {
+    texture: &'a wgpu::Texture,
+    position: Point2<u32>,
+    size: Vec2<u32>,
+    format: PixelFormat,
+}
+
+impl<'a> UnwrappedTexture<'a> {
+    fn from_texture_region(
+        texture: &'a wgpu::Texture,
+        position: Point2<u32>,
+        size: Vec2<u32>,
+    ) -> Self {
+        Self {
+            texture,
+            position,
+            size,
+            format: match texture.format() {
+                wgpu::TextureFormat::Bgra8Unorm => PixelFormat::Bgra,
+                wgpu::TextureFormat::R8Unorm => PixelFormat::Mono,
+                wgpu::TextureFormat::R32Float => PixelFormat::Mono,
+                format => {
+                    panic!("Texture with unexpected format {format:?} passed to wgpu rasterizer")
+                }
+            },
+        }
+    }
+}
+
+fn unwrap_wgpu_texture<'a>(
+    texture: &'a super::Texture,
+    packers: &'a Packers,
+) -> Option<UnwrappedTexture<'a>> {
     match &texture.0 {
-        super::TextureInner::Wgpu(texture) => texture.tex.as_ref().map(|texture| {
-            (
+        super::TextureInner::Wgpu(TextureImpl::Empty) => None,
+        super::TextureInner::Wgpu(TextureImpl::Full(texture)) => {
+            Some(UnwrappedTexture::from_texture_region(
                 texture,
-                match texture.format() {
-                    wgpu::TextureFormat::Bgra8Unorm => PixelFormat::Bgra,
-                    wgpu::TextureFormat::R8Unorm => PixelFormat::Mono,
-                    wgpu::TextureFormat::R32Float => PixelFormat::Mono,
-                    format => panic!(
-                        "Texture with unexpected format {format:?} passed to wgpu rasterizer"
-                    ),
-                },
-            )
-        }),
+                Point2::ZERO,
+                Vec2::new(texture.width(), texture.height()),
+            ))
+        }
+        &super::TextureInner::Wgpu(TextureImpl::Packed(ref packed, format)) => {
+            let (texture, position, size) = packed.get_texture_region(packers.for_format(format));
+            Some(UnwrappedTexture::from_texture_region(
+                texture, position, size,
+            ))
+        }
         target => panic!(
             "Incompatible texture {:?} passed to software rasterizer",
             target.variant_name()
@@ -351,6 +436,18 @@ impl Rasterizer {
             ),
             stroke_fill_bind_group_layout: fill_bind_group_layout,
 
+            packers: Packers {
+                mono: TexturePacker::new(
+                    device.clone(),
+                    queue.clone(),
+                    wgpu::TextureFormat::R8Unorm,
+                ),
+                bgra: TexturePacker::new(
+                    device.clone(),
+                    queue.clone(),
+                    wgpu::TextureFormat::Bgra8Unorm,
+                ),
+            },
             blitter: Blitter::new(&device),
 
             blur_pipeline: device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -634,30 +731,19 @@ impl Rasterizer {
             self.submit_render_impl(*target);
         }
     }
-}
 
-impl super::Rasterizer for Rasterizer {
-    fn name(&self) -> &'static str {
-        "wgpu"
-    }
-
-    fn adapter_info_string(&self) -> Option<String> {
-        self.adapter_info
-            .as_ref()
-            .map(|info| format!("{} ({})", info.name, info.driver))
-    }
-
-    unsafe fn create_texture_mapped(
+    fn create_texture_mapped_impl(
         &mut self,
         width: u32,
         height: u32,
         format: super::PixelFormat,
         // FIXME: ugly box...
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        pack: bool,
     ) -> super::Texture {
         if width == 0 || height == 0 {
             callback(&mut [], 0);
-            return super::Texture(super::TextureInner::Wgpu(TextureImpl { tex: None }));
+            return super::Texture(super::TextureInner::Wgpu(TextureImpl::Empty));
         }
 
         let byte_stride = (width * u32::from(format.width()))
@@ -685,51 +771,99 @@ impl super::Rasterizer for Rasterizer {
             PixelFormat::Mono => wgpu::TextureFormat::R8Unorm,
         };
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu_format,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[wgpu_format],
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("mapped buffer -> texture move encoder"),
-            });
-        encoder.copy_buffer_to_texture(
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(byte_stride),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit([encoder.finish()]);
+        let inner = if pack {
+            let packer = self.packers.for_format_mut(format);
 
-        super::Texture(super::TextureInner::Wgpu(TextureImpl {
-            tex: Some(texture),
-        }))
+            TextureImpl::Packed(
+                packer.add_from_buffer(&buffer, byte_stride, width, height),
+                format,
+            )
+        } else {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu_format,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[wgpu_format],
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mapped buffer -> texture move encoder"),
+                });
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(byte_stride),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.queue.submit([encoder.finish()]);
+
+            TextureImpl::Full(texture)
+        };
+
+        super::Texture(super::TextureInner::Wgpu(inner))
+    }
+}
+
+impl super::Rasterizer for Rasterizer {
+    fn name(&self) -> &'static str {
+        "wgpu"
+    }
+
+    fn write_debug_info(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        if let Some(info) = self.adapter_info.as_ref() {
+            writeln!(writer, "adapter: {} ({})", info.name, info.driver)?;
+        }
+
+        for (name, packer) in [("mono", &self.packers.mono), ("bgra", &self.packers.bgra)] {
+            writeln!(writer, "{name} texture atlas stats:")?;
+            packer.write_atlas_stats(writer)?;
+        }
+
+        Ok(())
+    }
+
+    unsafe fn create_texture_mapped(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: super::PixelFormat,
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+    ) -> super::Texture {
+        self.create_texture_mapped_impl(width, height, format, callback, false)
+    }
+
+    unsafe fn create_packed_texture_mapped(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+    ) -> super::Texture {
+        self.create_texture_mapped_impl(width, height, format, callback, true)
     }
 
     fn create_mono_texture_rendered(
@@ -759,12 +893,12 @@ impl super::Rasterizer for Rasterizer {
 
     fn finalize_texture_render(&mut self, target: super::RenderTarget<'static>) -> super::Texture {
         let Some(target) = unwrap_wgpu_render_target_owned(target) else {
-            return super::Texture(super::TextureInner::Wgpu(TextureImpl { tex: None }));
+            return super::Texture(super::TextureInner::Wgpu(TextureImpl::Empty));
         };
 
-        super::Texture(super::TextureInner::Wgpu(TextureImpl {
-            tex: Some(self.submit_render_impl(*target)),
-        }))
+        super::Texture(super::TextureInner::Wgpu(TextureImpl::Full(
+            self.submit_render_impl(*target),
+        )))
     }
 
     fn blit(
@@ -779,7 +913,7 @@ impl super::Rasterizer for Rasterizer {
             return;
         };
 
-        if let Some((texture, format)) = unwrap_wgpu_texture(texture) {
+        if let Some(unwrapped) = unwrap_wgpu_texture(texture, &self.packers) {
             self.blitter.do_blit(
                 &self.device,
                 &mut target.pass,
@@ -788,8 +922,7 @@ impl super::Rasterizer for Rasterizer {
                 target.tex.height(),
                 dx,
                 dy,
-                texture,
-                format,
+                &unwrapped,
                 color,
             );
         }
@@ -806,7 +939,7 @@ impl super::Rasterizer for Rasterizer {
             return;
         };
 
-        if let Some((texture, format)) = unwrap_wgpu_texture(texture) {
+        if let Some(unwrapped) = unwrap_wgpu_texture(texture, &self.packers) {
             self.blitter.do_blit(
                 &self.device,
                 &mut target.pass,
@@ -815,11 +948,15 @@ impl super::Rasterizer for Rasterizer {
                 target.tex.height(),
                 dx,
                 dy,
-                texture,
-                format,
+                &unwrapped,
                 BGRA8::WHITE,
             );
         }
+    }
+
+    fn flush(&mut self) {
+        self.packers.mono.defragment();
+        self.packers.bgra.defragment();
     }
 
     fn line(
@@ -938,7 +1075,7 @@ impl super::Rasterizer for Rasterizer {
             .as_mut()
             .expect("Rasterizer::blur_buffer_blit called without an active blur pass");
 
-        if let Some((texture, format)) = unwrap_wgpu_texture(texture) {
+        if let Some(unwrapped) = unwrap_wgpu_texture(texture, &self.packers) {
             self.blitter.do_blit(
                 &self.device,
                 &mut state.blit_pass,
@@ -947,8 +1084,7 @@ impl super::Rasterizer for Rasterizer {
                 state.front_texture.height(),
                 dx + (2 * state.radius) as i32,
                 dy + (2 * state.radius) as i32,
-                texture,
-                format,
+                &unwrapped,
                 BGRA8::WHITE,
             );
         }
@@ -975,9 +1111,9 @@ impl super::Rasterizer for Rasterizer {
 
         self.queue.submit([state.encoder.finish()]);
 
-        super::Texture(super::TextureInner::Wgpu(TextureImpl {
-            tex: Some(state.front_texture),
-        }))
+        super::Texture(super::TextureInner::Wgpu(TextureImpl::Full(
+            state.front_texture,
+        )))
     }
 }
 
@@ -1123,11 +1259,10 @@ impl Blitter {
         theight: u32,
         dx: i32,
         dy: i32,
-        texture: &wgpu::Texture,
-        source_format: PixelFormat,
+        unwrapped: &UnwrappedTexture,
         color: BGRA8,
     ) {
-        let data = {
+        let instance = {
             let mut builder = StructBuilder::<32>::new();
 
             builder.write_point2(&target_transform_point(
@@ -1137,8 +1272,8 @@ impl Blitter {
             ));
 
             builder.write_point2(&Point2::new(
-                texture.width() as f32 / twidth as f32,
-                -(texture.height() as f32 / theight as f32),
+                unwrapped.size.x as f32 / twidth as f32,
+                -(unwrapped.size.y as f32 / theight as f32),
             ));
 
             builder.write_f32s(&[
@@ -1151,13 +1286,52 @@ impl Blitter {
             builder.finish()
         };
 
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_data = {
+            let mut result = Vec::new();
+
+            let in_fsz = Vec2::new(
+                unwrapped.texture.width() as f32,
+                unwrapped.texture.height() as f32,
+            );
+
+            let uv_pos = Point2::new(
+                unwrapped.position.x as f32 / in_fsz.x,
+                unwrapped.position.y as f32 / in_fsz.y,
+            );
+
+            let uv_size = Point2::new(
+                unwrapped.size.x as f32 / in_fsz.x,
+                unwrapped.size.y as f32 / in_fsz.y,
+            );
+
+            result.extend([
+                [uv_pos.x, uv_pos.y + uv_size.y],
+                [uv_pos.x + uv_size.x, uv_pos.y + uv_size.y],
+                [uv_pos.x, uv_pos.y],
+                [uv_pos.x + uv_size.x, uv_pos.y],
+            ]);
+
+            result
+        };
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: &data,
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: unsafe {
+                std::slice::from_raw_parts(
+                    vertex_data.as_ptr().cast::<u8>(),
+                    size_of_val(vertex_data.as_slice()),
+                )
+            },
+            usage: wgpu::BufferUsages::VERTEX,
         });
 
-        match (pass_format, source_format) {
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: &instance,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        match (pass_format, unwrapped.format) {
             (PixelFormat::Bgra, PixelFormat::Bgra) => {
                 pass.set_pipeline(&self.pipeline_color_to_bgra);
             }
@@ -1184,25 +1358,19 @@ impl Blitter {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&texture.create_view(
-                            &wgpu::TextureViewDescriptor {
+                        resource: wgpu::BindingResource::TextureView(
+                            &unwrapped.texture.create_view(&wgpu::TextureViewDescriptor {
                                 usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
                                 ..Default::default()
-                            },
-                        )),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &buffer,
-                            offset: 0,
-                            size: None,
-                        }),
+                            }),
+                        ),
                     },
                 ],
             })),
             &[],
         );
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, instance_buffer.slice(..));
         pass.draw(0..4, 0..1);
     }
 }

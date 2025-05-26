@@ -682,7 +682,7 @@ impl Drop for Font {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 struct SizeInfo {
     coords: MmCoords,
     point_size: I26Dot6,
@@ -1032,7 +1032,7 @@ impl Font {
                 _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
             };
 
-            let texture = rasterizer.create_texture_mapped(
+            let texture = rasterizer.create_packed_texture_mapped(
                 scaled_width,
                 scaled_height,
                 if matches!(pixel_mode, CopyPixelMode::Bgra32) {

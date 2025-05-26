@@ -12,7 +12,6 @@ pub trait Number:
     + SubAssign<Self>
     + DivAssign<Self>
     + MulAssign<Self>
-    + Neg<Output = Self>
     + PartialOrd
     + Copy
 {
@@ -37,15 +36,27 @@ pub trait Number:
     const ZERO: Self;
 }
 
+pub trait Signed: Neg<Output = Self> {}
+
 impl Number for f32 {
     const MIN: Self = f32::MIN;
     const MAX: Self = f32::MAX;
     const ZERO: Self = 0.0;
 }
 
+impl Signed for f32 {}
+
 impl Number for i32 {
     const MIN: Self = i32::MIN;
     const MAX: Self = i32::MAX;
+    const ZERO: Self = 0;
+}
+
+impl Signed for i32 {}
+
+impl Number for u32 {
+    const MIN: Self = u32::MIN;
+    const MAX: Self = u32::MAX;
     const ZERO: Self = 0;
 }
 

@@ -508,9 +508,6 @@ impl Renderer<'_> {
         height: u32,
         stride: u32,
     ) -> Result<(), RenderError> {
-        self.previous_context = *ctx;
-        self.previous_output_size = (width, height);
-
         buffer.fill(BGRA8::ZERO);
         self.render_to(
             &mut rasterize::sw::Rasterizer::new(),
@@ -544,6 +541,10 @@ impl Renderer<'_> {
         t: u32,
     ) -> Result<(), RenderError> {
         let (target_width, target_height) = (target.width(), target.width());
+
+        self.previous_context = *ctx;
+        self.previous_output_size = (target_width, target_height);
+
         if target_width == 0 || target_height == 0 {
             return Ok(());
         }

@@ -258,13 +258,15 @@ impl FrameRenderPass<'_, '_> {
             end_x
         };
 
-        image.blit(
-            self.rasterizer,
-            target,
-            x.trunc_to_inner(),
-            y.trunc_to_inner(),
-            color,
-        );
+        if color.a > 0 {
+            image.blit(
+                self.rasterizer,
+                target,
+                x.trunc_to_inner(),
+                y.trunc_to_inner(),
+                color,
+            );
+        }
 
         // FIXME: This should use the main font for the segment, not the font
         //        of the first glyph..

@@ -91,7 +91,7 @@ impl ChromeDebugSocket {
             // ignore
             "Target.receivedMessageFromTarget" => (),
             "Target.consoleAPICalled" => (),
-            _ => println!("ignored unrecognized method {method:?} call from browser {params:?}"),
+            _ => println!("ignored unrecognized method {method:?} call from browser"),
         }
     }
 
@@ -203,12 +203,10 @@ impl ChromeYoutubeIpc {
 
 impl super::PlayerConnection for ChromeYoutubeIpc {
     fn poll(&mut self, _track_switched: &mut bool) -> super::PlayerState {
-        // whole player = #movie_player
-        // video part only = #movie_player > div:nth-child(1) > video:nth-child(1)
         serde_json::from_value(self.run_js_in_lambda(
             r##"
-            let movie_player = document.querySelector("#movie_player");
-            let video_player = document.querySelector("#movie_player > div:nth-child(1) > video:nth-child(1)")
+            let movie_player = document.querySelector("div.html5-video-player");
+            let video_player = document.querySelector("video.html5-main-video")
             let movie_rect = movie_player.getBoundingClientRect()
             let video_rect = video_player.getBoundingClientRect()
             return {

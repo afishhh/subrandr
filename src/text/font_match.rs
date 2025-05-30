@@ -194,6 +194,8 @@ impl<'f> FontMatcher<'f> {
 
     // TODO: Make something like a TofuFont that would be a virtual font that is always
     //       available, then no extra optional handling would have to be done.
+    // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
+    //       ^^^^ The current implementation might not interact well with font fallback in this regard
     pub fn primary(
         &self,
         arena: &'f FontArena,

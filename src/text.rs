@@ -375,7 +375,7 @@ impl ShapingBuffer {
             // TODO: TofuFont
             None => return Err(ShapingError::FontSelect(font_db::SelectError::NotFound)),
         };
-        let (_, hb_font) = font.with_applied_size_and_hb()?;
+        let hb_font = font.as_harfbuzz_font()?;
 
         unsafe {
             hb_shape(hb_font, self.buffer, std::ptr::null(), 0);

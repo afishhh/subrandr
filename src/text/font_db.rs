@@ -261,7 +261,7 @@ impl<'a> FontDb<'a> {
 
     pub fn advance_cache_generation(&mut self) {
         for face in self.source_cache.values() {
-            face.glyph_cache().advance_generation();
+            face.advance_cache_generation();
         }
     }
 

@@ -535,7 +535,7 @@ impl Renderer<'_> {
         Ok(())
     }
 
-    fn render_to(
+    pub(crate) fn render_to(
         &mut self,
         rasterizer: &mut dyn Rasterizer,
         target: &mut RenderTarget,

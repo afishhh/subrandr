@@ -18,7 +18,12 @@ rustPlatform.buildRustPackage {
 
   SUBRANDR_BUILD_REV = buildRevision;
 
-  cargoLock.lockFile = ../Cargo.lock;
+  cargoLock = {
+    lockFile = ../Cargo.lock;
+    outputHashes = {
+      "naga-25.0.0" = "sha256-0SIuQ9xn0ys3atmFwCi6Vb95dcuhPIOTFcR3k15k6d0=";
+    };
+  };
   src = ../.;
 
   nativeBuildInputs = [

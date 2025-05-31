@@ -1067,6 +1067,7 @@ impl super::Rasterizer for Rasterizer {
         rect: crate::math::Rect2f,
         color: BGRA8,
     ) {
+        // TODO: Anti aliased rectangle drawing
         self.fill_triangles(
             target,
             &[

@@ -27,7 +27,6 @@ impl PixelFormat {
 
 enum RenderTargetInner<'a> {
     Software(sw::RenderTargetImpl<'a>),
-    SoftwareTexture(sw::TextureRenderTargetImpl),
     #[cfg(feature = "wgpu")]
     Wgpu(Box<wgpu::RenderTargetImpl>),
     #[cfg(feature = "wgpu")]
@@ -39,7 +38,6 @@ impl RenderTargetInner<'_> {
     fn variant_name(&self) -> &'static str {
         match self {
             Self::Software(_) => "software",
-            Self::SoftwareTexture(_) => "software texture",
             #[cfg(feature = "wgpu")]
             Self::Wgpu(_) | Self::WgpuEmpty => "wgpu",
         }
@@ -53,7 +51,6 @@ impl RenderTarget<'_> {
         match &self.0 {
             // TODO: Make these fields private and have all the impls define accessors for them
             RenderTargetInner::Software(sw) => sw.width,
-            RenderTargetInner::SoftwareTexture(sw_tex) => sw_tex.width,
             #[cfg(feature = "wgpu")]
             RenderTargetInner::Wgpu(wgpu) => wgpu.tex.width(),
             #[cfg(feature = "wgpu")]
@@ -66,7 +63,6 @@ impl RenderTarget<'_> {
         match &self.0 {
             // TODO: Make these fields private and have all the impls define accessors for them
             RenderTargetInner::Software(sw) => sw.height,
-            RenderTargetInner::SoftwareTexture(sw_tex) => sw_tex.height,
             #[cfg(feature = "wgpu")]
             RenderTargetInner::Wgpu(wgpu) => wgpu.tex.height(),
             #[cfg(feature = "wgpu")]

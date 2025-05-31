@@ -139,10 +139,7 @@ impl FrameRenderPass<'_, '_> {
         let glyphs = text::simple_shape_text(matches.iterator(), &font_arena, text, self.fonts)?;
         let final_pos = pos
             + Self::translate_for_aligned_text(
-                match matches.primary(&font_arena, self.fonts)? {
-                    Some(font) => font,
-                    None => return Ok(()),
-                },
+                matches.primary(&font_arena, self.fonts)?,
                 &text::compute_extents_ex(true, &glyphs)?,
                 alignment,
             );

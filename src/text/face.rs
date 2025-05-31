@@ -19,6 +19,7 @@ use crate::{
 
 mod freetype;
 pub use freetype::GlyphRenderError;
+mod tofu;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -288,6 +289,7 @@ macro_rules! forward_methods {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FaceRepr {
     FreeType(freetype::Face),
+    Tofu(tofu::Face),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -306,8 +308,12 @@ impl Face {
             .map(Face)
     }
 
+    pub const fn tofu() -> Self {
+        Face(FaceRepr::Tofu(tofu::Face))
+    }
+
     forward_methods!(
-        variants = FaceRepr::[FreeType];
+        variants = FaceRepr::[FreeType, Tofu];
         pub fn family_name[&]() -> &str;
 
         pub fn axes[&]() -> &[Axis];
@@ -324,12 +330,16 @@ impl Face {
                 .with_size(point_size, dpi)
                 .map(FontRepr::FreeType)
                 .map(Font),
+            FaceRepr::Tofu(face) => match face.with_size(point_size, dpi) {
+                Ok(font) => Ok(Font(FontRepr::Tofu(font))),
+            },
         }
     }
 
     pub fn advance_cache_generation(&self) {
         match &self.0 {
             FaceRepr::FreeType(face) => face.glyph_cache().advance_generation(),
+            FaceRepr::Tofu(_) => (),
         }
     }
 }
@@ -337,6 +347,7 @@ impl Face {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FontRepr {
     FreeType(freetype::Font),
+    Tofu(tofu::Font),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -344,7 +355,7 @@ pub struct Font(FontRepr);
 
 impl Font {
     forward_methods!(
-        variants = FontRepr::[FreeType];
+        variants = FontRepr::[FreeType, Tofu];
 
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
@@ -353,12 +364,14 @@ impl Font {
     pub fn glyph_extents(&self, index: u32) -> Result<&GlyphMetrics, FreeTypeError> {
         match &self.0 {
             FontRepr::FreeType(font) => font.glyph_cache().get_or_try_measure(font, index),
+            FontRepr::Tofu(font) => Ok(font.glyph_metrics()),
         }
     }
 
     pub fn as_harfbuzz_font(&self) -> Result<*mut hb_font_t, FreeTypeError> {
         match &self.0 {
             FontRepr::FreeType(font) => Ok(font.with_applied_size_and_hb()?.1),
+            FontRepr::Tofu(font) => Ok(font.as_harfbuzz_font()),
         }
     }
 
@@ -377,6 +390,10 @@ impl Font {
                 offset_value,
                 offset_axis_is_y,
             ),
+            FontRepr::Tofu(font) => Ok(font
+                .glyph_cache()
+                .get_or_try_render(rasterizer, font, index, offset_value, offset_axis_is_y)
+                .unwrap()),
         }
     }
 }

@@ -370,11 +370,7 @@ impl ShapingBuffer {
             return Ok(());
         };
 
-        let font = match font_iterator.next_with_fallback(first_codepoint, font_arena, fonts)? {
-            Some(font) => font,
-            // TODO: TofuFont
-            None => return Err(ShapingError::FontSelect(font_db::SelectError::NotFound)),
-        };
+        let font = font_iterator.next_with_fallback(first_codepoint, font_arena, fonts)?;
         let hb_font = font.as_harfbuzz_font()?;
 
         unsafe {

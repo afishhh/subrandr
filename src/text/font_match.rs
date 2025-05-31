@@ -200,7 +200,7 @@ impl<'f> FontMatcher<'f> {
         &self,
         arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<Option<&'f Font>, font_db::SelectError> {
+    ) -> Result<&'f Font, font_db::SelectError> {
         self.iterator().next_with_fallback(' '.into(), arena, fonts)
     }
 }
@@ -225,28 +225,28 @@ impl<'f> FontMatchIterator<'_, 'f> {
         codepoint: u32,
         arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<Option<&'f Font>, font_db::SelectError> {
+    ) -> Result<&'f Font, font_db::SelectError> {
         match self.matcher.matched.get(self.index) {
             Some(&result) => {
                 self.index += 1;
-                Ok(Some(result))
+                Ok(result)
             }
             None => {
                 if self.index == self.matcher.matched.len() {
                     self.index += 1;
                 }
 
-                match fonts.select_fallback(&FontFallbackRequest {
+                let face = match fonts.select_fallback(&FontFallbackRequest {
                     families: self.matcher.families.clone(),
                     style: self.matcher.style,
                     codepoint,
                 }) {
-                    Ok(face) => Ok(Some(
-                        arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
-                    )),
-                    Err(super::SelectError::NotFound) => Ok(None),
-                    Err(err) => Err(err),
-                }
+                    Ok(face) => face,
+                    Err(super::SelectError::NotFound) => Face::tofu(),
+                    Err(err) => return Err(err),
+                };
+
+                Ok(arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?))
             }
         }
     }

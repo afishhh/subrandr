@@ -88,9 +88,7 @@ fn shape_simple_segment<'f>(
     };
 
     let mut metrics = text::compute_extents_ex(true, &glyphs)?;
-    if let Some(font) = primary {
-        metrics.extend_by_font(font);
-    }
+    metrics.extend_by_font(primary);
 
     Ok((glyphs, metrics))
 }
@@ -355,10 +353,7 @@ impl<'f> MultilineTextShaper<'f> {
                     }) => {
                         let primary = font_matcher
                             .primary(font_arena, fonts)
-                            .map_err(text::ShapingError::FontSelect)?
-                            .ok_or(text::ShapingError::FontSelect(
-                                text::font_db::SelectError::NotFound,
-                            ))?;
+                            .map_err(text::ShapingError::FontSelect)?;
 
                         let (mut glyphs, mut extents) = match post_wrap_glyphs.take() {
                             Some(glyphs) => {

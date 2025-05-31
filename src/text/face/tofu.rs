@@ -11,8 +11,8 @@ use text_sys::{
 };
 
 use crate::{
-    layout::{FixedL, Vec2L},
-    math::{I16Dot16, Point2, Rect2, Rect2f, Vec2},
+    layout::{FixedL, Point2L, Vec2L},
+    math::{I16Dot16, Point2, Rect2, Vec2},
     rasterize::{PixelFormat, Rasterizer},
     util::slice_assume_init_mut,
     I26Dot6,
@@ -308,10 +308,7 @@ impl FontImpl for Font {
         let base_spacing = pixel_height / 12;
         let margin = base_spacing;
         let inner_offset = offset + Vec2::new(margin, margin);
-        let fract_offset = Vec2::new(
-            inner_offset.x.fract().into_f32(),
-            inner_offset.y.fract().into_f32(),
-        );
+        let fract_offset = Vec2::new(inner_offset.x.fract(), inner_offset.y.fract());
 
         let outline_size = Vec2::new(pixel_width - margin * 2, pixel_height - margin * 2);
         let texture_size = Vec2::new(
@@ -337,62 +334,54 @@ impl FontImpl for Font {
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2 {
-                            min: Point2::new(
-                                0.0,
-                                outline_size.y.into_f32() - outline_width.into_f32(),
-                            ),
-                            max: Point2::new(outline_size.x.into_f32(), outline_size.y.into_f32()),
-                        }
-                        .translate(fract_offset),
+                        Rect2::layout_to_float(
+                            Rect2 {
+                                min: Point2::new(FixedL::ZERO, outline_size.y - outline_width),
+                                max: Point2::new(outline_size.x, outline_size.y),
+                            }
+                            .translate(fract_offset),
+                        ),
                         255,
                     );
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2 {
-                            min: Point2::new(0.0, 0.0),
-                            max: Point2::new(outline_size.x.into_f32(), outline_width.into_f32()),
-                        }
-                        .translate(fract_offset),
+                        Rect2::layout_to_float(
+                            Rect2 {
+                                min: Point2::new(FixedL::ZERO, FixedL::ZERO),
+                                max: Point2::new(outline_size.x, outline_width),
+                            }
+                            .translate(fract_offset),
+                        ),
                         255,
                     );
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2 {
-                            min: Point2::new(0., outline_width.into_f32()),
-                            max: Point2::new(
-                                outline_width.into_f32(),
-                                outline_size.y.into_f32() - outline_width.into_f32(),
-                            ),
-                        }
-                        .translate(fract_offset),
+                        Rect2::layout_to_float(
+                            Rect2 {
+                                min: Point2::new(FixedL::ZERO, outline_width),
+                                max: Point2::new(outline_width, outline_size.y - outline_width),
+                            }
+                            .translate(fract_offset),
+                        ),
                         255,
                     );
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2 {
-                            min: Point2::new(
-                                outline_size.x.into_f32() - outline_width.into_f32(),
-                                outline_width.into_f32(),
-                            ),
-                            max: Point2::new(
-                                outline_size.x.into_f32(),
-                                outline_size.y.into_f32() - outline_width.into_f32(),
-                            ),
-                        }
-                        .translate(fract_offset),
+                        Rect2::layout_to_float(
+                            Rect2 {
+                                min: Point2::new(outline_size.x - outline_width, outline_width),
+                                max: Point2::new(outline_size.x, outline_size.y - outline_width),
+                            }
+                            .translate(fract_offset),
+                        ),
                         255,
                     );
 
-                    let edge = outline_width * 2;
-                    let content_offset = Vec2::new(
-                        (outline_width + fract_offset.x).into_f32(),
-                        (outline_width + fract_offset.y).into_f32(),
-                    );
-                    let content_size = Vec2::new(outline_size.x - edge, outline_size.y - edge);
+                    let content_offset = fract_offset + Vec2::splat(outline_width);
+                    let content_size = outline_size - Vec2::splat(outline_width * 2);
                     let min_cell_spacing_x = base_spacing / 2;
                     let min_cell_spacing_y = base_spacing;
 
@@ -439,18 +428,20 @@ impl FontImpl for Font {
                         (char_space_y * 2 / 3, char_space_y)
                     };
 
-                    let mut draw_digit = |offset: Vec2<f32>, size: Vec2L, digit: u8| {
+                    let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
                         let rects = GLYPHS[usize::from(digit)];
                         for rect in rects {
-                            let xmul = size.x.into_f32() / 200.;
-                            let ymul = size.y.into_f32() / 400.;
+                            let transform =
+                                |p: Point2L| Point2::new(p.x * size.x / 200, p.y * size.y / 400);
                             rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                                 &mut target,
-                                Rect2 {
-                                    min: Point2::new(rect.min.x * xmul, rect.min.y * ymul),
-                                    max: Point2::new(rect.max.x * xmul, rect.max.y * ymul),
-                                }
-                                .translate(offset),
+                                Rect2::layout_to_float(
+                                    Rect2 {
+                                        min: transform(rect.min),
+                                        max: transform(rect.max),
+                                    }
+                                    .translate(offset),
+                                ),
                                 255,
                             );
                         }
@@ -518,147 +509,150 @@ macro_rules! glyph {
     [
         $([($a: literal, $b: literal), ($c: literal, $d: literal)],)*
     ] => {[
-        $(Rect2 { min: Point2::new($a, $b), max: Point2::new($c, $d) },)*
+        $(Rect2 {
+            min: Point2::new(FixedL::new($a), FixedL::new($b)),
+            max: Point2::new(FixedL::new($c), FixedL::new($d))
+        },)*
     ]};
 }
 
 // All glyphs that make up our mini tofu font on a 200x400 canvas.
 // This includes all hex digits and a special question mark glyph.
-const GLYPHS: &[&[Rect2f]; 17] = &[
+const GLYPHS: &[&[Rect2<FixedL>]; 17] = &[
     // 0
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
-        [(0.0, 20.0), (10.0, 380.0)],
-        [(190.0, 20.0), (200.0, 380.0)],
-        [(90.0, 180.0), (110.0, 220.0)],
+        [(10, 0), (190, 20)],
+        [(10, 380), (190, 400)],
+        [(0, 20), (10, 380)],
+        [(190, 20), (200, 380)],
+        [(90, 180), (110, 220)],
     ],
     // 1
     &glyph![
-        [(30.0, 0.0), (95.0, 20.0)],
-        [(95.0, 20.0), (105.0, 380.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
+        [(30, 0), (95, 20)],
+        [(95, 20), (105, 380)],
+        [(10, 380), (190, 400)],
     ],
     // 2
     &glyph![
-        [(0.0, 20.0), (10.0, 50.0)],
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(190.0, 20.0), (200.0, 190.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
-        [(0.0, 210.0), (10.0, 380.0)],
-        [(10.0, 380.0), (200.0, 400.0)],
+        [(0, 20), (10, 50)],
+        [(10, 0), (190, 20)],
+        [(190, 20), (200, 190)],
+        [(10, 190), (190, 210)],
+        [(0, 210), (10, 380)],
+        [(10, 380), (200, 400)],
     ],
     // 3
     &glyph![
-        [(0.0, 0.0), (190.0, 20.0)],
-        [(0.0, 190.0), (190.0, 210.0)],
-        [(0.0, 380.0), (190.0, 400.0)],
-        [(190.0, 20.0), (200.0, 380.0)],
+        [(0, 0), (190, 20)],
+        [(0, 190), (190, 210)],
+        [(0, 380), (190, 400)],
+        [(190, 20), (200, 380)],
     ],
     // 4
     &glyph![
-        [(0.0, 0.0), (10.0, 190.0)],
-        [(190.0, 0.0), (200.0, 400.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
+        [(0, 0), (10, 190)],
+        [(190, 0), (200, 400)],
+        [(10, 190), (190, 210)],
     ],
     // 5 (pretty much a flipped 2)
     &glyph![
-        [(10.0, 0.0), (200.0, 20.0)],
-        [(0.0, 20.0), (10.0, 190.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
-        [(190.0, 210.0), (200.0, 380.0)],
-        [(0.0, 380.0), (190.0, 400.0)],
+        [(10, 0), (200, 20)],
+        [(0, 20), (10, 190)],
+        [(10, 190), (190, 210)],
+        [(190, 210), (200, 380)],
+        [(0, 380), (190, 400)],
     ],
     // 6
     &glyph![
-        [(10.0, 0.0), (200.0, 20.0)],
-        [(0.0, 20.0), (10.0, 400.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
-        [(190.0, 210.0), (200.0, 380.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
+        [(10, 0), (200, 20)],
+        [(0, 20), (10, 400)],
+        [(10, 190), (190, 210)],
+        [(190, 210), (200, 380)],
+        [(10, 380), (190, 400)],
     ],
     // 7
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(160.0, 20.0), (180.0, 80.0)],
-        [(140.0, 80.0), (160.0, 160.0)],
-        [(120.0, 160.0), (140.0, 200.0)],
-        [(100.0, 200.0), (120.0, 260.0)],
-        [(80.0, 260.0), (100.0, 320.0)],
-        [(60.0, 320.0), (80.0, 380.0)],
-        [(40.0, 380.0), (60.0, 400.0)],
+        [(10, 0), (190, 20)],
+        [(160, 20), (180, 80)],
+        [(140, 80), (160, 160)],
+        [(120, 160), (140, 200)],
+        [(100, 200), (120, 260)],
+        [(80, 260), (100, 320)],
+        [(60, 320), (80, 380)],
+        [(40, 380), (60, 400)],
     ],
     // 8
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(0.0, 20.0), (10.0, 190.0)],
-        [(190.0, 20.0), (200.0, 190.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
-        [(0.0, 210.0), (10.0, 380.0)],
-        [(190.0, 210.0), (200.0, 380.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
+        [(10, 0), (190, 20)],
+        [(0, 20), (10, 190)],
+        [(190, 20), (200, 190)],
+        [(10, 190), (190, 210)],
+        [(0, 210), (10, 380)],
+        [(190, 210), (200, 380)],
+        [(10, 380), (190, 400)],
     ],
     // 9
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(0.0, 20.0), (10.0, 190.0)],
-        [(190.0, 20.0), (200.0, 380.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
+        [(10, 0), (190, 20)],
+        [(0, 20), (10, 190)],
+        [(190, 20), (200, 380)],
+        [(10, 190), (190, 210)],
+        [(10, 380), (190, 400)],
     ],
     // A
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(0.0, 20.0), (10.0, 380.0)],
-        [(190.0, 20.0), (200.0, 380.0)],
-        [(10.0, 190.0), (190.0, 210.0)],
+        [(10, 0), (190, 20)],
+        [(0, 20), (10, 380)],
+        [(190, 20), (200, 380)],
+        [(10, 190), (190, 210)],
     ],
     // B (a slightly different 8)
     &glyph![
-        [(0.0, 0.0), (10.0, 400.0)],
-        [(10.0, 0.0), (170.0, 20.0)],
-        [(10.0, 150.0), (190.0, 170.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
-        [(170.0, 20.0), (180.0, 150.0)],
-        [(190.0, 170.0), (200.0, 380.0)],
+        [(0, 0), (10, 400)],
+        [(10, 0), (170, 20)],
+        [(10, 150), (190, 170)],
+        [(10, 380), (190, 400)],
+        [(170, 20), (180, 150)],
+        [(190, 170), (200, 380)],
     ],
     // C
     &glyph![
-        [(0.0, 20.0), (10.0, 380.0)],
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(10.0, 380.0), (190.0, 400.0)],
+        [(0, 20), (10, 380)],
+        [(10, 0), (190, 20)],
+        [(10, 380), (190, 400)],
     ],
     // D
     &glyph![
-        [(0.0, 0.0), (10.0, 400.0)],
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(20.0, 380.0), (190.0, 400.0)],
-        [(190.0, 20.0), (200.0, 380.0)],
+        [(0, 0), (10, 400)],
+        [(10, 0), (190, 20)],
+        [(20, 380), (190, 400)],
+        [(190, 20), (200, 380)],
     ],
     // E
     &glyph![
-        [(45.0, 0.0), (190.0, 20.0)],
-        [(45.0, 190.0), (190.0, 210.0)],
-        [(45.0, 380.0), (190.0, 400.0)],
-        [(35.0, 20.0), (45.0, 380.0)],
+        [(45, 0), (190, 20)],
+        [(45, 190), (190, 210)],
+        [(45, 380), (190, 400)],
+        [(35, 20), (45, 380)],
     ],
     // F
     &glyph![
-        [(10.0, 0.0), (190.0, 20.0)],
-        [(10.0, 190.0), (130.0, 210.0)],
-        [(0.0, 20.0), (10.0, 400.0)],
+        [(10, 0), (190, 20)],
+        [(10, 190), (130, 210)],
+        [(0, 20), (10, 400)],
     ],
     // ? (drawn in full content box if not enough space is available for hex)
     &glyph![
-        [(50.0, 100.0), (60.0, 120.0)],
-        [(60.0, 80.0), (140.0, 100.0)],
-        [(150.0, 100.0), (160.0, 160.0)],
-        [(140.0, 160.0), (150.0, 175.0)],
-        [(130.0, 175.0), (140.0, 190.0)],
-        [(120.0, 190.0), (130.0, 205.0)],
-        [(110.0, 205.0), (120.0, 220.0)],
-        [(100.0, 220.0), (110.0, 235.0)],
-        [(90.0, 235.0), (110.0, 260.0)],
-        [(90.0, 320.0), (110.0, 340.0)],
+        [(50, 100), (60, 120)],
+        [(60, 80), (140, 100)],
+        [(150, 100), (160, 160)],
+        [(140, 160), (150, 175)],
+        [(130, 175), (140, 190)],
+        [(120, 190), (130, 205)],
+        [(110, 205), (120, 220)],
+        [(100, 220), (110, 235)],
+        [(90, 235), (110, 260)],
+        [(90, 320), (110, 340)],
     ],
 ];

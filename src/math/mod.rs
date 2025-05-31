@@ -11,6 +11,8 @@ pub use fixed::*;
 mod num;
 pub use num::*;
 
+use crate::layout::FixedL;
+
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
 pub struct Point2<N> {
@@ -62,6 +64,12 @@ impl<N> Vec2<N> {
         N: Copy,
     {
         Point2::new(self.x, self.y)
+    }
+}
+
+impl<N: Copy> Vec2<N> {
+    pub const fn splat(v: N) -> Self {
+        Self { x: v, y: v }
     }
 }
 
@@ -316,6 +324,16 @@ impl<N: Number + Display> Rect2<N> {
         self.min.y = self.min.y.min(rect.min.y);
         self.max.x = self.max.x.max(rect.max.x);
         self.max.y = self.max.y.max(rect.max.y);
+    }
+}
+
+impl Rect2<FixedL> {
+    // TODO: A trait for casting these types?
+    pub fn layout_to_float(rect: Self) -> Rect2f {
+        Rect2::new(
+            Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
+            Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
+        )
     }
 }
 

@@ -822,14 +822,6 @@ impl Renderer<'_> {
                     )?;
                 }
 
-                // TODO: A trait for casting these types?
-                fn convert_rect(rect: Rect2<I26Dot6>) -> Rect2<f32> {
-                    Rect2::new(
-                        Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
-                        Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
-                    )
-                }
-
                 for &(offset, ref container) in &fragment.children {
                     let current = pos + offset;
 
@@ -842,7 +834,10 @@ impl Renderer<'_> {
                             if text.style.background_color.a != 0 {
                                 pass.rasterizer.fill_axis_aligned_rect(
                                     target,
-                                    convert_rect(Rect2::from_min_size(current, text.fbox.size)),
+                                    Rect2::layout_to_float(Rect2::from_min_size(
+                                        current,
+                                        text.fbox.size,
+                                    )),
                                     text.style.background_color,
                                 );
                             }
@@ -893,7 +888,7 @@ impl Renderer<'_> {
                                     BGRA8::GOLD,
                                 )?;
 
-                                let final_logical_boxf = convert_rect(final_logical_box);
+                                let final_logical_boxf = Rect2::layout_to_float(final_logical_box);
 
                                 pass.rasterizer.stroke_axis_aligned_rect(
                                     target,

@@ -5,7 +5,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use wgpu::TextureFormat;
+use wgpu::{CommandEncoder, TextureFormat};
 
 use crate::math::{Point2, Vec2};
 
@@ -23,6 +23,7 @@ pub struct TexturePacker {
     textures: HashMap<u32, AtlasTexture>,
     next_texture_id: u32,
     free: Vec<FreeBlock>,
+    command_encoder: Cell<Option<CommandEncoder>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +76,7 @@ impl PackedTexture {
         &self,
         packer: &'a TexturePacker,
     ) -> (&'a wgpu::Texture, Point2<u32>, Vec2<u32>) {
+        packer.flush_commands();
         (
             &packer.textures[&self.block.texture.get()].texture,
             self.block.position.get(),
@@ -92,6 +94,7 @@ impl TexturePacker {
             textures: HashMap::new(),
             next_texture_id: 0,
             free: Vec::new(),
+            command_encoder: Cell::new(None),
         }
     }
 
@@ -228,6 +231,25 @@ impl TexturePacker {
         }
     }
 
+    fn flush_commands(&self) {
+        let old = Cell::new(None);
+        self.command_encoder.swap(&old);
+        if let Some(encoder) = old.take() {
+            self.queue.submit([encoder.finish()]);
+        }
+    }
+
+    fn get_command_encoder_mut<'a>(
+        cell: &'a mut Cell<Option<CommandEncoder>>,
+        device: &wgpu::Device,
+    ) -> &'a mut CommandEncoder {
+        cell.get_mut().get_or_insert_with(|| {
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("texture texture command encoder"),
+            })
+        })
+    }
+
     fn relocate_block(
         &mut self,
         texture: &wgpu::Texture,
@@ -238,11 +260,7 @@ impl TexturePacker {
         let block = self.allocate_block(size);
         let atlas = self.textures.get_mut(&block.texture).unwrap();
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("texture texture atlas move encoder"),
-            });
+        let encoder = Self::get_command_encoder_mut(&mut self.command_encoder, &self.device);
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -270,7 +288,6 @@ impl TexturePacker {
                 depth_or_array_layers: 1,
             },
         );
-        self.queue.submit([encoder.finish()]);
 
         allocated_block.texture.set(block.texture);
         allocated_block.position.set(block.position);
@@ -288,11 +305,7 @@ impl TexturePacker {
         let block = self.allocate_block(size);
         let atlas = self.textures.get_mut(&block.texture).unwrap();
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("buffer -> texture atlas move encoder"),
-            });
+        let encoder = Self::get_command_encoder_mut(&mut self.command_encoder, &self.device);
         encoder.copy_buffer_to_texture(
             wgpu::TexelCopyBufferInfo {
                 buffer,
@@ -318,7 +331,6 @@ impl TexturePacker {
                 depth_or_array_layers: 1,
             },
         );
-        self.queue.submit([encoder.finish()]);
 
         let allocated = Rc::new(AllocatedBlock {
             position: Cell::new(block.position),

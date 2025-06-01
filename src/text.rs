@@ -267,7 +267,10 @@ impl ItemRange for RangeFull {
 // so we need to fixup cluster ranges so we don't crash when slicing with them.
 fn fixup_range(a: usize, b: usize) -> Range<usize> {
     if a > b {
-        b..a
+        // fixup_range accepts an *exclusive* range where b is excluded and a is included
+        // *regardless* of which if higher, therefore when reversing it we have to make
+        // sure we're taking this into account.
+        b + 1..a + 1
     } else {
         a..b
     }

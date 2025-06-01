@@ -76,7 +76,7 @@ impl Font {
             let decoration_thickness = point_size * dpi_scale6 / 192;
             let pixel_height = point_size * 96 / dpi as i32;
             let pixel_width = pixel_height * 2 / 3;
-            let ascender = pixel_height * 2 / 3;
+            let ascender = pixel_height * 5 / 6;
             let descender = ascender - pixel_height;
             FontShared {
                 point_size,

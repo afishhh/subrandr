@@ -367,15 +367,20 @@ impl ShapingBuffer {
         start: usize,
         properties: &hb_segment_properties_t,
         mut font_iterator: FontMatchIterator<'_, 'f>,
+        force_tofu: bool,
         fonts: &mut FontDb,
     ) -> Result<(), ShapingError> {
         let Some(&(first_codepoint, _)) = codepoints.get(start) else {
             return Ok(());
         };
 
-        let font = font_iterator
-            .next_with_fallback(first_codepoint, font_arena, fonts)?
-            .unwrap_or_else(|| font_iterator.matcher().tofu(font_arena));
+        let font = if force_tofu {
+            font_iterator.matcher().tofu(font_arena)
+        } else {
+            font_iterator
+                .next_with_fallback(first_codepoint, font_arena, fonts)?
+                .unwrap_or_else(|| font_iterator.matcher().tofu(font_arena))
+        };
         let hb_font = font.as_harfbuzz_font()?;
 
         unsafe {
@@ -396,7 +401,8 @@ impl ShapingBuffer {
             };
             let mut retry_shaping = |range: Range<usize>,
                                      result: &mut Vec<Glyph<'f>>,
-                                     font_arena: &'f FontArena|
+                                     font_arena: &'f FontArena,
+                                     force_tofu: bool|
              -> Result<(), ShapingError> {
                 let mut sub_buffer = Self::new();
                 for ((codepoint, _), i) in
@@ -414,6 +420,7 @@ impl ShapingBuffer {
                     range.start,
                     properties,
                     font_iterator.clone(),
+                    force_tofu,
                     fonts,
                 )?;
 
@@ -431,6 +438,7 @@ impl ShapingBuffer {
                         fixup_range(infos[start].cluster as usize, info.cluster as usize),
                         result,
                         font_arena,
+                        force_tofu,
                     )?;
                 }
 
@@ -440,14 +448,9 @@ impl ShapingBuffer {
             if let Some(start) = invalid_range_start {
                 // This means the font fallback system lied to us and gave us
                 // a font that does not, in fact, have the character we asked for.
-                // TODO: This should ideally still fallback to a tofu font although
-                //       I don't know how likely it is to happen.
-                if start == 0 && font_iterator.did_system_fallback() {
-                    for (info, position) in infos.iter().zip(positions.iter()) {
-                        result.push(make_glyph(info, position));
-                    }
-                    return Ok(());
-                }
+                // Or the tofu font failed to shape any characters but that shouldn't
+                // happen, if it does anyway it will just incur an additional shaping pass.
+                let next_force_tofu = start == 0 && font_iterator.did_system_fallback();
 
                 retry_shaping(
                     fixup_range(
@@ -457,6 +460,7 @@ impl ShapingBuffer {
                     ),
                     result,
                     font_arena,
+                    next_force_tofu,
                 )?
             }
 
@@ -502,6 +506,7 @@ impl ShapingBuffer {
             0,
             &properties,
             font_iterator,
+            false,
             fonts,
         )?;
 

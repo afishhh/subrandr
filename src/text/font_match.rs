@@ -192,8 +192,10 @@ impl<'f> FontMatcher<'f> {
         }
     }
 
-    // TODO: Make something like a TofuFont that would be a virtual font that is always
-    //       available, then no extra optional handling would have to be done.
+    pub fn tofu(&self, arena: &'f FontArena) -> &'f Font {
+        arena.insert(&Face::tofu().with_size(self.size, self.dpi).unwrap())
+    }
+
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
     pub fn primary(
@@ -201,7 +203,10 @@ impl<'f> FontMatcher<'f> {
         arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<&'f Font, font_db::SelectError> {
-        self.iterator().next_with_fallback(' '.into(), arena, fonts)
+        Ok(self
+            .iterator()
+            .next_with_fallback(' '.into(), arena, fonts)?
+            .unwrap_or_else(|| self.tofu(arena)))
     }
 }
 
@@ -225,28 +230,28 @@ impl<'f> FontMatchIterator<'_, 'f> {
         codepoint: u32,
         arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<&'f Font, font_db::SelectError> {
+    ) -> Result<Option<&'f Font>, font_db::SelectError> {
         match self.matcher.matched.get(self.index) {
             Some(&result) => {
                 self.index += 1;
-                Ok(result)
+                Ok(Some(result))
             }
             None => {
                 if self.index == self.matcher.matched.len() {
                     self.index += 1;
                 }
 
-                let face = match fonts.select_fallback(&FontFallbackRequest {
+                match fonts.select_fallback(&FontFallbackRequest {
                     families: self.matcher.families.clone(),
                     style: self.matcher.style,
                     codepoint,
                 }) {
-                    Ok(face) => face,
-                    Err(super::SelectError::NotFound) => Face::tofu(),
-                    Err(err) => return Err(err),
-                };
-
-                Ok(arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?))
+                    Ok(face) => Ok(Some(
+                        arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
+                    )),
+                    Err(super::SelectError::NotFound) => Ok(None),
+                    Err(err) => Err(err),
+                }
             }
         }
     }

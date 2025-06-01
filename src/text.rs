@@ -268,7 +268,7 @@ impl ItemRange for RangeFull {
 fn fixup_range(a: usize, b: usize) -> Range<usize> {
     if a > b {
         // fixup_range accepts an *exclusive* range where b is excluded and a is included
-        // *regardless* of which if higher, therefore when reversing it we have to make
+        // *regardless* of which is higher, therefore when reversing it we have to make
         // sure we're taking this into account.
         b + 1..a + 1
     } else {
@@ -373,7 +373,9 @@ impl ShapingBuffer {
             return Ok(());
         };
 
-        let font = font_iterator.next_with_fallback(first_codepoint, font_arena, fonts)?;
+        let font = font_iterator
+            .next_with_fallback(first_codepoint, font_arena, fonts)?
+            .unwrap_or_else(|| font_iterator.matcher().tofu(font_arena));
         let hb_font = font.as_harfbuzz_font()?;
 
         unsafe {
@@ -436,6 +438,10 @@ impl ShapingBuffer {
             }
 
             if let Some(start) = invalid_range_start {
+                // This means the font fallback system lied to us and gave us
+                // a font that does not, in fact, have the character we asked for.
+                // TODO: This should ideally still fallback to a tofu font although
+                //       I don't know how likely it is to happen.
                 if start == 0 && font_iterator.did_system_fallback() {
                     for (info, position) in infos.iter().zip(positions.iter()) {
                         result.push(make_glyph(info, position));
@@ -446,6 +452,7 @@ impl ShapingBuffer {
                 retry_shaping(
                     fixup_range(
                         infos[start].cluster as usize,
+                        // FIXME: Is this correct for RTL text?
                         infos.last().unwrap().cluster as usize + 1,
                     ),
                     result,

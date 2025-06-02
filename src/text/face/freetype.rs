@@ -333,27 +333,66 @@ unsafe fn build_font_metrics(
 
     let max_advance = scale!(metrics.max_advance);
 
-    let ascender;
-    let descender;
-    let height;
-    let strikeout_top_offset;
-    let strikeout_thickness;
+    struct TypoMetrics {
+        ascender: I26Dot6,
+        descender: I26Dot6,
+        height: I26Dot6,
+    }
+
+    let mut strikeout_metrics = None;
+    let mut typo_metrics = None;
 
     if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2).filter(|_| scalable) } {
-        ascender = scale_font_units!(os2.sTypoAscender);
-        descender = scale_font_units!(os2.sTypoDescender);
-        height = ascender - descender + scale_font_units!(os2.sTypoLineGap);
+        const USE_TYPO_METRICS: FT_UShort = 1 << 7;
 
-        strikeout_top_offset = scale_font_units!(-os2.yStrikeoutPosition);
-        strikeout_thickness = scale_font_units!(os2.yStrikeoutSize);
-    } else {
-        ascender = scale!(metrics.ascender);
-        descender = scale!(metrics.descender);
-        height = scale!(metrics.height);
+        strikeout_metrics = Some((
+            scale_font_units!(-os2.yStrikeoutPosition),
+            scale_font_units!(os2.yStrikeoutSize),
+        ));
 
-        strikeout_top_offset = (ascender - descender) / 2 - ascender - scale / 2;
-        strikeout_thickness = scale;
+        if os2.fsSelection & USE_TYPO_METRICS != 0 {
+            let ascender = scale_font_units!(os2.sTypoAscender);
+            let descender = scale_font_units!(os2.sTypoDescender);
+            typo_metrics = Some(TypoMetrics {
+                ascender,
+                descender,
+                height: ascender - descender + scale_font_units!(os2.sTypoLineGap),
+            })
+        } else {
+            // Fallback to metrics from the hhea table
+        }
     }
+
+    if typo_metrics.is_none() {
+        if let Some(hhea) =
+            unsafe { get_table::<TT_HoriHeader>(face, FT_SFNT_HHEA).filter(|_| scalable) }
+        {
+            let ascender = scale_font_units!(hhea.Ascender);
+            let descender = scale_font_units!(hhea.Descender);
+            typo_metrics = Some(TypoMetrics {
+                ascender,
+                descender,
+                height: ascender - descender + scale_font_units!(hhea.Line_Gap),
+            })
+        }
+    }
+
+    // TODO: Use OS/2 metrics if hhea metrics resulted in zero and OS/2 table exists
+    //       Note that this is basically reimplementing what FreeType already does
+    //       but whatever, maybe it'll be useful if we ever switch to a Rust based
+    //       ttf parser and glyph rasterizer.
+
+    let TypoMetrics {
+        ascender,
+        descender,
+        height,
+    } = typo_metrics.unwrap_or_else(|| TypoMetrics {
+        ascender: scale!(metrics.ascender),
+        descender: scale!(metrics.descender),
+        height: scale!(metrics.height),
+    });
+    let (strikeout_top_offset, strikeout_thickness) = strikeout_metrics
+        .unwrap_or_else(|| ((ascender - descender) / 2 - ascender - scale / 2, scale));
 
     let underline_top_offset;
     let underline_thickness;

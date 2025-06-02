@@ -172,6 +172,7 @@ fn layout_inline(
                 .get_copy_or::<style::WordBreak, _>(LineBreakWordOption::Normal),
         },
         constraints.size.x,
+        text::layout::LineHeight::Normal,
         unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
         context.fonts,
     )?;

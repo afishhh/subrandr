@@ -117,6 +117,13 @@ impl Default for TextWrapOptions {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineHeight {
+    #[default]
+    Metrics,
+    Normal,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RubyBaseId(usize);
 
@@ -258,6 +265,7 @@ impl<'f> MultilineTextShaper<'f> {
         line_alignment: HorizontalAlignment,
         wrap: TextWrapOptions,
         wrap_width: I26Dot6,
+        line_height: LineHeight,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<(Vec<ShapedLine<'f>>, Rect2<I26Dot6>), LayoutError> {
@@ -383,7 +391,7 @@ impl<'f> MultilineTextShaper<'f> {
                             const MAX_TRIES: usize = 3;
 
                             let max_width = wrap_width - current_x;
-                            // A MAX_TRIES-wide ring buffer for breaking opportunities.
+                            // A MAX_TRIES-wide buffer for breaking opportunities.
                             let mut candidate_breaks = [last; MAX_TRIES];
                             let breaks = segmenter.segment_str(&text[segment_slice.clone()]);
                             let mut glyph_it = glyphs.iter_glyphs().peekable();
@@ -440,6 +448,16 @@ impl<'f> MultilineTextShaper<'f> {
                                 "last: {last}, end: {end}, intra font splits: {:?}, current intra split: {}",
                                 self.intra_font_segment_splits, current_intra_split
                             );
+                        }
+
+                        match line_height {
+                            LineHeight::Metrics => (),
+                            LineHeight::Normal => {
+                                let line_gap = primary.metrics().line_gap();
+
+                                extents.max_ascender += line_gap / 2;
+                                extents.min_descender -= line_gap / 2;
+                            }
                         }
 
                         line_max_ascender = line_max_ascender.max(extents.max_ascender);
@@ -587,6 +605,8 @@ impl<'f> MultilineTextShaper<'f> {
                 annotations_max_ascender
             };
 
+            let final_line_height = line_max_ascender - line_min_descender;
+
             current_line_y += annotation_y_adjustment;
 
             for segment in segments.iter_mut() {
@@ -612,7 +632,7 @@ impl<'f> MultilineTextShaper<'f> {
                 line_rect.expand_to_rect(segment.logical_rect);
             }
 
-            current_line_y += line_max_ascender - line_min_descender + line_max_lineskip_descent;
+            current_line_y += final_line_height;
 
             segments.append(&mut annotation_segments);
 

@@ -1,7 +1,8 @@
 use std::{
-    ffi::{CStr, CString},
+    ffi::{c_int, c_void},
     hash::Hash,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::MaybeUninit,
+    num::NonZero,
     path::Path,
     rc::Rc,
     sync::Arc,
@@ -9,178 +10,160 @@ use std::{
 
 use text_sys::*;
 use thiserror::Error;
+use ttf_parser::{LineMetrics, NormalizedCoordinate};
 
 use super::{
-    Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
-    SingleGlyphBitmap, ITALIC_AXIS, WEIGHT_AXIS,
+    Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, SingleGlyphBitmap,
+    ITALIC_AXIS, WEIGHT_AXIS,
 };
 use crate::{
-    math::{I16Dot16, I26Dot6, Vec2},
-    outline::Outline,
-    rasterize::{PixelFormat, Rasterizer},
+    math::{I16Dot16, I26Dot6, Point2f, Vec2},
+    outline::{Outline, OutlineBuilder, SegmentDegree},
+    rasterize::Rasterizer,
     text::ft_utils::*,
+    util::slice_assume_init_mut,
 };
 
-#[repr(transparent)]
-struct FaceMmVar(*mut FT_MM_Var);
+struct FaceData {
+    parser: ttf_parser::Face<'static>,
+    data: Arc<[u8]>,
+    index: u32,
 
-impl FaceMmVar {
-    #[inline(always)]
-    unsafe fn has(face: FT_Face) -> bool {
-        unsafe { ((*face).face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS as FT_Long) != 0 }
-    }
-
-    unsafe fn get(face: FT_Face) -> Result<Option<Self>, FreeTypeError> {
-        unsafe {
-            Ok(if Self::has(face) {
-                Some(Self({
-                    let mut output = MaybeUninit::uninit();
-                    fttry!(FT_Get_MM_Var(face, output.as_mut_ptr()))?;
-                    output.assume_init()
-                }))
-            } else {
-                None
-            })
-        }
-    }
-
-    fn axes(&self) -> &[FT_Var_Axis] {
-        unsafe {
-            assert!((*self.0).num_axis <= T1_MAX_MM_AXIS);
-            std::slice::from_raw_parts((*self.0).axis, (*self.0).num_axis as usize)
-        }
-    }
-
-    #[expect(dead_code)]
-    fn namedstyles(&self) -> &[FT_Var_Named_Style] {
-        unsafe {
-            std::slice::from_raw_parts((*self.0).namedstyle, (*self.0).num_namedstyles as usize)
-        }
-    }
-}
-
-impl Drop for FaceMmVar {
-    fn drop(&mut self) {
-        unsafe {
-            FT_Done_MM_Var(Library::get_or_init().unwrap().ptr, self.0);
-        }
-    }
-}
-
-pub(super) type MmCoords = [FT_Fixed; T1_MAX_MM_AXIS as usize];
-
-struct SharedFaceData {
+    metrics: FaceMetrics,
     axes: Vec<Axis>,
+    default_coordinates: Vec<NormalizedCoordinate>,
+
+    name: Box<str>,
+    os2_weight: Option<u16>,
+    is_bold: bool,
+    is_italic: bool,
+
     glyph_cache: GlyphCache<Font>,
-    // This is only here to ensure the memory backing the font doesn't get
-    // deallocated while FreeType is still using it.
-    #[expect(dead_code)]
-    memory: Option<Arc<[u8]>>,
 }
 
-impl SharedFaceData {
-    fn get_ref(face: FT_Face) -> &'static Self {
-        unsafe { &*((*face).generic.data as *const Self) }
+impl FaceData {
+    fn parser(&self) -> &ttf_parser::Face<'_> {
+        &self.parser
     }
+}
 
-    unsafe extern "C" fn finalize(face: *mut std::ffi::c_void) {
-        let face = face as FT_Face;
-        drop(unsafe { Box::from_raw((*face).generic.data as *mut Self) });
+// Unscaled font metrics
+struct FaceMetrics {
+    ascender: i32,
+    descender: i32,
+    height: i32,
+
+    underline: Option<LineMetrics>,
+    strikeout: Option<LineMetrics>,
+}
+
+impl FaceMetrics {
+    fn get(face: &ttf_parser::Face<'_>) -> FaceMetrics {
+        let ascender = i32::from(face.ascender());
+        let descender = i32::from(face.descender());
+        let height = ascender - descender + i32::from(face.line_gap());
+
+        FaceMetrics {
+            ascender,
+            descender,
+            height,
+            underline: face.underline_metrics(),
+            strikeout: face.strikeout_metrics(),
+        }
+    }
+}
+
+impl FaceData {
+    pub fn new(
+        data: Arc<[u8]>,
+        mut index: u32,
+    ) -> Result<(Self, Vec<NormalizedCoordinate>), ttf_parser::FaceParsingError> {
+        // TODO: PR named instance support to ttf-parser
+        index &= 0xFFFF;
+        let _named_instance = index >> 16;
+        let font_index = index & 0xFFFF;
+
+        let face = ttf_parser::Face::parse(&data, font_index)?;
+
+        let mut axes = Vec::new();
+        let mut coordinates = Vec::new();
+        for (index, axis) in face.variation_axes().into_iter().enumerate() {
+            coordinates.push(NormalizedCoordinate::from(axis.def_value));
+
+            axes.push(Axis {
+                tag: axis.tag,
+                minimum: I16Dot16::from_f32(axis.min_value),
+                maximum: I16Dot16::from_f32(axis.max_value),
+                index,
+            });
+        }
+
+        Ok((
+            Self {
+                metrics: FaceMetrics::get(&face),
+                axes,
+                default_coordinates: coordinates.clone(),
+
+                name: face
+                    .names()
+                    .into_iter()
+                    .find_map(|name| name.to_string())
+                    .unwrap()
+                    .into_boxed_str(),
+                os2_weight: face.tables().os2.map(|t| t.weight().to_number()),
+                is_bold: face.is_bold(),
+                is_italic: face.is_italic(),
+
+                glyph_cache: GlyphCache::new(),
+
+                parser: unsafe { std::mem::transmute(face) },
+                data,
+                index,
+            },
+            coordinates,
+        ))
     }
 }
 
 #[repr(C)]
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub(super) struct Face {
-    face: FT_Face,
-    coords: MmCoords,
+    face: Rc<FaceData>,
+    coords: Vec<NormalizedCoordinate>,
+}
+
+impl PartialEq for Face {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.face, &other.face) && self.coords == other.coords
+    }
+}
+
+impl Eq for Face {}
+
+impl Hash for Face {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.face).hash(state);
+        for coord in &self.coords {
+            coord.get().hash(state);
+        }
+    }
 }
 
 impl Face {
     pub fn load_from_file(path: impl AsRef<Path>, index: i32) -> Result<Self, FreeTypeError> {
-        let library = Library::get_or_init()?;
-        let _guard = library.face_mutation_mutex.lock().unwrap();
-        let cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes()).unwrap();
-
-        let mut face = std::ptr::null_mut();
-        unsafe {
-            #[allow(clippy::unnecessary_cast)]
-            fttry!(FT_New_Face(
-                library.ptr,
-                cstr.as_ptr(),
-                index as FT_Long,
-                &mut face
-            ))?;
-        }
-
-        unsafe { Self::adopt_ft(face, None) }
+        Ok(Self::load_from_bytes(std::fs::read(path).unwrap().into(), index).unwrap())
     }
 
     pub fn load_from_bytes(bytes: Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
-        let library = Library::get_or_init()?;
-        let _guard = library.face_mutation_mutex.lock().unwrap();
-
-        let mut face = std::ptr::null_mut();
-        unsafe {
-            #[allow(clippy::unnecessary_cast)]
-            fttry!(FT_New_Memory_Face(
-                library.ptr,
-                bytes.as_ptr(),
-                bytes.len() as FT_Long,
-                index as FT_Long,
-                &mut face
-            ))?;
-        }
-
-        unsafe { Self::adopt_ft(face, Some(bytes)) }
-    }
-
-    unsafe fn adopt_ft(face: FT_Face, memory: Option<Arc<[u8]>>) -> Result<Self, FreeTypeError> {
-        let mut axes = Vec::new();
-        let mut default_coords = MmCoords::default();
-
-        if let Some(mm) = unsafe { FaceMmVar::get(face)? } {
-            for (index, ft_axis) in mm.axes().iter().enumerate() {
-                axes.push(Axis {
-                    // FT_ULong may be u64, but this tag always fits in u32
-                    #[allow(clippy::unnecessary_cast)]
-                    tag: OpenTypeTag(ft_axis.tag as u32),
-                    index,
-                    minimum: I16Dot16::from_ft(ft_axis.minimum),
-                    maximum: I16Dot16::from_ft(ft_axis.maximum),
-                });
-                default_coords[index] = ft_axis.def;
-            }
-        }
-
-        unsafe {
-            (*face).generic.data = Box::into_raw(Box::new(SharedFaceData {
-                axes,
-                glyph_cache: GlyphCache::new(),
-                memory,
-            })) as *mut std::ffi::c_void;
-            (*face).generic.finalizer = Some(SharedFaceData::finalize);
-        }
-
+        let (face, coords) = FaceData::new(bytes, index as u32).unwrap();
         Ok(Self {
-            face,
-            coords: default_coords,
+            face: Rc::new(face),
+            coords,
         })
     }
 
-    fn shared_data(&self) -> &SharedFaceData {
-        SharedFaceData::get_ref(self.face)
-    }
-
     pub fn glyph_cache(&self) -> &GlyphCache<Font> {
-        &self.shared_data().glyph_cache
-    }
-
-    fn os2_weight(&self) -> Option<u16> {
-        unsafe {
-            let table = FT_Get_Sfnt_Table(self.face, FT_SFNT_OS2) as *const TT_OS2;
-            table.as_ref().map(|os2| os2.usWeightClass)
-        }
+        &self.face.glyph_cache
     }
 }
 
@@ -188,60 +171,62 @@ impl FaceImpl for Face {
     type Font = Font;
 
     fn family_name(&self) -> &str {
-        // NOTE: FreeType says this is *always* an ASCII string.
-        unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
+        &self.face.name
     }
 
     fn axes(&self) -> &[Axis] {
-        &self.shared_data().axes
+        &self.face.axes
     }
 
     fn set_axis(&mut self, index: usize, value: I16Dot16) {
-        assert!(self.shared_data().axes[index].is_value_in_range(value));
-        self.coords[index] = value.into_ft();
+        assert!(self.face.axes[index].is_value_in_range(value));
+        self.coords[index] = NormalizedCoordinate::from(value.into_raw() as i16 >> 2);
     }
 
     fn weight(&self) -> I16Dot16 {
-        SharedFaceData::get_ref(self.face)
+        self.face
             .axes
             .iter()
             .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
             .map_or_else(
                 || {
-                    if let Some(weight) = self.os2_weight() {
+                    if let Some(weight) = self.face.os2_weight {
                         I16Dot16::new(weight as i32)
                     } else {
-                        let has_bold_flag = unsafe {
-                            (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0
-                        };
+                        let has_bold_flag = self.face.is_bold;
 
                         I16Dot16::new(300 + 400 * has_bold_flag as i32)
                     }
                 },
-                |idx| I16Dot16::from_ft(self.coords[idx]),
+                |idx| I16Dot16::from_raw(i32::from(self.coords[idx].get()) << 2),
             )
     }
 
     fn italic(&self) -> bool {
-        SharedFaceData::get_ref(self.face)
+        self.face
             .axes
             .iter()
             .find_map(|x| (x.tag == ITALIC_AXIS).then_some(x.index))
             .map_or_else(
-                || unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 },
-                |idx| I16Dot16::from_ft(self.coords[idx]) > I16Dot16::HALF,
+                || self.face.is_italic,
+                |idx| I16Dot16::from_raw(i32::from(self.coords[idx].get()) << 2) > I16Dot16::HALF,
             )
     }
 
     type Error = FreeTypeError;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
-        Font::create(self.face, self.coords, point_size, dpi)
+        Font::create(self.face.clone(), self.coords.clone(), point_size, dpi)
     }
 }
 
 impl std::fmt::Debug for Face {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Face({:?}@{:?}, ", self.family_name(), self.face,)?;
+        write!(
+            f,
+            "Face({:?}@{:?}, ",
+            self.family_name(),
+            Rc::as_ptr(&self.face)
+        )?;
 
         if self.italic() {
             write!(f, "italic, ")?;
@@ -252,302 +237,163 @@ impl std::fmt::Debug for Face {
         }
 
         f.debug_map()
-            .entries(
-                self.axes()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, axis)| (axis.tag, I16Dot16::from_ft(self.coords[i]))),
-            )
+            .entries(self.axes().iter().enumerate().map(|(i, axis)| {
+                (
+                    axis.tag,
+                    I16Dot16::from_raw(i32::from(self.coords[i].get()) << 2),
+                )
+            }))
             .finish()?;
         write!(f, ")")
     }
 }
 
-impl Clone for Face {
-    fn clone(&self) -> Self {
-        unsafe {
-            fttry!(FT_Reference_Face(self.face)).expect("FT_Reference_Face failed");
-        }
-        Self {
-            face: self.face,
-            coords: self.coords,
-        }
-    }
-}
-
-impl Drop for Face {
-    fn drop(&mut self) {
-        let _guard = Library::get_or_init()
-            .unwrap()
-            .face_mutation_mutex
-            .lock()
-            .unwrap();
-        unsafe {
-            FT_Done_Face(self.face);
-        }
-    }
-}
-
-struct Size {
-    ft_size: FT_Size,
-    metrics: FontMetrics,
-    bitmap_scale: I26Dot6,
+struct FontScale {
     point_size: I26Dot6,
     dpi: u32,
+    ppem: I26Dot6,
+    units_per_em: u16,
 }
 
-impl Drop for Size {
-    fn drop(&mut self) {
+impl FontScale {
+    fn new(point_size: I26Dot6, dpi: u32, units_per_em: u16) -> Self {
+        let ppem = point_size * 96 / dpi as i32;
+        Self {
+            point_size,
+            dpi,
+            ppem,
+            units_per_em,
+        }
+    }
+
+    fn to_pixels(&self, value: impl Into<i32>) -> I26Dot6 {
+        self.ppem * value.into() / i32::from(self.units_per_em)
+    }
+
+    fn default_decoration_thickness(&self) -> I26Dot6 {
+        // magic number
+        self.point_size * self.dpi as i32 / 13824
+    }
+}
+
+struct FontData {
+    face: Face,
+    scale: FontScale,
+    metrics: FontMetrics,
+    harfbuzz: *mut hb_font_t,
+}
+
+unsafe impl Sync for FontData {}
+unsafe impl Send for FontData {}
+
+impl FaceMetrics {
+    fn scale(&self, scale: &FontScale) -> FontMetrics {
+        let default_decoration_thickness = scale.default_decoration_thickness();
+        let ascender = scale.to_pixels(self.ascender);
+        let descender = scale.to_pixels(self.descender);
+        let height = scale.to_pixels(self.height);
+
+        let (strikeout_top_offset, strikeout_thickness) = self.strikeout.map_or_else(
+            || {
+                (
+                    (ascender - descender) / 2 - ascender - default_decoration_thickness / 2,
+                    default_decoration_thickness,
+                )
+            },
+            |line| {
+                (
+                    scale.to_pixels(-line.position),
+                    scale.to_pixels(line.thickness),
+                )
+            },
+        );
+
+        let (underline_top_offset, underline_thickness) = self.underline.map_or_else(
+            || {
+                (
+                    (descender - default_decoration_thickness) / 2,
+                    default_decoration_thickness,
+                )
+            },
+            |line| {
+                (
+                    scale.to_pixels(-line.position),
+                    scale.to_pixels(line.thickness),
+                )
+            },
+        );
+
+        FontMetrics {
+            ascender,
+            descender,
+            height,
+            strikeout_top_offset,
+            strikeout_thickness,
+            underline_top_offset,
+            underline_thickness,
+        }
+    }
+}
+
+impl FaceData {
+    fn data_hb_blob(&self) -> *mut hb_blob_t {
         unsafe {
-            FT_Done_Size(self.ft_size);
+            unsafe extern "C" fn destroy(user_data: *mut c_void) {
+                Arc::decrement_strong_count(Arc::as_ptr(&(*user_data.cast::<FaceData>()).data))
+            }
+
+            hb_blob_create(
+                self.data.as_ptr() as *const i8,
+                self.data.len() as u32,
+                HB_MEMORY_MODE_READONLY,
+                self as *const _ as *mut c_void,
+                Some(destroy),
+            )
         }
-    }
-}
-
-unsafe fn get_table<T>(face: FT_Face, tag: FT_Sfnt_Tag) -> Option<&'static T> {
-    unsafe { FT_Get_Sfnt_Table(face, tag).cast::<T>().as_ref() }
-}
-
-unsafe fn build_font_metrics(
-    face: FT_Face,
-    metrics: &FT_Size_Metrics,
-    scale: I26Dot6,
-    dpi_scale: I26Dot6,
-) -> FontMetrics {
-    macro_rules! scale {
-        ($value: expr) => {{
-            I26Dot6::from_ft((($value as i64 * i64::from(scale.into_raw())) >> 6) as FT_Long)
-        }};
-    }
-
-    let scalable = ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) != 0;
-    let units_per_em = (*face).units_per_EM;
-    let y_ppem = metrics.y_ppem;
-
-    // NOTE: Do not use when `scalable` is false, no idea how to make these metrics make sense in that case.
-    macro_rules! scale_font_units {
-        ($value: expr) => {
-            I26Dot6::from_wide_quotient($value as i64 * y_ppem as i64, units_per_em as i64)
-        };
-    }
-
-    let max_advance = scale!(metrics.max_advance);
-
-    struct TypoMetrics {
-        ascender: I26Dot6,
-        descender: I26Dot6,
-        height: I26Dot6,
-    }
-
-    let mut strikeout_metrics = None;
-    let mut typo_metrics = None;
-
-    if let Some(os2) = unsafe { get_table::<TT_OS2>(face, FT_SFNT_OS2).filter(|_| scalable) } {
-        const USE_TYPO_METRICS: FT_UShort = 1 << 7;
-
-        strikeout_metrics = Some((
-            scale_font_units!(-os2.yStrikeoutPosition),
-            scale_font_units!(os2.yStrikeoutSize),
-        ));
-
-        if os2.fsSelection & USE_TYPO_METRICS != 0 {
-            let ascender = scale_font_units!(os2.sTypoAscender);
-            let descender = scale_font_units!(os2.sTypoDescender);
-            typo_metrics = Some(TypoMetrics {
-                ascender,
-                descender,
-                height: ascender - descender + scale_font_units!(os2.sTypoLineGap),
-            })
-        } else {
-            // Fallback to metrics from the hhea table
-        }
-    }
-
-    if typo_metrics.is_none() {
-        if let Some(hhea) =
-            unsafe { get_table::<TT_HoriHeader>(face, FT_SFNT_HHEA).filter(|_| scalable) }
-        {
-            let ascender = scale_font_units!(hhea.Ascender);
-            let descender = scale_font_units!(hhea.Descender);
-            typo_metrics = Some(TypoMetrics {
-                ascender,
-                descender,
-                height: ascender - descender + scale_font_units!(hhea.Line_Gap),
-            })
-        }
-    }
-
-    // TODO: Use OS/2 metrics if hhea metrics resulted in zero and OS/2 table exists
-    //       Note that this is basically reimplementing what FreeType already does
-    //       but whatever, maybe it'll be useful if we ever switch to a Rust based
-    //       ttf parser and glyph rasterizer.
-
-    let TypoMetrics {
-        ascender,
-        descender,
-        height,
-    } = typo_metrics.unwrap_or_else(|| TypoMetrics {
-        ascender: scale!(metrics.ascender),
-        descender: scale!(metrics.descender),
-        height: scale!(metrics.height),
-    });
-    let (strikeout_top_offset, strikeout_thickness) = strikeout_metrics
-        .unwrap_or_else(|| ((ascender - descender) / 2 - ascender - scale / 2, scale));
-
-    let underline_top_offset;
-    let underline_thickness;
-
-    if let Some(postscript) =
-        unsafe { get_table::<TT_Postscript>(face, FT_SFNT_POST).filter(|_| scalable) }
-    {
-        underline_top_offset = scale_font_units!(-postscript.underlinePosition);
-        underline_thickness = scale_font_units!(postscript.underlineThickness);
-    } else {
-        underline_top_offset = (descender - dpi_scale) / 2;
-        underline_thickness = dpi_scale;
-    };
-
-    FontMetrics {
-        ascender,
-        descender,
-        height,
-        max_advance,
-        underline_top_offset,
-        underline_thickness,
-        strikeout_top_offset,
-        strikeout_thickness,
     }
 }
 
 #[repr(C)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct Font {
-    // owned by hb_font
-    ft_face: FT_Face,
-    coords: MmCoords,
-    hb_font: *mut hb_font_t,
-    size: ManuallyDrop<Rc<Size>>,
+    data: Rc<FontData>,
 }
 
 impl Font {
     fn create(
-        face: FT_Face,
-        coords: MmCoords,
+        face: Rc<FaceData>,
+        coords: Vec<NormalizedCoordinate>,
         point_size: I26Dot6,
         dpi: u32,
     ) -> Result<Self, FreeTypeError> {
-        let size = unsafe {
-            let mut size = MaybeUninit::uninit();
-            fttry!(FT_New_Size(face, size.as_mut_ptr()))?;
-            size.assume_init()
-        };
+        let scale = FontScale::new(point_size, dpi, face.parser().units_per_em());
+        let metrics = face.metrics.scale(&scale);
 
+        let blob = face.data_hb_blob();
+        let hb_face = unsafe { hb_face_create(blob, face.index) };
+        let hb_font = unsafe { hb_font_create(hb_face) };
         unsafe {
-            fttry!(FT_Activate_Size(size))?;
+            hb_font_set_ptem(hb_font, point_size.into_f32());
+            hb_font_set_ppem(
+                hb_font,
+                scale.ppem.into_raw() as u32,
+                scale.ppem.into_raw() as u32,
+            );
+            hb_face_destroy(hb_face);
         }
-
-        let dpi_scale = I26Dot6::from_quotient(dpi as i32, 72);
-
-        let is_scalable = unsafe { (*face).face_flags & (FT_FACE_FLAG_SCALABLE as FT_Long) != 0 };
-        let has_bitmaps =
-            unsafe { (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) != 0 };
-        let mut bitmap_scale = I26Dot6::ONE;
-
-        if has_bitmaps {
-            let sizes = unsafe {
-                std::slice::from_raw_parts_mut(
-                    (*face).available_sizes,
-                    (*face).num_fixed_sizes as usize,
-                )
-            };
-
-            // 3f3e3de freetype/include/freetype/internal/ftobjs.h:653
-            let map_to_ppem = |dimension: i64, resolution: i64| (dimension * resolution + 36) / 72;
-            let ppem = map_to_ppem(point_size.into_raw().into(), dpi.into());
-
-            // First size larger than requested, or the largest size if not found
-            let mut picked_size_index = 0usize;
-            for (i, size) in sizes.iter().enumerate() {
-                #[allow(clippy::useless_conversion)] // c_ulong conversion
-                if (i64::from(sizes[picked_size_index].x_ppem) < ppem
-                    && size.x_ppem > sizes[picked_size_index].x_ppem)
-                    || (i64::from(size.x_ppem) > ppem
-                        && size.x_ppem < sizes[picked_size_index].x_ppem)
-                {
-                    picked_size_index = i;
-                }
-            }
-
-            #[allow(clippy::unnecessary_cast)]
-            let new_scale =
-                I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
-            bitmap_scale = new_scale;
-
-            unsafe {
-                fttry!(FT_Select_Size(face, picked_size_index as i32))?;
-            }
-        }
-
-        if is_scalable {
-            unsafe {
-                fttry!(FT_Set_Char_Size(
-                    face,
-                    point_size.into_ft(),
-                    point_size.into_ft(),
-                    dpi,
-                    dpi
-                ))?;
-            }
-        };
-
-        let metrics = unsafe {
-            build_font_metrics(
-                face,
-                &(*size).metrics,
-                if is_scalable {
-                    I26Dot6::ONE
-                } else {
-                    bitmap_scale
-                },
-                dpi_scale,
-            )
-        };
 
         Ok(Self {
-            ft_face: face,
-            coords,
-            size: ManuallyDrop::new(Rc::new(Size {
-                ft_size: size,
+            data: Rc::new(FontData {
+                face: Face { face, coords },
+                scale,
                 metrics,
-                bitmap_scale,
-                point_size,
-                dpi,
-            })),
-            hb_font: unsafe { hb_ft_font_create_referenced(face) },
+                harfbuzz: hb_font,
+            }),
         })
     }
 
-    pub(super) fn with_applied_size(&self) -> Result<FT_Face, FreeTypeError> {
-        unsafe {
-            fttry!(FT_Activate_Size(self.size.ft_size))?;
-        }
-
-        if unsafe { FaceMmVar::has(self.ft_face) } {
-            unsafe {
-                fttry!(FT_Set_Var_Design_Coordinates(
-                    self.ft_face,
-                    SharedFaceData::get_ref(self.ft_face).axes.len() as u32,
-                    self.coords.as_ptr().cast_mut()
-                ))?;
-            }
-        }
-
-        Ok(self.ft_face)
-    }
-
-    pub(super) fn with_applied_size_and_hb(
-        &self,
-    ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
-        Ok((self.with_applied_size()?, self.hb_font))
+    pub fn as_harfbuzz_font(&self) -> *mut hb_font_t {
+        self.data.harfbuzz
     }
 
     /// Gets the Outline associated with the glyph at `index`.
@@ -556,19 +402,14 @@ impl Font {
     /// an outline glyph.
     #[expect(dead_code)]
     pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
-        let face = self.with_applied_size()?;
-        unsafe {
-            // According to FreeType documentation, bitmap-only fonts ignore
-            // FT_LOAD_NO_BITMAP.
-            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
-                return Ok(None);
-            }
-
-            // TODO: return none if the glyph does not exist in the font
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32))?;
-
-            Ok(Some(Outline::from_freetype(&(*(*face).glyph).outline)))
-        }
+        let mut builder = OutlineBuilder::new();
+        Ok(self
+            .data
+            .face
+            .face
+            .parser
+            .outline_glyph(ttf_parser::GlyphId(index as u16), &mut builder)
+            .map(|_| builder.build()))
     }
 }
 
@@ -577,50 +418,28 @@ impl std::fmt::Debug for Font {
         f.debug_struct("Font")
             .field("face", self.face())
             .field("point_size", &self.point_size())
-            .field("dpi", &self.size.dpi)
+            .field("dpi", &self.data.scale.dpi)
             .finish()
     }
 }
 
-impl Clone for Font {
-    fn clone(&self) -> Self {
-        Self {
-            ft_face: self.ft_face,
-            coords: self.coords,
-            hb_font: { unsafe { hb_font_reference(self.hb_font) } },
-            size: self.size.clone(),
-        }
-    }
-}
-
-impl Hash for Font {
+impl Hash for FontData {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(self.ft_face.addr());
-        self.coords.hash(state);
-        state.write_i32(self.size.point_size.into_raw());
-        state.write_u32(self.size.dpi);
+        self.face.hash(state);
+        self.scale.point_size.hash(state);
+        self.scale.dpi.hash(state);
     }
 }
 
-impl PartialEq for Font {
+impl PartialEq for FontData {
     fn eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self.ft_face, other.ft_face)
-            && self.size.point_size == other.size.point_size
-            && self.size.dpi == other.size.dpi
-            && self.coords == other.coords
+        self.face == other.face
+            && self.scale.point_size == other.scale.point_size
+            && self.scale.dpi == other.scale.dpi
     }
 }
 
-impl Eq for Font {}
-
-impl Drop for Font {
-    fn drop(&mut self) {
-        unsafe {
-            _ = ManuallyDrop::take(&mut self.size);
-            hb_font_destroy(self.hb_font);
-        }
-    }
-}
+impl Eq for FontData {}
 
 #[derive(Debug, Error)]
 pub enum GlyphRenderError {
@@ -634,7 +453,7 @@ pub enum GlyphRenderError {
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(super) struct SizeInfo {
-    coords: MmCoords,
+    coords: Vec<i16>,
     point_size: I26Dot6,
     dpi: u32,
 }
@@ -643,23 +462,23 @@ impl FontImpl for Font {
     type Face = Face;
 
     fn face(&self) -> &Self::Face {
-        unsafe { std::mem::transmute(self) }
+        &self.data.face
     }
 
     fn metrics(&self) -> &FontMetrics {
-        &self.size.metrics
+        &self.data.metrics
     }
 
     fn point_size(&self) -> I26Dot6 {
-        self.size.point_size
+        self.data.scale.point_size
     }
 
     type FontSizeKey = SizeInfo;
     fn font_size_key(&self) -> Self::FontSizeKey {
         Self::FontSizeKey {
-            coords: self.coords,
+            coords: self.data.face.coords.iter().map(|x| x.get()).collect(),
             point_size: self.point_size(),
-            dpi: self.size.dpi,
+            dpi: self.data.scale.dpi,
         }
     }
 
@@ -669,43 +488,34 @@ impl FontImpl for Font {
 
     type MeasureError = FreeTypeError;
     fn measure_glyph_uncached(&self, index: u32) -> Result<GlyphMetrics, Self::MeasureError> {
-        let face = self.with_applied_size()?;
-        let mut metrics = unsafe {
-            fttry!(FT_Load_Glyph(
-                face,
-                index,
-                (FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
-            ))?;
-            (*(*face).glyph).metrics
-        };
+        let parser = self.data.face.face.parser();
+        let glyph = ttf_parser::GlyphId(index as u16);
 
-        let scale = self.size.bitmap_scale;
-        if scale != I26Dot6::ONE {
-            macro_rules! scale_field {
-                ($name: ident) => {
-                    metrics.$name = (metrics.$name * scale.into_raw() as FT_Long) >> 6;
-                };
-            }
-
-            scale_field!(width);
-            scale_field!(height);
-            scale_field!(horiBearingX);
-            scale_field!(horiBearingY);
-            scale_field!(horiAdvance);
-            scale_field!(vertBearingX);
-            scale_field!(vertBearingY);
-            scale_field!(vertAdvance);
-        }
+        dbg!(glyph, self.data.face.face.parser().number_of_glyphs());
+        let rect = parser
+            .glyph_bounding_box(glyph)
+            .map(|r| (i32::from(r.width()), i32::from(r.height())))
+            .or_else(|| {
+                parser
+                    .glyph_raster_image(glyph, self.data.scale.ppem.round_to_inner() as u16)
+                    .map(|i| (i32::from(i.width), i32::from(i.height)))
+            })
+            .unwrap_or((0, 0));
+        let hori_advance = parser.glyph_hor_advance(glyph).unwrap();
+        let vert_advance = parser.glyph_ver_advance(glyph).unwrap_or(0);
+        let hori_bearing_x = parser.glyph_hor_side_bearing(glyph).unwrap();
+        let vert_bearing_x = parser.glyph_ver_side_bearing(glyph).unwrap_or(0);
+        let bearing_y = parser.glyph_y_origin(glyph).unwrap_or(0);
 
         Ok(GlyphMetrics {
-            width: I26Dot6::from_raw(metrics.width as i32),
-            height: I26Dot6::from_raw(metrics.height as i32),
-            hori_bearing_x: I26Dot6::from_raw(metrics.horiBearingX as i32),
-            hori_bearing_y: I26Dot6::from_raw(metrics.horiBearingY as i32),
-            hori_advance: I26Dot6::from_raw(metrics.horiAdvance as i32),
-            vert_bearing_x: I26Dot6::from_raw(metrics.vertBearingX as i32),
-            vert_bearing_y: I26Dot6::from_raw(metrics.vertBearingY as i32),
-            vert_advance: I26Dot6::from_raw(metrics.vertAdvance as i32),
+            width: I26Dot6::new(rect.0),
+            height: I26Dot6::new(rect.1),
+            hori_bearing_x: self.data.scale.to_pixels(hori_bearing_x),
+            hori_bearing_y: self.data.scale.to_pixels(bearing_y),
+            hori_advance: self.data.scale.to_pixels(hori_advance),
+            vert_bearing_x: self.data.scale.to_pixels(vert_bearing_x),
+            vert_bearing_y: self.data.scale.to_pixels(bearing_y),
+            vert_advance: self.data.scale.to_pixels(vert_advance),
         })
     }
 
@@ -716,113 +526,179 @@ impl FontImpl for Font {
         index: u32,
         offset: Vec2<I26Dot6>,
     ) -> Result<SingleGlyphBitmap, Self::RenderError> {
-        struct FtGlyph(FT_Glyph);
-        impl Drop for FtGlyph {
-            fn drop(&mut self) {
-                unsafe {
-                    FT_Done_Glyph(self.0);
-                }
-            }
-        }
+        let outline = self.glyph_outline(index)?.unwrap();
+        let bbox = outline.control_box();
+        let width = (bbox.max.x.ceil() - bbox.min.x.floor()).ceil() as u32;
+        let height = (bbox.max.y.ceil() - bbox.min.y.floor()).ceil() as u32;
+        let texture = unsafe {
+            rasterizer.create_packed_texture_mapped(
+                width,
+                height,
+                crate::rasterize::PixelFormat::Mono,
+                Box::new(|data, stride| {
+                    data.fill(MaybeUninit::new(0));
+                    let data = unsafe { slice_assume_init_mut(data) };
+                    struct Userdata {
+                        ptr: *mut u8,
+                        height: u32,
+                        stride: usize,
+                    }
 
-        unsafe {
-            let face = self.with_applied_size()?;
+                    unsafe extern "C" fn fill_span(
+                        y: c_int,
+                        count: c_int,
+                        spans: *const FT_Span,
+                        user: *mut c_void,
+                    ) {
+                        unsafe {
+                            let ud = &mut *user.cast::<Userdata>();
+                            let row_ptr = ud.ptr.add(y as usize * ud.stride);
+                            for span in std::slice::from_raw_parts(spans, count as usize) {
+                                row_ptr
+                                    .add(span.x as usize)
+                                    .write_bytes(span.coverage, usize::from(span.len));
+                            }
+                        }
+                    }
 
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
-            let is_bitmap;
-            let glyph = {
-                let slot = (*face).glyph;
-                let mut glyph = {
-                    let mut glyph = MaybeUninit::uninit();
-                    fttry!(FT_Get_Glyph(slot, glyph.as_mut_ptr()))?;
-                    FtGlyph(glyph.assume_init())
-                };
-
-                is_bitmap = (*glyph.0).format == FT_GLYPH_FORMAT_BITMAP;
-
-                if !is_bitmap {
-                    fttry!(FT_Glyph_To_Bitmap(
-                        &mut glyph.0,
-                        FT_RENDER_MODE_NORMAL,
-                        &FT_Vector {
-                            x: offset.x.into_ft(),
-                            y: offset.y.into_ft()
+                    let mut user = Userdata {
+                        ptr: data.as_mut_ptr(),
+                        height,
+                        stride,
+                    };
+                    let mut ft_outline = outline.to_freetype();
+                    let library = Library::get_or_init().unwrap();
+                    fttry!(FT_Outline_Render(
+                        library.ptr,
+                        &mut ft_outline,
+                        &mut FT_Raster_Params {
+                            target: std::ptr::null(),
+                            source: &ft_outline as *const _ as *const c_void,
+                            flags: FT_RASTER_FLAG_AA as i32 | FT_RASTER_FLAG_DIRECT as i32,
+                            gray_spans: Some(fill_span),
+                            black_spans: None,
+                            bit_test: None,
+                            bit_set: None,
+                            user: &mut user as *mut _ as *mut c_void,
+                            clip_box: FT_BBox_ {
+                                xMin: bbox.min.x.floor() as i64,
+                                yMin: bbox.min.y.floor() as i64,
+                                xMax: bbox.max.x.ceil() as i64,
+                                yMax: bbox.max.x.ceil() as i64,
+                            },
                         },
-                        1
-                    ))?;
-                }
-
-                glyph
-            };
-
-            let scale = if is_bitmap {
-                self.size.bitmap_scale
-            } else {
-                I26Dot6::ONE
-            };
-            let scale6 = scale.into_raw();
-
-            // I don't think this can happen but let's be safe
-            if (*glyph.0).format != FT_GLYPH_FORMAT_BITMAP {
-                return Err(GlyphRenderError::ConversionToBitmapFailed(
-                    (*glyph.0).format,
-                ));
-            }
-
-            let bitmap_glyph = glyph.0.cast::<FT_BitmapGlyphRec>();
-            let (ox, oy) = (
-                I26Dot6::from_raw((*bitmap_glyph).left * scale6),
-                I26Dot6::from_raw(-(*bitmap_glyph).top * scale6),
-            );
-
-            let bitmap = &(*bitmap_glyph).bitmap;
-
-            let scaled_width = (bitmap.width * scale6 as u32) >> 6;
-            let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
-
-            let pixel_mode = match bitmap.pixel_mode.into() {
-                FT_PIXEL_MODE_GRAY => CopyPixelMode::Mono8,
-                FT_PIXEL_MODE_BGRA => CopyPixelMode::Bgra32,
-                _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
-            };
-
-            let texture = rasterizer.create_packed_texture_mapped(
-                scaled_width,
-                scaled_height,
-                if matches!(pixel_mode, CopyPixelMode::Bgra32) {
-                    PixelFormat::Bgra
-                } else {
-                    PixelFormat::Mono
-                },
-                Box::new(|buffer_data, stride| {
-                    macro_rules! copy_font_bitmap_with {
-                        ($pixel_mode: expr) => {
-                            copy_font_bitmap::<$pixel_mode>(
-                                bitmap.buffer.cast_const(),
-                                bitmap.pitch as isize,
-                                bitmap.width as u32,
-                                bitmap.rows as u32,
-                                buffer_data,
-                                stride,
-                                scale,
-                                scaled_width,
-                                scaled_height,
-                            )
-                        };
-                    }
-
-                    match pixel_mode {
-                        CopyPixelMode::Mono8 => copy_font_bitmap_with!(COPY_PIXEL_MODE_MONO8),
-                        CopyPixelMode::Bgra32 => copy_font_bitmap_with!(COPY_PIXEL_MODE_BGRA32),
-                    }
+                    ))
+                    .unwrap();
                 }),
-            );
+            )
+        };
 
-            Ok(SingleGlyphBitmap {
-                offset: Vec2::new(ox, oy),
-                texture,
-            })
-        }
+        // struct FtGlyph(FT_Glyph);
+        // impl Drop for FtGlyph {
+        //     fn drop(&mut self) {
+        //         unsafe {
+        //             FT_Done_Glyph(self.0);
+        //         }
+        //     }
+        // }
+
+        // unsafe {
+        //     let face = self.with_applied_size()?;
+
+        //     fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
+        //     let is_bitmap;
+        //     let glyph = {
+        //         let slot = (*face).glyph;
+        //         let mut glyph = {
+        //             let mut glyph = MaybeUninit::uninit();
+        //             fttry!(FT_Get_Glyph(slot, glyph.as_mut_ptr()))?;
+        //             FtGlyph(glyph.assume_init())
+        //         };
+
+        //         is_bitmap = (*glyph.0).format == FT_GLYPH_FORMAT_BITMAP;
+
+        //         if !is_bitmap {
+        //             fttry!(FT_Glyph_To_Bitmap(
+        //                 &mut glyph.0,
+        //                 FT_RENDER_MODE_NORMAL,
+        //                 &FT_Vector {
+        //                     x: offset.x.into_ft(),
+        //                     y: offset.y.into_ft()
+        //                 },
+        //                 1
+        //             ))?;
+        //         }
+
+        //         glyph
+        //     };
+
+        //     let scale = if is_bitmap {
+        //         self.size.bitmap_scale
+        //     } else {
+        //         I26Dot6::ONE
+        //     };
+        //     let scale6 = scale.into_raw();
+
+        //     // I don't think this can happen but let's be safe
+        //     if (*glyph.0).format != FT_GLYPH_FORMAT_BITMAP {
+        //         return Err(GlyphRenderError::ConversionToBitmapFailed(
+        //             (*glyph.0).format,
+        //         ));
+        //     }
+
+        //     let bitmap_glyph = glyph.0.cast::<FT_BitmapGlyphRec>();
+        //     let (ox, oy) = (
+        //         I26Dot6::from_raw((*bitmap_glyph).left * scale6),
+        //         I26Dot6::from_raw(-(*bitmap_glyph).top * scale6),
+        //     );
+
+        //     let bitmap = &(*bitmap_glyph).bitmap;
+
+        //     let scaled_width = (bitmap.width * scale6 as u32) >> 6;
+        //     let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
+
+        //     let pixel_mode = match bitmap.pixel_mode.into() {
+        //         FT_PIXEL_MODE_GRAY => CopyPixelMode::Mono8,
+        //         FT_PIXEL_MODE_BGRA => CopyPixelMode::Bgra32,
+        //         _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
+        //     };
+
+        //     let texture = rasterizer.create_packed_texture_mapped(
+        //         scaled_width,
+        //         scaled_height,
+        //         if matches!(pixel_mode, CopyPixelMode::Bgra32) {
+        //             PixelFormat::Bgra
+        //         } else {
+        //             PixelFormat::Mono
+        //         },
+        //         Box::new(|buffer_data, stride| {
+        //             macro_rules! copy_font_bitmap_with {
+        //                 ($pixel_mode: expr) => {
+        //                     copy_font_bitmap::<$pixel_mode>(
+        //                         bitmap.buffer.cast_const(),
+        //                         bitmap.pitch as isize,
+        //                         bitmap.width as u32,
+        //                         bitmap.rows as u32,
+        //                         buffer_data,
+        //                         stride,
+        //                         scale,
+        //                         scaled_width,
+        //                         scaled_height,
+        //                     )
+        //                 };
+        //             }
+
+        //             match pixel_mode {
+        //                 CopyPixelMode::Mono8 => copy_font_bitmap_with!(COPY_PIXEL_MODE_MONO8),
+        //                 CopyPixelMode::Bgra32 => copy_font_bitmap_with!(COPY_PIXEL_MODE_BGRA32),
+        //             }
+        //         }),
+        //     );
+
+        Ok(SingleGlyphBitmap {
+            offset: Vec2::new(I26Dot6::ZERO, I26Dot6::ZERO),
+            texture,
+        })
     }
 }
 

@@ -62,6 +62,16 @@ impl OutlineBuilder {
         self.first_point_of_contour = self.outline.points.len();
     }
 
+    fn close_contour_assert_last_equal(&mut self) {
+        self.outline.segments.last_mut().unwrap().end_of_contour = true;
+        assert_eq!(
+            &self.outline.points[self.first_point_of_contour],
+            self.outline.points.last().unwrap()
+        );
+        self.segment_start += 1;
+        self.first_point_of_contour = self.outline.points.len();
+    }
+
     pub fn build(self) -> Outline {
         let expected = self.segment_start;
         if self.outline.points.len() != expected as usize {
@@ -77,6 +87,34 @@ impl OutlineBuilder {
         }
 
         self.outline
+    }
+}
+
+impl ttf_parser::OutlineBuilder for OutlineBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.add_point(Point2f::new(x, y));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.add_point(Point2f::new(x, y));
+        self.add_segment(SegmentDegree::Linear);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.add_point(Point2f::new(x1, y1));
+        self.add_point(Point2f::new(x, y));
+        self.add_segment(SegmentDegree::Quadratic);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.add_point(Point2f::new(x1, y1));
+        self.add_point(Point2f::new(x2, y2));
+        self.add_point(Point2f::new(x, y));
+        self.add_segment(SegmentDegree::Cubic);
+    }
+
+    fn close(&mut self) {
+        self.close_contour_assert_last_equal();
     }
 }
 
@@ -206,6 +244,49 @@ impl Outline {
         assert_eq!(first, points.len());
 
         builder.build()
+    }
+
+    pub fn to_freetype(&self) -> FT_Outline {
+        let mut contours = Vec::new();
+        let mut points = Vec::new();
+        let mut tags = Vec::new();
+
+        for contour in self.iter_contours() {
+            for segment in contour {
+                let x = match segment.degree {
+                    SegmentDegree::Linear => 0,
+                    SegmentDegree::Quadratic => FT_CURVE_TAG_CONIC as u8,
+                    SegmentDegree::Cubic => FT_CURVE_TAG_CUBIC as u8,
+                };
+                for point in self.points_for_segment(*segment) {
+                    points.push(FT_Vector {
+                        x: (point.x * 2.0f32.powi(6)) as i64,
+                        y: -(point.y * 2.0f32.powi(6)) as i64,
+                    });
+                }
+                tags.push(FT_CURVE_TAG_ON as u8);
+                for _ in 0..match segment.degree {
+                    SegmentDegree::Linear => 0,
+                    SegmentDegree::Quadratic => 1,
+                    SegmentDegree::Cubic => 2,
+                } {
+                    tags.push(x);
+                }
+                tags.push(FT_CURVE_TAG_ON as u8);
+            }
+
+            contours.push(points.len() as u16);
+        }
+
+        assert_eq!(tags.len(), points.len());
+        FT_Outline {
+            n_contours: contours.len() as u16,
+            contours: Box::into_raw(contours.into_boxed_slice()).cast(),
+            n_points: points.len() as u16,
+            points: Box::into_raw(points.into_boxed_slice()).cast(),
+            tags: Box::into_raw(tags.into_boxed_slice()).cast(),
+            flags: 0,
+        }
     }
 
     #[inline(always)]

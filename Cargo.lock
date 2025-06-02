@@ -1765,6 +1765,7 @@ dependencies = [
  "quick-xml 0.36.2",
  "text-sys",
  "thiserror 1.0.63",
+ "ttf-parser",
  "wgpu",
  "windows 0.61.1",
  "windows-core 0.61.0",
@@ -1910,6 +1911,12 @@ name = "tracing-core"
 version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tungstenite"

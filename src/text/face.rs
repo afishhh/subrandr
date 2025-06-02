@@ -10,6 +10,7 @@ use std::{
 
 use once_cell::unsync::OnceCell;
 use text_sys::hb_font_t;
+use ttf_parser::Tag;
 
 use super::FreeTypeError;
 use crate::{
@@ -21,63 +22,14 @@ mod freetype;
 pub use freetype::GlyphRenderError;
 mod tofu;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct OpenTypeTag(u32);
-
-impl OpenTypeTag {
-    pub const fn from_bytes(text: [u8; 4]) -> Self {
-        Self(
-            ((text[0] as u32) << 24)
-                + ((text[1] as u32) << 16)
-                + ((text[2] as u32) << 8)
-                + (text[3] as u32),
-        )
-    }
-
-    pub const fn to_bytes(self) -> [u8; 4] {
-        self.0.to_be_bytes()
-    }
-
-    pub fn to_bytes_in(self, buf: &mut [u8; 4]) -> &[u8] {
-        *buf = self.to_bytes();
-        let offset = buf.iter().position(|b| *b != b'0').unwrap_or(buf.len());
-        &buf[offset..]
-    }
-}
-
-impl Display for OpenTypeTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buf = [0; 4];
-        let bytes = self.to_bytes_in(&mut buf);
-        if let Ok(string) = std::str::from_utf8(bytes) {
-            write!(f, "{string}")
-        } else {
-            write!(f, "{}", bytes.escape_ascii())
-        }
-    }
-}
-
-impl Debug for OpenTypeTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buf = [0; 4];
-        let bytes = self.to_bytes_in(&mut buf);
-        if let Ok(string) = std::str::from_utf8(bytes) {
-            write!(f, "{string:?}")
-        } else {
-            write!(f, "{bytes:?}")
-        }
-    }
-}
-
-pub const WEIGHT_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"wght");
+pub const WEIGHT_AXIS: Tag = Tag::from_bytes(b"wght");
 #[expect(dead_code)]
-pub const WIDTH_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"wdth");
-pub const ITALIC_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"ital");
+pub const WIDTH_AXIS: Tag = Tag::from_bytes(b"wdth");
+pub const ITALIC_AXIS: Tag = Tag::from_bytes(b"ital");
 
 #[derive(Debug, Clone, Copy)]
 pub struct Axis {
-    pub tag: OpenTypeTag,
+    pub tag: Tag,
     pub index: usize,
     pub minimum: I16Dot16,
     pub maximum: I16Dot16,
@@ -114,12 +66,17 @@ pub struct FontMetrics {
     pub ascender: I26Dot6,
     pub descender: I26Dot6,
     pub height: I26Dot6,
-    pub max_advance: I26Dot6,
 
     pub underline_top_offset: I26Dot6,
     pub underline_thickness: I26Dot6,
     pub strikeout_top_offset: I26Dot6,
     pub strikeout_thickness: I26Dot6,
+}
+
+impl FontMetrics {
+    pub fn line_gap(&self) -> I26Dot6 {
+        self.height - self.ascender + self.descender
+    }
 }
 
 trait FaceImpl: Sized {
@@ -128,7 +85,7 @@ trait FaceImpl: Sized {
     fn family_name(&self) -> &str;
 
     fn axes(&self) -> &[Axis];
-    fn axis(&self, tag: OpenTypeTag) -> Option<Axis> {
+    fn axis(&self, tag: Tag) -> Option<Axis> {
         self.axes().iter().find(|x| x.tag == tag).copied()
     }
     fn set_axis(&mut self, index: usize, value: I16Dot16);
@@ -317,7 +274,7 @@ impl Face {
         pub fn family_name[&]() -> &str;
 
         pub fn axes[&]() -> &[Axis];
-        pub fn axis[&](tag: OpenTypeTag) -> Option<Axis>;
+        pub fn axis[&](tag: Tag) -> Option<Axis>;
         pub fn set_axis[&mut](index: usize, value: I16Dot16) -> ();
 
         pub fn weight[&]() -> I16Dot16;
@@ -370,7 +327,7 @@ impl Font {
 
     pub fn as_harfbuzz_font(&self) -> Result<*mut hb_font_t, FreeTypeError> {
         match &self.0 {
-            FontRepr::FreeType(font) => Ok(font.with_applied_size_and_hb()?.1),
+            FontRepr::FreeType(font) => Ok(font.as_harfbuzz_font()),
             FontRepr::Tofu(font) => Ok(font.as_harfbuzz_font()),
         }
     }

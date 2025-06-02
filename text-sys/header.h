@@ -1,10 +1,5 @@
 #include <freetype2/ft2build.h>
 #include FT_FREETYPE_H
-#include FT_SIZES_H
-#include FT_GLYPH_H
-#include FT_MULTIPLE_MASTERS_H
-#include FT_SFNT_NAMES_H
-#include FT_TRUETYPE_IDS_H
-#include FT_TRUETYPE_TABLES_H
+#include FT_OUTLINE_H
 #include <harfbuzz/hb-ft.h>
 #include <harfbuzz/hb.h>

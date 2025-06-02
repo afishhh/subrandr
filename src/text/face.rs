@@ -122,6 +122,12 @@ pub struct FontMetrics {
     pub strikeout_thickness: I26Dot6,
 }
 
+impl FontMetrics {
+    pub fn line_gap(&self) -> I26Dot6 {
+        self.height - self.ascender + self.descender
+    }
+}
+
 trait FaceImpl: Sized {
     type Font: FontImpl<Face = Self>;
 

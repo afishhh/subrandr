@@ -489,7 +489,9 @@ impl<'f> MultilineTextShaper<'f> {
                                 glyphs: GlyphString::from_glyphs(text.clone(), glyphs),
                                 baseline_offset: Point2::new(
                                     current_x + ruby_padding,
-                                    current_line_y - extents.max_ascender,
+                                    current_line_y
+                                        - extents.max_ascender
+                                        - ruby_metrics.min_descender,
                                 ),
                                 logical_rect: Rect2::new(
                                     Point2::new(-ruby_padding, -ruby_metrics.max_ascender),

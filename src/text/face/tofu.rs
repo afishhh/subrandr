@@ -1,13 +1,13 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
 use text_sys::{
-    hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_set_glyph_count,
-    hb_font_create, hb_font_destroy, hb_font_extents_t, hb_font_funcs_create,
-    hb_font_funcs_set_font_h_extents_func, hb_font_funcs_set_glyph_extents_func,
-    hb_font_funcs_set_glyph_h_advance_func, hb_font_funcs_set_glyph_h_origin_func,
-    hb_font_funcs_set_nominal_glyph_func, hb_font_get_user_data, hb_font_make_immutable,
-    hb_font_reference, hb_font_set_funcs, hb_font_set_user_data, hb_font_t, hb_glyph_extents_t,
-    hb_position_t, hb_user_data_key_t,
+    hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_destroy,
+    hb_face_set_glyph_count, hb_font_create, hb_font_destroy, hb_font_extents_t,
+    hb_font_funcs_create, hb_font_funcs_set_font_h_extents_func,
+    hb_font_funcs_set_glyph_extents_func, hb_font_funcs_set_glyph_h_advance_func,
+    hb_font_funcs_set_glyph_h_origin_func, hb_font_funcs_set_nominal_glyph_func,
+    hb_font_get_user_data, hb_font_make_immutable, hb_font_reference, hb_font_set_funcs,
+    hb_font_set_user_data, hb_font_t, hb_glyph_extents_t, hb_position_t, hb_user_data_key_t,
 };
 
 use crate::{
@@ -178,6 +178,7 @@ impl Font {
 
             let font = hb_font_create(face);
             assert!(!font.is_null(), "hb_font_create failed to allocate font");
+            hb_face_destroy(face);
 
             let set = hb_font_set_user_data(
                 font,

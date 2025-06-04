@@ -38,7 +38,10 @@
             xdotool # useful for testing
             web-ext
           ] ++ runtimeLibs;
-          buildInputs = runtimeLibs;
+          buildInputs = runtimeLibs ++ [
+            pkgs.glfw
+            pkgs.vulkan-headers
+          ];
           shellHook = ''
             export FREETYPE_PATH=${pkgs.freetype.dev}
             export HARFBUZZ_PATH=${pkgs.harfbuzz.dev}

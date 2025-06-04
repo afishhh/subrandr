@@ -1,7 +1,7 @@
 #[allow(clippy::invisible_characters)]
 
 #[test]
-fn all_entites() {
+fn all_entities() {
 	assert_eq!(super::consume(b"AElig"), Some(("Æ", 5)));
 	assert_eq!(super::consume(b"AElig;"), Some(("Æ", 6)));
 	assert_eq!(super::consume(b"AMP"), Some(("&", 3)));

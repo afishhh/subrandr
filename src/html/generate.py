@@ -145,7 +145,7 @@ with Path("./all_entities_test.rs").open("w+") as f:
     f.write("#[allow(clippy::invisible_characters)]\n")
     f.write("\n")
     f.write("#[test]\n")
-    f.write("fn all_entites() {\n")
+    f.write("fn all_entities() {\n")
 
     for entity, value in entities.items():
         entity = entity[1:]

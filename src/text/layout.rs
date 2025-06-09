@@ -1,15 +1,445 @@
-use std::rc::Rc;
+use std::{num::NonZero, ops::Range, rc::Rc};
 
 use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
 use crate::{
-    math::{I26Dot6, Point2, Rect2, Vec2},
-    style::types::HorizontalAlignment,
+    layout::{FixedL, InlineLayoutError, LayoutContext},
+    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
+    style::{
+        self,
+        types::{FontSlant, HorizontalAlignment},
+        CascadingStyleMap, StyleMap,
+    },
     text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
 };
 
-const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
+use super::{Direction, ShapingBuffer};
+
+// TODO: Bidi Mirroring (https://www.unicode.org/reports/tr9/#L4)
+//       unless harfbuzz already does that I don't know
+
+pub struct InlineContent {
+    main_text_content: Rc<str>,
+    segments: Vec<InlineSegment>,
+}
+
+pub struct InlineContentBuilder {
+    result_text: String,
+    segments: Vec<InlineSegment>,
+}
+
+impl InlineContentBuilder {
+    pub fn new() -> Self {
+        Self {
+            result_text: String::new(),
+            segments: Vec::new(),
+        }
+    }
+
+    pub fn as_span_builder(&mut self) -> InlineSpanBuilder {
+        InlineSpanBuilder {
+            parent: self,
+            span_index: usize::MAX,
+            length: 0,
+        }
+    }
+
+    pub fn build(&mut self) -> InlineContent {
+        InlineContent {
+            main_text_content: self.result_text.as_str().into(),
+            segments: std::mem::take(&mut self.segments),
+        }
+    }
+}
+
+pub struct InlineSpanBuilder<'a> {
+    parent: &'a mut InlineContentBuilder,
+    span_index: usize,
+    length: usize,
+}
+
+impl<'a> InlineSpanBuilder<'a> {
+    pub fn push_text(&mut self, content: &str) {
+        let start = self.parent.result_text.len();
+        self.parent.result_text.push_str(content);
+        self.parent.segments.push(InlineSegment::Text(InlineText {
+            content_range: start..self.parent.result_text.len(),
+        }));
+        self.length += 1;
+    }
+
+    pub fn push_span(&mut self, style: StyleMap) -> InlineSpanBuilder<'_> {
+        let index = self.parent.segments.len();
+        self.parent.segments.push(InlineSegment::Span(InlineSpan {
+            style,
+            length: 0,
+            kind: InlineSpanKind::Span,
+        }));
+        self.length += 1;
+        InlineSpanBuilder {
+            parent: self.parent,
+            span_index: index,
+            length: self.length,
+        }
+    }
+}
+
+impl<'a> Drop for InlineSpanBuilder<'a> {
+    fn drop(&mut self) {
+        if self.span_index == usize::MAX {
+            return;
+        }
+
+        match &mut self.parent.segments[self.span_index] {
+            InlineSegment::Span(span) => span.length = self.length,
+            _ => unreachable!(),
+        }
+    }
+}
+
+pub enum InlineSegment {
+    Span(InlineSpan),
+    Text(InlineText),
+}
+
+pub struct InlineSpan {
+    style: StyleMap,
+    length: usize,
+    kind: InlineSpanKind,
+}
+
+pub enum InlineSpanKind {
+    Span,
+    Ruby(RubySegment),
+}
+
+// The direct children of this span are the ruby bases while the
+// annotations are stored in the contained vector.
+pub struct RubySegment {
+    annotation_containers: Vec<RubyAnnotationContainer>,
+}
+
+pub struct RubyAnnotationContainer {
+    annotations: Vec<RubyAnnotation2>,
+}
+
+pub struct RubyAnnotation2 {
+    content: InlineContent,
+    bases: Range<usize>,
+}
+
+pub struct InlineText {
+    content_range: Range<usize>,
+}
+
+// tmp pub
+pub(crate) struct FontContext<'l, 'a, 'f> {
+    pub layout: LayoutContext<'l, 'a>,
+    pub font_arena: &'f FontArena,
+    pub shaping_buffer: ShapingBuffer,
+}
+
+pub fn content_to_runs<'a, 'f>(
+    content: &'a InlineContent,
+    fctx: &mut FontContext<'_, '_, 'f>,
+    base_style: CascadingStyleMap,
+) -> Result<(InlineRuns<'f>, unicode_bidi::BidiInfo<'a>), InlineLayoutError> {
+    let bidi = unicode_bidi::BidiInfo::new(&content.main_text_content, None);
+    let mut result = InlineRuns(Vec::new());
+
+    fn visit<'f>(
+        result: &mut InlineRuns<'f>,
+        bidi: &unicode_bidi::BidiInfo,
+        content: &InlineContent,
+        fctx: &mut FontContext<'_, '_, 'f>,
+        style: CascadingStyleMap,
+        current: &mut usize,
+        limit: usize,
+    ) -> Result<(), InlineLayoutError> {
+        for _ in 0..limit {
+            let item = content.segments.get(*current);
+            *current += 1;
+            match item {
+                Some(InlineSegment::Span(span)) => {
+                    let new_style = style.push(&span.style);
+                    visit(result, bidi, content, fctx, new_style, current, span.length)?;
+                }
+                Some(InlineSegment::Text(text)) => {
+                    let run = if let Some(Run::Text(run)) = result.0.last_mut() {
+                        run
+                    } else {
+                        result.0.push(Run::Text(TextRun {
+                            range: text.content_range.clone(),
+                            font_segments: Vec::new(),
+                        }));
+                        match result.0.last_mut().unwrap() {
+                            Run::Text(run) => run,
+                            _ => unreachable!(),
+                        }
+                    };
+
+                    run.range.end = text.content_range.end;
+                    let mut current_paragraph = match bidi
+                        .paragraphs
+                        .binary_search_by_key(&text.content_range.start, |p| p.range.start)
+                    {
+                        Ok(i) => i,
+                        Err(i) => i - 1,
+                    };
+
+                    let mut push = |level: unicode_bidi::Level,
+                                    range: Range<usize>|
+                     -> Result<(), InlineLayoutError> {
+                        let direction = if level.is_ltr() {
+                            Direction::Ltr
+                        } else {
+                            Direction::Rtl
+                        };
+
+                        let font_matcher = text::FontMatcher::match_all(
+                            style.get::<style::FontFamily>(),
+                            text::FontStyle {
+                                weight: style
+                                    .get_copy_or::<style::FontWeight, _>(I16Dot16::new(400)),
+                                italic: match style.get_copy_or_default::<style::FontStyle, _>() {
+                                    FontSlant::Regular => false,
+                                    FontSlant::Italic => true,
+                                },
+                            },
+                            style.get_copy_or::<style::FontSize, _>(
+                                I26Dot6::new(16) * fctx.layout.dpi as i32 / 72,
+                            ),
+                            fctx.layout.dpi,
+                            fctx.font_arena,
+                            fctx.layout.fonts,
+                        )?;
+
+                        fctx.shaping_buffer.reset();
+                        fctx.shaping_buffer.guess_properties();
+                        fctx.shaping_buffer.set_direction(direction);
+                        // TODO: Maybe this should not include *all* context?
+                        //       For exactly characters inserted in place of an inline atomic probably shouldn't be here.
+                        //       I think this requires an extra pass for us to figure out the appropriate context window.
+                        fctx.shaping_buffer
+                            .add(&content.main_text_content, range.clone());
+                        let glyphs = GlyphString::from_glyphs(
+                            content.main_text_content.clone(),
+                            fctx.shaping_buffer.shape(
+                                font_matcher.iterator(),
+                                fctx.font_arena,
+                                fctx.layout.fonts,
+                            )?,
+                        );
+
+                        run.font_segments.push(TextRunSegment {
+                            font_matcher,
+                            direction,
+                            range,
+                            glyphs,
+                        });
+
+                        Ok(())
+                    };
+
+                    let mut current_level = bidi.levels[text.content_range.start];
+                    let mut last = text.content_range.start;
+                    for (i, &level) in bidi.levels[text.content_range.clone()].iter().enumerate() {
+                        if bidi.paragraphs[current_paragraph].range.end == i {
+                            push(current_level, last..i)?;
+                            last = i;
+                            current_paragraph += 1;
+                        } else if current_level != level {
+                            push(current_level, last..i)?;
+                            last = i;
+                        }
+                        current_level = level;
+                    }
+
+                    push(current_level, last..text.content_range.end)?;
+                }
+                None => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    visit(
+        &mut result,
+        &bidi,
+        content,
+        fctx,
+        base_style,
+        &mut 0,
+        usize::MAX,
+    )?;
+
+    Ok((result, bidi))
+}
+
+#[derive(Debug)]
+//. tmp private
+pub struct InlineRuns<'f>(Vec<Run<'f>>);
+
+impl<'f> InlineRuns<'f> {
+    pub fn reorder(&mut self, bidi: &unicode_bidi::BidiInfo) {
+        let line_range = {
+            if let (Some(first), Some(last)) = (self.0.first(), self.0.last()) {
+                first.byte_range().start..last.byte_range().end
+            } else {
+                // There's nothing to reorder, at most we'll run into indexing errors if
+                // somehow there are paragraphs but not runs so we must bail here.
+                return;
+            }
+        };
+
+        // The whole line only consists of LTR levels, hence no bidirectional reodering is
+        // needed and we can skip all of this mess.
+        if bidi.levels[line_range.clone()]
+            .iter()
+            .all(|level| level.is_ltr())
+        {
+            return;
+        }
+
+        dbg!(&line_range);
+        let mut visual_runs = Vec::new();
+        for paragraph in &bidi.paragraphs {
+            if line_range.contains(&paragraph.range.start)
+                || line_range.contains(&paragraph.range.end)
+            {
+                let (_, mut paragraph_runs) = bidi.visual_runs(
+                    paragraph,
+                    line_range.start.max(paragraph.range.start)
+                        ..line_range.end.min(paragraph.range.end),
+                );
+                visual_runs.append(&mut paragraph_runs);
+            }
+        }
+
+        let mut unordered_start = 0;
+        for range in visual_runs {
+            let unordered = &self.0[unordered_start..];
+            let start = match unordered.binary_search_by_key(&range.start, |r| r.byte_range().start)
+            {
+                Ok(i) => i,
+                Err(_) => unreachable!(
+                    "bidirectional reordering must not reorder partial text run segments"
+                ),
+            };
+            dbg!(unordered_start, &range);
+            dbg!(unordered.iter().map(|r| r.byte_range()).collect::<Vec<_>>());
+            let end = match unordered.binary_search_by_key(&range.end, |r| r.byte_range().end) {
+                Ok(i) => i,
+                Err(_) => unreachable!(
+                    "bidirectional reordering must not reorder partial text run segments"
+                ),
+            };
+
+            let len = end - start;
+            let split = unordered_start - len;
+            let (new_ordered, new_unordered) = self.0.split_at_mut(split);
+            new_ordered[unordered_start..]
+                .swap_with_slice(&mut new_unordered[start - len..end - len]);
+            unordered_start += len;
+        }
+
+        assert_eq!(unordered_start, self.0.len());
+    }
+}
+
+#[derive(Debug)]
+enum Run<'f> {
+    Text(TextRun<'f>),
+    Ruby(RubyRun<'f>),
+}
+
+impl<'f> Run<'f> {
+    fn byte_range(&self) -> Range<usize> {
+        match self {
+            Run::Text(text) => text.byte_range(),
+            Run::Ruby(ruby) => ruby.byte_range(),
+        }
+    }
+}
+
+trait InlineRun: Sized {
+    fn byte_range(&self) -> Range<usize>;
+
+    fn break_off(&mut self, width: FixedL) -> Option<Self> {
+        _ = width;
+        None
+    }
+}
+
+/// A run of uninterrupted text segments. Note that two [`TextRun`]s should never end up
+/// adjacent in a single [`InlineRuns`] list to achieve correct line-breaking. This is
+/// because runs have implicit line breaking opportunities in-between and such adjacent runs
+/// would cause such an opportunity to be present where it otherwise wouldn't be.
+#[derive(Debug)]
+struct TextRun<'f> {
+    range: Range<usize>,
+    font_segments: Vec<TextRunSegment<'f>>,
+}
+
+impl<'f> InlineRun for TextRun<'f> {
+    fn byte_range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+}
+
+/// A single text segment part of a [`TextRun`], contains a single span of same-font same-direction text.
+#[derive(Debug)]
+struct TextRunSegment<'f> {
+    font_matcher: FontMatcher<'f>,
+    direction: Direction,
+    /// The range of the original string this segment represents, used for bidirectional reordering.
+    range: Range<usize>,
+    glyphs: GlyphString<'f, Rc<str>>,
+}
+
+/// A ruby run created from a single ruby container, contains some amount of bases
+/// and annotations that span any range of bases.
+/// This run is line-broken by splitting it base-wise whenever ALL annotation levels
+/// allow it, as the spec mandates. This means ruby bases and annotations are never
+/// split internally and spanning annotations prevent line breaks between their bases.
+#[derive(Debug)]
+struct RubyRun<'f> {
+    range: Range<usize>,
+    bases: Vec<TextRunSegment<'f>>,
+    annotations: Vec<RubyAnnotationSegment<'f>>,
+}
+
+impl<'f> InlineRun for RubyRun<'f> {
+    fn byte_range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+}
+
+/// The level of a ruby annotation, represented as an 8-bit signed integer.
+/// Negative values are used to represent levels below the current line and
+/// positive ones to represent levels over the current line.
+///
+/// Inter-character annotations are not currently supported.
+// TODO: Inter-character annotations
+//       (NOTE: Chromium does not yet support them so we don't really have to yet)
+#[derive(Debug)]
+struct RubyLevel(NonZero<i8>);
+
+impl RubyLevel {
+    fn new(level: NonZero<i8>) -> Self {
+        Self(level)
+    }
+}
+
+/// A single annotation represented as a level, a range of bases and some nested inline content.
+#[derive(Debug)]
+struct RubyAnnotationSegment<'f> {
+    level: RubyLevel,
+    bases: Range<usize>,
+    text: InlineRuns<'f>,
+}
 
 struct ShaperSegment<'f> {
     content: Content<'f>,
@@ -155,10 +585,6 @@ impl<'f> MultilineTextShaper<'f> {
     }
 
     pub fn add_text(&mut self, mut text: &str, font_matcher: FontMatcher<'f>) {
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT TEXT: {text:?} {font_matcher:?}");
-        }
-
         while let Some(nl) = text.find('\n') {
             self.text.push_str(&text[..nl]);
             self.explicit_line_bounaries.push(self.text.len());
@@ -206,10 +632,6 @@ impl<'f> MultilineTextShaper<'f> {
     pub fn add_ruby_base(&mut self, text: &str, font_matcher: FontMatcher<'f>) -> RubyBaseId {
         let id = self.segments.len();
 
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 INPUT RUBY BASE[{id}]: {font_matcher:?}");
-        }
-
         self.text.push_str(text);
         self.segments.push(ShaperSegment {
             content: Content::Text(TextContent {
@@ -229,13 +651,6 @@ impl<'f> MultilineTextShaper<'f> {
         text: impl Into<Rc<str>> + std::fmt::Debug,
         font_matcher: FontMatcher<'f>,
     ) {
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!(
-                "SHAPING V2 INPUT RUBY ANNOTATION FOR {}: {text:?} {font_matcher:?}",
-                base.0
-            );
-        }
-
         let index = self.segments.len() + self.intra_font_segment_splits.len();
 
         let ShaperSegment {
@@ -278,14 +693,6 @@ impl<'f> MultilineTextShaper<'f> {
             return Ok((Vec::new(), Rect2::ZERO));
         }
 
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 TEXT {:?}", self.text);
-            println!(
-                "SHAPING V2 LINE BOUNDARIES {:?}",
-                self.explicit_line_bounaries
-            );
-        }
-
         if self.segments.is_empty() {
             return Ok((Vec::new(), Rect2::ZERO));
         }
@@ -315,17 +722,6 @@ impl<'f> MultilineTextShaper<'f> {
             let mut annotation_segments: Vec<ShapedSegment> = Vec::new();
             let mut segments: Vec<ShapedSegment> = Vec::new();
             let mut current_x = I26Dot6::ZERO;
-
-            if MULTILINE_SHAPER_DEBUG_PRINT {
-                println!(
-                    "last: {last}, segment boundaries: {:?}, current segment: {}",
-                    self.segments
-                        .iter()
-                        .map(|ShaperSegment { end, .. }| end)
-                        .collect::<Vec<_>>(),
-                    current_segment
-                );
-            }
 
             let mut line_max_ascender = I26Dot6::ZERO;
             let mut line_min_descender = I26Dot6::ZERO;
@@ -439,13 +835,6 @@ impl<'f> MultilineTextShaper<'f> {
                                     break;
                                 }
                             }
-                        }
-
-                        if MULTILINE_SHAPER_DEBUG_PRINT {
-                            println!(
-                                "last: {last}, end: {end}, intra font splits: {:?}, current intra split: {}",
-                                self.intra_font_segment_splits, current_intra_split
-                            );
                         }
 
                         match line_height {
@@ -637,10 +1026,6 @@ impl<'f> MultilineTextShaper<'f> {
                 segments,
                 bounding_rect: line_rect,
             });
-        }
-
-        if MULTILINE_SHAPER_DEBUG_PRINT {
-            println!("SHAPING V2 RESULT: {total_rect:?} {lines:#?}");
         }
 
         Ok((lines, total_rect))

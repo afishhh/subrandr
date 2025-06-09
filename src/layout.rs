@@ -114,6 +114,8 @@ pub enum InlineLayoutError {
     FontSelect(#[from] text::font_db::SelectError),
     #[error(transparent)]
     TextLayout(#[from] text::layout::LayoutError),
+    #[error(transparent)]
+    Shaping(#[from] text::ShapingError),
 }
 
 fn layout_inline(

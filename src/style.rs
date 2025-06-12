@@ -84,6 +84,7 @@ impl StyleMap {
     }
 }
 
+#[derive(Clone)]
 pub struct CascadingStyleMap<'a> {
     prev: Option<&'a CascadingStyleMap<'a>>,
     map: &'a StyleMap,

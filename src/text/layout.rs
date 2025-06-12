@@ -1,4 +1,8 @@
-use std::{num::NonZero, ops::Range, rc::Rc};
+use std::{
+    num::NonZero,
+    ops::{Deref, DerefMut, Range},
+    rc::Rc,
+};
 
 use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
@@ -6,12 +10,14 @@ use util::math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{
     layout::{FixedL, InlineLayoutError, LayoutContext},
+    log::{error, log_once_state},
     style::{
         self,
         types::{FontSlant, HorizontalAlignment},
         CascadingStyleMap, StyleMap,
     },
     text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
+    Subrandr,
 };
 
 use super::{Direction, ShapingBuffer};
@@ -19,14 +25,32 @@ use super::{Direction, ShapingBuffer};
 // TODO: Bidi Mirroring (https://www.unicode.org/reports/tr9/#L4)
 //       unless harfbuzz already does that I don't know
 
+// I don't care anymore let's just inline the code...
+macro_rules! inline_runs_get_or_insert_text_nll_case_3 {
+    ($runs: ident, $default_range: expr) => {
+        if let Some(Run::Text(run)) = $runs.0.last_mut() {
+            run
+        } else {
+            $runs.0.push(Run::Text(TextRun {
+                range: $default_range,
+                segments: Vec::new(),
+            }));
+            match $runs.0.last_mut().unwrap() {
+                Run::Text(run) => run,
+                _ => unreachable!(),
+            }
+        }
+    };
+}
+
 pub struct InlineContent {
     main_text_content: Rc<str>,
-    segments: Vec<InlineSegment>,
+    segments: Vec<InlineItem>,
 }
 
 pub struct InlineContentBuilder {
     result_text: String,
-    segments: Vec<InlineSegment>,
+    segments: Vec<InlineItem>,
 }
 
 impl InlineContentBuilder {
@@ -53,6 +77,37 @@ impl InlineContentBuilder {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum UnicodeBidi {
+    Normal,
+    Embed,
+    // ruby boxes have this by default
+    // NOTE: ruby boxes have special "computes to" clauses in the spec - this has to
+    //       be taken into account in miniweb.
+    Isolate,
+    BidiOverride,
+    IsolateOverride,
+    Plaintext,
+}
+
+impl UnicodeBidi {
+    // https://www.w3.org/TR/css-writing-modes-4/#bidi-isolate
+    fn control_characters(self, is_rtl: bool) -> Option<(&'static str, &'static str)> {
+        match (self, is_rtl) {
+            (UnicodeBidi::Normal, _) => None,
+            (UnicodeBidi::Embed, false) => Some(("\u{202A}", "\u{202C}")),
+            (UnicodeBidi::Isolate, false) => Some(("\u{2066}", "\u{2069}")),
+            (UnicodeBidi::BidiOverride, false) => Some(("\u{202D}", "\u{202C}")),
+            (UnicodeBidi::IsolateOverride, false) => Some(("\u{2068}\u{202D}", "\u{202C}\u{2069}")),
+            (UnicodeBidi::Embed, true) => Some(("\u{202B}", "\u{202C}")),
+            (UnicodeBidi::Isolate, true) => Some(("\u{2067}", "\u{2069}")),
+            (UnicodeBidi::BidiOverride, true) => Some(("\u{202E}", "\u{202C}")),
+            (UnicodeBidi::IsolateOverride, true) => Some(("\u{2068}\u{202E}", "\u{202C}\u{2069}")),
+            (UnicodeBidi::Plaintext, _) => Some(("\u{2068}", "\u{2069}")),
+        }
+    }
+}
+
 pub struct InlineSpanBuilder<'a> {
     parent: &'a mut InlineContentBuilder,
     span_index: usize,
@@ -60,21 +115,28 @@ pub struct InlineSpanBuilder<'a> {
 }
 
 impl<'a> InlineSpanBuilder<'a> {
+    fn span_mut(&mut self) -> &mut InlineSpan {
+        match &mut self.parent.segments[self.span_index] {
+            InlineItem::Span(span) => span,
+            _ => unreachable!(),
+        }
+    }
+
     pub fn push_text(&mut self, content: &str) {
         let start = self.parent.result_text.len();
         self.parent.result_text.push_str(content);
-        self.parent.segments.push(InlineSegment::Text(InlineText {
+        self.parent.segments.push(InlineItem::Text(InlineText {
             content_range: start..self.parent.result_text.len(),
         }));
         self.length += 1;
     }
 
-    pub fn push_span(&mut self, style: StyleMap) -> InlineSpanBuilder<'_> {
+    fn push_span_with(&mut self, style: StyleMap, kind: InlineSpanKind) -> InlineSpanBuilder<'_> {
         let index = self.parent.segments.len();
-        self.parent.segments.push(InlineSegment::Span(InlineSpan {
+        self.parent.segments.push(InlineItem::Span(InlineSpan {
             style,
             length: 0,
-            kind: InlineSpanKind::Span,
+            kind,
         }));
         self.length += 1;
         InlineSpanBuilder {
@@ -82,6 +144,19 @@ impl<'a> InlineSpanBuilder<'a> {
             span_index: index,
             length: self.length,
         }
+    }
+
+    pub fn push_span(&mut self, style: StyleMap) -> InlineSpanBuilder<'_> {
+        self.push_span_with(style, InlineSpanKind::Span)
+    }
+
+    pub fn push_ruby(&mut self, style: StyleMap) -> InlineRubyBuilder<'_> {
+        InlineRubyBuilder(self.push_span_with(
+            style,
+            InlineSpanKind::Ruby(RubySpan {
+                annotations: Vec::new(),
+            }),
+        ))
     }
 }
 
@@ -91,14 +166,47 @@ impl<'a> Drop for InlineSpanBuilder<'a> {
             return;
         }
 
-        match &mut self.parent.segments[self.span_index] {
-            InlineSegment::Span(span) => span.length = self.length,
-            _ => unreachable!(),
+        self.span_mut().length = self.length;
+    }
+}
+
+pub struct InlineRubyBuilder<'a>(InlineSpanBuilder<'a>);
+
+impl<'a> InlineRubyBuilder<'a> {
+    pub fn push_annotation(
+        &mut self,
+        level: RubyLevel,
+        bases: Range<usize>,
+        content: InlineContent,
+    ) {
+        match self.span_mut().kind {
+            InlineSpanKind::Span => unreachable!(),
+            InlineSpanKind::Ruby(ref mut ruby) => {
+                ruby.annotations.push(RubyAnnotation2 {
+                    level,
+                    bases,
+                    content,
+                });
+            }
         }
     }
 }
 
-pub enum InlineSegment {
+impl<'a> Deref for InlineRubyBuilder<'a> {
+    type Target = InlineSpanBuilder<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for InlineRubyBuilder<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub enum InlineItem {
     Span(InlineSpan),
     Text(InlineText),
 }
@@ -111,22 +219,19 @@ pub struct InlineSpan {
 
 pub enum InlineSpanKind {
     Span,
-    Ruby(RubySegment),
+    Ruby(RubySpan),
 }
 
 // The direct children of this span are the ruby bases while the
 // annotations are stored in the contained vector.
-pub struct RubySegment {
-    annotation_containers: Vec<RubyAnnotationContainer>,
-}
-
-pub struct RubyAnnotationContainer {
+pub struct RubySpan {
     annotations: Vec<RubyAnnotation2>,
 }
 
 pub struct RubyAnnotation2 {
-    content: InlineContent,
+    level: RubyLevel,
     bases: Range<usize>,
+    content: InlineContent,
 }
 
 pub struct InlineText {
@@ -140,18 +245,19 @@ pub(crate) struct FontContext<'l, 'a, 'f> {
     pub shaping_buffer: ShapingBuffer,
 }
 
+// tmp pub
 pub fn content_to_runs<'a, 'f>(
     content: &'a InlineContent,
     fctx: &mut FontContext<'_, '_, 'f>,
     base_style: CascadingStyleMap,
-) -> Result<(InlineRuns<'f>, unicode_bidi::BidiInfo<'a>), InlineLayoutError> {
+) -> Result<(InlineRuns<'a, 'f>, unicode_bidi::BidiInfo<'a>), InlineLayoutError> {
     let bidi = unicode_bidi::BidiInfo::new(&content.main_text_content, None);
-    let mut result = InlineRuns(Vec::new());
+    let mut result = InlineRuns::new();
 
-    fn visit<'f>(
-        result: &mut InlineRuns<'f>,
+    fn visit<'a, 'f>(
+        result: &mut InlineRuns<'a, 'f>,
         bidi: &unicode_bidi::BidiInfo,
-        content: &InlineContent,
+        content: &'a InlineContent,
         fctx: &mut FontContext<'_, '_, 'f>,
         style: CascadingStyleMap,
         current: &mut usize,
@@ -161,23 +267,56 @@ pub fn content_to_runs<'a, 'f>(
             let item = content.segments.get(*current);
             *current += 1;
             match item {
-                Some(InlineSegment::Span(span)) => {
+                Some(InlineItem::Span(span)) => {
                     let new_style = style.push(&span.style);
-                    visit(result, bidi, content, fctx, new_style, current, span.length)?;
-                }
-                Some(InlineSegment::Text(text)) => {
-                    let run = if let Some(Run::Text(run)) = result.0.last_mut() {
-                        run
-                    } else {
-                        result.0.push(Run::Text(TextRun {
-                            range: text.content_range.clone(),
-                            font_segments: Vec::new(),
-                        }));
-                        match result.0.last_mut().unwrap() {
-                            Run::Text(run) => run,
-                            _ => unreachable!(),
+                    match &span.kind {
+                        InlineSpanKind::Span => {
+                            visit(result, bidi, content, fctx, new_style, current, span.length)?;
                         }
-                    };
+                        InlineSpanKind::Ruby(ruby) => {
+                            let mut run = RubyRun {
+                                range: usize::MAX..usize::MAX,
+                                bases: Vec::new(),
+                                annotations: Vec::new(),
+                            };
+                            for _ in 0..span.length {
+                                let mut base = InlineRuns::new();
+                                visit(
+                                    &mut base,
+                                    bidi,
+                                    content,
+                                    fctx,
+                                    new_style.clone(),
+                                    current,
+                                    1,
+                                )?;
+                                run.bases.push(base);
+                            }
+                            if let (Some(first), Some(last)) = (
+                                run.bases.iter().find_map(|r| r.0.first()),
+                                run.bases.iter().rev().find_map(|r| r.0.last()),
+                            ) {
+                                run.range = first.byte_range().start..last.byte_range().end;
+                            }
+                            for annotation in &ruby.annotations {
+                                let (text, bidi) =
+                                    content_to_runs(&annotation.content, fctx, new_style.clone())?;
+                                run.annotations.push(RubyAnnotationSegment {
+                                    level: annotation.level,
+                                    bases: annotation.bases.clone(),
+                                    text,
+                                    bidi,
+                                });
+                            }
+                            result.0.push(Run::Ruby(run));
+                        }
+                    }
+                }
+                Some(InlineItem::Text(text)) => {
+                    let run = inline_runs_get_or_insert_text_nll_case_3!(
+                        result,
+                        text.content_range.clone()
+                    );
 
                     run.range.end = text.content_range.end;
                     let mut current_paragraph = match bidi
@@ -219,7 +358,7 @@ pub fn content_to_runs<'a, 'f>(
                         fctx.shaping_buffer.guess_properties();
                         fctx.shaping_buffer.set_direction(direction);
                         // TODO: Maybe this should not include *all* context?
-                        //       For exactly characters inserted in place of an inline atomic probably shouldn't be here.
+                        //       For example characters inserted in place of an inline atomic probably shouldn't be here.
                         //       I think this requires an extra pass for us to figure out the appropriate context window.
                         fctx.shaping_buffer
                             .add(&content.main_text_content, range.clone());
@@ -232,7 +371,7 @@ pub fn content_to_runs<'a, 'f>(
                             )?,
                         );
 
-                        run.font_segments.push(TextRunSegment {
+                        run.segments.push(TextRunSegment {
                             font_matcher,
                             direction,
                             range,
@@ -279,11 +418,25 @@ pub fn content_to_runs<'a, 'f>(
 }
 
 #[derive(Debug)]
-//. tmp private
-pub struct InlineRuns<'f>(Vec<Run<'f>>);
+//. tmp pub
+pub struct InlineRuns<'a, 'f>(Vec<Run<'a, 'f>>);
 
-impl<'f> InlineRuns<'f> {
-    pub fn reorder(&mut self, bidi: &unicode_bidi::BidiInfo) {
+impl<'a, 'f> InlineRuns<'a, 'f> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Reorder runs according to `bidi`. `bidi` must be a [`BidiInfo`] of the original
+    /// original text string from which these runs originated. `self` must currently be in
+    /// logical order (not already reordered).
+    ///
+    /// [`BidiInfo`]: unicode_bidi::BidiInfo
+    pub fn reorder(
+        &mut self,
+        sbr: &Subrandr,
+        bidi: &unicode_bidi::BidiInfo,
+        temporary: &mut InlineRuns<'a, 'f>,
+    ) {
         let line_range = {
             if let (Some(first), Some(last)) = (self.0.first(), self.0.last()) {
                 first.byte_range().start..last.byte_range().end
@@ -293,6 +446,7 @@ impl<'f> InlineRuns<'f> {
                 return;
             }
         };
+        log_once_state!(bad_ruby_reordering);
 
         // The whole line only consists of LTR levels, hence no bidirectional reodering is
         // needed and we can skip all of this mess.
@@ -303,12 +457,9 @@ impl<'f> InlineRuns<'f> {
             return;
         }
 
-        dbg!(&line_range);
         let mut visual_runs = Vec::new();
         for paragraph in &bidi.paragraphs {
-            if line_range.contains(&paragraph.range.start)
-                || line_range.contains(&paragraph.range.end)
-            {
+            if line_range.start <= paragraph.range.start || line_range.end >= paragraph.range.end {
                 let (_, mut paragraph_runs) = bidi.visual_runs(
                     paragraph,
                     line_range.start.max(paragraph.range.start)
@@ -318,44 +469,88 @@ impl<'f> InlineRuns<'f> {
             }
         }
 
-        let mut unordered_start = 0;
         for range in visual_runs {
-            let unordered = &self.0[unordered_start..];
-            let start = match unordered.binary_search_by_key(&range.start, |r| r.byte_range().start)
+            let start = match self
+                .0
+                .binary_search_by_key(&range.start, |r| r.byte_range().start)
             {
                 Ok(i) => i,
-                Err(_) => unreachable!(
-                    "bidirectional reordering must not reorder partial text run segments"
-                ),
-            };
-            dbg!(unordered_start, &range);
-            dbg!(unordered.iter().map(|r| r.byte_range()).collect::<Vec<_>>());
-            let end = match unordered.binary_search_by_key(&range.end, |r| r.byte_range().end) {
-                Ok(i) => i,
-                Err(_) => unreachable!(
-                    "bidirectional reordering must not reorder partial text run segments"
-                ),
+                Err(i) => i - 1,
             };
 
-            let len = end - start;
-            let split = unordered_start - len;
-            let (new_ordered, new_unordered) = self.0.split_at_mut(split);
-            new_ordered[unordered_start..]
-                .swap_with_slice(&mut new_unordered[start - len..end - len]);
-            unordered_start += len;
+            let mut i = start;
+            while i < self.0.len() {
+                let run = &mut self.0[i];
+                let run_range = run.byte_range();
+                if run_range.start > range.end {
+                    break;
+                }
+                if range.start <= run_range.start && range.end >= run_range.end {
+                    temporary.0.push(self.0.remove(i));
+                    continue;
+                }
+
+                match run {
+                    Run::Text(text) => {
+                        let s_start = match text
+                            .segments
+                            .binary_search_by_key(&range.start, |s| s.range.start)
+                        {
+                            Ok(i) => i,
+                            Err(_) => unreachable!(
+                                "bidi reordering attempted to partially reorder a text segment"
+                            ),
+                        };
+                        let s_end = match text
+                            .segments
+                            .binary_search_by_key(&range.end, |s| s.range.end)
+                        {
+                            Ok(i) => i + 1,
+                            // Range ends after this text run, don't fail here
+                            Err(i) if i == text.segments.len() => i,
+                            Err(_) => unreachable!(
+                                "bidi reordering attempted to partially reorder a text segment"
+                            ),
+                        };
+                        let run = inline_runs_get_or_insert_text_nll_case_3!(
+                            temporary,
+                            text.segments[s_start].range.clone()
+                        );
+                        run.segments.extend(text.segments.drain(s_start..s_end));
+                        i += 1;
+                    }
+                    Run::Ruby(_) => {
+                        // TODO: This could be somewhat allowed, and may be actually
+                        //       necessary for RTL ruby containers.
+                        //       Maybe this could be chaTextRun<'f>nged even more and we could treat
+                        //       ruby containers as opaque replaced elements with their own nested
+                        //       InlineRuns... not sure but it would fix these bidi issues.
+                        error!(
+                            sbr,
+                            once(bad_ruby_reordering),
+                            concat!(
+                                "Bidirectional reordering partially reordered a ruby container! ",
+                                "This is not allowed, unexpected results may follow!"
+                            )
+                        );
+                        temporary.0.push(self.0.remove(i));
+                    }
+                }
+            }
         }
 
-        assert_eq!(unordered_start, self.0.len());
+        std::mem::swap(&mut self.0, &mut temporary.0);
+        temporary.0.clear();
     }
 }
 
 #[derive(Debug)]
-enum Run<'f> {
+enum Run<'a, 'f> {
     Text(TextRun<'f>),
-    Ruby(RubyRun<'f>),
+    Ruby(RubyRun<'a, 'f>),
 }
 
-impl<'f> Run<'f> {
+impl<'a, 'f> Run<'a, 'f> {
     fn byte_range(&self) -> Range<usize> {
         match self {
             Run::Text(text) => text.byte_range(),
@@ -380,7 +575,7 @@ trait InlineRun: Sized {
 #[derive(Debug)]
 struct TextRun<'f> {
     range: Range<usize>,
-    font_segments: Vec<TextRunSegment<'f>>,
+    segments: Vec<TextRunSegment<'f>>,
 }
 
 impl<'f> InlineRun for TextRun<'f> {
@@ -405,13 +600,13 @@ struct TextRunSegment<'f> {
 /// allow it, as the spec mandates. This means ruby bases and annotations are never
 /// split internally and spanning annotations prevent line breaks between their bases.
 #[derive(Debug)]
-struct RubyRun<'f> {
+struct RubyRun<'a, 'f> {
     range: Range<usize>,
-    bases: Vec<TextRunSegment<'f>>,
-    annotations: Vec<RubyAnnotationSegment<'f>>,
+    bases: Vec<InlineRuns<'a, 'f>>,
+    annotations: Vec<RubyAnnotationSegment<'a, 'f>>,
 }
 
-impl<'f> InlineRun for RubyRun<'f> {
+impl<'a, 'f> InlineRun for RubyRun<'a, 'f> {
     fn byte_range(&self) -> Range<usize> {
         self.range.clone()
     }
@@ -424,21 +619,22 @@ impl<'f> InlineRun for RubyRun<'f> {
 /// Inter-character annotations are not currently supported.
 // TODO: Inter-character annotations
 //       (NOTE: Chromium does not yet support them so we don't really have to yet)
-#[derive(Debug)]
-struct RubyLevel(NonZero<i8>);
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct RubyLevel(NonZero<i8>);
 
 impl RubyLevel {
-    fn new(level: NonZero<i8>) -> Self {
+    pub fn new(level: NonZero<i8>) -> Self {
         Self(level)
     }
 }
 
 /// A single annotation represented as a level, a range of bases and some nested inline content.
 #[derive(Debug)]
-struct RubyAnnotationSegment<'f> {
+struct RubyAnnotationSegment<'a, 'f> {
     level: RubyLevel,
     bases: Range<usize>,
-    text: InlineRuns<'f>,
+    text: InlineRuns<'a, 'f>,
+    bidi: unicode_bidi::BidiInfo<'a>,
 }
 
 struct ShaperSegment<'f> {

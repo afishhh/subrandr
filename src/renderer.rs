@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
+    num::NonZeroI8,
     ops::Range,
     rc::Rc,
 };
@@ -13,10 +14,14 @@ use crate::{
     layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
     srv3,
-    style::types::{
-        Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
+    style::{
+        types::{Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment},
+        CascadingStyleMap, StyleMap,
     },
-    text::{self, FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics},
+    text::{
+        self, layout::RubyLevel, FontArena, FreeTypeError, GlyphRenderError, GlyphString,
+        TextMetrics,
+    },
     vtt, Subrandr,
 };
 
@@ -766,6 +771,42 @@ impl Renderer<'_> {
                 pass.rasterizer.flush(target);
             }
             self.perf.end_debug_raster();
+
+            {
+                let mut builder = text::layout::InlineContentBuilder::new();
+                {
+                    let mut top_level = builder.as_span_builder();
+                    top_level.push_text("abבא בcda");
+                    {
+                        let mut ruby = top_level.push_ruby(StyleMap::new());
+                        ruby.push_text("what?");
+                        ruby.push_annotation(RubyLevel::new(NonZeroI8::new(1).unwrap()), 0..1, {
+                            let mut ann = text::layout::InlineContentBuilder::new();
+                            ann.as_span_builder().push_text("text");
+                            ann.build()
+                        });
+                    }
+                    let mut a = top_level.push_span(StyleMap::new());
+                    a.push_text("abc");
+                }
+                let content = builder.build();
+                let fa = text::FontArena::new();
+                let mut fctx = text::layout::FontContext {
+                    layout: LayoutContext {
+                        dpi: pass.sctx.dpi,
+                        fonts: &mut *pass.fonts,
+                    },
+                    font_arena: &fa,
+                    shaping_buffer: text::ShapingBuffer::new(),
+                };
+                let (mut runs, bidi) = text::layout::content_to_runs(
+                    &content,
+                    &mut fctx,
+                    CascadingStyleMap::new(&StyleMap::new()),
+                )?;
+                dbg!(&runs);
+                dbg!(runs.reorder(self.sbr, &bidi, &mut text::layout::InlineRuns::new()));
+            }
 
             for &(pos, ref fragment) in &fragments {
                 let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);

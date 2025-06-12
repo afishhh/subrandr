@@ -1,13 +1,14 @@
+use std::ffi::c_void;
 use std::hash::Hash;
 use std::sync::Arc;
 
 use windows::core::{implement, Interface, PCWSTR};
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFont, IDWriteFontCollection,
-    IDWriteFontFallback, IDWriteFontFamily, IDWriteFontFile, IDWriteTextAnalysisSource,
-    IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_ISOLATED, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
-    DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
+    IDWriteFontFallback, IDWriteFontFamily, IDWriteFontFile, IDWriteFontFileLoader,
+    IDWriteTextAnalysisSource, IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_ISOLATED,
+    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
 };
 use windows_core::BOOL;
 
@@ -117,28 +118,60 @@ impl IDWriteTextAnalysisSource_Impl for TextAnalysisSource_Impl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Source {
-    file: IDWriteFontFile,
+    // This owns `reference_key`!
+    _file: IDWriteFontFile,
+    loader: IDWriteFontFileLoader,
+    reference_key: *mut c_void,
+    reference_key_size: u32,
     index: u32,
 }
 
-// TODO: Don't cache DWrite sources
 impl Hash for Source {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.file.as_raw().hash(state);
+        self.loader.as_raw().hash(state);
+        self.reference_key_slice().hash(state);
     }
 }
 
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        self.loader.as_raw() == other.loader.as_raw()
+            && self.reference_key_slice() == other.reference_key_slice()
+    }
+}
+
+impl Eq for Source {}
+
 impl Source {
-    fn get_data(&self) -> Result<Arc<[u8]>, windows::core::Error> {
+    fn from_font_file(file: IDWriteFontFile, index: u32) -> windows::core::Result<Self> {
         unsafe {
             let mut reference_key = std::ptr::null_mut();
             let mut reference_key_size = 0;
-            self.file
-                .GetReferenceKey(&mut reference_key, &mut reference_key_size)?;
-            let loader = self.file.GetLoader()?;
-            let stream = loader.CreateStreamFromKey(reference_key, reference_key_size)?;
+            file.GetReferenceKey(&mut reference_key, &mut reference_key_size)?;
+
+            Ok(Self {
+                loader: file.GetLoader()?,
+                reference_key,
+                reference_key_size,
+                index,
+                _file: file,
+            })
+        }
+    }
+
+    fn reference_key_slice(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.reference_key.cast(), self.reference_key_size as usize)
+        }
+    }
+
+    fn get_data(&self) -> Result<Arc<[u8]>, windows::core::Error> {
+        unsafe {
+            let stream = self
+                .loader
+                .CreateStreamFromKey(self.reference_key, self.reference_key_size)?;
             let size = stream.GetFileSize()?;
             let mut output = Vec::new();
             output.reserve(size as usize);
@@ -199,10 +232,7 @@ impl DirectWriteFontProvider {
             files.set_len(n_files as usize);
 
             let source = if let Some(file) = files.drain(..1).next() {
-                Source {
-                    file,
-                    index: face.GetIndex(),
-                }
+                Source::from_font_file(file, face.GetIndex())?
             } else {
                 return Ok(None);
             };

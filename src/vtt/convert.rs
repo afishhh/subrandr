@@ -9,8 +9,8 @@ use util::{
 
 use crate::{
     layout::{
-        self, BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
-        InlineText, LineBoxFragment, Point2L, Vec2L,
+        self, inline::LineBoxFragment, BlockContainer, BlockContainerFragment, FixedL,
+        InlineLayoutError, InlineText, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
@@ -126,18 +126,15 @@ impl Event {
                     *result.make_text_align_mut() = self.horizontal_alignment;
                     result
                 },
-                contents: vec![InlineContainer {
-                    style: ComputedStyle::DEFAULT,
-                    contents: self
-                        .segments
-                        .iter()
-                        .cloned()
-                        .map(|mut text| {
-                            *text.style.make_font_size_mut() = font_size;
-                            text
-                        })
-                        .collect(),
-                }],
+                contents: vec![self
+                    .segments
+                    .iter()
+                    .cloned()
+                    .map(|mut text| {
+                        *text.style.make_font_size_mut() = font_size;
+                        text
+                    })
+                    .collect()],
             },
         )?;
 

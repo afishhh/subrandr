@@ -1,20 +1,12 @@
-use thiserror::Error;
-
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Vec2},
     rc::Rc,
 };
 
 use crate::{
-    style::{
-        computed::{FontSlant, Ruby},
-        ComputedStyle,
-    },
-    text::{
-        self,
-        layout::{MultilineTextShaper, TextWrapOptions},
-        FontArena, FontDb, GlyphCache,
-    },
+    layout::inline::InlineContentFragment,
+    style::{computed::Ruby, ComputedStyle},
+    text::FontDb,
 };
 
 // Layout engine coordinate space:
@@ -33,38 +25,10 @@ pub struct FragmentBox {
     pub size: Vec2L,
 }
 
-#[derive(Debug)]
-pub struct TextFragment {
-    pub fbox: FragmentBox,
-    pub style: ComputedStyle,
-    // self-referential
-    glyphs: text::GlyphString<'static, std::rc::Rc<str>>,
-    _font_arena: Rc<FontArena>,
-    pub baseline_offset: Vec2L,
-}
-
-impl TextFragment {
-    pub fn glyphs(&self) -> &text::GlyphString<'_, std::rc::Rc<str>> {
-        &self.glyphs
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LineBoxFragment {
-    pub fbox: FragmentBox,
-    pub children: Vec<(Vec2L, Rc<TextFragment>)>,
-}
-
-#[derive(Debug, Clone)]
-pub struct InlineContainerFragment {
-    pub fbox: FragmentBox,
-    pub lines: Vec<(Vec2L, Rc<LineBoxFragment>)>,
-}
-
 #[derive(Debug, Clone)]
 pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
-    pub children: Vec<(Vec2L, Rc<InlineContainerFragment>)>,
+    pub children: Vec<(Vec2L, Rc<InlineContentFragment>)>,
 }
 
 impl BlockContainerFragment {
@@ -79,7 +43,6 @@ impl BlockContainerFragment {
 #[derive(Debug)]
 pub struct LayoutContext<'l, 'a> {
     pub dpi: u32,
-    pub glyph_cache: &'l GlyphCache,
     pub fonts: &'l mut FontDb<'a>,
 }
 
@@ -96,127 +59,19 @@ pub struct LayoutConstraints {
 
 #[derive(Default, Debug, Clone)]
 pub struct BlockContainer {
-    #[expect(dead_code, reason = "block flow layout is not complex enough yet")]
     pub style: ComputedStyle,
-    pub contents: Vec<InlineContainer>,
+    pub contents: Vec<Vec<InlineText>>,
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct InlineContainer {
-    pub style: ComputedStyle,
-    pub contents: Vec<InlineText>,
-}
+pub mod inline;
+pub use inline::InlineLayoutError;
 
+// TODO: remove
 #[derive(Debug, Clone)]
 pub struct InlineText {
     pub style: ComputedStyle,
     pub text: std::rc::Rc<str>,
     pub ruby: Ruby,
-}
-
-#[derive(Debug, Error)]
-pub enum InlineLayoutError {
-    #[error(transparent)]
-    FontSelect(#[from] text::font_db::SelectError),
-    #[error(transparent)]
-    TextLayout(#[from] text::layout::LayoutError),
-}
-
-fn layout_inline(
-    context: &mut LayoutContext,
-    constraints: &LayoutConstraints,
-    container: &InlineContainer,
-) -> Result<InlineContainerFragment, InlineLayoutError> {
-    let font_arena = Rc::new(FontArena::new());
-
-    let mut shaper = MultilineTextShaper::new();
-    let mut last_ruby_base = None;
-    for segment in container.contents.iter() {
-        let matcher = text::FontMatcher::match_all(
-            segment.style.font_family(),
-            text::FontStyle {
-                weight: segment.style.font_weight(),
-                italic: match segment.style.font_slant() {
-                    FontSlant::Regular => false,
-                    FontSlant::Italic => true,
-                },
-            },
-            segment.style.font_size() * context.pixel_scale(),
-            context.dpi,
-            unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
-            context.fonts,
-        )?;
-
-        match segment.ruby {
-            Ruby::None => {
-                shaper.add_text(&segment.text, matcher);
-            }
-            Ruby::Base => {
-                last_ruby_base = Some(shaper.add_ruby_base(&segment.text, matcher));
-            }
-            Ruby::Over => {
-                shaper.add_ruby_annotation(
-                    last_ruby_base.expect("Ruby::Over without preceding Ruby::Base"),
-                    segment.text.clone(),
-                    matcher,
-                );
-                last_ruby_base = None;
-            }
-        }
-    }
-
-    let (lines, total_rect) = shaper.shape(
-        container.style.text_align(),
-        TextWrapOptions {
-            mode: container.style.text_wrap_style(),
-            strictness: container.style.line_break(),
-            word_break: container.style.word_break(),
-        },
-        constraints.size.x,
-        text::layout::LineHeight::Normal,
-        unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
-        context.glyph_cache,
-        context.fonts,
-    )?;
-
-    let mut result = InlineContainerFragment {
-        fbox: FragmentBox {
-            size: total_rect.size(),
-        },
-        lines: Vec::new(),
-    };
-
-    for line in lines {
-        let offset = line.bounding_rect.min - total_rect.min;
-        let mut line_box = LineBoxFragment {
-            fbox: FragmentBox {
-                size: line.bounding_rect.size(),
-            },
-            children: Vec::new(),
-        };
-
-        for segment in line.segments {
-            let style = &container.contents[segment.corresponding_input_segment].style;
-            let offset = segment.logical_rect.min - line.bounding_rect.min;
-
-            line_box.children.push((
-                offset,
-                Rc::new(TextFragment {
-                    fbox: FragmentBox {
-                        size: segment.logical_rect.size(),
-                    },
-                    style: style.clone(),
-                    glyphs: segment.glyphs,
-                    _font_arena: font_arena.clone(),
-                    baseline_offset: segment.baseline_offset - segment.logical_rect.min,
-                }),
-            ));
-        }
-
-        result.lines.push((offset, Rc::new(line_box)));
-    }
-
-    Ok(result)
 }
 
 fn layout_block(
@@ -231,13 +86,47 @@ fn layout_block(
 
     for child in &container.contents {
         let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.size.y);
-        let fragment = layout_inline(
-            context,
-            &LayoutConstraints {
-                size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
-            },
-            child,
-        )?;
+        let fragment = {
+            let mut builder = inline::InlineContentBuilder::new();
+            {
+                let mut root = builder.root();
+                let mut it = child.iter();
+                while let Some(segment) = it.next() {
+                    match segment.ruby {
+                        Ruby::None => {
+                            root.push_span(segment.style.clone())
+                                .push_text(&segment.text);
+                        }
+                        Ruby::Base => {
+                            let mut ruby = root.push_ruby(segment.style.clone());
+                            ruby.push_base(segment.style.clone())
+                                .push_text(&segment.text);
+                            if let Some(next) = it.as_slice().first() {
+                                if let Ruby::Over = next.ruby {
+                                    ruby.push_annotation(next.style.clone())
+                                        .push_text(&next.text);
+                                    _ = it.next();
+                                }
+                            }
+                        }
+                        Ruby::Over => {
+                            root.push_ruby(segment.style.clone())
+                                .push_annotation(segment.style.clone())
+                                .push_text(&segment.text);
+                        }
+                    }
+                }
+            }
+
+            inline::layout(
+                context,
+                &builder.finish(),
+                &LayoutConstraints {
+                    size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
+                },
+                container.style.text_align(),
+            )?
+        };
 
         result.fbox.size.x = result.fbox.size.x.max(fragment.fbox.size.x);
         result.fbox.size.y += fragment.fbox.size.y;
@@ -264,12 +153,11 @@ mod test {
     use util::rc_static;
 
     use super::{
-        layout, BlockContainer, FixedL, InlineContainer, InlineText, LayoutConstraints,
-        LayoutContext, Vec2L,
+        layout, BlockContainer, FixedL, InlineText, LayoutConstraints, LayoutContext, Vec2L,
     };
     use crate::{
         style::{computed::Ruby, ComputedStyle},
-        text::{FontDb, GlyphCache},
+        text::FontDb,
     };
 
     #[test]
@@ -283,29 +171,22 @@ mod test {
         let tree = BlockContainer {
             style: ComputedStyle::DEFAULT,
             contents: vec![
-                InlineContainer {
-                    style: ComputedStyle::DEFAULT,
-                    contents: vec![InlineText {
-                        style: text_style.clone(),
-                        text: "hello world".into(),
-                        ruby: Ruby::None,
-                    }],
-                },
-                InlineContainer {
-                    style: ComputedStyle::DEFAULT,
-                    contents: vec![InlineText {
-                        style: text_style,
-                        text: "this is a separate inline container".into(),
-                        ruby: Ruby::None,
-                    }],
-                },
+                vec![InlineText {
+                    style: text_style.clone(),
+                    text: "hello world".into(),
+                    ruby: Ruby::None,
+                }],
+                vec![InlineText {
+                    style: text_style,
+                    text: "this is a separate inline container".into(),
+                    ruby: Ruby::None,
+                }],
             ],
         };
 
         let fragment = layout(
             &mut LayoutContext {
                 dpi: 72,
-                glyph_cache: &GlyphCache::new(),
                 fonts: &mut FontDb::new(&crate::Subrandr::init()).unwrap(),
             },
             LayoutConstraints {

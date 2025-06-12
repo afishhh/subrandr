@@ -8,8 +8,6 @@ use util::{
     rc_static,
 };
 
-use crate::text::layout::TextWrapMode;
-
 pub mod computed;
 use computed::*;
 
@@ -32,7 +30,6 @@ macros::implement_style_module! {
 
     rc text_inherited {
         #[copy(no)] text_shadows: [TextShadow] = rc_static!([]),
-        text_wrap_style: TextWrapMode = TextWrapMode::Normal,
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: HorizontalAlignment = HorizontalAlignment::Left,

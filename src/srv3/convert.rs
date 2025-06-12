@@ -10,8 +10,8 @@ use util::{
 
 use crate::{
     layout::{
-        self, BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText,
-        LayoutConstraints, Point2L, Vec2L,
+        self, BlockContainer, FixedL, InlineLayoutError, InlineText, LayoutConstraints, Point2L,
+        Vec2L,
     },
     log::{log_once_state, warning},
     renderer::FrameLayoutPass,
@@ -352,15 +352,12 @@ impl Window {
             result
         };
 
-        let contents: Vec<InlineContainer> = self
+        let contents: Vec<Vec<InlineText>> = self
             .events
             .iter()
             .filter_map(|line| {
                 if pass.add_event_range(line.range.clone()) {
-                    Some(InlineContainer {
-                        style: block_style.clone(),
-                        contents: segments_to_inline(pass, line.range.start, &line.segments),
-                    })
+                    Some(segments_to_inline(pass, line.range.start, &line.segments))
                 } else {
                     None
                 }

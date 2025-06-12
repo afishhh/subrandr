@@ -7,7 +7,9 @@ use std::{
 
 use util::math::I26Dot6;
 
-use super::{font_match::FontMatchIterator, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError};
+use super::{
+    font_match::FontMatchIterator, Direction, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError,
+};
 
 pub trait GlyphStringText: AsRef<str> + Clone {}
 
@@ -16,17 +18,19 @@ impl GlyphStringText for Rc<str> {}
 
 #[derive(Clone)]
 pub struct GlyphString<'f, T: GlyphStringText> {
-    pub segments: LinkedList<GlyphStringSegment<'f, T>>,
+    segments: LinkedList<GlyphStringSegment<'f, T>>,
+    direction: Direction,
 }
 
 impl<T: GlyphStringText> Debug for GlyphString<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GlyphString").finish_non_exhaustive()
+        f.write_str("GlyphString ")?;
+        f.debug_list().entries(self.iter_glyphs()).finish()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct GlyphStringSegment<'f, T: GlyphStringText> {
+struct GlyphStringSegment<'f, T: GlyphStringText> {
     /// Always refers to the original string that contains the whole context
     /// of this segment, not only the text of the glyphs themselves.
     text: T,
@@ -38,7 +42,7 @@ pub struct GlyphStringSegment<'f, T: GlyphStringText> {
 }
 
 impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
-    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
+    fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
         Self {
             text,
             range: 0..glyphs.len(),
@@ -46,7 +50,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         }
     }
 
-    pub fn glyphs(&self) -> &[Glyph<'f>] {
+    fn glyphs(&self) -> &[Glyph<'f>] {
         &self.storage[self.range.clone()]
     }
 
@@ -58,14 +62,14 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         }
     }
 
-    pub fn split_off_start(&mut self, count: usize) -> Self {
+    fn split_off_start(&mut self, count: usize) -> Self {
         let result = self.break_unsafe_subslice(0..count);
         self.range.start += count;
         result
     }
 
     // These breaking functions *seem to* work, although I haven't tested them that extensively.
-    pub fn break_until(
+    fn break_until(
         &self,
         glyph_index: usize,
         cluster: usize,
@@ -73,6 +77,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
+        direction: Direction,
     ) -> Result<GlyphString<'f, T>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         // If the break is within a glyph (like a long ligature), we must
@@ -80,9 +85,10 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         let can_reuse_split_glyph = split_glyph.cluster == cluster;
         if !split_glyph.unsafe_to_break() && can_reuse_split_glyph {
             // Easy case, we can just split the glyph string right here
-            Ok(GlyphString::from_array([
-                self.break_unsafe_subslice(0..glyph_index)
-            ]))
+            Ok(GlyphString::from_array(
+                [self.break_unsafe_subslice(0..glyph_index)],
+                direction,
+            ))
         } else {
             // Harder case, we have to find the closest glyph on the left which
             // has the UNSAFE_TO_CONCAT flag unset, then try reshaping after such glyphs
@@ -104,10 +110,13 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                         );
                         let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.first().is_none_or(|first| !first.unsafe_to_concat()) {
-                            break 'left GlyphString::from_array([
-                                self.break_unsafe_subslice(0..i),
-                                GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
-                            ]);
+                            break 'left GlyphString::from_array(
+                                [
+                                    self.break_unsafe_subslice(0..i),
+                                    GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
+                                ],
+                                direction,
+                            );
                         } else {
                             // The result cannot be concatenated with the other part,
                             // we have to try again in another position.
@@ -124,6 +133,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                 GlyphString::from_glyphs(
                     self.text.clone(),
                     buffer.shape(font_iterator, font_arena, fonts)?,
+                    direction,
                 )
             };
 
@@ -131,7 +141,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         }
     }
 
-    pub fn break_after(
+    fn break_after(
         &self,
         glyph_index: usize,
         cluster: usize,
@@ -139,6 +149,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
+        direction: Direction,
     ) -> Result<GlyphString<'f, T>, ShapingError> {
         let split_glyph = self.glyphs()[glyph_index];
         let can_reuse_split_glyph = split_glyph.cluster == cluster;
@@ -149,7 +160,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                 range: self.range.start + glyph_index..self.range.end,
             };
 
-            Ok(GlyphString::from_array([right]))
+            Ok(GlyphString::from_array([right], direction))
         } else {
             // Analogous to the process in `split_until`, but performed on the right searching forward.
             let right = 'right: {
@@ -169,10 +180,13 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                         );
                         let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.last().is_none_or(|last| !last.unsafe_to_concat()) {
-                            break 'right GlyphString::from_array([
-                                GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
-                                self.break_unsafe_subslice(i..self.range.len()),
-                            ]);
+                            break 'right GlyphString::from_array(
+                                [
+                                    GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
+                                    self.break_unsafe_subslice(i..self.range.len()),
+                                ],
+                                direction,
+                            );
                         } else {
                             // The result cannot be concatenated with the other part,
                             // we have to try again in another position.
@@ -189,6 +203,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                 GlyphString::from_glyphs(
                     self.text.clone(),
                     buffer.shape(font_iterator, font_arena, fonts)?,
+                    direction,
                 )
             };
 
@@ -199,17 +214,20 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
 
 // TODO: linked_list_cursors feature would improve some of this code significantly
 impl<'f, T: GlyphStringText> GlyphString<'f, T> {
-    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
+    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>, direction: Direction) -> Self {
         GlyphString {
             segments: LinkedList::from([GlyphStringSegment::from_glyphs(text, glyphs)]),
+            direction,
         }
     }
 
-    pub fn from_array<const N: usize>(
+    fn from_array<const N: usize>(
         segments: [GlyphStringSegment<'f, T>; N],
+        direction: Direction,
     ) -> GlyphString<'f, T> {
         GlyphString {
             segments: LinkedList::from(segments),
+            direction,
         }
     }
 
@@ -218,7 +236,12 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
     }
 
     pub fn is_empty(&self) -> bool {
+        // TODO: just make empty segments an invariant of `GlyphString`
         self.segments.is_empty() || self.segments.iter().all(|s| s.glyphs().is_empty())
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     // TODO: Maybe this could be gotten rid of by reworking how glyphs are styled?
@@ -228,17 +251,22 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
 
         while let Some(mut segment) = self.segments.pop_front() {
             // TODO: linked_list_cursors feature would avoid unnecessary re-allocations here
-            match segment
-                .glyphs()
-                .iter()
-                .position(|glyph| glyph.cluster >= cluster)
-            {
+            match segment.glyphs().iter().position(|glyph| {
+                if self.direction.is_reverse() {
+                    glyph.cluster <= cluster
+                } else {
+                    glyph.cluster >= cluster
+                }
+            }) {
                 Some(end) => {
                     if end != 0 {
                         result.push_back(segment.split_off_start(end));
                     }
                     self.segments.push_front(segment);
-                    return Some(Self { segments: result });
+                    return Some(Self {
+                        segments: result,
+                        direction: self.direction,
+                    });
                 }
                 None => result.push_back(segment),
             }
@@ -247,7 +275,10 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
         if result.is_empty() {
             None
         } else {
-            Some(GlyphString { segments: result })
+            Some(GlyphString {
+                segments: result,
+                direction: self.direction,
+            })
         }
     }
 
@@ -266,6 +297,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
         let mut x = I26Dot6::ZERO;
         for segment in &mut it {
             // TODO: if g.cluster > cluster then use previous glyph
+            //       ^^^^ RTL?
             if let Some(split_at) = segment.glyphs().iter().position(|g| g.cluster == cluster) {
                 let mut left_suff = segment.break_until(
                     split_at,
@@ -274,6 +306,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
                     font_iter.clone(),
                     font_arena,
                     fonts,
+                    self.direction,
                 )?;
 
                 if left_suff
@@ -283,14 +316,27 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
                     <= max_width
                 {
                     left.append(&mut left_suff.segments);
-                    let mut right = segment
-                        .break_after(split_at, cluster, buffer, font_iter, font_arena, fonts)?;
+                    let mut right = segment.break_after(
+                        split_at,
+                        cluster,
+                        buffer,
+                        font_iter,
+                        font_arena,
+                        fonts,
+                        self.direction,
+                    )?;
 
                     for segment in it {
                         right.segments.push_back(segment.clone());
                     }
 
-                    return Ok(Some((GlyphString { segments: left }, right)));
+                    return Ok(Some((
+                        Self {
+                            segments: left,
+                            direction: self.direction,
+                        },
+                        right,
+                    )));
                 }
             }
 

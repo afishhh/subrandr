@@ -13,11 +13,17 @@ use util::{
 };
 
 use crate::{
-    layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
+    layout::{
+        self, inline::InlineItemFragment, BlockContainerFragment, FixedL, FragmentBox,
+        LayoutContext, Point2L, Vec2L,
+    },
     log::{info, trace},
     srv3,
-    style::computed::{
-        Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
+    style::{
+        computed::{
+            Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
+        },
+        ComputedStyle,
     },
     text::{
         self, platform_font_provider, FontArena, FreeTypeError, GlyphRenderError, GlyphString,
@@ -155,7 +161,7 @@ impl FrameRenderPass<'_, '_> {
             self.rasterizer,
             I26Dot6::ZERO,
             I26Dot6::ZERO,
-            &GlyphString::from_glyphs(text, glyphs),
+            &GlyphString::from_glyphs(text, glyphs, text::Direction::Ltr),
         )?;
         image.blit(
             self.rasterizer,
@@ -305,6 +311,161 @@ impl FrameRenderPass<'_, '_> {
                 ),
                 decoration.strike_out_color,
             );
+        }
+
+        Ok(())
+    }
+
+    fn draw_background(
+        &mut self,
+        target: &mut RenderTarget,
+        pos: Point2L,
+        style: &ComputedStyle,
+        fragment_box: &FragmentBox,
+    ) {
+        let background = style.background_color();
+        if background.a != 0 {
+            self.rasterizer.fill_axis_aligned_rect(
+                target,
+                Rect2::to_float(Rect2::from_min_size(pos, fragment_box.size)),
+                background,
+            );
+        }
+    }
+
+    fn draw_inline_item_fragment_background(
+        &mut self,
+        target: &mut RenderTarget,
+        pos: Point2L,
+        fragment: &InlineItemFragment,
+    ) {
+        match fragment {
+            InlineItemFragment::Text(text) => {
+                self.draw_background(target, pos, &text.style, &text.fbox);
+            }
+            InlineItemFragment::Ruby(ruby) => {
+                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
+                    let base_pos = pos + base_offset;
+                    self.draw_background(target, base_pos, &base.style, &base.fbox);
+                    for &(base_item_offset, ref base_item) in &base.children {
+                        self.draw_inline_item_fragment_background(
+                            target,
+                            base_pos + base_item_offset,
+                            base_item,
+                        );
+                    }
+
+                    let annotation_pos = pos + annotation_offset;
+                    self.draw_background(
+                        target,
+                        annotation_pos,
+                        &annotation.style,
+                        &annotation.fbox,
+                    );
+                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
+                        self.draw_inline_item_fragment_background(
+                            target,
+                            annotation_pos + annotation_item_offset,
+                            annotation_item,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw_inline_item_fragment_content(
+        &mut self,
+        target: &mut RenderTarget,
+        pos: Point2L,
+        fragment: &InlineItemFragment,
+        sbr: &Subrandr,
+        debug_font_size: I26Dot6,
+    ) -> Result<(), RenderError> {
+        match fragment {
+            InlineItemFragment::Text(text) => {
+                if sbr.debug.draw_layout_info {
+                    let final_logical_box = Rect2::from_min_size(pos, text.fbox.size);
+
+                    self.debug_text(
+                        target,
+                        final_logical_box.min,
+                        &format!("{:.0},{:.0}", pos.x, pos.y),
+                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
+                        debug_font_size,
+                        BGRA8::RED,
+                    )?;
+
+                    self.debug_text(
+                        target,
+                        Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
+                        &format!("{:.1}", pos.x + text.baseline_offset.x),
+                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                        debug_font_size,
+                        BGRA8::RED,
+                    )?;
+
+                    self.debug_text(
+                        target,
+                        Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
+                        &format!("{:.0}pt", text.style.font_size()),
+                        Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
+                        debug_font_size,
+                        BGRA8::GOLD,
+                    )?;
+
+                    let final_logical_boxf = Rect2::to_float(final_logical_box);
+
+                    self.rasterizer.stroke_axis_aligned_rect(
+                        target,
+                        final_logical_boxf,
+                        BGRA8::BLUE,
+                    );
+
+                    self.rasterizer.horizontal_line(
+                        target,
+                        (pos.y + text.baseline_offset.y).into_f32(),
+                        final_logical_boxf.min.x,
+                        final_logical_boxf.max.x,
+                        BGRA8::GREEN,
+                    );
+                }
+
+                self.draw_text_full(
+                    target,
+                    pos.x + text.baseline_offset.x,
+                    (pos.y + text.baseline_offset.y).round(),
+                    text.glyphs(),
+                    text.style.color(),
+                    &text.style.text_decoration(),
+                    text.style.text_shadows(),
+                )?;
+            }
+            InlineItemFragment::Ruby(ruby) => {
+                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
+                    let base_pos = pos + base_offset;
+                    for &(base_item_offset, ref base_item) in &base.children {
+                        self.draw_inline_item_fragment_content(
+                            target,
+                            base_pos + base_item_offset,
+                            base_item,
+                            sbr,
+                            debug_font_size,
+                        )?;
+                    }
+
+                    let annotation_pos = pos + annotation_offset;
+                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
+                        self.draw_inline_item_fragment_content(
+                            target,
+                            annotation_pos + annotation_item_offset,
+                            annotation_item,
+                            sbr,
+                            debug_font_size,
+                        )?;
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -594,7 +755,6 @@ impl Renderer<'_> {
             let mut pass = FrameLayoutPass {
                 sctx: &ctx,
                 lctx: &mut LayoutContext {
-                    glyph_cache: &self.glyph_cache,
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
                 },
@@ -878,17 +1038,10 @@ impl Renderer<'_> {
                     for &(offset, ref line) in &container.lines {
                         let current = current + offset;
 
-                        for &(offset, ref text) in &line.children {
+                        for &(offset, ref item) in &line.children {
                             let current = current + offset;
 
-                            let background = text.style.background_color();
-                            if background.a != 0 {
-                                pass.rasterizer.fill_axis_aligned_rect(
-                                    target,
-                                    Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
-                                    background,
-                                );
-                            }
+                            pass.draw_inline_item_fragment_background(target, current, item);
                         }
                     }
                 }
@@ -899,68 +1052,15 @@ impl Renderer<'_> {
                     for &(offset, ref line) in &container.lines {
                         let current = current + offset;
 
-                        for &(offset, ref text) in &line.children {
+                        for &(offset, ref item) in &line.children {
                             let current = current + offset;
 
-                            if self.sbr.debug.draw_layout_info {
-                                let final_logical_box =
-                                    Rect2::from_min_size(current, text.fbox.size);
-
-                                pass.debug_text(
-                                    target,
-                                    final_logical_box.min,
-                                    &format!("{:.0},{:.0}", current.x, current.y),
-                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
-                                    debug_font_size,
-                                    BGRA8::RED,
-                                )?;
-
-                                pass.debug_text(
-                                    target,
-                                    Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
-                                    &format!("{:.1}", offset.x + text.baseline_offset.x),
-                                    Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                                    debug_font_size,
-                                    BGRA8::RED,
-                                )?;
-
-                                pass.debug_text(
-                                    target,
-                                    Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                                    &format!("{:.0}pt", text.style.font_size()),
-                                    Alignment(
-                                        HorizontalAlignment::Right,
-                                        VerticalAlignment::Bottom,
-                                    ),
-                                    debug_font_size,
-                                    BGRA8::GOLD,
-                                )?;
-
-                                let final_logical_boxf = Rect2::to_float(final_logical_box);
-
-                                pass.rasterizer.stroke_axis_aligned_rect(
-                                    target,
-                                    final_logical_boxf,
-                                    BGRA8::BLUE,
-                                );
-
-                                pass.rasterizer.horizontal_line(
-                                    target,
-                                    (current.y + text.baseline_offset.y).into_f32(),
-                                    final_logical_boxf.min.x,
-                                    final_logical_boxf.max.x,
-                                    BGRA8::GREEN,
-                                );
-                            }
-
-                            pass.draw_text_full(
+                            pass.draw_inline_item_fragment_content(
                                 target,
-                                current.x + text.baseline_offset.x,
-                                (current.y + text.baseline_offset.y).round(),
-                                text.glyphs(),
-                                text.style.color(),
-                                &text.style.text_decoration(),
-                                text.style.text_shadows(),
+                                current,
+                                item,
+                                self.sbr,
+                                debug_font_size,
                             )?;
                         }
                     }

@@ -1815,6 +1815,7 @@ dependencies = [
  "sbr-util",
  "text-sys",
  "thiserror 1.0.63",
+ "unicode-bidi",
  "windows 0.61.1",
  "windows-core 0.61.0",
 ]
@@ -1983,6 +1984,12 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-ident"

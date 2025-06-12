@@ -147,7 +147,7 @@ fn match_face_for_specific_family(
     Ok(Some(face))
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontMatcher<'f> {
     families: Vec<Box<str>>,
     style: FontStyle,
@@ -194,6 +194,10 @@ impl<'f> FontMatcher<'f> {
 
     pub fn tofu(&self, arena: &'f FontArena) -> &'f Font {
         arena.insert(&Face::tofu().with_size(self.size, self.dpi).unwrap())
+    }
+
+    pub fn size(&self) -> I26Dot6 {
+        self.size
     }
 
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.

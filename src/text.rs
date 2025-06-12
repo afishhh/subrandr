@@ -25,7 +25,6 @@ mod font_match;
 pub use font_match::*;
 mod glyph_cache;
 pub use glyph_cache::*;
-pub mod layout;
 pub mod platform_font_provider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,8 +46,9 @@ impl Direction {
         })
     }
 
-    pub const fn is_horizontal(self) -> bool {
-        matches!(self, Self::Ltr | Self::Rtl)
+    #[must_use]
+    pub const fn is_reverse(self) -> bool {
+        matches!(self, Self::Rtl | Self::Btt)
     }
 
     #[must_use]
@@ -132,6 +132,7 @@ impl<'f> Glyph<'f> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct TextMetrics {
     pub paint_size: Vec2<I26Dot6>,
     pub trailing_advance: I26Dot6,
@@ -407,13 +408,13 @@ impl ShapingBuffer {
                                      force_tofu: bool|
              -> Result<(), ShapingError> {
                 let mut sub_buffer = Self::new();
+                hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
+                hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
                 for ((codepoint, _), i) in
                     codepoints[range.clone()].iter().copied().zip(range.clone())
                 {
                     hb_buffer_add(sub_buffer.buffer, codepoint, i as u32);
                 }
-                hb_buffer_set_segment_properties(sub_buffer.buffer, properties);
-                hb_buffer_set_content_type(sub_buffer.buffer, HB_BUFFER_CONTENT_TYPE_UNICODE);
 
                 sub_buffer.shape_rec(
                     result,
@@ -454,12 +455,14 @@ impl ShapingBuffer {
                 // happen, if it does anyway it will just incur an additional shaping pass.
                 let next_force_tofu = start == 0 && font_iterator.did_system_fallback();
 
+                let left = infos[start].cluster as usize;
+                let right = infos.last().unwrap().cluster as usize;
                 retry_shaping(
-                    fixup_range(
-                        infos[start].cluster as usize,
-                        // FIXME: Is this correct for RTL text?
-                        infos.last().unwrap().cluster as usize + 1,
-                    ),
+                    if left > right {
+                        right..left + 1
+                    } else {
+                        left..right + 1
+                    },
                     result,
                     font_arena,
                     next_force_tofu,

@@ -17,7 +17,7 @@ impl FreeTypeError {
 
     pub(super) fn result_from_ft(code: FT_Error) -> Result<(), Self> {
         if let Some(error) = std::num::NonZero::new(code) {
-            Err(Self::from_ft(error))
+            Err(Self::from_ft(error.abs()))
         } else {
             Ok(())
         }

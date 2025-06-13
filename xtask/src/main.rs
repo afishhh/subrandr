@@ -209,6 +209,8 @@ fn main() -> Result<()> {
 
             let status = Command::new(env!("CARGO"))
                 .arg("build")
+                .arg("--manifest-path")
+                .arg(manifest_dir.join("Cargo.toml"))
                 .arg("--target")
                 .arg(install.target.to_string())
                 .arg("--release")

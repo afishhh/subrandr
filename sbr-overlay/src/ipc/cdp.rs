@@ -160,7 +160,7 @@ impl ChromeYoutubeIpc {
         for target in &chrome.targets {
             if target.kind == "page" && target.url.starts_with("https://www.youtube.com") {
                 target_id = Some(target.id.clone());
-                println!("Found YouTube debug target {:#?}", target);
+                println!("Found YouTube debug target {target:#?}");
                 break;
             }
         }

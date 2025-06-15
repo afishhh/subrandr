@@ -10,11 +10,11 @@ buildRevision:
 }:
 
 let
-  cargoTomlPackage = (builtins.fromTOML (builtins.readFile ../Cargo.toml)).package;
+  cargoToml = (builtins.fromTOML (builtins.readFile ../Cargo.toml));
 in
 rustPlatform.buildRustPackage {
-  pname = cargoTomlPackage.name;
-  version = cargoTomlPackage.version;
+  pname = cargoToml.package.name;
+  version = cargoToml.workspace.package.version;
 
   SUBRANDR_BUILD_REV = buildRevision;
 

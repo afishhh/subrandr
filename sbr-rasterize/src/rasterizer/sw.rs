@@ -272,7 +272,7 @@ impl DrawPixel for u8 {
     }
 
     fn scale_alpha(self, scale: u8) -> Self {
-        ((self as u16 * scale as u16) / 255) as u8
+        crate::color::mul_rgb(self, scale)
     }
 
     const PIXEL_FORMAT: PixelFormat = PixelFormat::Mono;

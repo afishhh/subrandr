@@ -138,7 +138,8 @@ impl Premultiplied<BGRA8> {
     }
 }
 
-const fn mul_rgb(a: u8, b: u8) -> u8 {
+/// Calculates `(a * b + 127) / 255` but without a division.
+pub(crate) const fn mul_rgb(a: u8, b: u8) -> u8 {
     let c = a as u16 * b as u16 + 128;
     ((c + (c >> 8)) >> 8) as u8
 }

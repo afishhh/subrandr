@@ -88,7 +88,7 @@ impl SharedFaceData {
 
 #[repr(C)]
 #[derive(PartialEq, Eq, Hash)]
-pub(super) struct Face {
+pub struct Face {
     face: FT_Face,
     coords: MmCoords,
 }
@@ -417,7 +417,7 @@ unsafe fn build_font_metrics(
 }
 
 #[repr(C)]
-pub(super) struct Font {
+pub struct Font {
     // owned by hb_font
     ft_face: FT_Face,
     coords: MmCoords,

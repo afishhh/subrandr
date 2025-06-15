@@ -173,8 +173,7 @@ impl Source {
                 .loader
                 .CreateStreamFromKey(self.reference_key, self.reference_key_size)?;
             let size = stream.GetFileSize()?;
-            let mut output = Vec::new();
-            output.reserve(size as usize);
+            let mut output = Vec::with_capacity(size as usize);
             let mut context = std::ptr::null_mut();
             let mut data = std::ptr::null_mut();
             stream.ReadFileFragment(&mut data, 0, size, &mut context)?;
@@ -223,8 +222,7 @@ impl DirectWriteFontProvider {
             let mut n_files = 0;
             face.GetFiles(&mut n_files, None)?;
 
-            let mut files: Vec<IDWriteFontFile> = Vec::new();
-            files.reserve(n_files as usize);
+            let mut files: Vec<IDWriteFontFile> = Vec::with_capacity(n_files as usize);
             face.GetFiles(
                 &mut n_files,
                 Some(files.spare_capacity_mut().as_mut_ptr().cast()),
@@ -280,7 +278,7 @@ impl FontProvider for DirectWriteFontProvider {
             let (utf16, len) = codepoint_to_utf16(request.codepoint);
             let source = TextAnalysisSource { text: utf16, len };
 
-            let family_w: Option<Vec<u16>> = request.families.get(0).map(|f| {
+            let family_w: Option<Vec<u16>> = request.families.first().map(|f| {
                 f.encode_utf16()
                     .chain(std::iter::once(0))
                     .collect::<Vec<_>>()
@@ -310,13 +308,13 @@ impl FontProvider for DirectWriteFontProvider {
                 &mut scale,
             )?;
 
-            return Ok(match mapped_font {
+            Ok(match mapped_font {
                 Some(font) => match Self::info_from_font(font)? {
                     Some(info) => vec![info],
                     None => Vec::new(),
                 },
                 None => Vec::new(),
-            });
+            })
         }
     }
 

@@ -16,6 +16,7 @@ use util::math::{I16Dot16, I26Dot6, Vec2};
 use super::FreeTypeError;
 
 pub mod freetype;
+pub mod panose;
 pub use freetype::GlyphRenderError;
 mod tofu;
 

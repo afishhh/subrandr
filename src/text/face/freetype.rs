@@ -13,7 +13,7 @@ use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::{
-    Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
+    panose, Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
     SingleGlyphBitmap, ITALIC_AXIS, WEIGHT_AXIS,
 };
 use crate::{outline::Outline, text::ft_utils::*};
@@ -178,6 +178,13 @@ impl Face {
             let table = FT_Get_Sfnt_Table(self.face, FT_SFNT_OS2) as *const TT_OS2;
             table.as_ref().map(|os2| os2.usWeightClass)
         }
+    }
+}
+
+impl Face {
+    pub fn panose(&self) -> Option<panose::Classification> {
+        unsafe { (FT_Get_Sfnt_Table(self.face, FT_SFNT_OS2) as *const TT_OS2).as_ref() }
+            .and_then(|os2| panose::Classification::parse(os2.panose))
     }
 }
 

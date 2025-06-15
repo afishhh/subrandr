@@ -40,8 +40,21 @@ impl FaceImpl for Face {
         I16Dot16::new(400)
     }
 
+    fn weight_range(&self) -> crate::text::FontAxisValues {
+        crate::text::FontAxisValues::Fixed(self.weight())
+    }
+
     fn italic(&self) -> bool {
         false
+    }
+
+    fn italic_range(&self) -> crate::text::FontAxisValues {
+        crate::text::FontAxisValues::Fixed(I16Dot16::ZERO)
+    }
+
+    fn contains_codepoint(&self, codepoint: u32) -> bool {
+        _ = codepoint;
+        true
     }
 
     type Error = Infallible;

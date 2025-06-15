@@ -14,8 +14,10 @@ use text_sys::hb_font_t;
 use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::FreeTypeError;
+use crate::text::FontAxisValues;
 
-mod freetype;
+pub mod freetype;
+pub mod panose;
 pub use freetype::GlyphRenderError;
 mod tofu;
 
@@ -138,7 +140,11 @@ trait FaceImpl: Sized {
     fn set_axis(&mut self, index: usize, value: I16Dot16);
 
     fn weight(&self) -> I16Dot16;
+    fn weight_range(&self) -> FontAxisValues;
     fn italic(&self) -> bool;
+    fn italic_range(&self) -> FontAxisValues;
+
+    fn contains_codepoint(&self, codepoint: u32) -> bool;
 
     type Error;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error>;
@@ -271,7 +277,7 @@ macro_rules! forward_methods {
     (@once $enum: ident [$($variant: ident),*] $name: ident [$($selfref: tt)*] $params: tt ($($params_unwrapped: tt)*) $ret: ty) => {
         #[allow(dead_code)]
         pub fn $name($($selfref)* self, $($params_unwrapped)*) -> $ret {
-            match $($selfref)* self.0 {
+            match self {
                 $($enum :: $variant(value) => forward_methods!(@build_call {value.$name} $params),)*
             }
         }
@@ -291,33 +297,26 @@ macro_rules! forward_methods {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum FaceRepr {
+pub enum Face {
     FreeType(freetype::Face),
     Tofu(tofu::Face),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Face(FaceRepr);
-
 impl Face {
     pub fn load_from_file(path: impl AsRef<Path>, index: i32) -> Result<Self, FreeTypeError> {
-        freetype::Face::load_from_file(path, index)
-            .map(FaceRepr::FreeType)
-            .map(Face)
+        freetype::Face::load_from_file(path, index).map(Face::FreeType)
     }
 
     pub fn load_from_bytes(bytes: Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
-        freetype::Face::load_from_bytes(bytes, index)
-            .map(FaceRepr::FreeType)
-            .map(Face)
+        freetype::Face::load_from_bytes(bytes, index).map(Face::FreeType)
     }
 
     pub const fn tofu() -> Self {
-        Face(FaceRepr::Tofu(tofu::Face))
+        Face::Tofu(tofu::Face)
     }
 
     forward_methods!(
-        variants = FaceRepr::[FreeType, Tofu];
+        variants = Face::[FreeType, Tofu];
         pub fn family_name[&]() -> &str;
 
         pub fn axes[&]() -> &[Axis];
@@ -325,57 +324,55 @@ impl Face {
         pub fn set_axis[&mut](index: usize, value: I16Dot16) -> ();
 
         pub fn weight[&]() -> I16Dot16;
+        pub fn weight_range[&]() -> FontAxisValues;
         pub fn italic[&]() -> bool;
+        pub fn italic_range[&]() -> FontAxisValues;
+
+        pub fn contains_codepoint[&mut](value: u32) -> bool;
     );
 
     pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
-        match &self.0 {
-            FaceRepr::FreeType(face) => face
-                .with_size(point_size, dpi)
-                .map(FontRepr::FreeType)
-                .map(Font),
-            FaceRepr::Tofu(face) => match face.with_size(point_size, dpi) {
-                Ok(font) => Ok(Font(FontRepr::Tofu(font))),
+        match &self {
+            Face::FreeType(face) => face.with_size(point_size, dpi).map(Font::FreeType),
+            Face::Tofu(face) => match face.with_size(point_size, dpi) {
+                Ok(font) => Ok(Font::Tofu(font)),
             },
         }
     }
 
     pub fn advance_cache_generation(&self) {
-        match &self.0 {
-            FaceRepr::FreeType(face) => face.glyph_cache().advance_generation(),
-            FaceRepr::Tofu(_) => (),
+        match &self {
+            Face::FreeType(face) => face.glyph_cache().advance_generation(),
+            Face::Tofu(_) => (),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum FontRepr {
+pub enum Font {
     FreeType(freetype::Font),
     Tofu(tofu::Font),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Font(FontRepr);
-
 impl Font {
     forward_methods!(
-        variants = FontRepr::[FreeType, Tofu];
+        variants = Font::[FreeType, Tofu];
 
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
     );
 
     pub fn glyph_extents(&self, index: u32) -> Result<&GlyphMetrics, FreeTypeError> {
-        match &self.0 {
-            FontRepr::FreeType(font) => font.glyph_cache().get_or_try_measure(font, index),
-            FontRepr::Tofu(font) => Ok(font.glyph_metrics()),
+        match self {
+            Self::FreeType(font) => font.glyph_cache().get_or_try_measure(font, index),
+            Self::Tofu(font) => Ok(font.glyph_metrics()),
         }
     }
 
     pub fn as_harfbuzz_font(&self) -> Result<*mut hb_font_t, FreeTypeError> {
-        match &self.0 {
-            FontRepr::FreeType(font) => Ok(font.with_applied_size_and_hb()?.1),
-            FontRepr::Tofu(font) => Ok(font.as_harfbuzz_font()),
+        match self {
+            Self::FreeType(font) => Ok(font.with_applied_size_and_hb()?.1),
+            Self::Tofu(font) => Ok(font.as_harfbuzz_font()),
         }
     }
 
@@ -386,15 +383,15 @@ impl Font {
         offset_value: I26Dot6,
         offset_axis_is_y: bool,
     ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
-        match &self.0 {
-            FontRepr::FreeType(font) => font.glyph_cache().get_or_try_render(
+        match self {
+            Self::FreeType(font) => font.glyph_cache().get_or_try_render(
                 rasterizer,
                 font,
                 index,
                 offset_value,
                 offset_axis_is_y,
             ),
-            FontRepr::Tofu(font) => Ok(font
+            Self::Tofu(font) => Ok(font
                 .glyph_cache()
                 .get_or_try_render(rasterizer, font, index, offset_value, offset_axis_is_y)
                 .unwrap()),

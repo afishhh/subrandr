@@ -25,6 +25,7 @@ extern "C" {
 
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
+typedef struct sbr_custom_font_provider sbr_custom_font_provider;
 typedef struct sbr_renderer sbr_renderer;
 typedef int32_t sbr_26dot6;
 typedef struct sbr_subtitle_context {
@@ -43,13 +44,13 @@ typedef int16_t sbr_subtitle_format;
 #define SBR_SUBTITLE_FORMAT_SRV3 (sbr_subtitle_format)1
 #define SBR_SUBTITLE_FORMAT_WEBVTT (sbr_subtitle_format)2
 
-// Probe subtitle text for a matching format magic.
+// Probes subtitle text for a matching format magic.
 //
 // This function tries to determine the subtitle format of `content`
 // on a best-effort basis.
 sbr_subtitle_format sbr_probe_text(char const *content, size_t content_len);
 
-// Load subtitles from text data.
+// Loads subtitles from text data.
 //
 // If `format` is not SBR_SUBTITLE_FORMAT_UNKNOWN then subrandr will assume
 // subtitles are in the given subtitle format and parse them accordingly.
@@ -71,10 +72,21 @@ SBR_UNSTABLE sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
+
 void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
+
+// Sets a custom font provider for use by this renderer.
+//
+// All font lookups done by this renderer will first go through the provided
+// custom font provider before they reach system font fallback.
+void sbr_renderer_set_custom_font_provider(
+    sbr_renderer *, sbr_custom_font_provider *
+);
+
 bool sbr_renderer_did_change(
     sbr_renderer *, sbr_subtitle_context const *, uint32_t t
 );
+
 int sbr_renderer_render(
     sbr_renderer *, sbr_subtitle_context const *,
     // current time value in milliseconds
@@ -82,6 +94,7 @@ int sbr_renderer_render(
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height, uint32_t stride
 );
+
 void sbr_renderer_destroy(sbr_renderer *);
 
 typedef uint32_t SBR_UNSTABLE sbr_error_code;

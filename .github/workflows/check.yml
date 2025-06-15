@@ -17,7 +17,7 @@ jobs:
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
       - name: Install nextest
         uses: taiki-e/install-action@nextest
-      - run: cargo nextest r --no-fail-fast
+      - run: cargo nextest r --workspace --exclude sbr-overlay --no-fail-fast
 
   nix-build:
     name: Build nix flake
@@ -39,7 +39,7 @@ jobs:
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
 
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p subrandr --all-features
+      - run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
       - run: cargo xtask install --prefix prefix
 
   check-wasi:
@@ -85,6 +85,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
       - shell: msys2 {0}
-        run: cargo clippy -p subrandr --all-features
+        run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
       - shell: msys2 {0}
         run: cargo xtask install --prefix prefix

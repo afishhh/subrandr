@@ -16,7 +16,10 @@ use super::{
     panose, Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
     SingleGlyphBitmap, ITALIC_AXIS, WEIGHT_AXIS,
 };
-use crate::{outline::Outline, text::ft_utils::*};
+use crate::{
+    outline::Outline,
+    text::{ft_utils::*, FontAxisValues},
+};
 
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);
@@ -179,6 +182,81 @@ impl Face {
             table.as_ref().map(|os2| os2.usWeightClass)
         }
     }
+
+    fn static_weight(&self) -> I16Dot16 {
+        if let Some(weight) = self.os2_weight() {
+            I16Dot16::new(weight as i32)
+        } else {
+            let has_bold_flag =
+                unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0 };
+
+            I16Dot16::new(300 + 400 * has_bold_flag as i32)
+        }
+    }
+
+    pub fn get_names(&self, id: NameId) -> impl Iterator<Item = LocalisedName> {
+        unsafe {
+            let count = FT_Get_Sfnt_Name_Count(self.face);
+
+            (0..count).filter_map(move |i| {
+                let name = {
+                    let mut result = MaybeUninit::uninit();
+                    if FT_Get_Sfnt_Name(self.face, i, result.as_mut_ptr()) < 0 {
+                        return None;
+                    }
+                    result.assume_init()
+                };
+
+                if name.name_id != id.0 {
+                    return None;
+                }
+
+                // Unicode platform & Unicode 2.0+ encoding or
+                // Windows platform & Unicode BMP encoding
+                if name.platform_id == 0 && matches!(name.encoding_id, 3 | 4)
+                    || name.platform_id == 3 && name.encoding_id == 1
+                {
+                    if name.language_id < 0x8000 {
+                        // Since the Unicode platform has no platform-specific
+                        // language ids, these must be language tag strings.
+                        return None;
+                    }
+
+                    let language_tag = {
+                        let mut result = MaybeUninit::uninit();
+                        if FT_Get_Sfnt_LangTag(
+                            self.face,
+                            name.language_id.into(),
+                            result.as_mut_ptr(),
+                        ) < 0
+                        {
+                            return None;
+                        }
+                        result.assume_init()
+                    };
+
+                    let language_tag = std::str::from_utf8(std::slice::from_raw_parts(
+                        language_tag.string,
+                        language_tag.string_len as usize,
+                    ))
+                    .ok()?;
+
+                    let name = std::str::from_utf8(std::slice::from_raw_parts(
+                        name.string,
+                        name.string_len as usize,
+                    ))
+                    .ok()?;
+
+                    Some(LocalisedName {
+                        language_tag,
+                        value: name,
+                    })
+                } else {
+                    None
+                }
+            })
+        }
+    }
 }
 
 impl Face {
@@ -186,6 +264,20 @@ impl Face {
         unsafe { (FT_Get_Sfnt_Table(self.face, FT_SFNT_OS2) as *const TT_OS2).as_ref() }
             .and_then(|os2| panose::Classification::parse(os2.panose))
     }
+}
+
+struct NameId(u16);
+
+impl NameId {
+    const FAMILY_NAME: NameId = NameId(1);
+    const SUBFAMILY_NAME: NameId = NameId(2);
+    const FULL_NAME: NameId = NameId(4);
+    const POSTSCRIPT_NAME: NameId = NameId(6);
+}
+
+pub struct LocalisedName<'a> {
+    language_tag: &'a str,
+    value: &'a str,
 }
 
 impl FaceImpl for Face {
@@ -211,19 +303,17 @@ impl FaceImpl for Face {
             .iter()
             .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
             .map_or_else(
-                || {
-                    if let Some(weight) = self.os2_weight() {
-                        I16Dot16::new(weight as i32)
-                    } else {
-                        let has_bold_flag = unsafe {
-                            (*self.face).style_flags & (FT_STYLE_FLAG_BOLD as FT_Long) != 0
-                        };
-
-                        I16Dot16::new(300 + 400 * has_bold_flag as i32)
-                    }
-                },
+                || self.static_weight(),
                 |idx| I16Dot16::from_ft(self.coords[idx]),
             )
+    }
+
+    fn weight_range(&self) -> crate::text::FontAxisValues {
+        if let Some(axis) = self.axis(WEIGHT_AXIS) {
+            FontAxisValues::Range(axis.minimum, axis.maximum)
+        } else {
+            FontAxisValues::Fixed(self.static_weight())
+        }
     }
 
     fn italic(&self) -> bool {
@@ -235,6 +325,31 @@ impl FaceImpl for Face {
                 || unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 },
                 |idx| I16Dot16::from_ft(self.coords[idx]) > I16Dot16::HALF,
             )
+    }
+
+    fn italic_range(&self) -> crate::text::FontAxisValues {
+        if let Some(axis) = self.axis(ITALIC_AXIS) {
+            FontAxisValues::Range(axis.minimum, axis.maximum)
+        } else {
+            FontAxisValues::Fixed(unsafe {
+                if (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 {
+                    I16Dot16::ONE
+                } else {
+                    I16Dot16::ZERO
+                }
+            })
+        }
+    }
+
+    fn contains_codepoint(&self, codepoint: u32) -> bool {
+        if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
+            return false;
+        }
+
+        #[allow(clippy::useless_conversion)]
+        let index = unsafe { FT_Get_Char_Index(self.face, codepoint as std::ffi::c_ulong) };
+
+        index != 0
     }
 
     type Error = FreeTypeError;

@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    cell::UnsafeCell,
+    cell::{RefCell, UnsafeCell},
     ffi::{c_char, c_int, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
@@ -9,10 +9,9 @@ use std::{
 };
 
 use rasterize::color::BGRA8;
-use util::math::I16Dot16;
 
 use crate::{
-    text::{Face, FontAxisValues, WEIGHT_AXIS},
+    text::{CustomFontProvider, Face},
     Renderer, Subrandr, SubtitleContext, Subtitles,
 };
 
@@ -231,6 +230,7 @@ macro_rules! ctrywrap {
     };
 }
 
+mod custom_font_provider;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
@@ -395,6 +395,21 @@ unsafe extern "C" fn sbr_renderer_set_subtitles(
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_set_custom_font_provider(
+    renderer: *mut Renderer<'static>,
+    provider: *const RefCell<CustomFontProvider>,
+) {
+    if provider.is_null() {
+        (*renderer).fonts.set_custom_font_provider(None);
+    } else {
+        Rc::increment_strong_count(provider);
+        (*renderer)
+            .fonts
+            .set_custom_font_provider(Some(Rc::from_raw(provider)));
+    }
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_did_change(
     renderer: *mut Renderer<'static>,
     ctx: *const SubtitleContext,
@@ -415,47 +430,6 @@ unsafe extern "C" fn sbr_renderer_render(
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
     ctry!((*renderer).render(&*ctx, t, buffer, width, height, stride));
-    0
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_clear_fonts(renderer: *mut Renderer<'static>) {
-    (*renderer).fonts.clear_extra();
-}
-
-// This is very unstable: the variable font handling will probably have to change in the future
-// to hold a supported weight range
-// TODO: add to header and test
-// TODO: add width
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_add_font(
-    renderer: *mut Renderer<'static>,
-    family: *const c_char,
-    weight: f32,
-    italic: bool,
-    font: *mut Face,
-) -> i32 {
-    let family = ctrywrap!(
-        InvalidArgument("Path is not valid UTF-8"),
-        CStr::from_ptr(family).to_str()
-    );
-    (*renderer).fonts.add_extra(crate::text::FaceInfo {
-        family: family.into(),
-        width: FontAxisValues::Fixed(I16Dot16::new(100)),
-        weight: match weight {
-            f if f.is_nan() => (*font).axis(WEIGHT_AXIS).map_or_else(
-                || FontAxisValues::Fixed((*font).weight()),
-                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
-            ),
-            f if (0.0..1000.0).contains(&f) => {
-                crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(f))
-            }
-            _ => cthrow!(InvalidArgument, "Font weight out of range"),
-        },
-        italic,
-        source: crate::text::FontSource::Memory((*font).clone()),
-    });
-
     0
 }
 

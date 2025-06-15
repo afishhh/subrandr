@@ -1,5 +1,6 @@
-use std::{collections::HashMap, hash::Hash, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, hash::Hash, path::PathBuf, rc::Rc};
 
+use text::panose;
 use thiserror::Error;
 use util::{math::I16Dot16, AnyError};
 
@@ -40,6 +41,20 @@ pub struct FaceInfo {
     pub weight: FontAxisValues,
     pub italic: bool,
     pub source: FontSource,
+}
+
+impl FaceInfo {
+    fn from_face(face: Face) -> Self {
+        Self {
+            family: face.family_name().into(),
+            // TODO: fetch this from the font
+            width: FontAxisValues::Fixed(I16Dot16::ZERO),
+            weight: face.weight_range(),
+            // TODO: italic_range()
+            italic: face.italic(),
+            source: FontSource::Memory(face),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +212,177 @@ mod provider {
     }
 }
 
+#[derive(Debug)]
+pub struct CustomFontProvider {
+    faces: Vec<CustomFontInfo>,
+    /// Fonts sorted by serif type (serif fonts first).
+    serif_fallback: Vec<(Option<SerifType>, FaceInfo)>,
+    /// Fonts sorted by serif type (sans serif fonts first).
+    sans_serif_fallback: Vec<(Option<SerifType>, FaceInfo)>,
+    /// Fonts sorted by proportionality (monospace fonts first).
+    monospace_fallback: Vec<(Option<bool>, FaceInfo)>,
+    /// Fonts keyed on lowercase name.
+    by_name: HashMap<Box<str>, Vec<FaceInfo>>,
+    /// If true then the fallback lists may be unsorted and have to be sorted
+    /// before being used.
+    dirty: bool,
+}
+
+#[derive(Debug)]
+struct CustomFontInfo {
+    face: Face,
+    monospace: Option<bool>,
+    serif: Option<SerifType>,
+}
+
+impl CustomFontInfo {
+    fn classify(face: text::freetype::Face) -> Self {
+        let mut monospace = None;
+        let mut serif = None;
+
+        if let Some(panose) = face.panose() {
+            match panose {
+                panose::Classification::LatinText(text) => {
+                    monospace = Some(matches!(text.proportion, panose::Proportion::Monospaced));
+                    serif = Some(if text.serif_style.is_sans_serif() {
+                        SerifType::Sans
+                    } else {
+                        SerifType::Serif
+                    })
+                }
+                _ => (),
+            }
+        }
+
+        Self {
+            monospace,
+            serif,
+            face: Face::FreeType(face),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+enum SerifType {
+    Sans,
+    Serif,
+}
+
+impl CustomFontProvider {
+    pub fn new() -> Self {
+        Self {
+            faces: Vec::new(),
+            serif_fallback: Vec::new(),
+            sans_serif_fallback: Vec::new(),
+            monospace_fallback: Vec::new(),
+            by_name: HashMap::new(),
+            dirty: false,
+        }
+    }
+
+    pub fn add_font(&mut self, face: text::freetype::Face) {
+        let full_info = CustomFontInfo::classify(face);
+        let face_info = FaceInfo::from_face(full_info.face.clone());
+
+        self.serif_fallback
+            .push((full_info.serif, face_info.clone()));
+        self.sans_serif_fallback
+            .push((full_info.serif, face_info.clone()));
+        self.monospace_fallback
+            .push((full_info.monospace, face_info.clone()));
+        self.faces.push(full_info);
+        self.dirty = true;
+    }
+
+    fn sort_if_dirty(&mut self) {
+        if self.dirty {
+            self.dirty = false;
+        }
+    }
+
+    fn has_last_resort_fallback_for_family(family: &str) -> bool {
+        matches!(family, "monospace" | "sans-serif" | "serif")
+    }
+
+    fn last_resort_query_generic_family(
+        &mut self,
+        family: &str,
+    ) -> Result<Vec<FaceInfo>, AnyError> {
+        self.sort_if_dirty();
+
+        let mut result = Vec::new();
+
+        // Attempt to put together possible candidates for generic family names so we don't
+        // just fail to find these if no platform font provider is available.
+        //
+        // TODO: Make an API for setting this explicitly, although a fallback is still good
+        // TODO: Better heuristics?
+        match family {
+            "monospace" => {
+                for (name, face) in &self.by_name {
+                    if name.contains("mono") {
+                        result.extend(face.iter().cloned());
+                    }
+                }
+            }
+            "sans-serif" => {
+                for (name, face) in &self.by_name {
+                    if name.contains("sans") {
+                        result.extend(face.iter().cloned());
+                    }
+                }
+            }
+            "serif" => {
+                for (name, face) in &self.by_name {
+                    if name.contains("serif") {
+                        result.extend(face.iter().cloned());
+                    }
+                }
+            }
+            // TODO: srv3 also uses "cursive" although I have no idea how to fallback sensibly
+            //       for it.
+            _ => (),
+        }
+
+        Ok(result)
+    }
+}
+
+impl FontProvider for CustomFontProvider {
+    fn query_fallback(&mut self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, AnyError> {
+        self.sort_if_dirty();
+
+        let mut result = Vec::new();
+
+        for info in &mut self.faces {
+            if !info.face.contains_codepoint(request.codepoint) {
+                continue;
+            }
+
+            result.push(FaceInfo::from_face(info.face.clone()));
+        }
+
+        result.sort_by_cached_key(|font| {
+            let score = request
+                .families
+                .iter()
+                .position(|rf| font.family.eq_ignore_ascii_case(rf))
+                .unwrap_or(usize::MAX);
+
+            score
+        });
+
+        Ok(result)
+    }
+
+    fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError> {
+        Ok(self
+            .by_name
+            .get(family.to_lowercase().as_str())
+            .map_or_else(Vec::new, |v| v.clone()))
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum LoadError {
     #[error(transparent)]
@@ -230,7 +416,7 @@ pub struct FontDb<'a> {
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
     request_cache: HashMap<FontFallbackRequest, Option<Face>>,
     provider: Box<dyn FontProvider>,
-    custom: Vec<FaceInfo>,
+    custom: Option<Rc<RefCell<CustomFontProvider>>>,
 }
 
 pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
@@ -250,16 +436,12 @@ impl<'a> FontDb<'a> {
             family_cache: HashMap::new(),
             request_cache: HashMap::new(),
             provider,
-            custom: Vec::new(),
+            custom: None,
         })
     }
 
-    pub fn clear_extra(&mut self) {
-        self.custom.clear();
-    }
-
-    pub fn add_extra(&mut self, font: FaceInfo) {
-        self.custom.push(font);
+    pub fn set_custom_font_provider(&mut self, provider: Option<Rc<RefCell<CustomFontProvider>>>) {
+        self.custom = provider;
     }
 
     pub fn advance_cache_generation(&mut self) {
@@ -287,23 +469,22 @@ impl<'a> FontDb<'a> {
                 self.sbr,
                 "Querying font provider for font matching {request:?}"
             );
-            let mut choices = self
-                .provider
-                .query_fallback(request)
-                .map_err(SelectError::Provider)?;
 
-            let custom_start = choices.len();
-            choices.extend(self.custom.iter().cloned());
+            let mut choices = Vec::new();
 
-            choices[custom_start..].sort_by_cached_key(|font| {
-                let score = request
-                    .families
-                    .iter()
-                    .position(|rf| font.family.eq_ignore_ascii_case(rf))
-                    .unwrap_or(usize::MAX);
+            if let Some(provider) = &self.custom {
+                choices = provider
+                    .borrow_mut()
+                    .query_fallback(request)
+                    .map_err(SelectError::Provider)?;
+            }
 
-                score
-            });
+            if choices.is_empty() {
+                choices = self
+                    .provider
+                    .query_fallback(request)
+                    .map_err(SelectError::Provider)?;
+            }
 
             let mut result = choose(&choices, &request.style)
                 .map(|x| self.open(x))
@@ -333,12 +514,36 @@ impl<'a> FontDb<'a> {
 
         trace!(self.sbr, "Querying font provider for font family {name:?}");
 
-        let result = self
-            .provider
-            .query_family(name)
-            .map_err(SelectError::Provider)?;
+        let mut result = Vec::new();
+
+        if let Some(provider) = &self.custom {
+            result = provider
+                .borrow_mut()
+                .query_family(name)
+                .map_err(SelectError::Provider)?;
+        }
+
+        if result.is_empty() {
+            result = self
+                .provider
+                .query_family(name)
+                .map_err(SelectError::Provider)?;
+        }
 
         trace!(self.sbr, "Font family query {name:?} returned {result:?}");
+
+        if result.is_empty() && CustomFontProvider::has_last_resort_fallback_for_family(name) {
+            if let Some(provider) = &self.custom {
+                trace!(
+                    self.sbr,
+                    "Querying custom font provider for generic font family fallback {name:?}"
+                );
+
+                result = provider
+                    .borrow_mut()
+                    .last_resort_query_generic_family(name)?;
+            }
+        }
 
         Ok(self
             .family_cache

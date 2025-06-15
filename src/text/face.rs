@@ -14,6 +14,7 @@ use text_sys::hb_font_t;
 use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::FreeTypeError;
+use crate::text::FontAxisValues;
 
 pub mod freetype;
 pub mod panose;
@@ -139,7 +140,11 @@ trait FaceImpl: Sized {
     fn set_axis(&mut self, index: usize, value: I16Dot16);
 
     fn weight(&self) -> I16Dot16;
+    fn weight_range(&self) -> FontAxisValues;
     fn italic(&self) -> bool;
+    fn italic_range(&self) -> FontAxisValues;
+
+    fn contains_codepoint(&self, codepoint: u32) -> bool;
 
     type Error;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error>;
@@ -319,7 +324,11 @@ impl Face {
         pub fn set_axis[&mut](index: usize, value: I16Dot16) -> ();
 
         pub fn weight[&]() -> I16Dot16;
+        pub fn weight_range[&]() -> FontAxisValues;
         pub fn italic[&]() -> bool;
+        pub fn italic_range[&]() -> FontAxisValues;
+
+        pub fn contains_codepoint[&mut](value: u32) -> bool;
     );
 
     pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {

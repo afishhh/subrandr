@@ -70,7 +70,7 @@ impl BGRA8 {
 
     pub const fn mul_alpha(self, other: u8) -> Self {
         Self {
-            a: ((self.a as u16 * other as u16) / 255) as u8,
+            a: mul_rgb(self.a, other),
             ..self
         }
     }
@@ -86,11 +86,10 @@ pub struct Premultiplied<T: Premultiply>(pub T);
 
 impl Premultiply for BGRA8 {
     fn premultiply(self) -> Premultiplied<Self> {
-        let a = self.a as u16;
         Premultiplied(Self {
-            b: ((self.b as u16 * a) / 255) as u8,
-            g: ((self.g as u16 * a) / 255) as u8,
-            r: ((self.r as u16 * a) / 255) as u8,
+            b: mul_rgb(self.b, self.a),
+            g: mul_rgb(self.g, self.a),
+            r: mul_rgb(self.r, self.a),
             a: self.a,
         })
     }
@@ -119,8 +118,8 @@ impl Premultiplied<BGRA8> {
         b: /* TODO: Premultiplied< */ BGRA8, /* > */
     ) -> Premultiplied<BGRA8> {
         let a = self.0;
-        let inva = (255 - a.a) as u16;
-        let one = |a, b| a + (inva * b as u16 / 255) as u8;
+        let inva = 255 - a.a;
+        let one = |a, b| a + mul_rgb(inva, b);
         Premultiplied(BGRA8 {
             b: one(a.b, b.b),
             g: one(a.g, b.g),
@@ -131,10 +130,36 @@ impl Premultiplied<BGRA8> {
 
     pub const fn mul_alpha(self, other: u8) -> Self {
         Self(BGRA8 {
-            b: ((self.0.b as u16 * other as u16) / 255) as u8,
-            g: ((self.0.g as u16 * other as u16) / 255) as u8,
-            r: ((self.0.r as u16 * other as u16) / 255) as u8,
-            a: ((self.0.a as u16 * other as u16) / 255) as u8,
+            b: mul_rgb(self.0.b, other),
+            g: mul_rgb(self.0.g, other),
+            r: mul_rgb(self.0.r, other),
+            a: mul_rgb(self.0.a, other),
         })
+    }
+}
+
+const fn mul_rgb(a: u8, b: u8) -> u8 {
+    let c = a as u16 * b as u16 + 128;
+    ((c + (c >> 8)) >> 8) as u8
+}
+
+#[cfg(test)]
+mod test {
+    use super::mul_rgb;
+
+    #[test]
+    fn test_mul_rgb() {
+        assert_eq!(mul_rgb(255, 1), 1);
+        assert_eq!(mul_rgb(255, 255), 255);
+
+        for a in 0..=255 {
+            for b in 0..=255 {
+                assert_eq!(
+                    mul_rgb(a, b),
+                    ((a as u16 * b as u16 + 127) / 255) as u8,
+                    "{a} * {b} yielded incorrect result"
+                );
+            }
+        }
     }
 }

@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize};
 
 struct MpvSocket {
     stream: BufReader<UnixStream>,

@@ -1,9 +1,9 @@
 use std::net::TcpStream;
 
 use anyhow::Result;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::json;
-use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
+use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 struct ChromeDebugSocket {
     ws: WebSocket<MaybeTlsStream<TcpStream>>,

@@ -169,12 +169,22 @@ fn write_implib(arch: &str, def_content: &str, dllname: &str, output_path: &Path
 #[derive(Debug, Deserialize)]
 struct Manifest {
     package: Package,
+    workspace: WorkspaceMetadata,
 }
 
 #[derive(Debug, Deserialize)]
 struct Package {
-    version: Box<str>,
     metadata: PackageMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceMetadata {
+    package: WorkspacePackageMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspacePackageMetadata {
+    version: Box<str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,7 +238,7 @@ fn main() -> Result<()> {
             )
             .context("Failed to parse Cargo.toml")?;
 
-            let version = manifest.package.version;
+            let version = manifest.workspace.package.version;
             let abiver = manifest.package.metadata.capi.abiver;
 
             (|| -> Result<()> {

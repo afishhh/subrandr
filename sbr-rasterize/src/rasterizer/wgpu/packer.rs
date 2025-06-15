@@ -5,9 +5,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use util::math::{Point2, Vec2};
 use wgpu::{CommandEncoder, TextureFormat};
-
-use crate::math::{Point2, Vec2};
 
 /// A texture packer that packs stuff into (potentially multiple) atlas textures.
 ///

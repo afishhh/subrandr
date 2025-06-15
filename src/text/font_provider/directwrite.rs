@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use util::math::I16Dot16;
 use windows::core::{implement, Interface, PCWSTR};
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFont, IDWriteFontCollection,
@@ -12,7 +13,6 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 use windows_core::BOOL;
 
-use crate::math::I16Dot16;
 use crate::text::font_db::FontProvider;
 use crate::text::{Face, FaceInfo, LoadError};
 
@@ -275,7 +275,7 @@ impl FontProvider for DirectWriteFontProvider {
     fn query_fallback(
         &mut self,
         request: &crate::text::FontFallbackRequest,
-    ) -> Result<Vec<crate::text::FaceInfo>, crate::util::AnyError> {
+    ) -> Result<Vec<crate::text::FaceInfo>, util::AnyError> {
         unsafe {
             let (utf16, len) = codepoint_to_utf16(request.codepoint);
             let source = TextAnalysisSource { text: utf16, len };
@@ -320,10 +320,7 @@ impl FontProvider for DirectWriteFontProvider {
         }
     }
 
-    fn query_family(
-        &mut self,
-        family: &str,
-    ) -> Result<Vec<crate::text::FaceInfo>, crate::util::AnyError> {
+    fn query_family(&mut self, family: &str) -> Result<Vec<crate::text::FaceInfo>, util::AnyError> {
         let mut result = Vec::new();
 
         unsafe {

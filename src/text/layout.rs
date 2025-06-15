@@ -2,9 +2,9 @@ use std::rc::Rc;
 
 use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
+use util::math::{I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{
-    math::{I26Dot6, Point2, Rect2, Vec2},
     style::types::HorizontalAlignment,
     text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
 };

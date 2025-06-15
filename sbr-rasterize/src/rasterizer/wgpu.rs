@@ -1,16 +1,14 @@
 use std::mem::MaybeUninit;
 
-use packer::{PackedTexture, TexturePacker};
+use util::math::{Point2, Point2f, Rect2f, Vec2, Vec2f};
 use wgpu::{include_wgsl, util::DeviceExt, vertex_attr_array};
 
-use crate::{
-    color::BGRA8,
-    math::{Point2, Point2f, Vec2, Vec2f},
-};
+use crate::color::BGRA8;
 
 use super::{sw::blur::gaussian_sigma_to_box_radius, PixelFormat};
 
 mod packer;
+use packer::{PackedTexture, TexturePacker};
 
 pub struct Rasterizer {
     device: wgpu::Device,
@@ -1036,7 +1034,7 @@ impl super::Rasterizer for Rasterizer {
         &mut self,
         target: &mut super::RenderTarget,
         offset: Vec2f,
-        vertices: &[crate::math::Point2f],
+        vertices: &[Point2f],
         color: crate::color::BGRA8,
     ) {
         self.stroke_polyline_or_polygon(target, offset, vertices, false, color);
@@ -1046,7 +1044,7 @@ impl super::Rasterizer for Rasterizer {
         &mut self,
         target: &mut super::RenderTarget,
         offset: Vec2f,
-        vertices: &[crate::math::Point2f],
+        vertices: &[Point2f],
         color: crate::color::BGRA8,
     ) {
         self.stroke_polyline_or_polygon(target, offset, vertices, true, color);
@@ -1055,7 +1053,7 @@ impl super::Rasterizer for Rasterizer {
     fn fill_triangle(
         &mut self,
         target: &mut super::RenderTarget,
-        vertices: &[crate::math::Point2f; 3],
+        vertices: &[Point2f; 3],
         color: crate::color::BGRA8,
     ) {
         self.fill_triangles(target, vertices, color);
@@ -1064,7 +1062,7 @@ impl super::Rasterizer for Rasterizer {
     fn fill_axis_aligned_rect(
         &mut self,
         target: &mut super::RenderTarget,
-        rect: crate::math::Rect2f,
+        rect: Rect2f,
         color: BGRA8,
     ) {
         // TODO: Anti aliased rectangle drawing

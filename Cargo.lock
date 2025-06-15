@@ -1611,6 +1611,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbr-rasterize"
+version = "0.1.0"
+dependencies = [
+ "sbr-util",
+ "wgpu",
+]
+
+[[package]]
+name = "sbr-util"
+version = "0.1.0"
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1763,9 +1775,10 @@ dependencies = [
  "icu_segmenter",
  "once_cell",
  "quick-xml 0.36.2",
+ "sbr-rasterize",
+ "sbr-util",
  "text-sys",
  "thiserror 1.0.63",
- "wgpu",
  "windows 0.61.1",
  "windows-core 0.61.0",
 ]

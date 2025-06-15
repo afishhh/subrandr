@@ -5,14 +5,13 @@ use std::{
     rc::Rc,
 };
 
+use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
 use thiserror::Error;
+use util::math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f};
 
 use crate::{
-    color::BGRA8,
     layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
-    math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
-    rasterize::{self, Rasterizer, RenderTarget},
     srv3,
     style::types::{
         Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
@@ -834,10 +833,7 @@ impl Renderer<'_> {
                             if text.style.background_color.a != 0 {
                                 pass.rasterizer.fill_axis_aligned_rect(
                                     target,
-                                    Rect2::layout_to_float(Rect2::from_min_size(
-                                        current,
-                                        text.fbox.size,
-                                    )),
+                                    Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
                                     text.style.background_color,
                                 );
                             }
@@ -888,7 +884,7 @@ impl Renderer<'_> {
                                     BGRA8::GOLD,
                                 )?;
 
-                                let final_logical_boxf = Rect2::layout_to_float(final_logical_box);
+                                let final_logical_boxf = Rect2::to_float(final_logical_box);
 
                                 pass.rasterizer.stroke_axis_aligned_rect(
                                     target,

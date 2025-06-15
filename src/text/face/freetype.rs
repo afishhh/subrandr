@@ -7,19 +7,16 @@ use std::{
     sync::Arc,
 };
 
+use rasterize::{PixelFormat, Rasterizer};
 use text_sys::*;
 use thiserror::Error;
+use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::{
     Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
     SingleGlyphBitmap, ITALIC_AXIS, WEIGHT_AXIS,
 };
-use crate::{
-    math::{I16Dot16, I26Dot6, Vec2},
-    outline::Outline,
-    rasterize::{PixelFormat, Rasterizer},
-    text::ft_utils::*,
-};
+use crate::{outline::Outline, text::ft_utils::*};
 
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);

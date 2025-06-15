@@ -1,13 +1,13 @@
 use std::fmt::Debug;
 
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
-
-use crate::{
-    color::BGRA8,
+use rasterize::color::BGRA8;
+use util::{
     math::{I16Dot16, I26Dot6},
-    text::layout::TextWrapMode,
-    util::SmallTypeMap,
+    small_type_map::SmallTypeMap,
 };
+
+use crate::text::layout::TextWrapMode;
 
 pub mod types;
 

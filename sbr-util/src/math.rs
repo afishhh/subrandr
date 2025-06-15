@@ -11,8 +11,6 @@ pub use fixed::*;
 mod num;
 pub use num::*;
 
-use crate::layout::FixedL;
-
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
 pub struct Point2<N> {
@@ -73,14 +71,12 @@ impl<N: Copy> Vec2<N> {
     }
 }
 
-#[expect(dead_code)]
 impl<N: Number + Signed> Vec2<N> {
     pub fn normal(self) -> Self {
         Self::new(self.y, -self.x)
     }
 }
 
-#[expect(dead_code)]
 impl<N: Number> Vec2<N> {
     pub fn length(self) -> N
     where
@@ -92,6 +88,7 @@ impl<N: Number> Vec2<N> {
     pub fn length_sq(self) -> N {
         self.x * self.x + self.y * self.y
     }
+
     /// Calculates the dot product of two vectors.
     ///
     /// The dot product of two (2d) vectors is defined for vector u and v as:
@@ -327,12 +324,13 @@ impl<N: Number + Display> Rect2<N> {
     }
 }
 
-impl Rect2<FixedL> {
+// TODO: Really should get rid of the Display bound...
+impl<N: Display + Copy + Into<f32>> Rect2<N> {
     // TODO: A trait for casting these types?
-    pub fn layout_to_float(rect: Self) -> Rect2f {
+    pub fn to_float(rect: Self) -> Rect2f {
         Rect2::new(
-            Point2::new(rect.min.x.into_f32(), rect.min.y.into_f32()),
-            Point2::new(rect.max.x.into_f32(), rect.max.y.into_f32()),
+            Point2::new(rect.min.x.into(), rect.min.y.into()),
+            Point2::new(rect.max.x.into(), rect.max.y.into()),
         )
     }
 }

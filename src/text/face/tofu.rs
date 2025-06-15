@@ -1,5 +1,6 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
+use rasterize::{PixelFormat, Rasterizer};
 use text_sys::{
     hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_destroy,
     hb_face_set_glyph_count, hb_font_create, hb_font_destroy, hb_font_extents_t,
@@ -9,16 +10,13 @@ use text_sys::{
     hb_font_get_user_data, hb_font_make_immutable, hb_font_reference, hb_font_set_funcs,
     hb_font_set_user_data, hb_font_t, hb_glyph_extents_t, hb_position_t, hb_user_data_key_t,
 };
-
-use crate::{
-    layout::{FixedL, Point2L, Vec2L},
-    math::{I16Dot16, Point2, Rect2, Vec2},
-    rasterize::{PixelFormat, Rasterizer},
-    util::slice_assume_init_mut,
-    I26Dot6,
+use util::{
+    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
+    slice_assume_init_mut,
 };
 
 use super::{FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, SingleGlyphBitmap};
+use crate::layout::{FixedL, Point2L, Vec2L};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Face;
@@ -34,11 +32,11 @@ impl FaceImpl for Face {
         &[]
     }
 
-    fn set_axis(&mut self, _index: usize, _value: crate::math::I16Dot16) {
+    fn set_axis(&mut self, _index: usize, _value: I16Dot16) {
         panic!("Cannot set builtin tofu font axis values")
     }
 
-    fn weight(&self) -> crate::math::I16Dot16 {
+    fn weight(&self) -> I16Dot16 {
         I16Dot16::new(400)
     }
 
@@ -325,8 +323,8 @@ impl FontImpl for Font {
                     texture.fill(MaybeUninit::new(0));
                     let texture = slice_assume_init_mut(texture);
 
-                    let mut rasterizer = crate::rasterize::sw::Rasterizer::new();
-                    let mut target = crate::rasterize::sw::create_render_target_mono(
+                    let mut rasterizer = rasterize::sw::Rasterizer::new();
+                    let mut target = rasterize::sw::create_render_target_mono(
                         texture,
                         texture_size.x,
                         texture_size.y,
@@ -335,7 +333,7 @@ impl FontImpl for Font {
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2::layout_to_float(
+                        Rect2::to_float(
                             Rect2 {
                                 min: Point2::new(FixedL::ZERO, outline_size.y - outline_width),
                                 max: Point2::new(outline_size.x, outline_size.y),
@@ -347,7 +345,7 @@ impl FontImpl for Font {
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2::layout_to_float(
+                        Rect2::to_float(
                             Rect2 {
                                 min: Point2::new(FixedL::ZERO, FixedL::ZERO),
                                 max: Point2::new(outline_size.x, outline_width),
@@ -359,7 +357,7 @@ impl FontImpl for Font {
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2::layout_to_float(
+                        Rect2::to_float(
                             Rect2 {
                                 min: Point2::new(FixedL::ZERO, outline_width),
                                 max: Point2::new(outline_width, outline_size.y - outline_width),
@@ -371,7 +369,7 @@ impl FontImpl for Font {
 
                     rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                         &mut target,
-                        Rect2::layout_to_float(
+                        Rect2::to_float(
                             Rect2 {
                                 min: Point2::new(outline_size.x - outline_width, outline_width),
                                 max: Point2::new(outline_size.x, outline_size.y - outline_width),
@@ -436,7 +434,7 @@ impl FontImpl for Font {
                                 |p: Point2L| Point2::new(p.x * size.x / 200, p.y * size.y / 400);
                             rasterizer.fill_axis_aligned_antialias_mono_rect_set(
                                 &mut target,
-                                Rect2::layout_to_float(
+                                Rect2::to_float(
                                     Rect2 {
                                         min: transform(rect.min),
                                         max: transform(rect.max),

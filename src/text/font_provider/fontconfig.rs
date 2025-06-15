@@ -7,14 +7,11 @@ use std::{
 
 use text_sys::fontconfig::*;
 use thiserror::Error;
+use util::{math::I16Dot16, AnyError};
 
-use crate::{
-    math::I16Dot16,
-    text::{
-        font_db::{FaceInfo, FontFallbackRequest, FontProvider, FontSource},
-        FontAxisValues,
-    },
-    util::AnyError,
+use crate::text::{
+    font_db::{FaceInfo, FontFallbackRequest, FontProvider, FontSource},
+    FontAxisValues,
 };
 
 #[derive(Debug)]

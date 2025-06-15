@@ -1,8 +1,9 @@
 use std::{collections::HashMap, hash::Hash, path::PathBuf};
 
 use thiserror::Error;
+use util::{math::I16Dot16, AnyError};
 
-use crate::{log::trace, math::I16Dot16, text, util::AnyError, Subrandr};
+use crate::{log::trace, text, Subrandr};
 
 use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 
@@ -142,8 +143,10 @@ mod provider {
     #[path = "font_provider/directwrite.rs"]
     pub mod directwrite;
 
+    use util::AnyError;
+
     use super::FontProvider;
-    use crate::{util::AnyError, Subrandr};
+    use crate::Subrandr;
 
     pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
         #[cfg(target_family = "unix")]

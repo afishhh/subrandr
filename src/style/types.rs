@@ -1,7 +1,5 @@
-use crate::{
-    color::BGRA8,
-    math::{I26Dot6, Vec2f},
-};
+use rasterize::color::BGRA8;
+use util::math::{I26Dot6, Vec2f};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);

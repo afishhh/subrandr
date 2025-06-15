@@ -1,16 +1,16 @@
+//! Converts parsed SRV3 subtitles into Subtitles.
+
 use std::{collections::HashMap, ops::Range, rc::Rc};
 
-/// Converts parsed SRV3 subtitles into Subtitles.
-///
-/// Was initially based on YTSubConverter, now also reverse engineered from YouTube's captions.js.
+use rasterize::color::BGRA8;
+use util::math::{I16Dot16, I26Dot6, Vec2f};
+
 use crate::{
-    color::BGRA8,
     layout::{
         self, BlockContainer, FixedL, InlineContainer, InlineLayoutError, InlineText,
         LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning},
-    math::{I16Dot16, I26Dot6, Vec2f},
     renderer::FrameLayoutPass,
     style::{
         self,

@@ -1,13 +1,14 @@
 use std::{ops::Range, rc::Rc};
 
+use rasterize::color::BGRA8;
+use util::math::{I16Dot16, Point2, Rect2};
+
 use crate::{
-    color::BGRA8,
     layout::{
         self, BlockContainer, BlockContainerFragment, FixedL, InlineContainer, InlineLayoutError,
         InlineText, LineBoxFragment, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
-    math::{I16Dot16, Point2, Rect2},
     renderer::FrameLayoutPass,
     style::{
         self,

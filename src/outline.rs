@@ -3,8 +3,7 @@
 use std::fmt::Debug;
 
 use text_sys::{FT_Outline, FT_Vector, FT_CURVE_TAG_CONIC, FT_CURVE_TAG_CUBIC, FT_CURVE_TAG_ON};
-
-use crate::{math::*, util::fmt_from_fn};
+use util::{fmt_from_fn, math::*};
 
 pub struct OutlineBuilder {
     outline: Outline,

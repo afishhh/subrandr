@@ -1,15 +1,13 @@
 use std::{mem::MaybeUninit, sync::Arc};
 
-use blur::gaussian_sigma_to_box_radius;
+use util::math::{Point2f, Rect2f, Vec2f};
 
 use super::PixelFormat;
-use crate::{
-    color::BGRA8,
-    math::{Point2f, Rect2f, Vec2f},
-};
+use crate::color::BGRA8;
 
 mod blit;
 pub(super) mod blur;
+use blur::gaussian_sigma_to_box_radius;
 
 #[derive(Debug, Clone)]
 struct Bresenham {
@@ -925,7 +923,7 @@ impl super::Rasterizer for Rasterizer {
     fn fill_axis_aligned_rect(
         &mut self,
         target: &mut super::RenderTarget,
-        rect: crate::math::Rect2f,
+        rect: Rect2f,
         color: BGRA8,
     ) {
         let target = unwrap_sw_render_target(target);
@@ -946,7 +944,7 @@ impl super::Rasterizer for Rasterizer {
     fn fill_axis_aligned_antialias_rect(
         &mut self,
         target: &mut super::RenderTarget,
-        rect: crate::math::Rect2f,
+        rect: Rect2f,
         color: BGRA8,
     ) {
         let target = unwrap_sw_render_target(target);
@@ -1093,7 +1091,7 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blur_padding(&mut self) -> crate::math::Vec2f {
+    fn blur_padding(&mut self) -> Vec2f {
         Vec2f::new(self.blurer.padding() as f32, self.blurer.padding() as f32)
     }
 

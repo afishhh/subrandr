@@ -1,8 +1,9 @@
 use std::{alloc::Layout, sync::Arc};
 
+use rasterize::color::BGRA8;
+use util::math::I16Dot16;
+
 use crate::{
-    color::BGRA8,
-    math::I16Dot16,
     text::{Face, FaceInfo, FontAxisValues, WEIGHT_AXIS},
     Renderer, Subrandr,
 };

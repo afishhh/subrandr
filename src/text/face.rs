@@ -9,13 +9,11 @@ use std::{
 };
 
 use once_cell::unsync::OnceCell;
+use rasterize::{Rasterizer, Texture};
 use text_sys::hb_font_t;
+use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::FreeTypeError;
-use crate::{
-    math::{I16Dot16, I26Dot6, Vec2},
-    rasterize::{Rasterizer, Texture},
-};
 
 mod freetype;
 pub use freetype::GlyphRenderError;

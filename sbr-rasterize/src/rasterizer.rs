@@ -1,23 +1,21 @@
 use std::{fmt::Write, mem::MaybeUninit};
 
-use crate::{
-    color::BGRA8,
-    math::{Point2f, Rect2f, Vec2f},
-};
+use util::math::{Point2f, Rect2f, Vec2f};
 
-pub(crate) mod sw;
+use crate::color::BGRA8;
+
+pub mod sw;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum PixelFormat {
+pub enum PixelFormat {
     Mono,
     Bgra,
 }
 
 impl PixelFormat {
-    #[cfg_attr(not(feature = "wgpu"), expect(dead_code))]
-    pub(crate) fn width(&self) -> u8 {
+    pub fn width(&self) -> u8 {
         match self {
             PixelFormat::Mono => 1,
             PixelFormat::Bgra => 4,
@@ -47,7 +45,7 @@ impl RenderTargetInner<'_> {
 pub struct RenderTarget<'a>(RenderTargetInner<'a>);
 
 impl RenderTarget<'_> {
-    pub(crate) fn width(&self) -> u32 {
+    pub fn width(&self) -> u32 {
         match &self.0 {
             // TODO: Make these fields private and have all the impls define accessors for them
             RenderTargetInner::Software(sw) => sw.width,
@@ -58,8 +56,7 @@ impl RenderTarget<'_> {
         }
     }
 
-    #[expect(dead_code, reason = "how can I have a width without a height")]
-    pub(crate) fn height(&self) -> u32 {
+    pub fn height(&self) -> u32 {
         match &self.0 {
             // TODO: Make these fields private and have all the impls define accessors for them
             RenderTargetInner::Software(sw) => sw.height,
@@ -89,10 +86,10 @@ impl TextureInner {
 }
 
 #[derive(Clone)]
-pub(crate) struct Texture(TextureInner);
+pub struct Texture(TextureInner);
 
 impl Texture {
-    pub(crate) fn width(&self) -> u32 {
+    pub fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width,
             #[cfg(feature = "wgpu")]
@@ -100,7 +97,7 @@ impl Texture {
         }
     }
 
-    pub(crate) fn height(&self) -> u32 {
+    pub fn height(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.height,
             #[cfg(feature = "wgpu")]
@@ -109,13 +106,18 @@ impl Texture {
     }
 }
 
-pub(crate) trait Rasterizer {
+pub trait Rasterizer {
     // Used for displaying debug information
     fn name(&self) -> &'static str;
     fn write_debug_info(&self, _writer: &mut dyn Write) -> std::fmt::Result {
         Ok(())
     }
 
+    /// Creates a new texture via memory-mapped initialization.
+    ///
+    /// # Safety
+    ///
+    /// `callback` must initialize the entire buffer passed to it before returning.
     #[allow(clippy::type_complexity)]
     unsafe fn create_texture_mapped(
         &mut self,
@@ -126,6 +128,12 @@ pub(crate) trait Rasterizer {
         callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
     ) -> Texture;
 
+    /// Creates a new atlased texture via memory-mapped initialization.
+    ///
+    /// # Safety
+    ///
+    /// `callback` must initialize the entire buffer passed to it before returning.
+    // TODO: Merge into create_texture_mapped as parameter?
     #[allow(clippy::type_complexity)]
     unsafe fn create_packed_texture_mapped(
         &mut self,
@@ -154,7 +162,6 @@ pub(crate) trait Rasterizer {
         self.line(target, Point2f::new(x0, y), Point2f::new(x1, y), color);
     }
 
-    #[expect(dead_code)]
     fn fill_triangle(&mut self, target: &mut RenderTarget, vertices: &[Point2f; 3], color: BGRA8);
 
     fn stroke_polygon(
@@ -217,6 +224,14 @@ pub(crate) trait Rasterizer {
         color: BGRA8,
     );
 
+    /// Blits `texture` onto `target` at (`dx`, `dy`).
+    ///
+    /// `target` must be a monochrome render texture and `texture` must be a monochrome texture.
+    ///
+    /// # Safety
+    ///
+    /// Blitting `texture` onto `target` at the specified coordinates (`dx`, `dy`) must not
+    /// result in out-of-bounds accesses on either `texture` or `target`.
     unsafe fn blit_to_mono_texture_unchecked(
         &mut self,
         target: &mut RenderTarget,
@@ -225,7 +240,7 @@ pub(crate) trait Rasterizer {
         texture: &Texture,
     );
 
-    /// Flush pending buffered draws.
+    /// Flushes pending buffered draws.
     ///
     /// Some rasterizers, like the wgpu one, may batch some operations to reduce the amount of
     /// binding and draw calls. These batched operations may be flushed to ensure they're executed

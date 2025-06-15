@@ -1,4 +1,4 @@
-use crate::math::Point2;
+use util::math::Point2;
 
 mod text;
 pub(super) use text::*;

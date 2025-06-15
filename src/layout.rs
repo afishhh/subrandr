@@ -3,9 +3,10 @@ use std::rc::Rc;
 use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
+use rasterize::color::BGRA8;
+use util::math::{I16Dot16, I26Dot6, Point2, Vec2};
+
 use crate::{
-    color::BGRA8,
-    math::{I16Dot16, I26Dot6, Point2, Vec2},
     style::{
         self,
         types::{FontSlant, HorizontalAlignment, Ruby, TextStyle},

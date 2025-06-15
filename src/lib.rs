@@ -4,24 +4,21 @@
 
 use std::{cell::Cell, fmt::Debug};
 
+pub use rasterize;
+pub use util::math::I26Dot6;
+
 use log::Logger;
 
 pub mod srv3;
 pub mod vtt;
 
 mod capi;
-mod color;
 mod html;
 mod layout;
 mod log;
-mod math;
 mod outline;
-pub mod rasterize;
 mod style;
 mod text;
-mod util;
-
-pub use math::I26Dot6;
 
 #[derive(Default, Debug, Clone)]
 struct DebugFlags {

@@ -1,10 +1,16 @@
-pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
-
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
-mod small_type_map;
-pub use small_type_map::*;
+pub mod math;
+pub mod small_type_map;
 
+pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Asserts that the entirety of `slice` is initialized and returns a mutable slice
+/// of the initialized contents.
+///
+/// # Safety
+///
+/// `slice` must be fully initialized.
 pub const unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T] {
     unsafe { &mut *(slice as *mut [_] as *mut [T]) }
 }

@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, mem::MaybeUninit, ops::Range};
 
-use crate::{color::BGRA8, util::vec_parts};
+use crate::color::BGRA8;
 
 pub fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
     // https://drafts.fxtf.org/filter-effects/#funcdef-filter-blur
@@ -125,8 +125,8 @@ impl Blurer {
     }
 
     unsafe fn swap_buffers(&mut self) {
-        let (front_ptr, front_len, front_capacity) = vec_parts(&mut self.front);
-        let (back_ptr, back_len, back_capacity) = vec_parts(&mut self.back);
+        let (front_ptr, front_len, front_capacity) = util::vec_parts(&mut self.front);
+        let (back_ptr, back_len, back_capacity) = util::vec_parts(&mut self.back);
         std::ptr::write(
             &mut self.front,
             Vec::from_raw_parts(back_ptr as *mut f32, back_len, back_capacity),

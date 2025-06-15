@@ -3,8 +3,6 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-use text_sys::FT_Fixed;
-
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Fixed<const P: u32, T>(T);
@@ -312,10 +310,13 @@ define_fixed_for_type!(signedness = unsigned, inner = u16, widen = u32);
 pub type I26Dot6 = Fixed<6, i32>;
 pub type I16Dot16 = Fixed<16, i32>;
 
+#[allow(non_camel_case_types)]
+type FT_Fixed = std::ffi::c_long;
+
 impl<const P: u32> Fixed<P, i32> {
     #[allow(clippy::unnecessary_cast)]
     pub fn into_ft(self) -> FT_Fixed {
-        Self::into_raw(self) as FT_Fixed
+        Self::into_raw(self) as _
     }
 
     #[allow(clippy::unnecessary_cast)]

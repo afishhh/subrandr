@@ -1,0 +1,15 @@
+[package]
+name = "sbr-rasterize"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+wgpu = ["dep:wgpu"]
+
+[dependencies]
+util = { workspace = true }
+wgpu = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+

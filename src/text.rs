@@ -5,8 +5,13 @@ use std::{
     ops::{Range, RangeFrom, RangeFull},
 };
 
+use rasterize::{color::BGRA8, Rasterizer, RenderTarget, Texture};
 use text_sys::*;
 use thiserror::Error;
+use util::{
+    math::{I26Dot6, Vec2},
+    ReadonlyAliasableBox,
+};
 
 mod face;
 mod ft_utils;
@@ -19,13 +24,6 @@ pub use glyphstring::*;
 mod font_match;
 pub use font_match::*;
 pub mod layout;
-
-use crate::{
-    color::BGRA8,
-    math::{I26Dot6, Vec2},
-    rasterize::{Rasterizer, RenderTarget, Texture},
-    util::ReadonlyAliasableBox,
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {

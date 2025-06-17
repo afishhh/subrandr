@@ -10,6 +10,8 @@ mod fixed;
 pub use fixed::*;
 mod num;
 pub use num::*;
+mod outline;
+pub use outline::*;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]

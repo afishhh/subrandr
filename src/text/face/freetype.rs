@@ -169,7 +169,7 @@ impl Face {
         SharedFaceData::get_ref(self.face)
     }
 
-    pub fn glyph_cache(&self) -> &GlyphCache<Font> {
+    pub(super) fn glyph_cache(&self) -> &GlyphCache<Font> {
         &self.shared_data().glyph_cache
     }
 

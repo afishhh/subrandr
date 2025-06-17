@@ -7,7 +7,9 @@ use crate::color::BGRA8;
 
 mod blit;
 pub(super) mod blur;
+mod polygon;
 use blur::gaussian_sigma_to_box_radius;
+pub use polygon::*;
 
 #[derive(Debug, Clone)]
 struct Bresenham {

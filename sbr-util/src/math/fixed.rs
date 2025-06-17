@@ -45,12 +45,14 @@ macro_rules! define_simple_fixed_operator {
                 impl<const P: u32> $trait<$type> for Fixed<P, $ftype> {
                     type Output = Self;
 
+                    #[track_caller]
                     fn $f(self, rhs: $type) -> Self::Output {
                         $($ctor)? (self$($dot)* $op $($construct)*(rhs)$($dot)*)
                     }
                 }
 
                 impl<const P: u32> $trait_assign<$type> for Fixed<P, $ftype> {
+                    #[track_caller]
                     fn $f_assign(&mut self, rhs: $type) {
                         (*self)$($dot)* $op_assign $($construct)*(rhs)$($dot)*
                     }

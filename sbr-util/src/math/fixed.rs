@@ -45,12 +45,14 @@ macro_rules! define_simple_fixed_operator {
                 impl<const P: u32> $trait<$type> for Fixed<P, $ftype> {
                     type Output = Self;
 
+                    #[track_caller]
                     fn $f(self, rhs: $type) -> Self::Output {
                         $($ctor)? (self$($dot)* $op $($construct)*(rhs)$($dot)*)
                     }
                 }
 
                 impl<const P: u32> $trait_assign<$type> for Fixed<P, $ftype> {
+                    #[track_caller]
                     fn $f_assign(&mut self, rhs: $type) {
                         (*self)$($dot)* $op_assign $($construct)*(rhs)$($dot)*
                     }
@@ -138,12 +140,14 @@ macro_rules! define_fixed_for_type {
         impl<const P: u32> Mul for Fixed<P, $type> {
             type Output = Self;
 
+            #[track_caller]
             fn mul(self, rhs: Self) -> Self::Output {
                 Self(((self.0 as $wide * rhs.0 as $wide) >> P) as $type)
             }
         }
 
         impl<const P: u32> MulAssign for Fixed<P, $type> {
+            #[track_caller]
             fn mul_assign(&mut self, rhs: Self) {
                 *self = *self * rhs;
             }
@@ -152,6 +156,7 @@ macro_rules! define_fixed_for_type {
         impl<const P: u32> Div for Fixed<P, $type> {
             type Output = Self;
 
+            #[track_caller]
             fn div(self, rhs: Self) -> Self::Output {
                 let wide_result = ((self.0 as $wide) << P) / rhs.0 as $wide;
                 Self(wide_result as $type)
@@ -159,6 +164,7 @@ macro_rules! define_fixed_for_type {
         }
 
         impl<const P: u32> DivAssign for Fixed<P, $type> {
+            #[track_caller]
             fn div_assign(&mut self, rhs: Self) {
                 *self = *self / rhs;
             }

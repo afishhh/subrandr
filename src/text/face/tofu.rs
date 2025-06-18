@@ -1,6 +1,6 @@
-use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
+use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit, sync::LazyLock};
 
-use rasterize::{PixelFormat, Rasterizer};
+use rasterize::{sw::PolygonRasterizer, PixelFormat, Rasterizer};
 use text_sys::{
     hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_destroy,
     hb_face_set_glyph_count, hb_font_create, hb_font_destroy, hb_font_extents_t,
@@ -11,12 +11,12 @@ use text_sys::{
     hb_font_set_user_data, hb_font_t, hb_glyph_extents_t, hb_position_t, hb_user_data_key_t,
 };
 use util::{
-    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
+    math::{I16Dot16, I26Dot6, Outline, Point2, Rect2, Vec2},
     slice_assume_init_mut,
 };
 
 use super::{FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, SingleGlyphBitmap};
-use crate::layout::{FixedL, Point2L, Vec2L};
+use crate::layout::{FixedL, Vec2L};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Face;
@@ -378,6 +378,7 @@ impl FontImpl for Font {
                         ),
                         255,
                     );
+                    rasterizer.flush(&mut target);
 
                     let content_offset = fract_offset + Vec2::splat(outline_width);
                     let content_size = outline_size - Vec2::splat(outline_width * 2);
@@ -427,22 +428,40 @@ impl FontImpl for Font {
                         (char_space_y * 2 / 3, char_space_y)
                     };
 
+                    let mut poly = PolygonRasterizer::new();
                     let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
-                        let rects = GLYPHS[usize::from(digit)];
-                        for rect in rects {
-                            let transform =
-                                |p: Point2L| Point2::new(p.x * size.x / 200, p.y * size.y / 400);
-                            rasterizer.fill_axis_aligned_antialias_mono_rect_set(
-                                &mut target,
-                                Rect2::to_float(
-                                    Rect2 {
-                                        min: transform(rect.min),
-                                        max: transform(rect.max),
+                        let outline = &GLYPHS[usize::from(digit)];
+                        let psize = Vec2::new(
+                            size.x.floor_to_inner() as u32 + 2,
+                            size.y.floor_to_inner() as u32 + 2,
+                        );
+                        let poffset = Vec2::new(
+                            offset.x.floor_to_inner() as isize,
+                            offset.y.floor_to_inner() as isize,
+                        );
+                        poly.reset(psize, psize.x as usize);
+                        poly.add_outline_with(
+                            outline,
+                            |p| {
+                                Point2::new(
+                                    offset.x.fract().into_f32() + p.x * size.x.into_f32() / 200.,
+                                    offset.y.fract().into_f32() + p.y * size.y.into_f32() / 400.,
+                                )
+                            },
+                            1.0,
+                        );
+                        poly.rasterize();
+                        for y in 0..psize.y as usize {
+                            if let Some(dy) = y.checked_add_signed(poffset.y) {
+                                for x in 0..psize.x as usize {
+                                    if let Some(dx) = x.checked_add_signed(poffset.x) {
+                                        if let Some(out) = texture.get_mut(dy * stride + dx) {
+                                            *out = (poly.coverage()[y * psize.x as usize + x] >> 8)
+                                                as u8;
+                                        }
                                     }
-                                    .translate(offset),
-                                ),
-                                255,
-                            );
+                                }
+                            }
                         }
                     };
 
@@ -477,8 +496,6 @@ impl FontImpl for Font {
                             y += cell_size_y.into_f32() + justify_spacing_y.into_f32();
                         }
                     }
-
-                    rasterizer.flush(&mut target);
                 }),
             )
         };
@@ -504,154 +521,244 @@ impl Drop for Font {
     }
 }
 
-macro_rules! glyph {
+macro_rules! outline {
     [
         $([($a: literal, $b: literal), ($c: literal, $d: literal)],)*
-    ] => {[
-        $(Rect2 {
-            min: Point2::new(FixedL::new($a), FixedL::new($b)),
-            max: Point2::new(FixedL::new($c), FixedL::new($d))
-        },)*
-    ]};
+    ] => {{
+        let mut builder = util::math::OutlineBuilder::new();
+        $(
+            builder.move_to(Point2::new($a as f32, $b as f32));
+            builder.line_to(Point2::new($a as f32, $d as f32));
+            builder.line_to(Point2::new($c as f32, $d as f32));
+            builder.line_to(Point2::new($c as f32, $b as f32));
+        )*
+        builder.build()
+    }};
+    {
+        $($command: ident $(($x: literal, $y: literal))+;)*
+    } => {{
+        let mut builder = util::math::OutlineBuilder::new();
+        $(builder.$command($(Point2::new($x as f32, $y as f32)),+);)*
+        builder.build()
+    }};
 }
 
 // All glyphs that make up our mini tofu font on a 200x400 canvas.
 // This includes all hex digits and a special question mark glyph.
-const GLYPHS: &[&[Rect2<FixedL>]; 17] = &[
-    // 0
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(10, 380), (190, 400)],
-        [(0, 20), (10, 380)],
-        [(190, 20), (200, 380)],
-        [(90, 180), (110, 220)],
-    ],
-    // 1
-    &glyph![
-        [(30, 0), (95, 20)],
-        [(95, 20), (105, 380)],
-        [(10, 380), (190, 400)],
-    ],
-    // 2
-    &glyph![
-        [(0, 20), (10, 50)],
-        [(10, 0), (190, 20)],
-        [(190, 20), (200, 190)],
-        [(10, 190), (190, 210)],
-        [(0, 210), (10, 380)],
-        [(10, 380), (200, 400)],
-    ],
-    // 3
-    &glyph![
-        [(0, 0), (190, 20)],
-        [(0, 190), (190, 210)],
-        [(0, 380), (190, 400)],
-        [(190, 20), (200, 380)],
-    ],
-    // 4
-    &glyph![
-        [(0, 0), (10, 190)],
-        [(190, 0), (200, 400)],
-        [(10, 190), (190, 210)],
-    ],
-    // 5 (pretty much a flipped 2)
-    &glyph![
-        [(10, 0), (200, 20)],
-        [(0, 20), (10, 190)],
-        [(10, 190), (190, 210)],
-        [(190, 210), (200, 380)],
-        [(0, 380), (190, 400)],
-    ],
-    // 6
-    &glyph![
-        [(10, 0), (200, 20)],
-        [(0, 20), (10, 400)],
-        [(10, 190), (190, 210)],
-        [(190, 210), (200, 380)],
-        [(10, 380), (190, 400)],
-    ],
-    // 7
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(160, 20), (180, 80)],
-        [(140, 80), (160, 160)],
-        [(120, 160), (140, 200)],
-        [(100, 200), (120, 260)],
-        [(80, 260), (100, 320)],
-        [(60, 320), (80, 380)],
-        [(40, 380), (60, 400)],
-    ],
-    // 8
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(0, 20), (10, 190)],
-        [(190, 20), (200, 190)],
-        [(10, 190), (190, 210)],
-        [(0, 210), (10, 380)],
-        [(190, 210), (200, 380)],
-        [(10, 380), (190, 400)],
-    ],
-    // 9
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(0, 20), (10, 190)],
-        [(190, 20), (200, 380)],
-        [(10, 190), (190, 210)],
-        [(10, 380), (190, 400)],
-    ],
-    // A
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(0, 20), (10, 380)],
-        [(190, 20), (200, 380)],
-        [(10, 190), (190, 210)],
-    ],
-    // B (a slightly different 8)
-    &glyph![
-        [(0, 0), (10, 400)],
-        [(10, 0), (170, 20)],
-        [(10, 150), (190, 170)],
-        [(10, 380), (190, 400)],
-        [(170, 20), (180, 150)],
-        [(190, 170), (200, 380)],
-    ],
-    // C
-    &glyph![
-        [(0, 20), (10, 380)],
-        [(10, 0), (190, 20)],
-        [(10, 380), (190, 400)],
-    ],
-    // D
-    &glyph![
-        [(0, 0), (10, 400)],
-        [(10, 0), (190, 20)],
-        [(20, 380), (190, 400)],
-        [(190, 20), (200, 380)],
-    ],
-    // E
-    &glyph![
-        [(45, 0), (190, 20)],
-        [(45, 190), (190, 210)],
-        [(45, 380), (190, 400)],
-        [(35, 20), (45, 380)],
-    ],
-    // F
-    &glyph![
-        [(10, 0), (190, 20)],
-        [(10, 190), (130, 210)],
-        [(0, 20), (10, 400)],
-    ],
-    // ? (drawn in full content box if not enough space is available for hex)
-    &glyph![
-        [(50, 100), (60, 120)],
-        [(60, 80), (140, 100)],
-        [(150, 100), (160, 160)],
-        [(140, 160), (150, 175)],
-        [(130, 175), (140, 190)],
-        [(120, 190), (130, 205)],
-        [(110, 205), (120, 220)],
-        [(100, 220), (110, 235)],
-        [(90, 235), (110, 260)],
-        [(90, 320), (110, 340)],
-    ],
-];
+static GLYPHS: LazyLock<[Outline; 17]> = LazyLock::new(|| {
+    [
+        // 0
+        outline! {
+            move_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 400);
+            line_to (0, 400);
+
+            move_to (40, 40);
+            line_to (40, 360);
+            line_to (160, 360);
+            line_to (160, 40);
+
+            move_to (80, 170);
+            line_to (80, 230);
+            line_to (120, 230);
+            line_to (120, 170);
+        },
+        // 1
+        outline! {
+            move_to (40, 0);
+            line_to (120, 0);
+            line_to (120, 360);
+
+            line_to (180, 360);
+            line_to (180, 400);
+            line_to (20, 400);
+            line_to (20, 360);
+
+            line_to (90, 360);
+            line_to (90, 40);
+            line_to (30, 40);
+        },
+        // 2
+        outline! {
+            move_to (30, 40);
+            line_to (30, 70);
+            line_to (0, 70);
+            line_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 220);
+            line_to (40, 220);
+            line_to (40, 360);
+            line_to (200, 360);
+            line_to (200, 400);
+            line_to (0, 400);
+            line_to (0, 180);
+            line_to (160, 180);
+            line_to (160, 40);
+        },
+        // 3
+        outline! {
+            move_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 400);
+
+            line_to (0, 400);
+            line_to (0, 360);
+            line_to (160, 360);
+
+            line_to (160, 220);
+            line_to (0, 220);
+            line_to (0, 180);
+            line_to (160, 180);
+
+            line_to (160, 40);
+            line_to (0, 40);
+        },
+        // 4
+        outline! {
+            move_to (40, 0);
+            line_to (40, 180);
+            line_to (160, 180);
+            line_to (160, 0);
+            line_to (200, 0);
+            line_to (200, 400);
+
+            line_to (160, 400);
+            line_to (160, 360);
+            line_to (160, 220);
+            line_to (0, 220);
+            line_to (0, 0);
+        },
+        // 5 (pretty much a flipped 2)
+        outline! {
+            move_to (200, 40);
+            line_to (200, 0);
+            line_to (0, 0);
+            line_to (0, 220);
+            line_to (160, 220);
+            line_to (160, 360);
+            line_to (0, 360);
+            line_to (0, 400);
+            line_to (200, 400);
+            line_to (200, 180);
+            line_to (40, 180);
+            line_to (40, 40);
+        },
+        // 6
+        outline! {
+            move_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 40);
+            line_to (40, 40);
+
+            line_to (40, 180);
+            line_to (200, 180);
+            line_to (200, 400);
+            line_to (0, 400);
+
+            move_to (40, 220);
+            line_to (40, 360);
+            line_to (160, 360);
+            line_to (160, 220);
+        },
+        // 7
+        outline! {
+            move_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 40);
+            line_to (70, 400);
+            line_to (30, 400);
+            line_to (170, 40);
+            line_to (0, 40);
+        },
+        // 8
+        outline! {
+            move_to (0, 0);
+            line_to (200, 0);
+            line_to (200, 400);
+            line_to (0, 400);
+
+            move_to (40, 40);
+            line_to (40, 180);
+            line_to (160, 180);
+            line_to (160, 40);
+
+            move_to (40, 220);
+            line_to (40, 360);
+            line_to (160, 360);
+            line_to (160, 220);
+        },
+        // 9 (xy flipped 6)
+        outline! {
+            move_to (200, 400);
+            line_to (0, 400);
+            line_to (0, 360);
+            line_to (160, 360);
+
+            line_to (160, 220);
+            line_to (0, 220);
+            line_to (0, 0);
+            line_to (200, 0);
+
+            move_to (160, 180);
+            line_to (160, 40);
+            line_to (40, 40);
+            line_to (40, 180);
+        },
+        // A
+        outline![
+            [(10, 0), (190, 20)],
+            [(0, 20), (10, 380)],
+            [(190, 20), (200, 380)],
+            [(10, 190), (190, 210)],
+        ],
+        // B (a slightly different 8)
+        outline![
+            [(0, 0), (10, 400)],
+            [(10, 0), (170, 20)],
+            [(10, 150), (190, 170)],
+            [(10, 380), (190, 400)],
+            [(170, 20), (180, 150)],
+            [(190, 170), (200, 380)],
+        ],
+        // C
+        outline![
+            [(0, 20), (10, 380)],
+            [(10, 0), (190, 20)],
+            [(10, 380), (190, 400)],
+        ],
+        // D
+        outline![
+            [(0, 0), (10, 400)],
+            [(10, 0), (190, 20)],
+            [(20, 380), (190, 400)],
+            [(190, 20), (200, 380)],
+        ],
+        // E
+        outline![
+            [(45, 0), (190, 20)],
+            [(45, 190), (190, 210)],
+            [(45, 380), (190, 400)],
+            [(35, 20), (45, 380)],
+        ],
+        // F
+        outline![
+            [(10, 0), (190, 20)],
+            [(10, 190), (130, 210)],
+            [(0, 20), (10, 400)],
+        ],
+        // ? (drawn in full content box if not enough space is available for hex)
+        outline![
+            [(50, 100), (60, 120)],
+            [(60, 80), (140, 100)],
+            [(150, 100), (160, 160)],
+            [(140, 160), (150, 175)],
+            [(130, 175), (140, 190)],
+            [(120, 190), (130, 205)],
+            [(110, 205), (120, 220)],
+            [(100, 220), (110, 235)],
+            [(90, 235), (110, 260)],
+            [(90, 320), (110, 340)],
+        ],
+    ]
+});

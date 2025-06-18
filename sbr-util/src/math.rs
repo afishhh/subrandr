@@ -356,6 +356,15 @@ impl<N: Number> Rect2<N> {
         }
         result
     }
+
+    pub fn to_points(self) -> [Point2<N>; 4] {
+        [
+            self.min,
+            Point2::new(self.max.x, self.min.y),
+            self.max,
+            Point2::new(self.min.x, self.max.y),
+        ]
+    }
 }
 
 impl<N: Copy + Into<f32>> Rect2<N> {

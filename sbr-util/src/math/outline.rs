@@ -23,11 +23,39 @@ impl OutlineBuilder {
         self.outline.points()
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn move_to(&mut self, point: Point2f) {
+        self.close_contour_with_line();
+        self.add_point(point);
+    }
+
+    #[inline]
+    pub fn line_to(&mut self, point: Point2f) {
+        self.add_point(point);
+        self.add_segment(SegmentDegree::Linear);
+    }
+
+    #[inline]
+    pub fn quad_to(&mut self, control: Point2f, point: Point2f) {
+        self.add_point(control);
+        self.add_point(point);
+        self.add_segment(SegmentDegree::Quadratic);
+    }
+
+    #[inline]
+    pub fn cubic_to(&mut self, control1: Point2f, control2: Point2f, point: Point2f) {
+        self.add_point(control1);
+        self.add_point(control2);
+        self.add_point(point);
+        self.add_segment(SegmentDegree::Cubic);
+    }
+
+    #[inline]
     pub fn contour_points_mut(&mut self) -> &mut [Point2f] {
         &mut self.outline.points[self.first_point_of_contour..]
     }
 
+    #[inline]
     pub fn is_closed(&self) -> bool {
         self.outline
             .segments
@@ -35,12 +63,12 @@ impl OutlineBuilder {
             .is_none_or(Segment::end_of_contour)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn add_point(&mut self, point: Point2f) {
         self.outline.points.push(point)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn add_segment(&mut self, degree: SegmentDegree) {
         self.outline.segments.push(Segment {
             degree,
@@ -48,6 +76,24 @@ impl OutlineBuilder {
             start: self.segment_start,
         });
         self.segment_start += degree as u32;
+    }
+
+    fn close_contour_with_line(&mut self) {
+        if let Some(&last) = self.outline.points.last() {
+            if self.outline.segments.last_mut().unwrap().end_of_contour {
+                return;
+            }
+
+            let first = self.outline.points[self.first_point_of_contour];
+            if last == first {
+                self.outline.segments.last_mut().unwrap().end_of_contour = true;
+                self.segment_start += 1;
+                self.first_point_of_contour = self.outline.points.len();
+            } else {
+                self.add_segment(SegmentDegree::Linear);
+                self.close_contour();
+            }
+        }
     }
 
     pub fn close_contour(&mut self) {
@@ -59,7 +105,9 @@ impl OutlineBuilder {
         self.first_point_of_contour = self.outline.points.len();
     }
 
-    pub fn build(self) -> Outline {
+    pub fn build(mut self) -> Outline {
+        self.close_contour_with_line();
+
         let expected = self.segment_start;
         if self.outline.points.len() != expected as usize {
             panic!(

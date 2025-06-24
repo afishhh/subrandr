@@ -165,11 +165,7 @@ impl Outline {
     }
 
     pub fn control_box(&self) -> Rect2f {
-        let mut bb = Rect2f::NOTHING;
-        for &point in self.points.iter() {
-            bb.expand_to_point(point);
-        }
-        bb
+        Rect2f::bounding_box_of_points(self.points.iter().copied())
     }
 
     pub fn scale(&mut self, xy: f32) {

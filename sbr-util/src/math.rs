@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
+    fmt::Debug,
     iter::Sum,
     ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
@@ -36,12 +36,19 @@ impl<N> Point2<N> {
 }
 
 impl<N: Number> Point2<N> {
+    pub fn midpoint(self, other: Self) -> Self {
+        Self {
+            x: self.x + (other.x - self.x) / (N::ONE + N::ONE),
+            y: self.y + (other.y - self.y) / (N::ONE + N::ONE),
+        }
+    }
+
     pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
-impl<N: Display> Debug for Point2<N> {
+impl<N: Debug> Debug for Point2<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({:.1}, {:.1})", self.x, self.y)
+        write!(f, "({:?}, {:?})", self.x, self.y)
     }
 }
 
@@ -132,9 +139,9 @@ impl<N: Number> Vec2<N> {
     pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
-impl<N: Display> Debug for Vec2<N> {
+impl<N: Debug> Debug for Vec2<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:.1}, {:.1}]", self.x, self.y)
+        write!(f, "[{:?}, {:?}]", self.x, self.y)
     }
 }
 
@@ -236,15 +243,14 @@ impl<N: Number> Sum<Vec2<N>> for Point2<N> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-// TODO: Maybe just make Point2 Debug when N: Debug
-pub struct Rect2<N: Display> {
+pub struct Rect2<N> {
     pub min: Point2<N>,
     pub max: Point2<N>,
 }
 
 pub type Rect2f = Rect2<f32>;
 
-impl<N: Number + Display> Rect2<N> {
+impl<N: Number> Rect2<N> {
     pub const NOTHING: Self = Self {
         min: Point2::new(N::MAX, N::MAX),
         max: Point2::new(N::MIN, N::MIN),
@@ -268,7 +274,7 @@ impl<N: Number + Display> Rect2<N> {
 
     pub fn translate<U>(self, vector: Vec2<U>) -> Self
     where
-        U: Number + Display,
+        U: Number,
         N: Add<U, Output = N>,
     {
         Self {
@@ -284,6 +290,13 @@ impl<N: Number + Display> Rect2<N> {
             && self.max.y >= other.min.y
     }
 
+    pub fn intersection(&self, other: &Self) -> Self {
+        Self {
+            min: Point2::new(self.min.x.max(other.min.x), self.min.y.max(other.min.y)),
+            max: Point2::new(self.max.x.min(other.max.x), self.max.y.min(other.max.y)),
+        }
+    }
+
     pub fn includes(&self, other: Rect2<N>) -> bool {
         self.min.x <= other.min.x
             && self.max.x >= other.max.x
@@ -293,6 +306,11 @@ impl<N: Number + Display> Rect2<N> {
 
     pub fn size(&self) -> Vec2<N> {
         self.max - self.min
+    }
+
+    pub fn signed_area(&self) -> N {
+        let size = self.size();
+        size.x * size.y
     }
 
     pub fn x(&self) -> N {
@@ -311,6 +329,10 @@ impl<N: Number + Display> Rect2<N> {
         self.size().y
     }
 
+    pub fn center(&self) -> Point2<N> {
+        self.min + (self.max - self.min) / (N::ONE + N::ONE)
+    }
+
     pub fn expand_to_point(&mut self, point: Point2<N>) {
         self.min.x = self.min.x.min(point.x);
         self.min.y = self.min.y.min(point.y);
@@ -324,10 +346,17 @@ impl<N: Number + Display> Rect2<N> {
         self.max.x = self.max.x.max(rect.max.x);
         self.max.y = self.max.y.max(rect.max.y);
     }
+
+    pub fn bounding_box_of_points(points: impl IntoIterator<Item = Point2<N>>) -> Self {
+        let mut result = Rect2::NOTHING;
+        for point in points {
+            result.expand_to_point(point);
+        }
+        result
+    }
 }
 
-// TODO: Really should get rid of the Display bound...
-impl<N: Display + Copy + Into<f32>> Rect2<N> {
+impl<N: Copy + Into<f32>> Rect2<N> {
     // TODO: A trait for casting these types?
     pub fn to_float(rect: Self) -> Rect2f {
         Rect2::new(

@@ -90,6 +90,13 @@ pub enum SegmentDegree {
     Cubic = 3,
 }
 
+#[derive(Debug, Clone)]
+pub enum SegmentCurve {
+    Linear([Point2f; 2]),
+    Quadratic(QuadraticBezier<f32>),
+    Cubic(CubicBezier<f32>),
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(Rust, packed(8))]
 pub struct Segment {
@@ -124,23 +131,39 @@ impl Outline {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn segments(&self) -> &[Segment] {
         &self.segments
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn points_for_segment(&self, s: Segment) -> &[Point2f] {
         let start = s.start as usize;
         &self.points[start..(start + s.degree as usize + 1)]
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn curve_for_segment(&self, s: &Segment) -> SegmentCurve {
+        let start = s.start as usize;
+        match s.degree {
+            SegmentDegree::Linear => SegmentCurve::Linear(
+                <[Point2f; 2]>::try_from(&self.points[start..start + 2]).unwrap(),
+            ),
+            SegmentDegree::Quadratic => SegmentCurve::Quadratic(QuadraticBezier(
+                <[Point2f; 3]>::try_from(&self.points[start..start + 3]).unwrap(),
+            )),
+            SegmentDegree::Cubic => SegmentCurve::Cubic(CubicBezier(
+                <[Point2f; 4]>::try_from(&self.points[start..start + 4]).unwrap(),
+            )),
+        }
+    }
+
+    #[inline]
     pub fn points(&self) -> &[Point2f] {
         &self.points
     }

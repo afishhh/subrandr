@@ -1,6 +1,6 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit, sync::LazyLock};
 
-use rasterize::{sw::PolygonRasterizer, PixelFormat, Rasterizer};
+use rasterize::{sw::PathRasterizer, PixelFormat, Rasterizer};
 use text_sys::{
     hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_destroy,
     hb_face_set_glyph_count, hb_font_create, hb_font_destroy, hb_font_extents_t,
@@ -428,7 +428,7 @@ impl FontImpl for Font {
                         (char_space_y * 2 / 3, char_space_y)
                     };
 
-                    let mut poly = PolygonRasterizer::new();
+                    let mut poly = PathRasterizer::new();
                     let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
                         let outline = &GLYPHS[usize::from(digit)];
                         let psize = Vec2::new(

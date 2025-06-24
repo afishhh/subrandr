@@ -32,7 +32,7 @@ fn approximate_inverse_segments_integral(x: f32) -> f32 {
     x * (1.0 - b + (b * b + 0.25 * x * x).sqrt())
 }
 
-pub fn flatten_quadratic(curve: &QuadraticBezier, tolerance: f32, out: &mut Vec<Point2f>) {
+pub fn flatten_quadratic(curve: &QuadraticBezier<f32>, tolerance: f32, out: &mut Vec<Point2f>) {
     let basic = map_to_basic(curve[0], curve[1], curve[2]);
     let a0 = approximate_segments_integral(basic.x0);
     let a2 = approximate_segments_integral(basic.x2);
@@ -49,7 +49,7 @@ pub fn flatten_quadratic(curve: &QuadraticBezier, tolerance: f32, out: &mut Vec<
     out.push(curve[2]);
 }
 
-fn naive_cubic_to_quadratic(cubic: &CubicBezier) -> QuadraticBezier {
+fn naive_cubic_to_quadratic(cubic: &CubicBezier<f32>) -> QuadraticBezier<f32> {
     let c1_2 = cubic[1].to_vec() * 3.0 - cubic[0].to_vec();
     let c2_2 = cubic[2].to_vec() * 3.0 - cubic[3].to_vec();
 
@@ -66,9 +66,9 @@ fn quadratic_count_for_cubic(points: &[Point2f; 4], tolerance: f32) -> f32 {
 }
 
 pub fn cubic_to_quadratics(
-    points: &CubicBezier,
+    points: &CubicBezier<f32>,
     tolerance: f32,
-) -> impl ExactSizeIterator<Item = QuadraticBezier> + use<'_> {
+) -> impl ExactSizeIterator<Item = QuadraticBezier<f32>> + use<'_> {
     let count = quadratic_count_for_cubic(points, tolerance);
     let step = 1.0 / count;
 
@@ -81,7 +81,7 @@ pub fn cubic_to_quadratics(
     })
 }
 
-pub fn flatten_cubic(points: &CubicBezier, tolerance: f32, out: &mut Vec<Point2f>) {
+pub fn flatten_cubic(points: &CubicBezier<f32>, tolerance: f32, out: &mut Vec<Point2f>) {
     for quadratic in cubic_to_quadratics(points, tolerance) {
         flatten_quadratic(&quadratic, tolerance, out)
     }

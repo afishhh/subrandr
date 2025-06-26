@@ -519,31 +519,138 @@ impl PathRasterizer {
             (current.txl.max(current.bxl).ceil_to_inner().max(0) as u32).min(self.size.x);
         let inner_right =
             (current.txr.min(current.bxr).floor_to_inner().max(0) as u32).min(self.size.x);
-        let half_inner_h = (current.top - current.bottom) / 2;
-        for px in pixel_left..pixel_right {
-            let fpx = I16Dot16::new(px as i32);
+
+        struct LineStepper {
+            current_x: I16Dot16,
+            next_x: I16Dot16,
+            current_base: I16Dot16,
+            next_base: I16Dot16,
+            dbase: I16Dot16,
+            end_x: I16Dot16,
+            end_base: I16Dot16,
+        }
+
+        impl LineStepper {
+            fn horizontal(x: I16Dot16) -> Self {
+                Self {
+                    end_x: I16Dot16::MAX,
+                    end_base: I16Dot16::ZERO,
+                    dbase: I16Dot16::ZERO,
+                    current_x: x,
+                    current_base: I16Dot16::ZERO,
+                    next_x: x,
+                    next_base: I16Dot16::ZERO,
+                }
+            }
+
+            #[inline]
+            fn new(
+                top: Point2<I16Dot16>,
+                bottom: Point2<I16Dot16>,
+                fpy: I16Dot16,
+                right_edge: bool,
+            ) -> (Self, I16Dot16) {
+                if top.x == bottom.x {
+                    return (Self::horizontal(top.x), I16Dot16::ZERO);
+                }
+
+                let (left, right, over_area) = if top.x < bottom.x {
+                    (top, bottom, !right_edge)
+                } else {
+                    (bottom, top, right_edge)
+                };
+
+                // PERF: This results in a 64-bit division on every row multiple times.
+                //       I can't see a way around it short of computing ddy of bezier curves
+                //       which I feel is impractical...
+                //       Hoping for pipelining I guess...
+                let dy = (right.y - left.y) / (right.x - left.x);
+                let dbase = if over_area { dy } else { -dy };
+                let next_x = (left.x.floor() + 1).min(right.x);
+                let current_base = if over_area {
+                    left.y - fpy
+                } else {
+                    (fpy + 1) - left.y
+                };
+
+                (
+                    Self {
+                        end_x: right.x,
+                        end_base: if over_area {
+                            right.y - fpy
+                        } else {
+                            (fpy + 1) - right.y
+                        },
+                        current_x: left.x,
+                        next_x,
+                        current_base,
+                        next_base: current_base + (dbase * (next_x - left.x)),
+                        dbase,
+                    },
+                    if right_edge {
+                        (I16Dot16::ONE - right.x.fract()) * (top.y - bottom.y)
+                    } else {
+                        left.x.fract() * (top.y - bottom.y)
+                    },
+                )
+            }
+
+            #[inline]
+            fn current_doubled_hit(&self) -> I16Dot16 {
+                let neg_height = self.current_x - self.next_x;
+                (self.next_base + self.current_base) * neg_height
+            }
+
+            fn step(&mut self) {
+                self.current_x = self.next_x;
+                self.current_base = self.next_base;
+                self.next_x += 1;
+                if self.next_x >= self.end_x {
+                    self.next_x = self.end_x;
+                    self.next_base = self.end_base;
+                } else {
+                    self.next_base += self.dbase;
+                }
+            }
+        }
+
+        let (mut left_stepper, mut current_left_rect_hit) = LineStepper::new(
+            Point2::new(current.txl, current.top),
+            Point2::new(current.bxl, current.bottom),
+            fpy,
+            false,
+        );
+        let (mut right_stepper, right_rect_hit) = LineStepper::new(
+            Point2::new(current.txr, current.top),
+            Point2::new(current.bxr, current.bottom),
+            fpy,
+            true,
+        );
+
+        let mut px = pixel_left;
+        loop {
             let x_coverage_hit = {
                 let mut w = I16Dot16::ZERO;
 
                 if px < inner_left {
-                    let left = fpx;
-                    let top_right = current.txl.max(fpx).min(fpx + 1);
-                    let bottom_right = current.bxl.max(fpx).min(fpx + 1);
-                    let neg_a = left - top_right;
-                    let neg_b = left - bottom_right;
-                    w += neg_a + neg_b;
+                    w += left_stepper.current_doubled_hit();
+                    left_stepper.step();
                 }
 
                 if px >= inner_right {
-                    let right = fpx + 1;
-                    let top_left = current.txr.max(fpx).min(fpx + 1);
-                    let bottom_left = current.bxr.max(fpx).min(fpx + 1);
-                    let neg_a = top_left - right;
-                    let neg_b = bottom_left - right;
-                    w += neg_a + neg_b;
+                    w += right_stepper.current_doubled_hit();
+                    right_stepper.step();
                 }
 
-                w * half_inner_h
+                w /= 2;
+
+                w -= current_left_rect_hit;
+
+                if px == pixel_right - 1 {
+                    w -= right_rect_hit;
+                }
+
+                w
             };
             let coverage = I16Dot16::ONE + x_coverage_hit + y_coverage_hit;
 
@@ -553,6 +660,13 @@ impl PathRasterizer {
             debug_assert!(px < self.size.x);
             debug_assert!(py < self.size.y);
             unsafe { self.add_coverage_at(px, py, coverage16) }
+
+            px += 1;
+            if px >= pixel_right {
+                break;
+            }
+
+            current_left_rect_hit = I16Dot16::ZERO;
         }
     }
 
@@ -596,7 +710,7 @@ impl PathRasterizer {
             current.bxr = current.txr;
             current.top += 1;
 
-            if trapezoid.top < current.top {
+            if trapezoid.top <= current.top {
                 current.top = trapezoid.top;
                 current.txl = trapezoid.txl;
                 current.txr = trapezoid.txr;
@@ -1162,7 +1276,7 @@ fn fixed_to_u16(value: I16Dot16) -> u16 {
 
 #[cfg(test)]
 mod test {
-    use util::math::{I16Dot16, Outline, OutlineBuilder, Point2f, Vec2};
+    use util::math::{I16Dot16, Outline, Point2f, Vec2};
 
     use crate::sw::PathRasterizer;
 
@@ -1278,16 +1392,16 @@ mod test {
 
         #[rustfmt::skip]
         const EXPECTED: &[u8] = &[
-            0x00, 0x00, 0x00, 0x33, 0x80, 0x7F, 0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x99, 0xFF, 0xFF, 0xB3, 0x7F, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x0C, 0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xF3, 0xBF, 0x1C, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB8, 0x2A, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0xCC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0x1C, 0x00, 0x00,
-            0x00, 0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x9C, 0x0E, 0x00,
-            0x00, 0x99, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x8E, 0x00,
-            0x19, 0xE6, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0x7F, 0x7F, 0x7F, 0x7F, 0x00,
-            0x66, 0xFF, 0xFF, 0xFF, 0xD5, 0x7F, 0x7F, 0x7F, 0x7F, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x4C, 0x7F, 0x7F, 0x7F, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x33, 0xCA, 0x60, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x99, 0xFF, 0xFF, 0xEC, 0x8A, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xD3, 0x0F, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xCC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x07, 0x00, 0x00,
+            0x00, 0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xA8, 0x01, 0x00,
+            0x00, 0x99, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+            0x0C, 0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF3, 0xC0, 0x89, 0x52, 0x1B, 0x00,
+            0x66, 0xFF, 0xFF, 0xFF, 0xFC, 0xD2, 0x9B, 0x64, 0x2D, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xB1, 0xAD, 0x76, 0x40, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
         compare(SIZE, rasterizer.coverage(), EXPECTED);

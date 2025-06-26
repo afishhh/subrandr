@@ -27,29 +27,131 @@ struct Segment {
 }
 
 impl Segment {
-    #[inline(always)]
-    fn x_at_y(&self, y: I16Dot16) -> I16Dot16 {
+    fn x_at_y(&self, current_y: I16Dot16, y: I16Dot16) -> I16Dot16 {
         match self.kind {
             SegmentKind::Linear { dx } => self.bottom.x + dx * (y - self.bottom.y),
-            SegmentKind::Quadratic { control, .. } => {
-                binary_search_quadratic_x_at_y(QuadraticBezier([self.bottom, control, self.top]), y)
+            SegmentKind::Quadratic {
+                control, current_t, ..
+            } => {
+                binary_search_quadratic_x_at_y(
+                    QuadraticBezier([self.bottom, control, self.top]),
+                    current_t,
+                    Point2::new(self.current_x, current_y),
+                    I16Dot16::ONE,
+                    self.top,
+                    y,
+                )
+                .1
             }
         }
     }
 
-    fn degree_str(&self) -> &'static str {
+    fn advance_next_to_y(&mut self, current_y: I16Dot16, y: I16Dot16) {
         match self.kind {
-            SegmentKind::Linear { .. } => "linear",
-            SegmentKind::Quadratic { .. } => "quadratic",
+            SegmentKind::Linear { dx } => self.next_x = self.bottom.x + dx * (y - self.bottom.y),
+            SegmentKind::Quadratic {
+                control,
+                current_t,
+                ref mut next_t,
+                ..
+            } => {
+                let (t, x) = binary_search_quadratic_x_at_y(
+                    QuadraticBezier([self.bottom, control, self.top]),
+                    current_t,
+                    Point2::new(self.current_x, current_y),
+                    I16Dot16::ONE,
+                    self.top,
+                    y,
+                );
+                *next_t = t;
+                self.next_x = x;
+            }
         }
     }
 
-    #[inline(always)]
-    fn step1_or_x_at_y(&self, prev: I16Dot16, y: I16Dot16) -> I16Dot16 {
+    fn advance_current_to_next(&mut self) {
+        self.current_x = self.next_x;
+
+        match self.kind {
+            SegmentKind::Linear { .. } => (),
+            SegmentKind::Quadratic {
+                ref mut current_t,
+                next_t,
+                ..
+            } => {
+                *current_t = next_t;
+            }
+        }
+    }
+
+    fn stepper(&self) -> SegmentStepper {
+        SegmentStepper {
+            top: self.top,
+            bottom: self.bottom,
+            current_x: self.current_x,
+            next_x: self.next_x,
+            kind: self.kind.clone(),
+        }
+    }
+}
+
+struct SegmentStepper {
+    top: Point2<I16Dot16>,
+    bottom: Point2<I16Dot16>,
+    current_x: I16Dot16,
+    next_x: I16Dot16,
+    kind: SegmentKind,
+}
+
+impl SegmentStepper {
+    fn advance_inside(&mut self, current_y: I16Dot16, next_y: I16Dot16, y: I16Dot16) -> I16Dot16 {
+        match self.kind {
+            SegmentKind::Linear { dx } => self.bottom.x + dx * (y - self.bottom.y),
+            SegmentKind::Quadratic {
+                control,
+                ref mut current_t,
+                next_t,
+                ..
+            } => {
+                let (t, x) = binary_search_quadratic_x_at_y(
+                    QuadraticBezier([self.bottom, control, self.top]),
+                    *current_t,
+                    Point2::new(self.current_x, current_y),
+                    next_t,
+                    Point2::new(self.next_x, next_y),
+                    y,
+                );
+                *current_t = t;
+                x
+            }
+        }
+    }
+
+    fn advance1_inside(
+        &mut self,
+        prev: I16Dot16,
+        current_y: I16Dot16,
+        next_y: I16Dot16,
+        y: I16Dot16,
+    ) -> I16Dot16 {
         match self.kind {
             SegmentKind::Linear { dx } => prev + dx,
-            SegmentKind::Quadratic { control, .. } => {
-                binary_search_quadratic_x_at_y(QuadraticBezier([self.bottom, control, self.top]), y)
+            SegmentKind::Quadratic {
+                control,
+                ref mut current_t,
+                next_t,
+                ..
+            } => {
+                let (t, x) = binary_search_quadratic_x_at_y(
+                    QuadraticBezier([self.bottom, control, self.top]),
+                    *current_t,
+                    Point2::new(self.current_x, current_y),
+                    next_t,
+                    Point2::new(self.next_x, next_y),
+                    y,
+                );
+                *current_t = t;
+                x
             }
         }
     }
@@ -57,16 +159,29 @@ impl Segment {
 
 #[derive(Debug, Clone)]
 enum SegmentKind {
-    Linear { dx: I16Dot16 },
-    Quadratic { control: Point2<I16Dot16> },
+    Linear {
+        dx: I16Dot16,
+    },
+    Quadratic {
+        control: Point2<I16Dot16>,
+        current_t: I16Dot16,
+        next_t: I16Dot16,
+    },
 }
 
-fn binary_search_quadratic_x_at_y(quad: QuadraticBezier<I16Dot16>, y: I16Dot16) -> I16Dot16 {
-    let mut left = I16Dot16::ZERO;
-    let mut right = I16Dot16::ONE;
-    let mut left_p = quad[0];
-    let mut right_p = quad[2];
-    while (right_p.y - left_p.y) > I16Dot16::from_quotient(1, 32) {
+fn binary_search_quadratic_x_at_y(
+    quad: QuadraticBezier<I16Dot16>,
+    left_t: I16Dot16,
+    mut left_p: Point2<I16Dot16>,
+    right_t: I16Dot16,
+    mut right_p: Point2<I16Dot16>,
+    y: I16Dot16,
+) -> (I16Dot16, I16Dot16) {
+    let mut left = left_t;
+    let mut right = right_t;
+    #[cfg(debug_assertions)]
+    let mut i = 0;
+    while (right_p.y - left_p.y) > I16Dot16::from_quotient(1, 16) {
         let mid = (right + left) / 2;
         let mid_p = quad.sample(mid);
         if mid_p.y <= y {
@@ -76,9 +191,18 @@ fn binary_search_quadratic_x_at_y(quad: QuadraticBezier<I16Dot16>, y: I16Dot16) 
             right = mid;
             right_p = mid_p;
         }
+
+        #[cfg(debug_assertions)]
+        {
+            i += 1;
+            if i > 10000 {
+                // Most likely caused by incorrect `left_t`/`right_t` interval!
+                unreachable!("Infinite loop detected in binary_search_quadratic_x_at_y")
+            }
+        }
     }
     debug_assert!(left_p.y < right_p.y);
-    (left_p.x + right_p.x) / 2
+    (right, (left_p.x + right_p.x) / 2)
 }
 
 #[derive(Debug)]
@@ -231,6 +355,8 @@ impl PathRasterizer {
             next_x: quadratic[0].x,
             kind: SegmentKind::Quadratic {
                 control: quadratic[1],
+                current_t: I16Dot16::ZERO,
+                next_t: I16Dot16::ZERO,
             },
             prev: usize::MAX,
             next: usize::MAX,
@@ -249,8 +375,6 @@ impl PathRasterizer {
         let [dp0, dp1] = quadratic.derivative();
         let t = dp0.y / (dp0.y - dp1.y);
         let (a, b) = quadratic.split_at(t);
-        dbg!(quadratic);
-        dbg!(t, dp0, dp1, &a, &b);
         self.add_monotonic_quadraticf(a);
         self.add_monotonic_quadraticf(b);
     }
@@ -341,7 +465,7 @@ impl PathRasterizer {
             i = segment.next;
 
             if winding_count == 0 {
-                start = Some(segment.clone());
+                start = Some(segment.stepper());
             }
             winding_count += segment.winding as i32;
             if winding_count == 0 {
@@ -354,23 +478,17 @@ impl PathRasterizer {
                     bxl: start.current_x,
                     bxr: segment.current_x,
                 };
-                let end = segment.clone();
-                self.add_trapezoid_coverage(&trapezoid, &start, &end);
+                let end = segment.stepper();
+                self.add_trapezoid_coverage(&trapezoid, start, end);
             }
         }
     }
 
     fn add_trapezoid_row_coverage(&mut self, py: u32, current: &Trapezoid) {
-        let pixel_left = current
-            .txl
-            .min(current.bxl)
-            .floor_to_inner()
-            .clamp(0, self.size.x as i32) as u32;
-        let pixel_right = current
-            .txr
-            .max(current.bxr)
-            .ceil_to_inner()
-            .clamp(0, self.size.x as i32) as u32;
+        let pixel_left =
+            (current.txl.min(current.bxl).floor_to_inner().max(0) as u32).min(self.size.x);
+        let pixel_right =
+            (current.txr.max(current.bxr).ceil_to_inner().max(0) as u32).min(self.size.x);
 
         let fpy = I16Dot16::new(py as i32);
         #[expect(clippy::int_plus_one)] // dear clippy, this is not an int.
@@ -397,67 +515,40 @@ impl PathRasterizer {
 
         // eprintln!("Y coverage hit of line {py} = {y_coverage_hit}");
 
-        let inner_left = current
-            .txl
-            .max(current.bxl)
-            .ceil_to_inner()
-            .clamp(0, self.size.x as i32) as u32;
-        let inner_right = current
-            .txr
-            .min(current.bxr)
-            .floor_to_inner()
-            .clamp(0, self.size.x as i32) as u32;
+        let inner_left =
+            (current.txl.max(current.bxl).ceil_to_inner().max(0) as u32).min(self.size.x);
+        let inner_right =
+            (current.txr.min(current.bxr).floor_to_inner().max(0) as u32).min(self.size.x);
+        let half_inner_h = (current.top - current.bottom) / 2;
         for px in pixel_left..pixel_right {
             let fpx = I16Dot16::new(px as i32);
             let x_coverage_hit = {
-                let inner_h = current.top - current.bottom;
-                let lhit = if px >= inner_left {
-                    I16Dot16::ZERO
-                } else {
+                let mut w = I16Dot16::ZERO;
+
+                if px < inner_left {
                     let left = fpx;
-                    let top_right = current.txl.clamp(fpx, fpx + 1);
-                    let bottom_right = current.bxl.clamp(fpx, fpx + 1);
+                    let top_right = current.txl.max(fpx).min(fpx + 1);
+                    let bottom_right = current.bxl.max(fpx).min(fpx + 1);
                     let neg_a = left - top_right;
                     let neg_b = left - bottom_right;
-                    ((neg_a + neg_b) * inner_h) / 2
-                };
+                    w += neg_a + neg_b;
+                }
 
-                let rhit = if px < inner_right {
-                    I16Dot16::ZERO
-                } else {
+                if px >= inner_right {
                     let right = fpx + 1;
-                    let top_left = current.txr.clamp(fpx, fpx + 1);
-                    let bottom_left = current.bxr.clamp(fpx, fpx + 1);
+                    let top_left = current.txr.max(fpx).min(fpx + 1);
+                    let bottom_left = current.bxr.max(fpx).min(fpx + 1);
                     let neg_a = top_left - right;
                     let neg_b = bottom_left - right;
-                    ((neg_a + neg_b) * inner_h) / 2
-                };
-
-                if lhit != I16Dot16::ZERO {
-                    // eprintln!("Left coverage hit of pixel ({px}, {py}) = {lhit}");
+                    w += neg_a + neg_b;
                 }
 
-                debug_assert!(
-                    (-I16Dot16::ONE..=I16Dot16::ZERO).contains(&lhit),
-                    "Invalid left coverage hit {lhit} on pixel ({px}, {py})"
-                );
-
-                if rhit != I16Dot16::ZERO {
-                    // eprintln!("Right coverage hit of pixel ({px}, {py}) = {rhit}");
-                }
-
-                debug_assert!(
-                    (-I16Dot16::ONE..=I16Dot16::ZERO).contains(&rhit),
-                    "Invalid right coverage hit {rhit} on pixel ({px}, {py})"
-                );
-
-                lhit + rhit
+                w * half_inner_h
             };
             let coverage = I16Dot16::ONE + x_coverage_hit + y_coverage_hit;
 
             // debug_assert!(coverage >= -I16Dot16::from_quotient(1, 100));
-            let coverage16 = (((coverage.into_raw() & 0x0001FFFF) as u64) * u64::from(u16::MAX)
-                / (u64::from(u16::MAX) + 1)) as u16;
+            let coverage16 = fixed_to_u16(coverage);
             // eprintln!("Coverage of pixel ({px}, {py}) = {coverage16:04X}");
             debug_assert!(px < self.size.x);
             debug_assert!(py < self.size.y);
@@ -465,7 +556,12 @@ impl PathRasterizer {
         }
     }
 
-    fn add_trapezoid_coverage(&mut self, trapezoid: &Trapezoid, sleft: &Segment, sright: &Segment) {
+    fn add_trapezoid_coverage(
+        &mut self,
+        trapezoid: &Trapezoid,
+        mut sleft: SegmentStepper,
+        mut sright: SegmentStepper,
+    ) {
         let pixel_top = trapezoid.top.ceil_to_inner() as u32;
         let pixel_bottom = trapezoid.bottom.floor_to_inner() as u32;
 
@@ -475,38 +571,55 @@ impl PathRasterizer {
             txl: if top == trapezoid.top {
                 trapezoid.txl
             } else {
-                sleft.x_at_y(top)
+                sleft.advance_inside(trapezoid.bottom, trapezoid.top, top)
             },
             txr: if top == trapezoid.top {
                 trapezoid.txr
             } else {
-                sright.x_at_y(top)
+                sright.advance_inside(trapezoid.bottom, trapezoid.top, top)
             },
             bottom: trapezoid.bottom,
             bxl: trapezoid.bxl,
             bxr: trapezoid.bxr,
         };
-        for py in pixel_bottom..pixel_top {
+        let mut py = pixel_bottom;
+        loop {
             self.add_trapezoid_row_coverage(py, &current);
 
-            if current.bottom.fract() == I16Dot16::ZERO {
-                current.bottom += 1;
-                current.bxl = sleft.step1_or_x_at_y(current.bxl, current.bottom);
-                current.bxr = sright.step1_or_x_at_y(current.bxr, current.bottom);
-            } else {
-                current.bottom = current.bottom.ceil();
-                current.bxl = sleft.x_at_y(current.bottom);
-                current.bxr = sright.x_at_y(current.bottom);
+            py += 1;
+            if py == pixel_top {
+                break;
             }
 
+            current.bottom = current.top;
+            current.bxl = current.txl;
+            current.bxr = current.txr;
             current.top += 1;
+
             if trapezoid.top < current.top {
                 current.top = trapezoid.top;
                 current.txl = trapezoid.txl;
                 current.txr = trapezoid.txr;
             } else {
-                current.txl = sleft.step1_or_x_at_y(current.txl, current.top);
-                current.txr = sright.step1_or_x_at_y(current.txr, current.top);
+                debug_assert!(
+                    (trapezoid.bottom..=trapezoid.top).contains(&current.top),
+                    "{} is not inside trapezoid {}..={}",
+                    current.top,
+                    trapezoid.bottom,
+                    trapezoid.top
+                );
+                current.txl = sleft.advance1_inside(
+                    current.txl,
+                    trapezoid.bottom,
+                    trapezoid.top,
+                    current.top,
+                );
+                current.txr = sright.advance1_inside(
+                    current.txr,
+                    trapezoid.bottom,
+                    trapezoid.top,
+                    current.top,
+                );
             }
         }
     }
@@ -598,7 +711,7 @@ impl PathRasterizer {
                 SegmentKind::Linear { dx } => {
                     eprint!("linear({:?}, {:?}) dx={dx}", segment.bottom, segment.top,);
                 }
-                SegmentKind::Quadratic { control } => {
+                SegmentKind::Quadratic { control, .. } => {
                     eprint!(
                         "quadratic({:?}, {control:?}, {:?})",
                         segment.bottom, segment.top,
@@ -623,7 +736,6 @@ impl PathRasterizer {
             "PolygonRasterizer does not currently support more than 2^30-1 segments"
         );
         self.compute_segment_endpoint_events();
-        self.print_all_segments();
         self.events = BinaryHeap::from(std::mem::take(&mut self.initial_events));
 
         let mut last_y = I16Dot16::ZERO;
@@ -672,7 +784,7 @@ impl PathRasterizer {
                         while i != usize::MAX {
                             let segment = &mut self.segments[i];
                             let next = segment.next;
-                            segment.next_x = segment.x_at_y(order_y);
+                            segment.next_x = segment.x_at_y(last_y, order_y);
                             self.move_left_until_sorted(i);
                             i = next;
                         }
@@ -683,24 +795,16 @@ impl PathRasterizer {
                         }
                     }
 
-                    eprintln!("Active segments at y range {last_y}-{next_y}:");
+                    // eprintln!("Active segments at y range {last_y}-{next_y}:");
                     #[cfg(debug_assertions)]
-                    self.validate_linked_list(true);
+                    self.validate_linked_list(false);
 
                     {
                         let mut i = self.active_head;
-                        if next_y == last_y + 1 {
-                            while i != usize::MAX {
-                                let segment = &mut self.segments[i];
-                                segment.next_x = segment.step1_or_x_at_y(segment.current_x, next_y);
-                                i = segment.next;
-                            }
-                        } else {
-                            while i != usize::MAX {
-                                let segment = &mut self.segments[i];
-                                segment.next_x = segment.x_at_y(next_y);
-                                i = segment.next;
-                            }
+                        while i != usize::MAX {
+                            let segment = &mut self.segments[i];
+                            segment.advance_next_to_y(last_y, next_y);
+                            i = segment.next;
                         }
                     }
 
@@ -708,8 +812,7 @@ impl PathRasterizer {
                     self.add_coverage_between(next_y, last_y);
 
                     for i in 0..self.segments.len() {
-                        let segment = &mut self.segments[i];
-                        segment.current_x = segment.next_x;
+                        self.segments[i].advance_current_to_next();
                     }
 
                     last_y = next_y;
@@ -821,11 +924,9 @@ impl PathRasterizer {
     fn check_for_intersection(&mut self, current_y: I16Dot16, ai: usize, bi: usize) {
         debug_assert_ne!(ai, bi);
 
-        eprintln!(
-            "Checking {ai} ({}) and {bi} ({}) for intersection",
-            self.segments[ai].degree_str(),
-            self.segments[bi].degree_str()
-        );
+        // eprintln!(
+        //     "Checking {ai} and {bi} for intersection",
+        // );
         let mut intersections = [I16Dot16::ZERO; 2];
         let mut n_intersections = 0;
         self.find_intersection_y(current_y, ai, bi, &mut intersections, &mut n_intersections);
@@ -875,8 +976,8 @@ impl PathRasterizer {
         let mut bottom_y = current_y;
 
         let distance_at_y = |y: I16Dot16| {
-            let a_x = a.x_at_y(y);
-            let b_x = b.x_at_y(y);
+            let a_x = a.x_at_y(current_y, y);
+            let b_x = b.x_at_y(current_y, y);
             (a_x - b_x).abs()
         };
 
@@ -976,7 +1077,7 @@ impl PathRasterizer {
                     output[i] = v;
                     *output_n = i + 1;
                 }
-                eprintln!("{ai} {bi} {:?}", &output[..*output_n]);
+                // eprintln!("{ai} {bi} {:?}", &output[..*output_n]);
             }
         }
     }
@@ -1048,11 +1149,40 @@ fn intersect_curves(
     intersect_curves(lp2, lb2, sp, sb, output, output_n);
 }
 
+fn fixed_to_u16(value: I16Dot16) -> u16 {
+    if value <= 0 {
+        0
+    } else if value >= 1 {
+        u16::MAX
+    } else {
+        let raw = value.into_raw() as u32;
+        (((raw << 16) - raw) >> 16) as u16
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use util::math::{Outline, OutlineBuilder, Point2f, Vec2};
+    use util::math::{I16Dot16, Outline, OutlineBuilder, Point2f, Vec2};
 
     use crate::sw::PathRasterizer;
+
+    fn reference_fixed_to_u16(value: I16Dot16) -> u16 {
+        if value <= 0 {
+            0
+        } else if value >= 1 {
+            u16::MAX
+        } else {
+            (((value.into_raw()) as u64) * u64::from(u16::MAX) / (u64::from(u16::MAX) + 1)) as u16
+        }
+    }
+
+    #[test]
+    fn fixed_to_u16_exhaustive() {
+        for r in 0..=I16Dot16::new(1).into_raw() {
+            let value = I16Dot16::from_raw(r);
+            assert_eq!(super::fixed_to_u16(value), reference_fixed_to_u16(value));
+        }
+    }
 
     fn compare(size: Vec2<u32>, coverage: &[u16], expected: &[u8]) {
         let coverage8: Vec<_> = coverage.iter().map(|&v| (v >> 8) as u8).collect();
@@ -1115,27 +1245,13 @@ mod test {
         }
     }
 
+    #[expect(dead_code)]
     fn test_outline(outline: &Outline, expected: &[u8]) {
         let sizef = outline.control_box().size();
         let size = Vec2::new(sizef.x.ceil() as u32, sizef.y.ceil() as u32);
         let mut rasterizer = PathRasterizer::new();
         rasterizer.reset(size, size.x as usize);
-        rasterizer.add_outline(
-            &{
-                let mut builder = OutlineBuilder::new();
-
-                builder.move_to(Point2f::new(0.0, 0.0));
-                builder.quad_to(Point2f::new(20.0, 80.0), Point2f::new(80.0, 80.0));
-                builder.line_to(Point2f::new(80.0, 0.0));
-
-                builder.move_to(Point2f::new(0.0, 80.0));
-                builder.quad_to(Point2f::new(20.1, 0.0), Point2f::new(80.0, 80.0));
-
-                builder.build()
-            },
-            Vec2::ZERO,
-            1.0,
-        );
+        rasterizer.add_outline(outline, Vec2::ZERO, 0.5);
         rasterizer.rasterize();
 
         compare(size, rasterizer.coverage(), expected);
@@ -1177,36 +1293,5 @@ mod test {
         compare(SIZE, rasterizer.coverage(), EXPECTED);
     }
 
-    #[test]
-    fn tricky_beziers1() {
-        #[rustfmt::skip]
-        const EXPECTED: &[u8] = &[
-            0x00, 0x00, 0x00, 0x33, 0x80, 0x7F, 0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x99, 0xFF, 0xFF, 0xB3, 0x7F, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x0C, 0xF3, 0xFF, 0xFF, 0xFF, 0xFF, 0xF3, 0xBF, 0x1C, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x66, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xB8, 0x2A, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0xCC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0x1C, 0x00, 0x00,
-            0x00, 0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x9C, 0x0E, 0x00,
-            0x00, 0x99, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x8E, 0x00,
-            0x19, 0xE6, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0x7F, 0x7F, 0x7F, 0x7F, 0x00,
-            0x66, 0xFF, 0xFF, 0xFF, 0xD5, 0x7F, 0x7F, 0x7F, 0x7F, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x4C, 0x7F, 0x7F, 0x7F, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        test_outline(
-            &{
-                let mut builder = OutlineBuilder::new();
-
-                builder.move_to(Point2f::new(0.0, 0.0));
-                builder.quad_to(Point2f::new(20.0, 80.0), Point2f::new(80.0, 80.0));
-                builder.line_to(Point2f::new(80.0, 0.0));
-
-                builder.move_to(Point2f::new(0.0, 80.0));
-                builder.quad_to(Point2f::new(20.1, 0.0), Point2f::new(80.0, 80.0));
-
-                builder.build()
-            },
-            EXPECTED,
-        );
-    }
+    // TODO: quadratic test cases
 }

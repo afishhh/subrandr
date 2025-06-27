@@ -212,12 +212,27 @@ macro_rules! define_fixed_for_type {
             $type, @all Sub, sub, -, SubAssign, sub_assign, -=
         );
 
-        // TODO: Both Div and Mul can be implemented more efficiently when
-        //       multiplying by integers
+        impl<const P: u32> Div<$type> for Fixed<P, $type> {
+            type Output = Self;
+
+            #[track_caller]
+            fn div(self, rhs: $type) -> Self::Output {
+                Self(self.0 / rhs)
+            }
+        }
+
+        impl<const P: u32> DivAssign<$type> for Fixed<P, $type> {
+            #[track_caller]
+            fn div_assign(&mut self, rhs: $type) {
+                self.0 /= rhs;
+            }
+        }
+
         define_simple_fixed_operator!(
-            $type, @conversions Div, div, /, DivAssign, div_assign, /=
+            $type, [f32 [] [] Self::from_f32], Div, div, /, DivAssign, div_assign, /=
         );
 
+        // TODO: Mul can be implemented more efficiently when multiplying by integers
         define_simple_fixed_operator!(
             $type, @conversions Mul, mul, *, MulAssign, mul_assign, *=
         );

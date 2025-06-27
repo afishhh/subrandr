@@ -29,12 +29,10 @@ pub fn evaluate_bezier<N: Number>(points: &[Point2<N>], t: N) -> Point2<N> {
         }
     };
 
-    let one_minus_t = N::ONE - t;
-
     while midpoints.len() > 1 {
         let new_len = midpoints.len() - 1;
         for i in 0..new_len {
-            midpoints[i] = midpoints[i] * one_minus_t + midpoints[i + 1] * t
+            midpoints[i] = midpoints[i] + (midpoints[i + 1] - midpoints[i]) * t;
         }
         midpoints = &mut midpoints[..new_len];
     }
@@ -131,9 +129,8 @@ impl<N: Number> QuadraticBezier<N> {
     }
 
     pub fn split_at(&self, t: N) -> (Self, Self) {
-        let one_minus_t = N::ONE - t;
-        let ctrl1 = (self.0[0].to_vec() * one_minus_t + self.0[1].to_vec() * t).to_point();
-        let ctrl2 = (self.0[1].to_vec() * one_minus_t + self.0[2].to_vec() * t).to_point();
+        let ctrl1 = (self.0[0].to_vec() + (self.0[1] - self.0[0]) * t).to_point();
+        let ctrl2 = (self.0[1].to_vec() + (self.0[2] - self.0[1]) * t).to_point();
         let mid = ctrl1.midpoint(ctrl2);
         (
             QuadraticBezier([self.0[0], ctrl1, mid]),

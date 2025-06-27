@@ -124,6 +124,10 @@ macro_rules! define_fixed_for_type {
                 self.ceil().0 >> P
             }
 
+            pub fn sqrt(self) -> Self {
+                Self(((self.0 as $wide) << P).isqrt() as $type)
+            }
+
             pub const ONE: Self = Self(1 << P);
             pub const ZERO: Self = Self(0);
             pub const MIN: Self = Self(<$type>::MIN);
@@ -366,6 +370,23 @@ macro_rules! test_module {
             (26.0, EPS),
         ];
 
+        const SQRT_DATA: &[f32] = &[
+            2620388.0,
+            2620387.0,
+            34031.0,
+            4019.0,
+            3102.0,
+            2353.0,
+            60.0,
+            26.0,
+            20.0,
+            2.5,
+            1.0 + EPS,
+            1.0 - EPS,
+            1.0,
+            EPS
+        ];
+
         #[test]
         fn addsub() {
             for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()).chain(
@@ -474,6 +495,16 @@ macro_rules! test_module {
                     println!("{}.ceil() = {rn}", -d);
                     assert!((rn - en).abs() < EPS);
                 }
+            }
+        }
+
+        #[test]
+        fn sqrt() {
+            for &d in SQRT_DATA {
+                let ep = d.sqrt();
+                let rp = TestFixed::from_f32(d).sqrt().into_f32();
+                println!("{d}.ceil() = {rp}");
+                assert!((ep - rp).abs() < EPS);
             }
         }
 

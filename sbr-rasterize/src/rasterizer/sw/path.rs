@@ -1341,7 +1341,7 @@ mod test {
             for y in (0..size.y as usize).rev() {
                 print_row(y, true);
                 if side_by_side {
-                    print!("    ");
+                    eprint!("    ");
                     print_row(y, false);
                 }
 

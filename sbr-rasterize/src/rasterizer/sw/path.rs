@@ -33,12 +33,10 @@ impl Segment {
             SegmentKind::Quadratic {
                 control, current_t, ..
             } => {
-                binary_search_quadratic_x_at_y(
+                newton_quadratic_x_at_y(
                     QuadraticBezier([self.bottom, control, self.top]),
                     current_t,
-                    Point2::new(self.current_x, current_y),
-                    I16Dot16::ONE,
-                    self.top,
+                    current_y,
                     y,
                 )
                 .1
@@ -55,12 +53,10 @@ impl Segment {
                 ref mut next_t,
                 ..
             } => {
-                let (t, x) = binary_search_quadratic_x_at_y(
+                let (t, x) = newton_quadratic_x_at_y(
                     QuadraticBezier([self.bottom, control, self.top]),
                     current_t,
-                    Point2::new(self.current_x, current_y),
-                    I16Dot16::ONE,
-                    self.top,
+                    current_y,
                     y,
                 );
                 *next_t = t;
@@ -104,21 +100,18 @@ struct SegmentStepper {
 }
 
 impl SegmentStepper {
-    fn advance_inside(&mut self, current_y: I16Dot16, next_y: I16Dot16, y: I16Dot16) -> I16Dot16 {
+    fn advance_inside(&mut self, current_y: I16Dot16, y: I16Dot16) -> I16Dot16 {
         match self.kind {
             SegmentKind::Linear { dx } => self.bottom.x + dx * (y - self.bottom.y),
             SegmentKind::Quadratic {
                 control,
                 ref mut current_t,
-                next_t,
                 ..
             } => {
-                let (t, x) = binary_search_quadratic_x_at_y(
+                let (t, x) = newton_quadratic_x_at_y(
                     QuadraticBezier([self.bottom, control, self.top]),
                     *current_t,
-                    Point2::new(self.current_x, current_y),
-                    next_t,
-                    Point2::new(self.next_x, next_y),
+                    current_y,
                     y,
                 );
                 *current_t = t;
@@ -127,27 +120,18 @@ impl SegmentStepper {
         }
     }
 
-    fn advance1_inside(
-        &mut self,
-        prev: I16Dot16,
-        current_y: I16Dot16,
-        next_y: I16Dot16,
-        y: I16Dot16,
-    ) -> I16Dot16 {
+    fn advance1_inside(&mut self, prev: I16Dot16, current_y: I16Dot16, y: I16Dot16) -> I16Dot16 {
         match self.kind {
             SegmentKind::Linear { dx } => prev + dx,
             SegmentKind::Quadratic {
                 control,
                 ref mut current_t,
-                next_t,
                 ..
             } => {
-                let (t, x) = binary_search_quadratic_x_at_y(
+                let (t, x) = newton_quadratic_x_at_y(
                     QuadraticBezier([self.bottom, control, self.top]),
                     *current_t,
-                    Point2::new(self.current_x, current_y),
-                    next_t,
-                    Point2::new(self.next_x, next_y),
+                    current_y,
                     y,
                 );
                 *current_t = t;
@@ -169,40 +153,28 @@ enum SegmentKind {
     },
 }
 
-fn binary_search_quadratic_x_at_y(
-    quad: QuadraticBezier<I16Dot16>,
-    left_t: I16Dot16,
-    mut left_p: Point2<I16Dot16>,
-    right_t: I16Dot16,
-    mut right_p: Point2<I16Dot16>,
+fn newton_quadratic_x_at_y(
+    mut quad: QuadraticBezier<I16Dot16>,
+    initial_t: I16Dot16,
+    initial_y: I16Dot16,
     y: I16Dot16,
 ) -> (I16Dot16, I16Dot16) {
-    let mut left = left_t;
-    let mut right = right_t;
-    #[cfg(debug_assertions)]
-    let mut i = 0;
-    while (right_p.y - left_p.y) > I16Dot16::from_quotient(1, 16) {
-        let mid = (right + left) / 2;
-        let mid_p = quad.sample(mid);
-        if mid_p.y <= y {
-            left = mid;
-            left_p = mid_p;
-        } else {
-            right = mid;
-            right_p = mid_p;
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            i += 1;
-            if i > 10000 {
-                // Most likely caused by incorrect `left_t`/`right_t` interval!
-                unreachable!("Infinite loop detected in binary_search_quadratic_x_at_y")
-            }
-        }
+    for point in quad.points_mut() {
+        point.y -= y;
     }
-    debug_assert!(left_p.y < right_p.y);
-    (right, (left_p.x + right_p.x) / 2)
+    let derivy = quad.derivative().map(|p| p.y);
+    let dd = derivy[1] - derivy[0];
+    let mut t = initial_t;
+    let mut p_y = initial_y - y;
+
+    while p_y.abs() > I16Dot16::from_quotient(1, 64) {
+        // TODO: It may be possible to create an edge case where the derivative is zero here
+        t -= p_y / (derivy[0] + dd * t);
+        p_y = quad.sample(t).y;
+    }
+
+    t = t.clamp(I16Dot16::ZERO, I16Dot16::ONE);
+    (t, quad.sample(t).x)
 }
 
 #[derive(Debug)]
@@ -685,12 +657,12 @@ impl PathRasterizer {
             txl: if top == trapezoid.top {
                 trapezoid.txl
             } else {
-                sleft.advance_inside(trapezoid.bottom, trapezoid.top, top)
+                sleft.advance_inside(trapezoid.bottom, top)
             },
             txr: if top == trapezoid.top {
                 trapezoid.txr
             } else {
-                sright.advance_inside(trapezoid.bottom, trapezoid.top, top)
+                sright.advance_inside(trapezoid.bottom, top)
             },
             bottom: trapezoid.bottom,
             bxl: trapezoid.bxl,
@@ -722,18 +694,8 @@ impl PathRasterizer {
                     trapezoid.bottom,
                     trapezoid.top
                 );
-                current.txl = sleft.advance1_inside(
-                    current.txl,
-                    trapezoid.bottom,
-                    trapezoid.top,
-                    current.top,
-                );
-                current.txr = sright.advance1_inside(
-                    current.txr,
-                    trapezoid.bottom,
-                    trapezoid.top,
-                    current.top,
-                );
+                current.txl = sleft.advance1_inside(current.txl, trapezoid.bottom, current.top);
+                current.txr = sright.advance1_inside(current.txr, trapezoid.bottom, current.top);
             }
         }
     }

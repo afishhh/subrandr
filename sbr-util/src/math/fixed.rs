@@ -124,6 +124,10 @@ macro_rules! define_fixed_for_type {
                 self.ceil().0 >> P
             }
 
+            pub fn sqrt(self) -> Self {
+                Self(((self.0 as $wide) << P).isqrt() as $type)
+            }
+
             pub const ONE: Self = Self(1 << P);
             pub const ZERO: Self = Self(0);
             pub const MIN: Self = Self(<$type>::MIN);
@@ -208,12 +212,27 @@ macro_rules! define_fixed_for_type {
             $type, @all Sub, sub, -, SubAssign, sub_assign, -=
         );
 
-        // TODO: Both Div and Mul can be implemented more efficiently when
-        //       multiplying by integers
+        impl<const P: u32> Div<$type> for Fixed<P, $type> {
+            type Output = Self;
+
+            #[track_caller]
+            fn div(self, rhs: $type) -> Self::Output {
+                Self(self.0 / rhs)
+            }
+        }
+
+        impl<const P: u32> DivAssign<$type> for Fixed<P, $type> {
+            #[track_caller]
+            fn div_assign(&mut self, rhs: $type) {
+                self.0 /= rhs;
+            }
+        }
+
         define_simple_fixed_operator!(
-            $type, @conversions Div, div, /, DivAssign, div_assign, /=
+            $type, [f32 [] [] Self::from_f32], Div, div, /, DivAssign, div_assign, /=
         );
 
+        // TODO: Mul can be implemented more efficiently when multiplying by integers
         define_simple_fixed_operator!(
             $type, @conversions Mul, mul, *, MulAssign, mul_assign, *=
         );
@@ -366,6 +385,23 @@ macro_rules! test_module {
             (26.0, EPS),
         ];
 
+        const SQRT_DATA: &[f32] = &[
+            2620388.0,
+            2620387.0,
+            34031.0,
+            4019.0,
+            3102.0,
+            2353.0,
+            60.0,
+            26.0,
+            20.0,
+            2.5,
+            1.0 + EPS,
+            1.0 - EPS,
+            1.0,
+            EPS
+        ];
+
         #[test]
         fn addsub() {
             for &(a, b) in SMALL_DATA.iter().chain(EXTREME_DATA.iter()).chain(
@@ -474,6 +510,16 @@ macro_rules! test_module {
                     println!("{}.ceil() = {rn}", -d);
                     assert!((rn - en).abs() < EPS);
                 }
+            }
+        }
+
+        #[test]
+        fn sqrt() {
+            for &d in SQRT_DATA {
+                let ep = d.sqrt();
+                let rp = TestFixed::from_f32(d).sqrt().into_f32();
+                println!("{d}.ceil() = {rp}");
+                assert!((ep - rp).abs() < EPS);
             }
         }
 

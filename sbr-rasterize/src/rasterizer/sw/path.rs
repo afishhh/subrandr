@@ -1090,31 +1090,28 @@ impl PathRasterizer {
     fn find_quadratic_intersection_y(
         a: &Segment,
         b: &Segment,
-        // TODO: Bring ArrayVec back
         output: &mut [I16Dot16; 2],
         output_n: &mut usize,
     ) {
         macro_rules! points_for_segment {
-            (let $result: ident = $s: ident) => {
-                let mut buffer = [$s.bottom, $s.top, Point2::ZERO];
-                let $result = match &$s.kind {
-                    SegmentKind::Linear { .. } => &buffer[..2],
-                    &SegmentKind::Quadratic { control, .. } => {
-                        buffer[1] = control;
-                        buffer[2] = $s.top;
-                        &buffer[..3]
-                    }
+            (let ($result: ident, $bbox: ident) = $s: ident) => {
+                let ($result, $bbox) = match &$s.kind {
+                    SegmentKind::Linear { .. } => (
+                        LineOrCurve::Line([$s.bottom, $s.top]),
+                        Rect2::bounding_box_of_points([$s.bottom, $s.top].into_iter()),
+                    ),
+                    &SegmentKind::Quadratic { control, .. } => (
+                        LineOrCurve::Curve(QuadraticBezier([$s.bottom, control, $s.top])),
+                        Rect2::bounding_box_of_points([$s.bottom, control, $s.top].into_iter()),
+                    ),
                 };
             };
         }
 
-        points_for_segment!(let ap = a);
-        points_for_segment!(let bp = b);
+        points_for_segment!(let (ap, ab) = a);
+        points_for_segment!(let (bp, bb) = b);
 
-        let ab = Rect2::bounding_box_of_points(ap.iter().copied());
-        let bb = Rect2::bounding_box_of_points(bp.iter().copied());
-
-        intersect_curves(ap, ab, bp, bb, output, output_n)
+        intersect_curves(&ap, ab, &bp, bb, output, output_n)
     }
 
     fn find_intersection_y(
@@ -1159,13 +1156,18 @@ impl PathRasterizer {
     }
 }
 
+enum LineOrCurve {
+    Line([Point2<I16Dot16>; 2]),
+    Curve(QuadraticBezier<I16Dot16>),
+}
+
 // TODO: Handle coincident curves.
 //       Basically after some threshold based on the degree of our curves we should
 //       assume that the curves don't actually intersect and are coincident.
 fn intersect_curves(
-    ap: &[Point2<I16Dot16>],
+    ap: &LineOrCurve,
     ab: Rect2<I16Dot16>,
-    bp: &[Point2<I16Dot16>],
+    bp: &LineOrCurve,
     bb: Rect2<I16Dot16>,
     output: &mut [I16Dot16; 2],
     output_n: &mut usize,
@@ -1186,8 +1188,7 @@ fn intersect_curves(
 
     if ar < I16Dot16::from_quotient(1, 4) && br < I16Dot16::from_quotient(1, 4) {
         let point = ab.intersection(&bb).center();
-        let n = *output_n;
-        if n == 1 {
+        if *output_n == 1 {
             if (output[0] - point.y) > I16Dot16::from_quotient(1, 16) {
                 output[1] = point.y;
                 *output_n += 1;
@@ -1199,30 +1200,32 @@ fn intersect_curves(
         return;
     }
 
-    let split = |p: &[Point2<I16Dot16>]| match p.len() {
-        2 => {
-            let mid = p[0].midpoint(p[1]);
-            ([p[0], mid, Point2::ZERO], [mid, p[1], Point2::ZERO])
-        }
-        3 => {
-            let ctrl1 = p[0].midpoint(p[1]);
-            let ctrl2 = p[1].midpoint(p[2]);
-            let mid = ctrl1.midpoint(ctrl2);
-            ([p[0], ctrl1, mid], [mid, ctrl2, p[2]])
-        }
-        _ => unreachable!(),
-    };
-
     let (lp, sp, sb) = if ar > br { (ap, bp, bb) } else { (bp, ap, ab) };
-    let (lpb1, lpb2) = split(lp);
-    let (lp1, lp2) = (&lpb1[..lp.len()], &lpb2[..lp.len()]);
-    let (lb1, lb2) = (
-        Rect2::bounding_box_of_points(lp1.iter().copied()),
-        Rect2::bounding_box_of_points(lp2.iter().copied()),
-    );
 
-    intersect_curves(lp1, lb1, sp, sb, output, output_n);
-    intersect_curves(lp2, lb2, sp, sb, output, output_n);
+    let lp1;
+    let lp2;
+    let lb1;
+    let lb2;
+    match lp {
+        &LineOrCurve::Line([p0, p1]) => {
+            let mid = p0.midpoint(p1);
+            let (a, b) = ([p0, mid], [mid, p1]);
+            lb1 = Rect2::bounding_box_of_points(a);
+            lb2 = Rect2::bounding_box_of_points(b);
+            lp1 = LineOrCurve::Line(a);
+            lp2 = LineOrCurve::Line(b);
+        }
+        LineOrCurve::Curve(quad) => {
+            let (a, b) = quad.split_at(I16Dot16::HALF);
+            lb1 = Rect2::bounding_box_of_points(a.0.iter().copied());
+            lb2 = Rect2::bounding_box_of_points(b.0.iter().copied());
+            lp1 = LineOrCurve::Curve(a);
+            lp2 = LineOrCurve::Curve(b);
+        }
+    }
+
+    intersect_curves(&lp1, lb1, sp, sb, output, output_n);
+    intersect_curves(&lp2, lb2, sp, sb, output, output_n);
 }
 
 fn fixed_to_u16(value: I16Dot16) -> u16 {

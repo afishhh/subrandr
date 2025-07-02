@@ -174,6 +174,7 @@ macro_rules! impl_binop {
         impl<N: Number, U: Number> $trait<$src<U>> for $dst<N> where N: $trait<U, Output = N> {
             type Output = impl_binop!(@arg_or_self $($output)?);
 
+            #[track_caller]
             fn $fn(self, rhs: $src<U>)-> Self::Output {
                 <impl_binop!(@arg_or_self $($output)?)>::new(
                     self.x $operator rhs.x,
@@ -184,6 +185,7 @@ macro_rules! impl_binop {
 
         $(
             impl<N: Number> $trait_assign<$src<N>> for $dst<N> {
+                #[track_caller]
                 fn $fn_assign(&mut self, rhs: $src<N>) {
                     self.x $operator_assign rhs.x;
                     self.y $operator_assign rhs.y;

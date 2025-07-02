@@ -32,7 +32,10 @@ fn approximate_inverse_segments_integral(x: f32) -> f32 {
     x * (1.0 - b + (b * b + 0.25 * x * x).sqrt())
 }
 
-pub fn flatten_quadratic(curve: &QuadraticBezier<f32>, tolerance: f32, out: &mut Vec<Point2f>) {
+pub fn flatten_quadratic(
+    curve: &QuadraticBezier<f32>,
+    tolerance: f32,
+) -> impl Iterator<Item = Point2f> + '_ {
     let basic = map_to_basic(curve[0], curve[1], curve[2]);
     let a0 = approximate_segments_integral(basic.x0);
     let a2 = approximate_segments_integral(basic.x2);
@@ -41,12 +44,13 @@ pub fn flatten_quadratic(curve: &QuadraticBezier<f32>, tolerance: f32, out: &mut
     let x0 = approximate_inverse_segments_integral(a0);
     let x2 = approximate_inverse_segments_integral(a2);
 
-    for i in 1..count as u32 {
-        let x = approximate_inverse_segments_integral(a0 + ((a2 - a0) * i as f32) / count);
-        let t = (x - x0) / (x2 - x0);
-        out.push(curve.sample(t));
-    }
-    out.push(curve[2]);
+    (1..count as u32)
+        .map(move |i| {
+            let x = approximate_inverse_segments_integral(a0 + ((a2 - a0) * i as f32) / count);
+            let t = (x - x0) / (x2 - x0);
+            curve.sample(t)
+        })
+        .chain(std::iter::once(curve[2]))
 }
 
 fn naive_cubic_to_quadratic(cubic: &CubicBezier<f32>) -> QuadraticBezier<f32> {
@@ -79,10 +83,4 @@ pub fn cubic_to_quadratics(
         t = tnext;
         naive_cubic_to_quadratic(&cubic)
     })
-}
-
-pub fn flatten_cubic(points: &CubicBezier<f32>, tolerance: f32, out: &mut Vec<Point2f>) {
-    for quadratic in cubic_to_quadratics(points, tolerance) {
-        flatten_quadratic(&quadratic, tolerance, out)
-    }
 }

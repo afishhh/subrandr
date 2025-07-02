@@ -116,8 +116,12 @@ impl<N: Number> Bezier<N> for QuadraticBezier<N> {
 }
 
 impl QuadraticBezier<f32> {
-    pub fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>) {
-        flatten::flatten_quadratic(self, tolerance, output);
+    pub fn flatten(&self, tolerance: f32) -> impl Iterator<Item = Point2f> + '_ {
+        flatten::flatten_quadratic(self, tolerance)
+    }
+
+    pub fn flatten_into(&self, tolerance: f32, out: &mut Vec<Point2f>) {
+        out.extend(self.flatten(tolerance))
     }
 }
 
@@ -170,15 +174,22 @@ impl<N: Number> Bezier<N> for CubicBezier<N> {
 }
 
 impl CubicBezier<f32> {
-    pub fn flatten_into(&self, tolerance: f32, output: &mut Vec<Point2f>) {
-        flatten::flatten_cubic(self, tolerance, output);
-    }
-
     pub fn to_quadratics(
         &self,
         tolerance: f32,
     ) -> impl Iterator<Item = QuadraticBezier<f32>> + use<'_> {
         flatten::cubic_to_quadratics(self, tolerance)
+    }
+
+    // FIXME: This function probably shouldn't exist as the tolerance for
+    //        `cubic_to_quadratics` and `flatten_quadratic` should be separate.
+    //        Currently this is not used in any code paths so could be removed if
+    //        the debugging utility of `Outline::flatten_contour` is deemed not
+    //        important enough.
+    pub fn flatten_into(&self, tolerance: f32, out: &mut Vec<Point2f>) {
+        for quadratic in self.to_quadratics(tolerance) {
+            out.extend(quadratic.flatten(tolerance))
+        }
     }
 
     pub fn from_b_spline(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> Self {

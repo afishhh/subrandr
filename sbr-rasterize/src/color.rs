@@ -149,7 +149,7 @@ mod test {
     use super::mul_rgb;
 
     #[test]
-    fn test_mul_rgb() {
+    fn mul_rgb_exhaustive() {
         assert_eq!(mul_rgb(255, 1), 1);
         assert_eq!(mul_rgb(255, 255), 255);
 

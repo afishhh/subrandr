@@ -650,7 +650,7 @@ pub fn create_render_target(
     width: u32,
     height: u32,
     stride: u32,
-) -> super::RenderTarget {
+) -> super::RenderTarget<'_> {
     assert!(
         buffer.len() >= height as usize * stride as usize,
         "Buffer passed to rasterize::sw::create_render_target is too small!"
@@ -668,7 +668,7 @@ pub fn create_render_target_mono(
     width: u32,
     height: u32,
     stride: u32,
-) -> super::RenderTarget {
+) -> super::RenderTarget<'_> {
     assert!(
         buffer.len() >= height as usize * stride as usize,
         "Buffer passed to rasterize::sw::create_render_target is too small!"

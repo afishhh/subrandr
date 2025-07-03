@@ -12,4 +12,3 @@ wgpu = { workspace = true, optional = true }
 
 [lints]
 workspace = true
-

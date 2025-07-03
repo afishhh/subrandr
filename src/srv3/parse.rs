@@ -22,11 +22,23 @@ pub enum EdgeType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RubyPart {
-    None = 0,
-    Base = 1,
-    Parenthesis = 2,
-    Over = 4,
-    Under = 5,
+    None,
+    Base,
+    Parenthesis,
+    Ruby(RubyTextPart),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RubyTextPart {
+    pub position: RubyPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RubyPosition {
+    #[default]
+    Alternate,
+    Over,
+    Under,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -284,8 +296,13 @@ impl FromStr for RubyPart {
             "0" => Self::None,
             "1" => Self::Base,
             "2" => Self::Parenthesis,
-            "4" => Self::Over,
-            "5" => Self::Under,
+            "3" => Self::Ruby(RubyTextPart::default()),
+            "4" => Self::Ruby(RubyTextPart {
+                position: RubyPosition::Over,
+            }),
+            "5" => Self::Ruby(RubyTextPart {
+                position: RubyPosition::Under,
+            }),
             _ => return Err("Unknown ruby part".into()),
         })
     }

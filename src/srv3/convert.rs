@@ -12,6 +12,7 @@ use crate::{
     },
     log::{log_once_state, warning},
     renderer::FrameLayoutPass,
+    srv3::RubyPosition,
     style::{
         self,
         types::{Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment},
@@ -467,19 +468,16 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                 if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
                     let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
 
-                    if !matches!(
-                        ruby_block.each_ref().map(|s| s.pen().ruby_part),
-                        [
-                            RubyPart::Parenthesis,
-                            RubyPart::Over | RubyPart::Under,
-                            RubyPart::Parenthesis,
-                        ]
-                    ) {
+                    let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
+                        ruby_block.each_ref().map(|s| s.pen().ruby_part)
+                    else {
                         break 'ruby_failed;
-                    }
-                    let ruby = match ruby_block[1].pen().ruby_part {
-                        RubyPart::Over => Ruby::Over,
-                        RubyPart::Under => {
+                    };
+
+                    let ruby = match part.position {
+                        RubyPosition::Alternate => Ruby::Over,
+                        RubyPosition::Over => Ruby::Over,
+                        RubyPosition::Under => {
                             warning!(
                                 sbr,
                                 once(ruby_under_unsupported),
@@ -487,7 +485,6 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                             );
                             break 'ruby_failed;
                         }
-                        _ => unreachable!(),
                     };
 
                     segments.push(convert_segment(segment, Ruby::Base));

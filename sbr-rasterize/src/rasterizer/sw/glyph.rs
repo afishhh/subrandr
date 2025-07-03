@@ -1,15 +1,16 @@
-/// A cell-based analytical glyph rasterizer.
-///
-/// This is a cell-based rasterizer that should produce correct coverage for
-/// planar non-overlapping paths. While overlapping and intersecting paths are
-/// in some cases allowed in OpenType fonts, FreeType uses a similiar method
-/// that results in similiar inaccuracies (although sometimes they enable 4x
-/// multisampling to reduce error).
-///
-/// In the future I may investigate addressing the "overlapping areas" part of
-/// the problem, I have some ideas for how to do that while maybe keeping
-/// performance reasonable.
+//! A cell-based analytical glyph rasterizer.
+//!
+//! This is a cell-based rasterizer that should produce correct coverage for
+//! planar non-overlapping paths. While overlapping and intersecting paths are
+//! in some cases allowed in OpenType fonts, FreeType uses a similiar method
+//! that results in similiar inaccuracies (although sometimes they enable 4x
+//! multisampling to reduce error).
+//!
+//! In the future I may investigate addressing the "overlapping areas" part of
+//! the problem, I have some ideas for how to do that while maybe keeping
+//! performance reasonable.
 // TODO: Handle segments at x < 0 properly
+
 use std::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
 use util::math::{CubicBezier, I16Dot16, Outline, Point2, Point2f, QuadraticBezier, Vec2, Vec2f};

@@ -35,6 +35,14 @@ struct InstallCommand {
     prefix: Option<PathBuf>,
     #[clap(long = "destdir")]
     destdir: Option<PathBuf>,
+    #[clap(long = "bindir", default_value = "bin")]
+    bindir: PathBuf,
+    #[clap(long = "libdir", default_value = "lib")]
+    libdir: PathBuf,
+    #[clap(long = "includedir", default_value = "include")]
+    includedir: PathBuf,
+    #[clap(long = "pkgconfigdir")]
+    pkgconfigdir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +133,13 @@ fn copy_file(src: &Path, dst: &Path, file: &str) -> anyhow::Result<()> {
         .map(|_| ())
 }
 
-fn make_pkgconfig_file(prefix: &Path, version: &str, target: &Triple) -> String {
+fn make_pkgconfig_file(
+    prefix: &Path,
+    version: &str,
+    target: &Triple,
+    libdir: &Path,
+    includedir: &Path,
+) -> String {
     let prefix_str = prefix.to_str().unwrap().trim_end_matches('/');
     let extra_link_flags = if target.is_windows() {
         "-lWs2_32 -lUserenv"
@@ -138,10 +152,13 @@ fn make_pkgconfig_file(prefix: &Path, version: &str, target: &Triple) -> String 
         ""
     };
 
+    let libdir_str = libdir.to_str().unwrap().trim_end_matches('/');
+    let includedir_str = includedir.to_str().unwrap().trim_end_matches('/');
+
     format!(
         r#"prefix={prefix_str}
-libdir={prefix_str}/lib
-includedir={prefix_str}/include
+libdir={libdir_str}
+includedir={includedir_str}
 
 Name: subrandr
 Description: A subtitle rendering library
@@ -258,19 +275,27 @@ fn main() -> Result<()> {
             let version = manifest.workspace.package.version;
             let abiver = manifest.package.metadata.capi.abiver;
 
+            let libdir = destdir.join(&install.libdir);
+            let pkgconfigdir = if let Some(pkgconfigdir) = install.pkgconfigdir {
+                destdir.join(pkgconfigdir)
+            } else {
+                libdir.join("pkgconfig")
+            };
+
             (|| -> Result<()> {
-                std::fs::create_dir_all(destdir.join("lib").join("pkgconfig"))?;
-                std::fs::create_dir_all(destdir.join("include").join("subrandr"))?;
                 if install.target.is_windows() {
-                    std::fs::create_dir_all(destdir.join("bin"))?;
+                    std::fs::create_dir_all(destdir.join(&install.bindir))?;
                 }
+                std::fs::create_dir_all(&libdir)?;
+                std::fs::create_dir_all(destdir.join(&install.includedir).join("subrandr"))?;
+                std::fs::create_dir_all(&pkgconfigdir)?;
                 Ok(())
             })()
             .context("Failed to create directory structure")?;
 
             copy_dir_all(
                 &project_dir.join("include"),
-                &destdir.join("include").join("subrandr"),
+                &destdir.join(&install.includedir).join("subrandr"),
             )
             .context("Failed to copy headers")?;
 
@@ -279,14 +304,20 @@ fn main() -> Result<()> {
                 .join(install.target.to_string())
                 .join("release");
 
-            let libdir = destdir.join("lib");
-
             copy_file(&target_dir, &libdir, "libsubrandr.a")?;
 
             let (shared_in, shared_dir, shared_out) = if install.target.is_windows() {
-                ("subrandr.dll", "bin", format!("subrandr-{abiver}.dll"))
+                (
+                    "subrandr.dll",
+                    &install.bindir,
+                    format!("subrandr-{abiver}.dll"),
+                )
             } else {
-                ("libsubrandr.so", "lib", format!("libsubrandr.so.{abiver}"))
+                (
+                    "libsubrandr.so",
+                    &install.libdir,
+                    format!("libsubrandr.so.{abiver}"),
+                )
             };
 
             std::fs::copy(
@@ -318,8 +349,14 @@ fn main() -> Result<()> {
             }
 
             std::fs::write(
-                libdir.join("pkgconfig").join("subrandr.pc"),
-                make_pkgconfig_file(&prefix, &version, &install.target),
+                pkgconfigdir.join("subrandr.pc"),
+                make_pkgconfig_file(
+                    &prefix,
+                    &version,
+                    &install.target,
+                    &prefix.join(&install.libdir),
+                    &prefix.join(&install.includedir),
+                ),
             )
             .context("Failed to write pkgconfig file")?;
         }

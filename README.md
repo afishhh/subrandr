@@ -107,3 +107,9 @@ int main() {
   sbr_library_fini(sbr);
 }
 ```
+
+The example code above is licensed under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (public domain).
+
+### License
+
+subrandr is available under the Mozilla Public License 2.0, see [LICENSE](https://github.com/afishhh/subrandr/blob/master/LICENSE) for details. Unless stated otherwise all files in this repository are covered by this license.

@@ -35,6 +35,14 @@ struct InstallCommand {
     prefix: Option<PathBuf>,
     #[clap(long = "destdir")]
     destdir: Option<PathBuf>,
+    #[clap(long = "bindir", default_value = "bin")]
+    bindir: PathBuf,
+    #[clap(long = "libdir", default_value = "lib")]
+    libdir: PathBuf,
+    #[clap(long = "includedir", default_value = "include")]
+    includedir: PathBuf,
+    #[clap(long = "pkgconfigdir", default_value = "lib/pkgconfig")]
+    pkgconfigdir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -259,18 +267,19 @@ fn main() -> Result<()> {
             let abiver = manifest.package.metadata.capi.abiver;
 
             (|| -> Result<()> {
-                std::fs::create_dir_all(destdir.join("lib").join("pkgconfig"))?;
-                std::fs::create_dir_all(destdir.join("include").join("subrandr"))?;
                 if install.target.is_windows() {
-                    std::fs::create_dir_all(destdir.join("bin"))?;
+                    std::fs::create_dir_all(destdir.join(&install.bindir))?;
                 }
+                std::fs::create_dir_all(destdir.join(&install.libdir))?;
+                std::fs::create_dir_all(destdir.join(&install.includedir).join("subrandr"))?;
+                std::fs::create_dir_all(destdir.join(&install.pkgconfigdir))?;
                 Ok(())
             })()
             .context("Failed to create directory structure")?;
 
             copy_dir_all(
                 &project_dir.join("include"),
-                &destdir.join("include").join("subrandr"),
+                &destdir.join(&install.includedir).join("subrandr"),
             )
             .context("Failed to copy headers")?;
 
@@ -279,14 +288,22 @@ fn main() -> Result<()> {
                 .join(install.target.to_string())
                 .join("release");
 
-            let libdir = destdir.join("lib");
+            let libdir = destdir.join(&install.libdir);
 
             copy_file(&target_dir, &libdir, "libsubrandr.a")?;
 
             let (shared_in, shared_dir, shared_out) = if install.target.is_windows() {
-                ("subrandr.dll", "bin", format!("subrandr-{abiver}.dll"))
+                (
+                    "subrandr.dll",
+                    install.bindir,
+                    format!("subrandr-{abiver}.dll"),
+                )
             } else {
-                ("libsubrandr.so", "lib", format!("libsubrandr.so.{abiver}"))
+                (
+                    "libsubrandr.so",
+                    install.libdir,
+                    format!("libsubrandr.so.{abiver}"),
+                )
             };
 
             std::fs::copy(
@@ -318,7 +335,7 @@ fn main() -> Result<()> {
             }
 
             std::fs::write(
-                libdir.join("pkgconfig").join("subrandr.pc"),
+                destdir.join(&install.pkgconfigdir).join("subrandr.pc"),
                 make_pkgconfig_file(&prefix, &version, &install.target),
             )
             .context("Failed to write pkgconfig file")?;

@@ -31,8 +31,8 @@ Currently only a C API is provided, **do not** use this library from Rust. Absol
 The C API is defined in the `subrandr.h` header, items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined and no API stability is guaranteed for them.
 
 > [!WARNING]
-> This library is experimental and no API stability is guaranteed for any of its APIs
-> even for items not marked unstable. This *may* or *may not* change in the future.
+> No stability guarantees, neither ABI nor API, are provided for items marked unstable.
+> `SBR_ALLOW_UNSTABLE` should only be used when loading at runtime after checking the version or in statically linked builds.
 
 ```c
 #include <stdio.h>

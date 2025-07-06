@@ -232,6 +232,7 @@ struct CApiMetadata {
 }
 
 fn build_library(manifest_dir: &Path, target: &Triple) -> Result<()> {
+    eprintln!("Building for {target}");
     let status = Command::new(env!("CARGO"))
         .arg("build")
         .arg("--manifest-path")

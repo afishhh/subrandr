@@ -17,7 +17,14 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Task {
+    Build(BuildCommand),
     Install(InstallCommand),
+}
+
+#[derive(Parser)]
+struct BuildCommand {
+    #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
+    target: Triple,
 }
 
 #[derive(Parser)]
@@ -197,6 +204,26 @@ struct CApiMetadata {
     abiver: Box<str>,
 }
 
+fn build_library(manifest_dir: &Path, target: &Triple) -> Result<()> {
+    let status = Command::new(env!("CARGO"))
+        .arg("build")
+        .arg("--manifest-path")
+        .arg(manifest_dir.join("Cargo.toml"))
+        .arg("--target")
+        .arg(target.to_string())
+        .arg("--release")
+        .arg("-p")
+        .arg("subrandr")
+        .status()
+        .context("Failed to run `cargo build`")?;
+
+    if !status.success() {
+        bail!("`cargo build` failed: {}", status)
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").context("`CARGO_MANIFEST_DIR` is not set")?,
@@ -205,6 +232,9 @@ fn main() -> Result<()> {
     let project_dir = manifest_dir.parent().unwrap();
 
     match Args::parse().command {
+        Task::Build(build) => {
+            build_library(&manifest_dir, &build.target)?;
+        }
         Task::Install(install) => {
             let prefix = install
                 .prefix
@@ -217,20 +247,7 @@ fn main() -> Result<()> {
                 .or_else(|| std::env::var_os("DESTDIR").map(PathBuf::from))
                 .unwrap_or_else(|| prefix.clone());
 
-            let status = Command::new(env!("CARGO"))
-                .arg("build")
-                .arg("--manifest-path")
-                .arg(manifest_dir.join("Cargo.toml"))
-                .arg("--target")
-                .arg(install.target.to_string())
-                .arg("--release")
-                .arg("-p")
-                .arg("subrandr")
-                .status()
-                .context("Failed to run `cargo build`")?;
-            if !status.success() {
-                bail!("`cargo build` failed: {}", status)
-            }
+            build_library(&manifest_dir, &install.target)?;
 
             let manifest: Manifest = toml::from_str(
                 &std::fs::read_to_string(project_dir.join("Cargo.toml"))

@@ -417,10 +417,12 @@ impl<'a> Renderer<'a> {
             sbr.did_log_version.set(true);
             info!(
                 sbr,
-                "subrandr version {} rev {}{}",
-                env!("CARGO_PKG_VERSION"),
-                env!("BUILD_REV"),
-                env!("BUILD_DIRTY")
+                concat!(
+                    "subrandr version ",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("BUILD_REV_SUFFIX"),
+                    env!("BUILD_DIRTY")
+                )
             );
         }
 
@@ -612,8 +614,7 @@ impl Renderer<'_> {
                     concat!(
                         "subrandr ",
                         env!("CARGO_PKG_VERSION"),
-                        " rev ",
-                        env!("BUILD_REV")
+                        env!("BUILD_REV_SUFFIX"),
                     ),
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                     debug_font_size,

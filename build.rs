@@ -2,9 +2,9 @@ use std::{path::PathBuf, process::Command};
 
 fn main() {
     if let Ok(rev) = std::env::var("SUBRANDR_BUILD_REV") {
-        println!("cargo:rustc-env=BUILD_REV={}", &rev[..7]);
+        println!("cargo:rustc-env=BUILD_REV_SUFFIX= rev {}", &rev[..7]);
         println!("cargo:rustc-env=BUILD_DIRTY=");
-    } else {
+    } else if std::fs::exists(".git").unwrap() {
         let rev_output = Command::new("git")
             .arg("rev-parse")
             .arg("HEAD")
@@ -19,12 +19,15 @@ fn main() {
             .unwrap();
         let is_dirty = !dirty_status.success();
 
-        println!("cargo:rustc-env=BUILD_REV={}", &rev[..7]);
+        println!("cargo:rustc-env=BUILD_REV_SUFFIX= rev {}", &rev[..7]);
         println!(
             "cargo:rustc-env=BUILD_DIRTY={}",
             if is_dirty { " (dirty)" } else { "" }
         );
-    }
+    } else {
+        println!("cargo:rustc-env=BUILD_REV_SUFFIX=");
+        println!("cargo:rustc-env=BUILD_DIRTY=");
+    };
 
     let abiver = {
         let manifest_content =

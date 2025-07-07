@@ -152,8 +152,18 @@ fn make_pkgconfig_file(
         ""
     };
 
-    let libdir_str = libdir.to_str().unwrap().trim_end_matches('/');
-    let includedir_str = includedir.to_str().unwrap().trim_end_matches('/');
+    let libdir_str = [
+        prefix_str,
+        "/",
+        libdir.to_str().unwrap().trim_end_matches('/'),
+    ]
+    .concat();
+    let includedir_str = [
+        prefix_str,
+        "/",
+        includedir.to_str().unwrap().trim_end_matches('/'),
+    ]
+    .concat();
 
     format!(
         r#"prefix={prefix_str}
@@ -354,8 +364,8 @@ fn main() -> Result<()> {
                     &prefix,
                     &version,
                     &install.target,
-                    &prefix.join(&install.libdir),
-                    &prefix.join(&install.includedir),
+                    &install.libdir,
+                    &install.includedir,
                 ),
             )
             .context("Failed to write pkgconfig file")?;

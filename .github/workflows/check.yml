@@ -103,6 +103,7 @@ jobs:
             freetype:p
             harfbuzz:p
             rust:p
+            ca-certificates:p
 
       - uses: Swatinem/rust-cache@v2
       - shell: msys2 {0}

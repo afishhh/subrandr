@@ -786,8 +786,7 @@ checksum = "a1e52775179941363cc594e49ce99284d13d6948928d8e72c755f55e98caa1eb"
 [[package]]
 name = "implib"
 version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598bf7096215f835b0f70c94d7b033da3cbf66181b619f25e54d65adaf825e62"
+source = "git+https://github.com/afishhh/implib-rs?branch=fix-gnu-amd64#bd7c7ab8f19e91e3e7d9b4a2d1d783ded66706c8"
 dependencies = [
  "memoffset",
  "object",

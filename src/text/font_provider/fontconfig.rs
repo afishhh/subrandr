@@ -357,7 +357,7 @@ impl FontProvider for FontconfigFontProvider {
                 FcPatternAddString,
                 PatternAddString,
                 FC_FAMILY,
-                cname.as_ptr() as *const u8,
+                cname.as_ptr().cast(),
                 family.to_string()
             );
         }

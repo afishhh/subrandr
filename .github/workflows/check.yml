@@ -29,8 +29,16 @@ jobs:
       - run: nix build --print-build-logs .
 
   check-linux:
-    name: Check
-    runs-on: ubuntu-latest
+    name: Check ${{ matrix.name }}
+    runs-on: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64 Linux
+            image: ubuntu-latest
+          - name: aarch64 Linux
+            image: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,21 +77,31 @@ jobs:
       - run: cargo build --target wasm32-wasip1 -p subrandr --all-features
 
   check-windows:
-    name: Check Windows
-    runs-on: windows-latest
+    name: Check ${{ matrix.name }}
+    runs-on: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64 Windows
+            image: windows-latest
+            msystem: MINGW64
+          # FIXME: aarch64 is broken because implib produces garbage implibs for it
+          # - name: aarch64 Windows
+          #   image: windows-11-arm
+          #   msystem: CLANGARM64
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.msystem }}
           update: true
-          install: >-
-            git
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-freetype
-            mingw-w64-x86_64-harfbuzz
-            mingw-w64-x86_64-freetype
-            mingw-w64-x86_64-rust
+          install: git
+          pacboy: >-
+            gcc:p
+            freetype:p
+            harfbuzz:p
+            rust:p
 
       - uses: Swatinem/rust-cache@v2
       - shell: msys2 {0}

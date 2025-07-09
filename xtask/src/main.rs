@@ -189,6 +189,7 @@ fn write_implib(arch: &str, def_content: &str, dllname: &str, output_path: &Path
         _ => panic!("Don't know how to generate implib for arch {arch:?}"),
     };
 
+    dbg!(arch, def_content, machine, dllname, output_path);
     let mut def = implib::def::ModuleDef::parse(def_content, machine)
         .context("Failed to parse module def")?;
     def.import_name = dllname.to_owned();

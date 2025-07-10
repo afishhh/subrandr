@@ -37,19 +37,35 @@ jobs:
         include:
           - name: x86_64 Linux
             image: ubuntu-latest
+          - name: i686 Linux
+            image: ubuntu-latest
+            cross-arch: i686
+            rustc-cross-target: i686-unknown-linux-gnu
+            extra-cflags: -m32
+            extra-packages: gcc-multilib
           - name: aarch64 Linux
             image: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: clippy rustfmt
+          targets: ${{ matrix.rustc-cross-target }}
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
+        with:
+          key: ${{ matrix.cross-arch }}
+      - run: ./ci/ubuntu_install_packages.sh
+        env:
+          CROSS_ARCH: ${{ matrix.cross-arch }}
+          EXTRA_PACKAGES: ${{ matrix.extra-packages }}
+          LIBRARIES: libfontconfig-dev libfreetype-dev libharfbuzz-dev
 
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
       - run: ./ci/c_sanity_check.sh
+        env:
+          CROSS_TARGET: ${{ matrix.rustc-cross-target }}
+          CFLAGS: ${{ matrix.extra-cflags }}
 
   check-wasi:
     name: Check wasm32-wasip1

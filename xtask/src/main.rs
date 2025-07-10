@@ -181,18 +181,31 @@ Libs.private: {extra_link_flags}
     )
 }
 
-fn write_implib(arch: &str, def_content: &str, dllname: &str, output_path: &Path) -> Result<()> {
-    let machine = match arch {
+fn write_implib(
+    target: &Triple,
+    def_content: &str,
+    dllname: &str,
+    output_path: &Path,
+) -> Result<()> {
+    let flavor = match target.env.as_deref() {
+        Some("msvc") => implib::Flavor::Msvc,
+        _ => implib::Flavor::Gnu,
+    };
+
+    let machine = match &*target.arch {
         "x86_64" => implib::MachineType::AMD64,
         "i686" => implib::MachineType::I386,
         "aarch64" => implib::MachineType::ARM64,
-        _ => panic!("Don't know how to generate implib for arch {arch:?}"),
+        _ => panic!(
+            "Don't know how to generate implib for arch {:?}",
+            target.arch
+        ),
     };
 
     let mut def = implib::def::ModuleDef::parse(def_content, machine)
         .context("Failed to parse module def")?;
     def.import_name = dllname.to_owned();
-    implib::ImportLibrary::from_def(def, machine, implib::Flavor::Gnu)
+    implib::ImportLibrary::from_def(def, machine, flavor)
         .write_to(
             &mut std::fs::File::create(output_path)
                 .context("Failed to open import library output file")?,
@@ -350,7 +363,7 @@ fn main() -> Result<()> {
 
             if install.target.is_windows() {
                 write_implib(
-                    &install.target.arch,
+                    &install.target,
                     &std::fs::read_to_string(target_dir.join("subrandr.def"))
                         .context("Failed to read module definition file")?,
                     &shared_out,

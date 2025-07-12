@@ -102,10 +102,9 @@ jobs:
           - name: x86_64 Windows
             image: windows-latest
             msystem: MINGW64
-          # FIXME: aarch64 is broken because implib produces garbage implibs for it
-          # - name: aarch64 Windows
-          #   image: windows-11-arm
-          #   msystem: CLANGARM64
+          - name: aarch64 Windows
+            image: windows-11-arm
+            msystem: CLANGARM64
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2

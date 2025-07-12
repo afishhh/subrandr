@@ -184,7 +184,7 @@ Libs.private: {extra_link_flags}
 fn target_has_broken_implib(target: &Triple) -> bool {
     target.is_windows()
         && target.env.as_deref().is_some_and(|env| env != "msvc")
-        && matches!(&*target.arch, "aarch64" | "i686")
+        && matches!(&*target.arch, "i686")
 }
 
 fn write_implib(

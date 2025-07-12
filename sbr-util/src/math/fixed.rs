@@ -282,6 +282,8 @@ macro_rules! define_fixed_for_type {
             const ONE: Self = Self::ONE;
             const MAX: Self = Self::MAX;
         }
+
+        impl<const P: u32> super::Signed for Fixed<P, $type> {}
     };
     (@unsigned $type: ty, $wide: ty) => {
         impl<const P: u32> Fixed<P, $type> {

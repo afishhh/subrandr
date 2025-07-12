@@ -181,12 +181,6 @@ Libs.private: {extra_link_flags}
     )
 }
 
-fn target_has_broken_implib(target: &Triple) -> bool {
-    target.is_windows()
-        && target.env.as_deref().is_some_and(|env| env != "msvc")
-        && matches!(&*target.arch, "aarch64" | "i686")
-}
-
 fn write_implib(
     target: &Triple,
     def_content: &str,
@@ -292,17 +286,6 @@ fn main() -> Result<()> {
                 .destdir
                 .or_else(|| std::env::var_os("DESTDIR").map(PathBuf::from))
                 .unwrap_or_else(|| prefix.clone());
-
-            if target_has_broken_implib(&install.target) {
-                eprintln!(
-                    "\x1b[1;31mERROR\x1b[0m: Building for {} is currently known to be broken!",
-                    install.target
-                );
-                eprintln!(
-                    "\x1b[1;31mERROR\x1b[0m: See issue #31 at https://github.com/afishhh/subrandr/issues/31"
-                );
-                panic!("Build for broken platform aborted");
-            }
 
             build_library(&manifest_dir, &install.target)?;
 

@@ -4,7 +4,6 @@ use std::{
     ffi::{c_char, c_void},
     hash::{Hash, Hasher},
     io::IsTerminal,
-    panic::Location,
     str::FromStr,
     sync::OnceLock,
 };
@@ -19,13 +18,14 @@ pub enum Level {
     Error,
 }
 
+pub type CLogCallback =
+    extern "C" fn(Level, *const c_char, usize, *const c_char, usize, *const c_void);
+
 #[derive(Debug)]
 pub enum Logger {
     Default,
-    // TODO: Allow overriding logger in C API
-    #[expect(dead_code)]
     C {
-        fun: extern "C" fn(Level, *const c_char, usize, *const c_void),
+        callback: CLogCallback,
         user_data: *const c_void,
     },
     // possible future variant: rust's log crate for rust projects
@@ -48,23 +48,45 @@ impl AsLogger for Logger {
 }
 
 impl Logger {
-    #[track_caller]
     pub fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
-        let filter = ENV_LOG_FILTER.get_or_init(|| parse_log_env_var().unwrap_or_default());
-        if !filter.filter(level) {
-            return;
-        }
+        const CRATE_MODULE_PREFIX: &str = concat!(env!("CARGO_PKG_NAME"), "::");
+
+        let module_rel = module_path
+            .strip_prefix(CRATE_MODULE_PREFIX)
+            .unwrap_or(module_path);
 
         match self {
             Logger::Default => {
-                log_default(level, fmt, core::panic::Location::caller(), module_path)
+                let filter = ENV_LOG_FILTER.get_or_init(|| parse_log_env_var().unwrap_or_default());
+                if !filter.filter(level) {
+                    return;
+                }
+
+                log_default(level, fmt, module_rel)
             }
-            &Logger::C { fun, user_data } => {
+            &Logger::C {
+                callback,
+                user_data,
+            } => {
                 if let Some(literal) = fmt.as_str() {
-                    fun(level, literal.as_ptr().cast(), literal.len(), user_data)
+                    callback(
+                        level,
+                        module_rel.as_ptr().cast(),
+                        module_rel.len(),
+                        literal.as_ptr().cast(),
+                        literal.len(),
+                        user_data,
+                    )
                 } else {
                     let string = fmt.to_string();
-                    fun(level, string.as_ptr().cast(), string.len(), user_data)
+                    callback(
+                        level,
+                        module_rel.as_ptr().cast(),
+                        module_rel.len(),
+                        string.as_ptr().cast(),
+                        string.len(),
+                        user_data,
+                    )
                 }
             }
         }
@@ -134,12 +156,7 @@ fn parse_log_env_var() -> Option<LogFilter> {
 
 static ENV_LOG_FILTER: OnceLock<LogFilter> = OnceLock::new();
 
-fn log_default(
-    level: Level,
-    fmt: std::fmt::Arguments,
-    _location: &Location<'static>,
-    module_path: &'static str,
-) {
+fn log_default(level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
     let level_str = if std::io::stderr().is_terminal() {
         match level {
             Level::Trace => "\x1b[1;37mtrace\x1b[0m",
@@ -158,12 +175,8 @@ fn log_default(
         }
     };
 
-    let module_rel = module_path
-        .strip_prefix("subrandr::")
-        .or_else(|| module_path.strip_prefix("subrandr"))
-        .unwrap_or(module_path);
-    let module_space = if module_rel.is_empty() { "" } else { " " };
-    eprintln!("[sbr {level_str}{module_space}{module_rel}] {fmt}");
+    let module_space = if module_path.is_empty() { "" } else { " " };
+    eprintln!("[sbr {level_str}{module_space}{module_path}] {fmt}");
 }
 
 #[doc(hidden)]

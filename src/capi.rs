@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     cell::UnsafeCell,
-    ffi::{c_char, c_int, CStr, CString},
+    ffi::{c_char, c_int, c_void, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
     rc::Rc,
@@ -12,6 +12,7 @@ use rasterize::color::BGRA8;
 use util::math::I16Dot16;
 
 use crate::{
+    log::{CLogCallback, Logger},
     text::{Face, FontAxisValues, WEIGHT_AXIS},
     Renderer, Subrandr, SubtitleContext, Subtitles,
 };
@@ -256,6 +257,18 @@ unsafe extern "C" fn sbr_library_version(major: *mut u32, minor: *mut u32, patch
     major.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MAJOR")) });
     minor.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MINOR")) });
     patch.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_PATCH")) });
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_library_set_log_callback(
+    sbr: &mut Subrandr,
+    callback: CLogCallback,
+    user_data: *const c_void,
+) {
+    sbr.logger = Logger::C {
+        callback,
+        user_data,
+    }
 }
 
 #[unsafe(no_mangle)]

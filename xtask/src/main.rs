@@ -55,7 +55,7 @@ struct InstallCommand {
     #[clap(
         long = "static-library",
         action = clap::ArgAction::Set,
-        default_value = "true"
+        default_value = "false"
     )]
     static_library: bool,
 }

@@ -1,6 +1,7 @@
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
 pub mod math;
+pub mod rc;
 pub mod small_type_map;
 
 pub type AnyError = Box<dyn std::error::Error + Send + Sync>;

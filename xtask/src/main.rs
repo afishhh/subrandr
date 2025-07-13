@@ -1,5 +1,6 @@
 use std::{
     fmt::Display,
+    io::IsTerminal,
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -13,6 +14,8 @@ use serde::Deserialize;
 struct Args {
     #[clap(subcommand)]
     command: Task,
+    #[clap(short = 'q', long = "quiet", global = true)]
+    quiet: bool,
 }
 
 #[derive(Subcommand)]
@@ -43,6 +46,18 @@ struct InstallCommand {
     includedir: PathBuf,
     #[clap(long = "pkgconfigdir")]
     pkgconfigdir: Option<PathBuf>,
+    #[clap(
+        long = "shared-library",
+        action = clap::ArgAction::Set,
+        default_value = "true"
+    )]
+    shared_library: bool,
+    #[clap(
+        long = "static-library",
+        action = clap::ArgAction::Set,
+        default_value = "true"
+    )]
+    static_library: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -250,7 +265,7 @@ struct CApiMetadata {
     abiver: Box<str>,
 }
 
-fn build_library(manifest_dir: &Path, target: &Triple) -> Result<()> {
+fn build_library(manifest_dir: &Path, target: &Triple, quiet: bool) -> Result<()> {
     let status = Command::new(env!("CARGO"))
         .arg("build")
         .arg("--manifest-path")
@@ -260,6 +275,7 @@ fn build_library(manifest_dir: &Path, target: &Triple) -> Result<()> {
         .arg("--release")
         .arg("-p")
         .arg("subrandr")
+        .args(if quiet { &["--quiet"][..] } else { &[][..] })
         .status()
         .context("Failed to run `cargo build`")?;
 
@@ -270,6 +286,23 @@ fn build_library(manifest_dir: &Path, target: &Triple) -> Result<()> {
     Ok(())
 }
 
+fn print_cargo_style_status(title: &str, args: &std::fmt::Arguments) {
+    assert!(title.len() <= 12);
+
+    if std::io::stderr().is_terminal() {
+        eprint!("\x1b[32;1m{title: >12}\x1b[0m ");
+    } else {
+        eprint!("{title: >12} ");
+    }
+    eprintln!("{args}");
+}
+
+macro_rules! statusln {
+    ($title: literal, $($fmt: tt)*) => {
+        print_cargo_style_status($title, &format_args!($($fmt)*))
+    };
+}
+
 fn main() -> Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").context("`CARGO_MANIFEST_DIR` is not set")?,
@@ -277,9 +310,10 @@ fn main() -> Result<()> {
 
     let project_dir = manifest_dir.parent().unwrap();
 
-    match Args::parse().command {
+    let args = Args::parse();
+    match args.command {
         Task::Build(build) => {
-            build_library(&manifest_dir, &build.target)?;
+            build_library(&manifest_dir, &build.target, args.quiet)?;
         }
         Task::Install(install) => {
             let prefix = install
@@ -304,7 +338,7 @@ fn main() -> Result<()> {
                 panic!("Build for broken platform aborted");
             }
 
-            build_library(&manifest_dir, &install.target)?;
+            build_library(&manifest_dir, &install.target, args.quiet)?;
 
             let manifest: Manifest = toml::from_str(
                 &std::fs::read_to_string(project_dir.join("Cargo.toml"))
@@ -333,18 +367,24 @@ fn main() -> Result<()> {
             })()
             .context("Failed to create directory structure")?;
 
-            copy_dir_all(
-                &project_dir.join("include"),
-                &destdir.join(&install.includedir).join("subrandr"),
-            )
-            .context("Failed to copy headers")?;
+            let include_dir = destdir.join(&install.includedir);
+            if !args.quiet {
+                statusln!("Installing", "headers to `{}`", include_dir.display());
+            }
+            copy_dir_all(&project_dir.join("include"), &include_dir.join("subrandr"))
+                .context("Failed to copy headers")?;
 
             let target_dir = project_dir
                 .join("target")
                 .join(install.target.to_string())
                 .join("release");
 
-            copy_file(&target_dir, &libdir, "libsubrandr.a")?;
+            if install.static_library {
+                if !args.quiet {
+                    statusln!("Installing", "libsubrandr.a to `{}`", libdir.display());
+                }
+                copy_file(&target_dir, &libdir, "libsubrandr.a")?;
+            }
 
             let (shared_in, shared_dir, shared_out) = if install.target.is_windows() {
                 (
@@ -360,34 +400,50 @@ fn main() -> Result<()> {
                 )
             };
 
-            std::fs::copy(
-                target_dir.join(shared_in),
-                destdir.join(shared_dir).join(&shared_out),
-            )
-            .with_context(|| format!("Failed to copy `{shared_in}`"))?;
+            if install.shared_library {
+                let full_shared_dir = destdir.join(shared_dir);
+                if !args.quiet {
+                    statusln!(
+                        "Installing",
+                        "{shared_out} to `{}`",
+                        full_shared_dir.display()
+                    );
+                }
+                std::fs::copy(
+                    target_dir.join(shared_in),
+                    full_shared_dir.join(&shared_out),
+                )
+                .with_context(|| format!("Failed to copy `{shared_in}`"))?;
 
-            #[cfg(unix)]
-            if install.target.is_unix() {
-                let link = libdir.join("libsubrandr.so");
-                match std::fs::remove_file(&link) {
-                    Ok(()) => (),
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
-                    Err(err) => return Err(err).context("Failed to remove `libsubrandr.so`"),
-                };
-                std::os::unix::fs::symlink(&shared_out, link)
-                    .context("Failed to symlink `libsubrandr.so`")?;
+                #[cfg(unix)]
+                if install.target.is_unix() {
+                    let link = libdir.join("libsubrandr.so");
+                    match std::fs::remove_file(&link) {
+                        Ok(()) => (),
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
+                        Err(err) => return Err(err).context("Failed to remove `libsubrandr.so`"),
+                    };
+                    std::os::unix::fs::symlink(&shared_out, link)
+                        .context("Failed to symlink `libsubrandr.so`")?;
+                }
+
+                if install.target.is_windows() {
+                    if !args.quiet {
+                        statusln!("Installing", "implib to `{}`", libdir.display());
+                    }
+                    write_implib(
+                        &install.target,
+                        &std::fs::read_to_string(target_dir.join("subrandr.def"))
+                            .context("Failed to read module definition file")?,
+                        &shared_out,
+                        &libdir.join("libsubrandr.dll.a"),
+                    )?;
+                }
             }
 
-            if install.target.is_windows() {
-                write_implib(
-                    &install.target,
-                    &std::fs::read_to_string(target_dir.join("subrandr.def"))
-                        .context("Failed to read module definition file")?,
-                    &shared_out,
-                    &libdir.join("libsubrandr.dll.a"),
-                )?;
+            if !args.quiet {
+                statusln!("Installing", "subrandr.pc to `{}`", pkgconfigdir.display());
             }
-
             std::fs::write(
                 pkgconfigdir.join("subrandr.pc"),
                 make_pkgconfig_file(

@@ -91,7 +91,7 @@ use super::layout::FixedL;
 //
 // Also currently the macro only supports one layer but it's not like that's
 // too difficult to change.
-subrandr_macros::implement_style_module! {
+macros::implement_style_module! {
     rc font {
         #[copy(no)] font_family: [Rc<str>] = Rc::new(["serif".into()]),
         font_weight: I16Dot16 = I16Dot16::new(400),

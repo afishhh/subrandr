@@ -1,10 +1,13 @@
 [package]
-name = "subrandr-macros"
-version = "0.1.0"
-edition = "2024"
+name = "sbr-macros"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 proc-macro = true
+
+[lints]
+workspace = true
 
 [dependencies]
 proc-macro2 = "1"

@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fmt::Display,
     io::IsTerminal,
     path::{Path, PathBuf},
@@ -28,12 +29,14 @@ enum Task {
 struct BuildCommand {
     #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
     target: Triple,
+    /// Arguments passed through to `cargo build`.
+    cargo_args: Vec<OsString>,
 }
 
 #[derive(Parser)]
 struct InstallCommand {
-    #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
-    target: Triple,
+    #[clap(flatten)]
+    build: BuildCommand,
     #[clap(short = 'p', long = "prefix")]
     prefix: Option<PathBuf>,
     #[clap(long = "destdir")]
@@ -265,17 +268,18 @@ struct CApiMetadata {
     abiver: Box<str>,
 }
 
-fn build_library(manifest_dir: &Path, target: &Triple, quiet: bool) -> Result<()> {
+fn build_library(manifest_dir: &Path, build: &BuildCommand, quiet: bool) -> Result<()> {
     let status = Command::new(env!("CARGO"))
         .arg("build")
         .arg("--manifest-path")
         .arg(manifest_dir.join("Cargo.toml"))
         .arg("--target")
-        .arg(target.to_string())
+        .arg(build.target.to_string())
         .arg("--release")
         .arg("-p")
         .arg("subrandr")
         .args(if quiet { &["--quiet"][..] } else { &[][..] })
+        .args(&build.cargo_args)
         .status()
         .context("Failed to run `cargo build`")?;
 
@@ -313,7 +317,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     match args.command {
         Task::Build(build) => {
-            build_library(&manifest_dir, &build.target, args.quiet)?;
+            build_library(&manifest_dir, &build, args.quiet)?;
         }
         Task::Install(install) => {
             let prefix = install
@@ -327,10 +331,10 @@ fn main() -> Result<()> {
                 .or_else(|| std::env::var_os("DESTDIR").map(PathBuf::from))
                 .unwrap_or_else(|| prefix.clone());
 
-            if target_has_broken_implib(&install.target) {
+            if target_has_broken_implib(&install.build.target) {
                 eprintln!(
                     "\x1b[1;31mERROR\x1b[0m: Building for {} is currently known to be broken!",
-                    install.target
+                    install.build.target
                 );
                 eprintln!(
                     "\x1b[1;31mERROR\x1b[0m: See issue #31 at https://github.com/afishhh/subrandr/issues/31"
@@ -338,7 +342,7 @@ fn main() -> Result<()> {
                 panic!("Build for broken platform aborted");
             }
 
-            build_library(&manifest_dir, &install.target, args.quiet)?;
+            build_library(&manifest_dir, &install.build, args.quiet)?;
 
             let manifest: Manifest = toml::from_str(
                 &std::fs::read_to_string(project_dir.join("Cargo.toml"))
@@ -357,7 +361,7 @@ fn main() -> Result<()> {
             };
 
             (|| -> Result<()> {
-                if install.target.is_windows() {
+                if install.build.target.is_windows() {
                     std::fs::create_dir_all(destdir.join(&install.bindir))?;
                 }
                 std::fs::create_dir_all(&libdir)?;
@@ -376,7 +380,7 @@ fn main() -> Result<()> {
 
             let target_dir = project_dir
                 .join("target")
-                .join(install.target.to_string())
+                .join(install.build.target.to_string())
                 .join("release");
 
             if install.static_library {
@@ -386,7 +390,7 @@ fn main() -> Result<()> {
                 copy_file(&target_dir, &libdir, "libsubrandr.a")?;
             }
 
-            let (shared_in, shared_dir, shared_out) = if install.target.is_windows() {
+            let (shared_in, shared_dir, shared_out) = if install.build.target.is_windows() {
                 (
                     "subrandr.dll",
                     &install.bindir,
@@ -416,7 +420,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to copy `{shared_in}`"))?;
 
                 #[cfg(unix)]
-                if install.target.is_unix() {
+                if install.build.target.is_unix() {
                     let link = libdir.join("libsubrandr.so");
                     match std::fs::remove_file(&link) {
                         Ok(()) => (),
@@ -427,12 +431,12 @@ fn main() -> Result<()> {
                         .context("Failed to symlink `libsubrandr.so`")?;
                 }
 
-                if install.target.is_windows() {
+                if install.build.target.is_windows() {
                     if !args.quiet {
                         statusln!("Installing", "implib to `{}`", libdir.display());
                     }
                     write_implib(
-                        &install.target,
+                        &install.build.target,
                         &std::fs::read_to_string(target_dir.join("subrandr.def"))
                             .context("Failed to read module definition file")?,
                         &shared_out,
@@ -449,7 +453,7 @@ fn main() -> Result<()> {
                 make_pkgconfig_file(
                     &prefix,
                     &version,
-                    &install.target,
+                    &install.build.target,
                     &install.libdir,
                     &install.includedir,
                 ),

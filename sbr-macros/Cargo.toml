@@ -1,0 +1,15 @@
+[package]
+name = "sbr-macros"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["parsing", "full", "extra-traits"] }

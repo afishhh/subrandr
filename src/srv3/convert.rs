@@ -1,9 +1,12 @@
 //! Converts parsed SRV3 subtitles into Subtitles.
 
-use std::{collections::HashMap, ops::Range, rc::Rc};
+use std::{collections::HashMap, ops::Range};
 
 use rasterize::color::BGRA8;
-use util::math::{I16Dot16, I26Dot6, Vec2f};
+use util::{
+    math::{I16Dot16, I26Dot6, Vec2f},
+    rc::Rc,
+};
 
 use crate::{
     layout::{
@@ -14,55 +17,64 @@ use crate::{
     renderer::FrameLayoutPass,
     srv3::RubyPosition,
     style::{
-        self,
-        types::{Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment},
-        StyleMap,
+        computed::{
+            Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment,
+        },
+        ComputedStyle,
     },
     Subrandr, SubtitleContext,
 };
 
 use super::{Document, EdgeType, Pen, RubyPart};
 
-const SRV3_FONTS: &[&[&str]] = &[
-    &[
-        "Courier New",
-        "Courier",
-        "Nimbus Mono L",
-        "Cutive Mono",
-        "monospace",
+macro_rules! static_rc_of_static_strings {
+    [$($values: literal),* $(,)?] => {
+        util::rc_static!([
+            $(util::rc_static!(str $values)),*
+        ])
+    };
+}
+
+const SRV3_FONTS: &[Rc<[Rc<str>]>] = &[
+    static_rc_of_static_strings![
+        b"Courier New",
+        b"Courier",
+        b"Nimbus Mono L",
+        b"Cutive Mono",
+        b"monospace",
     ],
-    &[
-        "Times New Roman",
-        "Times",
-        "Georgia",
-        "Cambria",
-        "PT Serif Caption",
-        "serif",
+    static_rc_of_static_strings![
+        b"Times New Roman",
+        b"Times",
+        b"Georgia",
+        b"Cambria",
+        b"PT Serif Caption",
+        b"serif",
     ],
-    &[
-        "Deja Vu Sans Mono", // not a real font :(
-        "Lucida Console",
-        "Monaco",
-        "Consolas",
-        "PT Mono",
-        "monospace",
+    static_rc_of_static_strings![
+        b"Deja Vu Sans Mono", // not a real font :(
+        b"Lucida Console",
+        b"Monaco",
+        b"Consolas",
+        b"PT Mono",
+        b"monospace",
     ],
-    &[
-        "YouTube Noto",
-        "Roboto",
-        "Arial",
-        "Helvetica",
-        "Verdana",
-        "PT Sans Caption",
-        "sans-serif",
+    static_rc_of_static_strings![
+        b"YouTube Noto",
+        b"Roboto",
+        b"Arial",
+        b"Helvetica",
+        b"Verdana",
+        b"PT Sans Caption",
+        b"sans-serif",
     ],
-    &["Comic Sans Ms", "Impact", "Handlee", "fantasy"],
-    &[
-        "Monotype Corsiva",
-        "URW Chancery L",
-        "Apple Chancery",
-        "Dancing Script",
-        "cursive",
+    static_rc_of_static_strings![b"Comic Sans Ms", b"Impact", b"Handlee", b"fantasy"],
+    static_rc_of_static_strings![
+        b"Monotype Corsiva",
+        b"URW Chancery L",
+        b"Apple Chancery",
+        b"Dancing Script",
+        b"cursive",
     ],
     // YouTube appears to conditionally set this to either:
     // "Carrois Gothic SC", sans-serif-smallcaps
@@ -71,20 +83,20 @@ const SRV3_FONTS: &[&[&str]] = &[
     // the first one seems to be used when ran under Cobalt
     // https://developers.google.com/youtube/cobalt
     // i.e. in YouTube TV
-    &[
-        "Arial",
-        "Helvetica",
-        "Verdana",
-        "Marcellus SC",
-        "sans-serif",
+    static_rc_of_static_strings![
+        b"Arial",
+        b"Helvetica",
+        b"Verdana",
+        b"Marcellus SC",
+        b"sans-serif",
     ],
 ];
 
-fn font_style_to_name(style: u32) -> &'static [&'static str] {
+fn font_style_to_families(style: u32) -> &'static Rc<[Rc<str>]> {
     style
         .checked_sub(1)
         .and_then(|i| SRV3_FONTS.get(i as usize))
-        .map_or(SRV3_FONTS[3], |v| v)
+        .map_or(&SRV3_FONTS[3], |v| v)
 }
 
 fn convert_coordinate(coord: f32) -> f32 {
@@ -251,7 +263,6 @@ impl super::Point {
 
 #[derive(Debug)]
 pub struct Subtitles {
-    root_style: StyleMap,
     windows: Vec<Window>,
 }
 
@@ -275,10 +286,10 @@ struct WindowEvent {
 
 #[derive(Debug, Clone)]
 struct Segment {
-    base_style: StyleMap,
+    base_style: ComputedStyle,
     font_size: u16,
     time_offset: u32,
-    text: Rc<str>,
+    text: std::rc::Rc<str>,
     shadow: Srv3TextShadow,
     ruby: Ruby,
 }
@@ -305,13 +316,13 @@ fn segments_to_inline(
                             size /= 2.0;
                         }
 
-                        result.set::<style::FontSize>(I26Dot6::from(size));
+                        *result.make_font_size_mut() = I26Dot6::from(size);
 
                         let mut shadows = vec![];
                         segment.shadow.to_css(pass.sctx, &mut shadows);
 
                         if !shadows.is_empty() {
-                            result.set::<style::TextShadows>(shadows)
+                            *result.make_text_shadows_mut() = shadows.into();
                         }
 
                         result
@@ -330,16 +341,25 @@ impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
-        style: &StyleMap,
     ) -> Result<Option<(Point2L, layout::BlockContainerFragment)>, layout::InlineLayoutError> {
+        let block_style = {
+            let mut result = ComputedStyle::DEFAULT;
+
+            if self.alignment.0 != HorizontalAlignment::Left {
+                *result.make_text_align_mut() = self.alignment.0;
+            }
+
+            result
+        };
+
         let contents: Vec<InlineContainer> = self
             .events
             .iter()
             .filter_map(|line| {
                 if pass.add_event_range(line.range.clone()) {
                     Some(InlineContainer {
+                        style: block_style.clone(),
                         contents: segments_to_inline(pass, line.range.start, &line.segments),
-                        ..InlineContainer::default()
                     })
                 } else {
                     None
@@ -352,15 +372,7 @@ impl Window {
         }
 
         let block = BlockContainer {
-            style: {
-                let mut result = StyleMap::new();
-
-                if self.alignment.0 != HorizontalAlignment::Left {
-                    result.set::<style::TextAlign>(self.alignment.0);
-                }
-
-                result
-            },
+            style: block_style,
             contents,
         };
 
@@ -368,7 +380,7 @@ impl Window {
             size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment = layout::layout(pass.lctx, constraints, &block, style)?;
+        let fragment = layout::layout(pass.lctx, constraints, &block)?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),
@@ -391,43 +403,37 @@ impl Window {
     }
 }
 
-fn pen_to_size_independent_styles(pen: &Pen, set_default: bool) -> StyleMap {
-    let mut result = StyleMap::new();
-
+fn pen_to_size_independent_styles(
+    pen: &Pen,
+    set_default: bool,
+    mut base: ComputedStyle,
+) -> ComputedStyle {
     if set_default || pen.font_style != Pen::DEFAULT.font_style {
-        result.set::<style::FontFamily>(
-            font_style_to_name(pen.font_style)
-                .iter()
-                .copied()
-                .map(Box::<str>::from)
-                .collect(),
-        );
+        *base.make_font_family_mut() = font_style_to_families(pen.font_style).clone();
     }
 
     if pen.bold {
-        result.set::<style::FontWeight>(I16Dot16::new(700));
+        *base.make_font_weight_mut() = I16Dot16::new(700);
     }
 
     if pen.italic {
-        result.set::<style::FontStyle>(FontSlant::Italic);
+        *base.make_font_slant_mut() = FontSlant::Italic;
     }
 
     if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {
-        result.set::<style::Color>(BGRA8::from_rgba32(pen.foreground_color));
+        *base.make_color_mut() = BGRA8::from_rgba32(pen.foreground_color);
     }
 
     if set_default || pen.background_color != Pen::DEFAULT.background_color {
-        result.set::<style::BackgroundColor>(BGRA8::from_rgba32(pen.background_color));
+        *base.make_background_color_mut() = BGRA8::from_rgba32(pen.background_color);
     }
 
-    result
+    base
 }
 
-fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
-    let style = pen_to_size_independent_styles(segment.pen(), false);
-
+fn convert_segment(segment: &super::Segment, ruby: Ruby, base_style: &ComputedStyle) -> Segment {
     Segment {
-        base_style: style,
+        base_style: pen_to_size_independent_styles(segment.pen(), false, base_style.clone()),
         font_size: segment.pen().font_size,
         time_offset: segment.time_offset,
         text: segment.text.as_str().into(),
@@ -440,8 +446,8 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby) -> Segment {
 }
 
 pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
+    let base_style = pen_to_size_independent_styles(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);
     let mut result = Subtitles {
-        root_style: pen_to_size_independent_styles(&Pen::DEFAULT, true),
         windows: Vec::new(),
     };
 
@@ -487,16 +493,16 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                         }
                     };
 
-                    segments.push(convert_segment(segment, Ruby::Base));
+                    segments.push(convert_segment(segment, Ruby::Base, &base_style));
                     _ = it.next().unwrap();
-                    segments.push(convert_segment(it.next().unwrap(), ruby));
+                    segments.push(convert_segment(it.next().unwrap(), ruby, &base_style));
                     _ = it.next().unwrap();
 
                     continue 'segment_loop;
                 }
             }
 
-            segments.push(convert_segment(segment, Ruby::None));
+            segments.push(convert_segment(segment, Ruby::None, &base_style));
         }
 
         if let Some(&widx) = event
@@ -545,7 +551,7 @@ impl Layouter {
                 continue;
             }
 
-            if let Some((pos, block)) = window.layout(pass, &self.subtitles.root_style)? {
+            if let Some((pos, block)) = window.layout(pass)? {
                 pass.emit_fragment(pos, block);
             }
         }

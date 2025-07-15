@@ -1,6 +1,9 @@
-use std::{mem::MaybeUninit, sync::Arc};
+use std::mem::MaybeUninit;
 
-use util::math::{Point2f, Rect2f, Vec2f};
+use util::{
+    math::{Point2f, Rect2f, Vec2f},
+    rc::{Arc, UniqueArc},
+};
 
 use super::PixelFormat;
 use crate::color::BGRA8;
@@ -626,7 +629,7 @@ pub(super) struct RenderTargetImpl<'a> {
 }
 
 enum RenderTargetBuffer<'a> {
-    OwnedMono(Arc<[u8]>),
+    OwnedMono(UniqueArc<[u8]>),
     BorrowedBgra(&'a mut [BGRA8]),
     BorrowedMono(&'a mut [u8]),
 }
@@ -697,9 +700,7 @@ fn unwrap_sw_render_target<'a, 'b>(
 impl RenderTargetBuffer<'_> {
     fn as_mut(&mut self) -> RenderTargetBufferMut<'_> {
         match self {
-            RenderTargetBuffer::OwnedMono(mono) => {
-                RenderTargetBufferMut::Mono(unsafe { Arc::get_mut(mono).unwrap_unchecked() })
-            }
+            RenderTargetBuffer::OwnedMono(mono) => RenderTargetBufferMut::Mono(mono),
             RenderTargetBuffer::BorrowedBgra(bgra) => RenderTargetBufferMut::Bgra(bgra),
             RenderTargetBuffer::BorrowedMono(mono) => RenderTargetBufferMut::Mono(mono),
         }
@@ -783,31 +784,33 @@ impl super::Rasterizer for Rasterizer {
         let n_pixels = width as usize * height as usize;
         match format {
             PixelFormat::Mono => {
-                let mut data = Arc::new_uninit_slice(n_pixels);
-                let slice = unsafe { Arc::get_mut(&mut data).unwrap_unchecked() };
-                callback(slice, width as usize);
+                let mut data = UniqueArc::new_uninit_slice(n_pixels);
+
+                callback(&mut data, width as usize);
+                let init = UniqueArc::assume_init(data);
+
                 super::Texture(super::TextureInner::Software(TextureImpl {
                     width,
                     height,
-                    data: TextureData::OwnedMono(Arc::<[MaybeUninit<u8>]>::assume_init(data)),
+                    data: TextureData::OwnedMono(UniqueArc::into_shared(init)),
                 }))
             }
             PixelFormat::Bgra => {
-                let mut data: Arc<[MaybeUninit<BGRA8>]> = Arc::new_uninit_slice(n_pixels);
-                let slice = unsafe { Arc::get_mut(&mut data).unwrap_unchecked() };
+                let mut data = UniqueArc::<[BGRA8]>::new_uninit_slice(n_pixels);
                 let slice = unsafe {
                     std::slice::from_raw_parts_mut(
-                        slice.as_mut_ptr().cast::<MaybeUninit<u8>>(),
-                        slice.len() * 4,
+                        data.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+                        data.len() * 4,
                     )
                 };
 
                 callback(slice, width as usize * 4);
+                let init = UniqueArc::assume_init(data);
 
                 super::Texture(super::TextureInner::Software(TextureImpl {
                     width,
                     height,
-                    data: TextureData::OwnedBgra(Arc::<[MaybeUninit<BGRA8>]>::assume_init(data)),
+                    data: TextureData::OwnedBgra(UniqueArc::into_shared(init)),
                 }))
             }
         }
@@ -820,12 +823,10 @@ impl super::Rasterizer for Rasterizer {
     ) -> super::RenderTarget<'static> {
         super::RenderTarget(super::RenderTargetInner::Software(RenderTargetImpl {
             buffer: {
-                let mut uninit = Arc::new_uninit_slice(width as usize * height as usize);
+                let mut uninit = UniqueArc::new_uninit_slice(width as usize * height as usize);
                 unsafe {
-                    Arc::get_mut(&mut uninit)
-                        .unwrap_unchecked()
-                        .fill(MaybeUninit::zeroed());
-                    RenderTargetBuffer::OwnedMono(Arc::<[MaybeUninit<u8>]>::assume_init(uninit))
+                    uninit.fill(MaybeUninit::zeroed());
+                    RenderTargetBuffer::OwnedMono(UniqueArc::assume_init(uninit))
                 }
             },
             width,
@@ -837,15 +838,24 @@ impl super::Rasterizer for Rasterizer {
     fn finalize_texture_render(&mut self, target: super::RenderTarget<'static>) -> super::Texture {
         #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
         match target.0 {
-            super::RenderTargetInner::Software(RenderTargetImpl { buffer, width, height, stride }) => {
+            super::RenderTargetInner::Software(RenderTargetImpl {
+                buffer,
+                width,
+                height,
+                stride,
+            }) => {
                 assert_eq!(stride, width);
                 super::Texture(super::TextureInner::Software(TextureImpl {
                     width,
                     height,
                     data: match buffer {
-                        RenderTargetBuffer::OwnedMono(mono) => TextureData::OwnedMono(mono),
-                        _ => panic!("Borrowed render target passed to software Rasterizer::finalize_texture_render")
-                    }
+                        RenderTargetBuffer::OwnedMono(mono) => {
+                            TextureData::OwnedMono(UniqueArc::into_shared(mono))
+                        }
+                        _ => panic!(
+                            "Borrowed render target passed to software Rasterizer::finalize_texture_render"
+                        ),
+                    },
                 }))
             }
             target => panic!(

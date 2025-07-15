@@ -2,18 +2,20 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     ops::Range,
-    rc::Rc,
 };
 
 use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
 use thiserror::Error;
-use util::math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f};
+use util::{
+    math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
+    rc::Rc,
+};
 
 use crate::{
     layout::{self, BlockContainerFragment, FixedL, LayoutContext, Point2L, Vec2L},
     log::{info, trace},
     srv3,
-    style::types::{
+    style::computed::{
         Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
     },
     text::{self, FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics},
@@ -188,7 +190,7 @@ impl FrameRenderPass<'_, '_> {
         target: &mut RenderTarget,
         x: I26Dot6,
         y: I26Dot6,
-        glyphs: &GlyphString<'_, Rc<str>>,
+        glyphs: &GlyphString<'_, std::rc::Rc<str>>,
         color: BGRA8,
         decoration: &TextDecorations,
         shadows: &[TextShadow],
@@ -831,11 +833,12 @@ impl Renderer<'_> {
                         for &(offset, ref text) in &line.children {
                             let current = current + offset;
 
-                            if text.style.background_color.a != 0 {
+                            let background = text.style.background_color();
+                            if background.a != 0 {
                                 pass.rasterizer.fill_axis_aligned_rect(
                                     target,
                                     Rect2::to_float(Rect2::from_min_size(current, text.fbox.size)),
-                                    text.style.background_color,
+                                    background,
                                 );
                             }
                         }
@@ -876,7 +879,7 @@ impl Renderer<'_> {
                                 pass.debug_text(
                                     target,
                                     Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                                    &format!("{:.0}pt", text.style.font_size),
+                                    &format!("{:.0}pt", text.style.font_size()),
                                     Alignment(
                                         HorizontalAlignment::Right,
                                         VerticalAlignment::Bottom,
@@ -907,9 +910,9 @@ impl Renderer<'_> {
                                 current.x + text.baseline_offset.x,
                                 current.y + text.baseline_offset.y,
                                 text.glyphs(),
-                                text.style.color,
-                                &text.style.decorations,
-                                &text.style.shadows,
+                                text.style.color(),
+                                &text.style.text_decoration(),
+                                text.style.text_shadows(),
                             )?;
                         }
                     }

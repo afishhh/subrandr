@@ -1642,12 +1642,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbr-macros"
+version = "0.1.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "sbr-overlay"
 version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
  "pollster",
+ "sbr-util",
  "serde",
  "serde_json",
  "subrandr",
@@ -1800,6 +1810,7 @@ dependencies = [
  "icu_segmenter",
  "once_cell",
  "quick-xml 0.36.2",
+ "sbr-macros",
  "sbr-rasterize",
  "sbr-util",
  "text-sys",

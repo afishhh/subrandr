@@ -1,7 +1,11 @@
-use std::{ops::Range, rc::Rc};
+use std::ops::Range;
 
 use rasterize::color::BGRA8;
-use util::math::{I16Dot16, Point2, Rect2};
+use util::{
+    math::{I16Dot16, I26Dot6, Point2, Rect2},
+    rc::Rc,
+    rc_static,
+};
 
 use crate::{
     layout::{
@@ -11,9 +15,8 @@ use crate::{
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     style::{
-        self,
-        types::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
-        StyleMap,
+        computed::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
+        ComputedStyle,
     },
     vtt, Subrandr, SubtitleContext,
 };
@@ -109,7 +112,7 @@ impl Event {
         &self,
         sctx: &SubtitleContext,
         lctx: &mut layout::LayoutContext<'_, '_>,
-        style: &style::StyleMap,
+        font_size: I26Dot6,
         output: &mut Vec<Rect2<FixedL>>,
     ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
         let mut fragment = layout::layout(
@@ -119,16 +122,23 @@ impl Event {
             },
             &BlockContainer {
                 style: {
-                    let mut result = StyleMap::new();
-                    result.set::<style::TextAlign>(self.horizontal_alignment);
+                    let mut result = ComputedStyle::DEFAULT;
+                    *result.make_text_align_mut() = self.horizontal_alignment;
                     result
                 },
                 contents: vec![InlineContainer {
-                    style: StyleMap::new(),
-                    contents: self.segments.clone(),
+                    style: ComputedStyle::DEFAULT,
+                    contents: self
+                        .segments
+                        .iter()
+                        .cloned()
+                        .map(|mut text| {
+                            *text.style.make_font_size_mut() = font_size;
+                            text
+                        })
+                        .collect(),
                 }],
             },
-            style,
         )?;
 
         let container = Rc::make_mut(&mut fragment.children[0].1);
@@ -378,7 +388,7 @@ impl Event {
 
 // TODO: Ruby
 struct TextConverter {
-    style: StyleMap,
+    style: ComputedStyle,
     segments: Vec<InlineText>,
 }
 
@@ -389,40 +399,40 @@ impl TextConverter {
                 let old = self.style.clone();
                 match internal.kind {
                     vtt::InternalNodeKind::Italic => {
-                        self.style.set::<style::FontStyle>(FontSlant::Italic)
+                        *self.style.make_font_slant_mut() = FontSlant::Italic;
                     }
                     vtt::InternalNodeKind::Bold => {
-                        self.style.set::<style::FontWeight>(I16Dot16::new(700))
+                        *self.style.make_font_weight_mut() = I16Dot16::new(700);
                     }
                     vtt::InternalNodeKind::Underline => {
-                        self.style.set::<style::TextDecoration>(TextDecorations {
+                        *self.style.make_text_decoration_mut() = TextDecorations {
                             underline: true,
-                            underline_color: self.style.get_copy_or::<style::Color>(BGRA8::WHITE),
+                            underline_color: self.style.color(),
                             strike_out: false,
                             strike_out_color: BGRA8::ZERO,
-                        })
+                        };
                     }
                     _ => (),
                 }
 
                 for class in internal.classes.iter() {
                     match class {
-                        "white" => self.style.set::<style::Color>(BGRA8::WHITE),
-                        "lime" => self.style.set::<style::Color>(BGRA8::LIME),
-                        "cyan" => self.style.set::<style::Color>(BGRA8::CYAN),
-                        "red" => self.style.set::<style::Color>(BGRA8::RED),
-                        "yellow" => self.style.set::<style::Color>(BGRA8::YELLOW),
-                        "magenta" => self.style.set::<style::Color>(BGRA8::MAGENTA),
-                        "blue" => self.style.set::<style::Color>(BGRA8::BLUE),
-                        "black" => self.style.set::<style::Color>(BGRA8::BLACK),
-                        "bg_white" => self.style.set::<style::BackgroundColor>(BGRA8::WHITE),
-                        "bg_lime" => self.style.set::<style::BackgroundColor>(BGRA8::LIME),
-                        "bg_cyan" => self.style.set::<style::BackgroundColor>(BGRA8::CYAN),
-                        "bg_red" => self.style.set::<style::BackgroundColor>(BGRA8::RED),
-                        "bg_yellow" => self.style.set::<style::BackgroundColor>(BGRA8::YELLOW),
-                        "bg_magenta" => self.style.set::<style::BackgroundColor>(BGRA8::MAGENTA),
-                        "bg_blue" => self.style.set::<style::BackgroundColor>(BGRA8::BLUE),
-                        "bg_black" => self.style.set::<style::BackgroundColor>(BGRA8::BLACK),
+                        "white" => *self.style.make_color_mut() = BGRA8::WHITE,
+                        "lime" => *self.style.make_color_mut() = BGRA8::LIME,
+                        "cyan" => *self.style.make_color_mut() = BGRA8::CYAN,
+                        "red" => *self.style.make_color_mut() = BGRA8::RED,
+                        "yellow" => *self.style.make_color_mut() = BGRA8::YELLOW,
+                        "magenta" => *self.style.make_color_mut() = BGRA8::MAGENTA,
+                        "blue" => *self.style.make_color_mut() = BGRA8::BLUE,
+                        "black" => *self.style.make_color_mut() = BGRA8::BLACK,
+                        "bg_white" => *self.style.make_background_color_mut() = BGRA8::WHITE,
+                        "bg_lime" => *self.style.make_background_color_mut() = BGRA8::LIME,
+                        "bg_cyan" => *self.style.make_background_color_mut() = BGRA8::CYAN,
+                        "bg_red" => *self.style.make_background_color_mut() = BGRA8::RED,
+                        "bg_yellow" => *self.style.make_background_color_mut() = BGRA8::YELLOW,
+                        "bg_magenta" => *self.style.make_background_color_mut() = BGRA8::MAGENTA,
+                        "bg_blue" => *self.style.make_background_color_mut() = BGRA8::BLUE,
+                        "bg_black" => *self.style.make_background_color_mut() = BGRA8::BLACK,
                         _ => (),
                     }
                 }
@@ -443,9 +453,9 @@ impl TextConverter {
     }
 }
 
-fn convert_text(text: &str) -> Vec<InlineText> {
+fn convert_text(text: &str, base_style: &ComputedStyle) -> Vec<InlineText> {
     let mut converter = TextConverter {
-        style: StyleMap::new(),
+        style: base_style.clone(),
         segments: Vec::new(),
     };
 
@@ -458,23 +468,20 @@ fn convert_text(text: &str) -> Vec<InlineText> {
 
 #[derive(Debug)]
 pub struct Subtitles {
-    root_style: StyleMap,
     events: Vec<Event>,
 }
 
 pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
-    let mut subtitles = Subtitles {
-        root_style: {
-            let mut result = StyleMap::new();
+    let base_style = {
+        let mut result = ComputedStyle::DEFAULT;
 
-            result.set::<style::FontFamily>(vec!["sans-serif".into()]);
-            result.set::<style::Color>(BGRA8::WHITE);
-            result.set::<style::BackgroundColor>(BGRA8::new(0, 0, 0, /* 255 * 80% */ 204));
+        *result.make_font_family_mut() = rc_static!([rc_static!(str b"sans-serif")]);
+        *result.make_color_mut() = BGRA8::WHITE;
+        *result.make_background_color_mut() = BGRA8::new(0, 0, 0, /* 255 * 80% */ 204);
 
-            result
-        },
-        events: Vec::new(),
+        result
     };
+    let mut subtitles = Subtitles { events: Vec::new() };
 
     let logset = LogOnceSet::new();
     log_once_state!(in logset; region_unsupported);
@@ -561,7 +568,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
             size,
             x: x_position / 100.,
             y: y_position / 100.,
-            segments: convert_text(cue.text),
+            segments: convert_text(cue.text, &base_style),
         });
     }
 
@@ -585,22 +592,17 @@ impl Layouter {
         // TODO: This should actually be persisted between frames.
         let mut output = Vec::new();
 
-        let style = {
-            let mut result = self.subtitles.root_style.clone();
-            result.set::<style::FontSize>(
-                // Standard says 5vh, but browser engines use 5vmin.
-                // See https://github.com/w3c/webvtt/issues/529
-                pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale(),
-            );
-            result
-        };
+        // Standard says 5vh, but browser engines use 5vmin.
+        // See https://github.com/w3c/webvtt/issues/529
+        let font_size =
+            pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale();
 
         for event in &self.subtitles.events {
             if !pass.add_event_range(event.range.clone()) {
                 continue;
             }
 
-            let (pos, block) = event.layout(pass.sctx, pass.lctx, &style, &mut output)?;
+            let (pos, block) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
             pass.emit_fragment(pos, block);
         }
 

@@ -48,28 +48,17 @@ pub struct TextDecorations {
     pub strike_out_color: BGRA8,
 }
 
-#[derive(Debug, Clone)]
-pub struct TextStyle {
-    pub color: BGRA8,
-    pub font_size: I26Dot6,
-    pub background_color: BGRA8,
-    pub decorations: TextDecorations,
-    pub shadows: Vec<TextShadow>,
-}
-
 impl TextDecorations {
-    pub const fn none() -> Self {
-        Self {
-            underline: false,
-            underline_color: BGRA8::ZERO,
-            strike_out: false,
-            strike_out_color: BGRA8::ZERO,
-        }
-    }
+    pub const NONE: Self = Self {
+        underline: false,
+        underline_color: BGRA8::ZERO,
+        strike_out: false,
+        strike_out_color: BGRA8::ZERO,
+    };
 }
 
 impl Default for TextDecorations {
     fn default() -> Self {
-        Self::none()
+        Self::NONE
     }
 }

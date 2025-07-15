@@ -31,6 +31,7 @@ icu_segmenter = "2"
 
 util = { workspace = true }
 rasterize = { workspace = true }
+macros = { workspace = true }
 
 [lints]
 workspace = true
@@ -52,6 +53,7 @@ members = [
   "sbr-util",
   "sbr-rasterize",
   "sbr-overlay",
+  "sbr-macros",
   "xtask"
 ]
 
@@ -60,6 +62,7 @@ wgpu = { version = "26" }
 
 util = { path = "sbr-util", package = "sbr-util" }
 rasterize = { path = "sbr-rasterize", package = "sbr-rasterize" }
+macros = { path = "sbr-macros", package = "sbr-macros" }
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"

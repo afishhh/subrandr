@@ -4,12 +4,11 @@ use std::{
     ffi::{c_char, c_int, c_void, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
-    rc::Rc,
     sync::Arc,
 };
 
 use rasterize::color::BGRA8;
-use util::math::I16Dot16;
+use util::{math::I16Dot16, rc::Rc};
 
 use crate::{
     log::{CLogCallback, Logger},

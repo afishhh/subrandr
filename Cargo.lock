@@ -1797,6 +1797,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 name = "subrandr"
 version = "0.1.1"
 dependencies = [
+ "ash",
  "icu_segmenter",
  "once_cell",
  "quick-xml 0.36.2",
@@ -1804,6 +1805,7 @@ dependencies = [
  "sbr-util",
  "text-sys",
  "thiserror 1.0.63",
+ "wgpu",
  "windows 0.61.1",
  "windows-core 0.61.0",
 ]

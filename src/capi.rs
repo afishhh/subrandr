@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use rasterize::color::BGRA8;
+use rasterize::{color::BGRA8, Rasterizer};
 use util::math::I16Dot16;
 
 use crate::{
@@ -58,6 +58,9 @@ enum ErrorKind {
     Io = 3,
 
     UnrecognizedFormat = 10,
+
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+    Vulkan = 100,
 }
 
 #[derive(Debug)]
@@ -88,20 +91,27 @@ impl CError {
         }
     }
 
-    pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
-        let mut root_cause = &error as &dyn std::error::Error;
+    fn determine_error_kind(error: &(dyn std::error::Error + 'static)) -> ErrorKind {
+        let mut root_cause = error;
         while let Some(cause) = root_cause.source() {
             root_cause = cause;
         }
 
-        let kind = if root_cause.is::<std::io::Error>() {
+        if root_cause.is::<std::io::Error>() {
             ErrorKind::Io
         } else {
-            ErrorKind::Other
-        };
+            #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+            if root_cause.is::<ash::vk::Result>() {
+                return ErrorKind::Vulkan;
+            }
 
+            ErrorKind::Other
+        }
+    }
+
+    pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
         Self {
-            kind,
+            kind: Self::determine_error_kind(&error),
             context: Some(Box::new(error)),
             message: None,
         }
@@ -140,6 +150,13 @@ fn fill_last_error(error: CError) {
             string: CString::new(error.to_string()).unwrap(),
             error,
         });
+    })
+}
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+fn clear_last_error() {
+    LAST_ERROR.with(|x| unsafe {
+        (*x.get()) = None;
     })
 }
 
@@ -234,6 +251,9 @@ macro_rules! ctrywrap {
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+mod vk;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_init() -> *mut Subrandr {
@@ -428,6 +448,21 @@ unsafe extern "C" fn sbr_renderer_render(
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
     ctry!((*renderer).render(&*ctx, t, buffer, width, height, stride));
+    0
+}
+
+#[repr(C)]
+struct ErasedRasterizerPtr(*mut dyn Rasterizer);
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_render_to(
+    renderer: *mut Renderer<'static>,
+    ctx: *const SubtitleContext,
+    t: u32,
+    rasterizer: *mut ErasedRasterizerPtr,
+    target: *mut crate::rasterize::RenderTarget<'static>,
+) -> c_int {
+    ctry!((*renderer).render_to(&mut *(*rasterizer).0, &mut *target, &*ctx, t));
     0
 }
 

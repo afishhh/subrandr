@@ -12,20 +12,13 @@ extern "C" {
 #include <stdint.h>
 #endif
 
-#ifdef SBR_ALLOW_UNSTABLE
-#define SBR_UNSTABLE
-#else
-#define SBR_UNSTABLE                                                           \
-  __attribute__((unavailable(                                                  \
-      "This item is not part of subrandr's stable API yet.\n"                  \
-      "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "              \
-      "you still want to use it."                                              \
-  )))
-#endif
+#include "internal/stability.h"
 
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
 typedef struct sbr_renderer sbr_renderer;
+typedef struct sbr_rasterizer sbr_rasterizer SBR_UNSTABLE;
+typedef struct sbr_render_target sbr_render_target SBR_UNSTABLE;
 typedef int32_t sbr_26dot6;
 typedef struct sbr_subtitle_context {
   uint32_t dpi;
@@ -66,15 +59,18 @@ sbr_subtitles *sbr_load_text(
 
 // TODO: Remove this. It shouldn't really exist or at least should
 //       probably have different semantics.
-SBR_UNSTABLE sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
+sbr_subtitles *sbr_load_file(sbr_library *, char const *path) SBR_UNSTABLE;
 
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
+void sbr_renderer_destroy(sbr_renderer *);
+
 void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
 bool sbr_renderer_did_change(
     sbr_renderer *, sbr_subtitle_context const *, uint32_t t
 );
+
 int sbr_renderer_render(
     sbr_renderer *, sbr_subtitle_context const *,
     // current time value in milliseconds
@@ -82,7 +78,13 @@ int sbr_renderer_render(
     // BGRA8 pixel buffer
     uint32_t *buffer, uint32_t width, uint32_t height, uint32_t stride
 );
-void sbr_renderer_destroy(sbr_renderer *);
+
+int sbr_renderer_render_to(
+    sbr_renderer *, sbr_subtitle_context const *, uint32_t t,
+    // TODO: unavailable seems to misbehave here, hence `struct`
+    //       why?
+    struct sbr_rasterizer *, struct sbr_render_target *
+) SBR_UNSTABLE;
 
 typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_OTHER (sbr_error_code)1
@@ -91,7 +93,7 @@ typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_UNRECOGNIZED_FORMAT (sbr_error_code)10
 
 char const *sbr_get_last_error_string(void);
-SBR_UNSTABLE uint32_t sbr_get_last_error_code(void);
+uint32_t sbr_get_last_error_code(void) SBR_UNSTABLE;
 
 #undef SBR_UNSTABLE
 

@@ -567,6 +567,7 @@ impl Rasterizer {
                         ..Default::default()
                     }),
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
@@ -1118,6 +1119,7 @@ impl super::Rasterizer for Rasterizer {
                             ..Default::default()
                         }),
                         resolve_target: None,
+                        depth_slice: None,
                         ops: wgpu::Operations::default(),
                     })],
                     depth_stencil_attachment: None,

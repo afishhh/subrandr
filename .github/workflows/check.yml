@@ -37,12 +37,13 @@ jobs:
         include:
           - name: x86_64 Linux
             image: ubuntu-latest
-          - name: i686 Linux
-            image: ubuntu-latest
-            cross-arch: i686
-            rustc-cross-target: i686-unknown-linux-gnu
-            extra-cflags: -m32
-            extra-packages: gcc-multilib
+          # FIXME: Started to fail all of a sudden https://github.com/afishhh/subrandr/actions/runs/16400428460/job/46339036503?pr=35#step:5:74
+          # - name: i686 Linux
+          #   image: ubuntu-latest
+          #   cross-arch: i686
+          #   rustc-cross-target: i686-unknown-linux-gnu
+          #   extra-cflags: -m32
+          #   extra-packages: gcc-multilib
           - name: aarch64 Linux
             image: ubuntu-24.04-arm
     steps:

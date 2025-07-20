@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
+use icu_segmenter::options::{LineBreakStrictness, LineBreakWordOption};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6},

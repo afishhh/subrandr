@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use icu_segmenter::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
+use icu_segmenter::options::{LineBreakOptions, LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 use util::math::{I26Dot6, Point2, Rect2, Vec2};
 
@@ -290,10 +290,10 @@ impl<'f> MultilineTextShaper<'f> {
             return Ok((Vec::new(), Rect2::ZERO));
         }
 
-        let segmenter = icu_segmenter::LineSegmenter::new_auto_with_options({
+        let segmenter = icu_segmenter::LineSegmenter::new_auto({
             let mut options = LineBreakOptions::default();
-            options.strictness = wrap.strictness;
-            options.word_option = wrap.word_break;
+            options.strictness = Some(wrap.strictness);
+            options.word_option = Some(wrap.word_break);
             options
         });
 

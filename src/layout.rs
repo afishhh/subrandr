@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use icu_segmenter::{LineBreakStrictness, LineBreakWordOption};
+use icu_segmenter::options::{LineBreakStrictness, LineBreakWordOption};
 use thiserror::Error;
 
 use rasterize::color::BGRA8;

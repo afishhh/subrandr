@@ -27,7 +27,7 @@ once_cell = "1"
 
 text-sys = { path = "./text-sys" }
 
-icu_segmenter = { version = "1", features = ["compiled_data"] }
+icu_segmenter = "2"
 
 util = { workspace = true }
 rasterize = { workspace = true }

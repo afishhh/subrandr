@@ -137,7 +137,7 @@ fn match_face_for_specific_family(
     //        This is done this way to allow for font family substitutions to still happen.
     //        We should probably just handle substitutions ourselves?
     //        Although I think browsers just ignore this maybe??? Not sure.
-    let faces = fonts.query_by_name(family)?.to_vec();
+    let faces = fonts.select_family(family)?.to_vec();
 
     // If no matching face exists or the matched face does not contain a glyph for the character to be rendered, the next family name is selected and the previous three steps repeated. Glyphs from other faces in the family are not considered. The only exception is that user agents may optionally substitute a synthetically obliqued version of the default face if that face supports a given glyph and synthesis of these faces is permitted by the value of the ‘font-synthesis’ property. For example, a synthetic italic version of the regular face may be used if the italic face doesn't support glyphs for Arabic.
     let Some(face) = match_faces(&faces, style, fonts)? else {

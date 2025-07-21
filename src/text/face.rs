@@ -140,6 +140,8 @@ trait FaceImpl: Sized {
     fn weight(&self) -> I16Dot16;
     fn italic(&self) -> bool;
 
+    fn contains_codepoint(&self, codepoint: u32) -> bool;
+
     type Error;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error>;
 }
@@ -319,6 +321,8 @@ impl Face {
 
         pub fn weight[&]() -> I16Dot16;
         pub fn italic[&]() -> bool;
+
+        pub fn contains_codepoint[&](codepoint: u32) -> bool;
     );
 
     pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {

@@ -249,6 +249,17 @@ impl FaceImpl for Face {
             )
     }
 
+    fn contains_codepoint(&self, codepoint: u32) -> bool {
+        if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
+            return false;
+        }
+
+        #[allow(clippy::useless_conversion)]
+        let index = unsafe { FT_Get_Char_Index(self.face, codepoint as std::ffi::c_ulong) };
+
+        index != 0
+    }
+
     type Error = FreeTypeError;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
         Font::create(self.face, self.coords, point_size, dpi)

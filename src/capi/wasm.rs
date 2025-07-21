@@ -75,7 +75,7 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
 
     let renderer = unsafe { &mut *renderer };
     renderer.fonts.add_extra(FaceInfo {
-        family: name.into(),
+        family_names: Arc::new([name.into()]),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: if weight0 == weight1 {
             if weight0 == -1 {

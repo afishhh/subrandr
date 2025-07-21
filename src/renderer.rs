@@ -18,7 +18,10 @@ use crate::{
     style::computed::{
         Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
     },
-    text::{self, FontArena, FreeTypeError, GlyphRenderError, GlyphString, TextMetrics},
+    text::{
+        self, platform_font_provider, FontArena, FreeTypeError, GlyphRenderError, GlyphString,
+        TextMetrics,
+    },
     vtt, Subrandr,
 };
 
@@ -489,6 +492,8 @@ impl<'a> Renderer<'a> {
 #[derive(Debug, Error)]
 pub enum RenderError {
     #[error(transparent)]
+    FontProviderUpdate(#[from] platform_font_provider::UpdateError),
+    #[error(transparent)]
     FreeType(#[from] FreeTypeError),
     #[error(transparent)]
     GlyphRender(#[from] GlyphRenderError),
@@ -552,6 +557,7 @@ impl Renderer<'_> {
         }
 
         self.perf.start_frame();
+        self.fonts.update_platform_font_list()?;
         self.fonts.advance_cache_generation();
 
         let ctx = SubtitleContext {

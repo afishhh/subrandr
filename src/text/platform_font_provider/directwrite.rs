@@ -6,15 +6,19 @@ use util::math::I16Dot16;
 use windows::core::{implement, Interface, PCWSTR};
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFont, IDWriteFontCollection,
-    IDWriteFontFallback, IDWriteFontFamily, IDWriteFontFile, IDWriteFontFileLoader,
-    IDWriteTextAnalysisSource, IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_ISOLATED,
-    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
+    IDWriteFontFallback, IDWriteFontFile, IDWriteFontFileLoader, IDWriteTextAnalysisSource,
+    IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_ISOLATED, DWRITE_FONT_STRETCH_NORMAL,
+    DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
 };
-use windows_core::BOOL;
 
-use crate::text::font_db::FontProvider;
+use super::PlatformFontProvider;
 use crate::text::{Face, FaceInfo, LoadError};
+
+pub type NewError = windows_core::Error;
+pub type UpdateError = windows_core::Error;
+pub type SubstituteError = windows_core::Error;
+pub type FallbackError = windows_core::Error;
 
 fn codepoint_to_utf16(mut value: u32) -> ([u16; 2], bool) {
     if value < 0x10000 {
@@ -194,8 +198,8 @@ impl Source {
 
 #[derive(Debug)]
 pub struct DirectWriteFontProvider {
-    font_collection: IDWriteFontCollection,
     fallback: IDWriteFontFallback,
+    fonts: Vec<FaceInfo>,
 }
 
 impl DirectWriteFontProvider {
@@ -207,7 +211,7 @@ impl DirectWriteFontProvider {
             let font_collection = font_collection.unwrap();
 
             Ok(Self {
-                font_collection,
+                fonts: Self::collect_font_list(&font_collection)?,
                 fallback: factory.cast::<IDWriteFactory2>()?.GetSystemFontFallback()?,
             })
         }
@@ -236,15 +240,25 @@ impl DirectWriteFontProvider {
             };
 
             let names = font.GetFontFamily()?.GetFamilyNames()?;
-            let mut name_buffer = vec![0u16; names.GetStringLength(0)? as usize + 1];
-            names.GetString(0, &mut name_buffer)?;
+            let n_names = names.GetCount();
+            let mut family_names = Vec::with_capacity(n_names as usize);
+            let mut name_buffer = Vec::new();
+            for i in 0..n_names {
+                name_buffer.resize(names.GetStringLength(i)? as usize + 1, 0);
+                names.GetString(i, &mut name_buffer)?;
+                let Ok(name) = String::from_utf16(&name_buffer[..name_buffer.len() - 1]) else {
+                    continue;
+                };
+                family_names.push(name.into())
+            }
+
+            if family_names.is_empty() {
+                // TODO: Return or at least log an error
+                return Ok(None);
+            }
 
             Ok(Some(FaceInfo {
-                family: match String::from_utf16(&name_buffer) {
-                    Ok(name) => name.into(),
-                    // TODO: Return an error
-                    Err(_) => return Ok(None),
-                },
+                family_names: family_names.into(),
                 // TODO: Width conversion
                 width: crate::text::FontAxisValues::Fixed(I16Dot16::new(100)),
                 weight: crate::text::FontAxisValues::Fixed(I16Dot16::new(weight.0)),
@@ -254,30 +268,70 @@ impl DirectWriteFontProvider {
         }
     }
 
-    fn gather_fonts_from_family(
-        result: &mut Vec<FaceInfo>,
-        set: IDWriteFontFamily,
-    ) -> Result<(), windows::core::Error> {
-        unsafe {
-            let n = set.GetFontCount();
-            for i in 0..n {
-                result.extend(Self::info_from_font(set.GetFont(i)?)?)
-            }
+    fn collect_font_list(collection: &IDWriteFontCollection) -> Result<Vec<FaceInfo>, UpdateError> {
+        let mut result = Vec::new();
 
-            Ok(())
+        unsafe {
+            let n_families = collection.GetFontFamilyCount();
+            for i in 0..n_families {
+                let family = collection.GetFontFamily(i)?;
+                let n_fonts = family.GetFontCount();
+                for j in 0..n_fonts {
+                    let font = family.GetFont(j)?;
+                    result.extend(Self::info_from_font(font)?);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn substitute_family(family: &str) -> &'static [&'static str] {
+        // TODO: This should be script-dependent
+        match family {
+            "sans-serif" => &["Arial"],
+            "serif" => &["Times New Roman"],
+            "monospace" => &["Consolas"],
+            "cursive" => &["Comic Sans MS"],
+            "fantasy" => &["Impact"],
+            _ => &[],
         }
     }
 }
 
-impl FontProvider for DirectWriteFontProvider {
-    fn query_fallback(
-        &mut self,
+impl PlatformFontProvider for DirectWriteFontProvider {
+    fn substitute(
+        &self,
+        _sbr: &crate::Subrandr,
+        request: &mut crate::text::FaceRequest,
+    ) -> Result<(), super::SubstituteError> {
+        for family in std::mem::take(&mut request.families) {
+            let substitutes = Self::substitute_family(&family);
+            if substitutes.is_empty() {
+                request.families.push(family);
+            } else {
+                request
+                    .families
+                    .extend(substitutes.iter().copied().map(Into::into))
+            }
+        }
+
+        Ok(())
+    }
+
+    fn fonts(&self) -> &[FaceInfo] {
+        &self.fonts
+    }
+
+    fn fallback(
+        &self,
         request: &crate::text::FontFallbackRequest,
-    ) -> Result<Vec<crate::text::FaceInfo>, util::AnyError> {
+    ) -> Result<Vec<crate::text::FaceInfo>, super::FallbackError> {
         unsafe {
             let (utf16, len) = codepoint_to_utf16(request.codepoint);
             let source = TextAnalysisSource { text: utf16, len };
 
+            // TODO: This should probably use the "used font" from the initial query.
             let family_w: Option<Vec<u16>> = request.families.first().map(|f| {
                 f.encode_utf16()
                     .chain(std::iter::once(0))
@@ -317,30 +371,10 @@ impl FontProvider for DirectWriteFontProvider {
             })
         }
     }
-
-    fn query_family(&mut self, family: &str) -> Result<Vec<crate::text::FaceInfo>, util::AnyError> {
-        let mut result = Vec::new();
-
-        unsafe {
-            let family_w = family
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let mut family_index = 0;
-            let mut family_exists = BOOL(0);
-            self.font_collection.FindFamilyName(
-                PCWSTR::from_raw(family_w.as_ptr()),
-                &mut family_index,
-                &mut family_exists,
-            )?;
-            if !family_exists.as_bool() {
-                return Ok(result);
-            }
-            let dwrite_family = self.font_collection.GetFontFamily(family_index)?;
-
-            Self::gather_fonts_from_family(&mut result, dwrite_family)?;
-        }
-
-        Ok(result)
-    }
 }
+
+// TODO: Is DirectWrite actually thread-safe here?
+//       I think the only function we rely on being thread-safe is
+//       IDWriteFontFallback::MapCharacters
+unsafe impl Send for DirectWriteFontProvider {}
+unsafe impl Sync for DirectWriteFontProvider {}

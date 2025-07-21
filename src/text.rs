@@ -24,6 +24,7 @@ pub use glyphstring::*;
 mod font_match;
 pub use font_match::*;
 pub mod layout;
+pub mod platform_font_provider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {

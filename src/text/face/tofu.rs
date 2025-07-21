@@ -44,6 +44,10 @@ impl FaceImpl for Face {
         false
     }
 
+    fn contains_codepoint(&self, _codepoint: u32) -> bool {
+        true
+    }
+
     type Error = Infallible;
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error> {
         Ok(Font::create(point_size, dpi))

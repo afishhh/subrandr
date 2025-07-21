@@ -1,9 +1,18 @@
-use std::{collections::HashMap, hash::Hash, path::PathBuf};
+use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
 use thiserror::Error;
-use util::{math::I16Dot16, AnyError};
+use util::math::I16Dot16;
 
-use crate::{log::trace, text, Subrandr};
+use crate::{
+    log::trace,
+    text::{
+        self,
+        platform_font_provider::{
+            self, FallbackError, LockedPlatformFontProvider, SubstituteError,
+        },
+    },
+    Subrandr,
+};
 
 use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
 
@@ -12,6 +21,13 @@ pub struct FontFallbackRequest {
     pub families: Vec<Box<str>>,
     pub style: FontStyle,
     pub codepoint: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FaceRequest {
+    pub families: Vec<Box<str>>,
+    // TODO: script?
+    pub language: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,9 +47,9 @@ impl Default for FontStyle {
 
 #[derive(Debug, Clone)]
 pub struct FaceInfo {
-    pub family: Box<str>,
+    pub family_names: Arc<[Arc<str>]>,
     // TODO: Implement font width support
-    //       SRV3 (I think) and WebVTT-without-CSS don't need this but will be
+    //       SRV3 (I think) and WebVTT-without-CSS don't need this but may be
     //       necessary in the future
     #[expect(dead_code)]
     pub width: FontAxisValues,
@@ -80,7 +96,7 @@ pub enum FontSource {
     },
     Memory(text::Face),
     #[cfg(target_os = "windows")]
-    DirectWrite(provider::directwrite::Source),
+    DirectWrite(platform_font_provider::directwrite::Source),
 }
 
 impl FontSource {
@@ -128,75 +144,6 @@ fn choose<'a>(fonts: &'a [FaceInfo], style: &FontStyle) -> Option<&'a FaceInfo> 
     result
 }
 
-trait FontProvider: std::fmt::Debug {
-    fn query_fallback(&mut self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, AnyError>;
-    fn query_family(&mut self, family: &str) -> Result<Vec<FaceInfo>, AnyError>;
-}
-
-#[path = ""]
-mod provider {
-    #[cfg(target_family = "unix")]
-    #[path = "font_provider/fontconfig.rs"]
-    pub mod fontconfig;
-
-    #[cfg(target_family = "windows")]
-    #[path = "font_provider/directwrite.rs"]
-    pub mod directwrite;
-
-    use util::AnyError;
-
-    use super::FontProvider;
-    use crate::Subrandr;
-
-    pub fn platform_default(_sbr: &Subrandr) -> Result<Box<dyn FontProvider>, AnyError> {
-        #[cfg(target_family = "unix")]
-        {
-            fontconfig::FontconfigFontProvider::new()
-                .map(|x| Box::new(x) as Box<dyn FontProvider>)
-                .map_err(Into::into)
-        }
-        #[cfg(target_os = "windows")]
-        {
-            directwrite::DirectWriteFontProvider::new()
-                .map(|x| Box::new(x) as Box<dyn FontProvider>)
-                .map_err(Into::into)
-        }
-        #[cfg(not(any(target_family = "unix", target_os = "windows")))]
-        {
-            static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(false);
-
-            if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
-                crate::log::warning!(
-                    _sbr,
-                    "no default fontprovider available for current platform"
-                );
-            }
-
-            #[derive(Debug)]
-            struct NullFontProvider;
-
-            impl FontProvider for NullFontProvider {
-                fn query_fallback(
-                    &mut self,
-                    _request: &super::FontFallbackRequest,
-                ) -> Result<Vec<super::FaceInfo>, AnyError> {
-                    Ok(Vec::new())
-                }
-
-                fn query_family(
-                    &mut self,
-                    _family: &str,
-                ) -> Result<Vec<super::FaceInfo>, AnyError> {
-                    Ok(Vec::new())
-                }
-            }
-
-            Ok(Box::new(NullFontProvider))
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum LoadError {
     #[error(transparent)]
@@ -209,8 +156,9 @@ pub enum LoadError {
 #[derive(Debug, Error)]
 pub enum SelectError {
     #[error(transparent)]
-    // TODO: enum
-    Provider(#[from] AnyError),
+    Substitute(#[from] SubstituteError),
+    #[error(transparent)]
+    Fallback(#[from] FallbackError),
     #[error("Failed to load font: {0}")]
     Load(#[from] LoadError),
     #[error("No font found")]
@@ -229,8 +177,9 @@ pub struct FontDb<'a> {
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
     request_cache: HashMap<FontFallbackRequest, Option<Face>>,
-    provider: Box<dyn FontProvider>,
-    custom: Vec<FaceInfo>,
+    provider: &'static LockedPlatformFontProvider,
+    extra_faces: Vec<FaceInfo>,
+    family_lookup_cache: HashMap<Box<str>, Vec<FaceInfo>>,
 }
 
 pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
@@ -240,31 +189,64 @@ pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
 }
 
 impl<'a> FontDb<'a> {
-    pub fn new(sbr: &'a Subrandr) -> Result<FontDb<'a>, SelectError> {
-        let provider: Box<dyn FontProvider> =
-            provider::platform_default(sbr).map_err(SelectError::Provider)?;
-
-        Ok(Self {
-            sbr,
-            source_cache: HashMap::new(),
-            family_cache: HashMap::new(),
-            request_cache: HashMap::new(),
-            provider,
-            custom: Vec::new(),
+    pub fn new(sbr: &'a Subrandr) -> Result<FontDb<'a>, platform_font_provider::InitError> {
+        Ok({
+            let mut result = Self {
+                sbr,
+                source_cache: HashMap::new(),
+                family_cache: HashMap::new(),
+                request_cache: HashMap::new(),
+                family_lookup_cache: HashMap::new(),
+                provider: platform_font_provider::platform_default(sbr)?,
+                extra_faces: Vec::new(),
+            };
+            result.rebuild_family_lookup_cache();
+            result
         })
     }
 
     pub fn clear_extra(&mut self) {
-        self.custom.clear();
+        self.extra_faces.clear();
     }
 
     pub fn add_extra(&mut self, font: FaceInfo) {
-        self.custom.push(font);
+        Self::add_to_family_lookup_cache(&mut self.family_lookup_cache, &font);
+        self.extra_faces.push(font);
     }
 
     pub fn advance_cache_generation(&mut self) {
         for face in self.source_cache.values() {
             face.advance_cache_generation();
+        }
+    }
+
+    pub fn update_platform_font_list(&mut self) -> Result<(), platform_font_provider::UpdateError> {
+        if self.provider.write().unwrap().update_if_changed(self.sbr)? {
+            self.family_cache.clear();
+            self.request_cache.clear();
+            self.rebuild_family_lookup_cache();
+        }
+
+        Ok(())
+    }
+
+    fn add_to_family_lookup_cache(cache: &mut HashMap<Box<str>, Vec<FaceInfo>>, face: &FaceInfo) {
+        for name in &*face.family_names {
+            cache
+                .entry(name.to_lowercase().into_boxed_str())
+                .or_default()
+                .push(face.clone());
+        }
+    }
+
+    fn rebuild_family_lookup_cache(&mut self) {
+        self.family_lookup_cache.clear();
+        let provider = self.provider.read().unwrap();
+        for face in &self.extra_faces {
+            Self::add_to_family_lookup_cache(&mut self.family_lookup_cache, face);
+        }
+        for face in provider.fonts() {
+            Self::add_to_family_lookup_cache(&mut self.family_lookup_cache, face)
         }
     }
 
@@ -279,6 +261,60 @@ impl<'a> FontDb<'a> {
         }
     }
 
+    pub fn select_family(&mut self, name: &str) -> Result<&[FaceInfo], SelectError> {
+        // NLL problem case 3 again
+        let family_cache = &raw mut self.family_cache;
+        if let Some(existing) = unsafe { (*family_cache).get(name) } {
+            return Ok(existing);
+        }
+
+        trace!(self.sbr, "Substituting font family {name:?}");
+
+        let mut request = FaceRequest {
+            families: vec![name.into()],
+            language: None,
+        };
+
+        self.provider
+            .read()
+            .unwrap()
+            .substitute(self.sbr, &mut request)
+            .map_err(SelectError::Substitute)?;
+
+        trace!(self.sbr, "Substition resulted in {:?}", request.families);
+
+        let mut result = None;
+        for candidate in &request.families {
+            let lowercase_name = candidate.to_lowercase();
+            if let Some(faces) = self.family_lookup_cache.get(lowercase_name.as_str()) {
+                result = Some(faces);
+                break;
+            }
+        }
+
+        let faces = match result {
+            Some(faces) => {
+                trace!(
+                    self.sbr,
+                    "Font family query {name:?} matched {} {:?} faces",
+                    faces.len(),
+                    faces[0].family_names[0]
+                );
+                faces.clone()
+            }
+            None => {
+                trace!(self.sbr, "Font family query {name:?} matched no faces",);
+                Vec::new()
+            }
+        };
+
+        Ok(self
+            .family_cache
+            .entry(name.into())
+            .insert_entry(faces)
+            .into_mut())
+    }
+
     pub fn select_fallback(&mut self, request: &FontFallbackRequest) -> Result<Face, SelectError> {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
@@ -289,21 +325,20 @@ impl<'a> FontDb<'a> {
             );
             let mut choices = self
                 .provider
-                .query_fallback(request)
-                .map_err(SelectError::Provider)?;
+                .read()
+                .unwrap()
+                .fallback(request)
+                .map_err(SelectError::Fallback)?;
 
-            let custom_start = choices.len();
-            choices.extend(self.custom.iter().cloned());
-
-            choices[custom_start..].sort_by_cached_key(|font| {
-                let score = request
-                    .families
+            choices.extend(
+                self.extra_faces
                     .iter()
-                    .position(|rf| font.family.eq_ignore_ascii_case(rf))
-                    .unwrap_or(usize::MAX);
-
-                score
-            });
+                    .filter(|face| match &face.source {
+                        FontSource::Memory(face) => face.contains_codepoint(request.codepoint),
+                        _ => unreachable!(),
+                    })
+                    .cloned(),
+            );
 
             let mut result = choose(&choices, &request.style)
                 .map(|x| self.open(x))
@@ -322,28 +357,5 @@ impl<'a> FontDb<'a> {
             result
         }
         .ok_or(SelectError::NotFound)
-    }
-
-    pub fn query_by_name(&mut self, name: &str) -> Result<&[FaceInfo], SelectError> {
-        // NLL problem case 3 again
-        let family_cache = &raw mut self.family_cache;
-        if let Some(existing) = unsafe { (*family_cache).get(name) } {
-            return Ok(existing);
-        }
-
-        trace!(self.sbr, "Querying font provider for font family {name:?}");
-
-        let result = self
-            .provider
-            .query_family(name)
-            .map_err(SelectError::Provider)?;
-
-        trace!(self.sbr, "Font family query {name:?} returned {result:?}");
-
-        Ok(self
-            .family_cache
-            .entry(name.into())
-            .insert_entry(result)
-            .into_mut())
     }
 }

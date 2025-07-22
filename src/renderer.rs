@@ -908,7 +908,7 @@ impl Renderer<'_> {
                             pass.draw_text_full(
                                 target,
                                 current.x + text.baseline_offset.x,
-                                current.y + text.baseline_offset.y,
+                                (current.y + text.baseline_offset.y).round(),
                                 text.glyphs(),
                                 text.style.color(),
                                 &text.style.text_decoration(),

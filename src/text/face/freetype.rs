@@ -18,6 +18,25 @@ use super::{
 };
 use crate::text::ft_utils::*;
 
+// Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
+// This is required because:
+// a) HarfBuzz uses unhinted metrics, and it is not practically possible to make it
+//    use hinted metrics AND perform subpixel positioning[1].
+// b) Since the above seems true, we also take the liberty of relying on being able to splice
+//    together text runs on the x axis with subpixel precision.
+//
+// [1] This is because harfbuzz's font funcs for getting the glyph advance DON'T
+//     pass you in a position, thus it follows that hinting CANNOT change the metrics
+//     on subpixel positions.
+//
+//     See https://github.com/harfbuzz/harfbuzz/issues/2394 for people complaining about
+//     the lack of full hinting in newer pango versions.
+//     See https://github.com/harfbuzz/harfbuzz/issues/1892 for pango developer complaining about
+//     people complaining about the metrics being different (unhinted).
+//
+// Also this is not picked up by bindgen because it's a macro expression I think
+const FT_LOAD_TARGET_LIGHT: u32 = (FT_RENDER_MODE_LIGHT & 15) << 16;
+
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);
 
@@ -667,14 +686,19 @@ impl FontImpl for Font {
     type MeasureError = FreeTypeError;
     fn measure_glyph_uncached(&self, index: u32) -> Result<GlyphMetrics, Self::MeasureError> {
         let face = self.with_applied_size()?;
-        let mut metrics = unsafe {
+        let slot = unsafe {
             fttry!(FT_Load_Glyph(
                 face,
                 index,
-                (FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
+                (FT_LOAD_COLOR | FT_LOAD_TARGET_LIGHT | FT_LOAD_BITMAP_METRICS_ONLY) as i32
             ))?;
-            (*(*face).glyph).metrics
+            &*(*face).glyph
         };
+        let mut metrics = slot.metrics;
+
+        // I have no idea whether this is correct or necessary but the advance
+        // fields are currently unused so it doesn't matter.
+        metrics.horiAdvance += slot.lsb_delta - slot.rsb_delta;
 
         let scale = self.size.bitmap_scale;
         if scale != I26Dot6::ONE {
@@ -725,7 +749,11 @@ impl FontImpl for Font {
         unsafe {
             let face = self.with_applied_size()?;
 
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_COLOR as i32))?;
+            fttry!(FT_Load_Glyph(
+                face,
+                index,
+                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
+            ))?;
             let is_bitmap;
             let glyph = {
                 let slot = (*face).glyph;

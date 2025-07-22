@@ -15,8 +15,11 @@ use util::{
     slice_assume_init_mut,
 };
 
-use super::{FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, SingleGlyphBitmap};
-use crate::layout::{FixedL, Vec2L};
+use super::{FaceImpl, FontImpl, FontMetrics, GlyphMetrics, SingleGlyphBitmap};
+use crate::{
+    layout::{FixedL, Vec2L},
+    text::FontSizeCacheKey,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Face;
@@ -26,6 +29,12 @@ impl FaceImpl for Face {
 
     fn family_name(&self) -> &str {
         "Subrandr Tofu Font"
+    }
+
+    fn addr(&self) -> usize {
+        // This is an unaligned address that should never occur
+        // in any actually real font backends.
+        1
     }
 
     fn axes(&self) -> &[super::Axis] {
@@ -58,11 +67,11 @@ static TOFU_HB_FONT_USERDATA_KEY: hb_user_data_key_t = hb_user_data_key_t { unus
 
 struct FontShared {
     point_size: I26Dot6,
+    dpi: u32,
     pixel_height: I26Dot6,
     pixel_width: I26Dot6,
     glyph_metrics: GlyphMetrics,
     font_metrics: FontMetrics,
-    cache: GlyphCache<Font>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -82,6 +91,7 @@ impl Font {
             let descender = ascender - pixel_height;
             FontShared {
                 point_size,
+                dpi,
                 pixel_height,
                 pixel_width,
                 glyph_metrics: GlyphMetrics {
@@ -108,7 +118,6 @@ impl Font {
                         strikeout_thickness: decoration_thickness,
                     }
                 },
-                cache: GlyphCache::new(),
             }
         }));
 
@@ -275,10 +284,6 @@ impl FontImpl for Font {
         &Face
     }
 
-    fn glyph_cache(&self) -> &super::GlyphCache<Self> {
-        &self.shared().cache
-    }
-
     fn metrics(&self) -> &FontMetrics {
         &self.shared().font_metrics
     }
@@ -287,9 +292,12 @@ impl FontImpl for Font {
         self.shared().point_size
     }
 
-    type FontSizeKey = I26Dot6;
-    fn font_size_key(&self) -> Self::FontSizeKey {
-        self.shared().pixel_height
+    fn size_cache_key(&self) -> FontSizeCacheKey {
+        FontSizeCacheKey::new(
+            self.point_size(),
+            self.shared().dpi,
+            [I16Dot16::ZERO; text_sys::T1_MAX_MM_AXIS as usize],
+        )
     }
 
     type MeasureError = Infallible;

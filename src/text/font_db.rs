@@ -214,12 +214,6 @@ impl<'a> FontDb<'a> {
         self.extra_faces.push(font);
     }
 
-    pub fn advance_cache_generation(&mut self) {
-        for face in self.source_cache.values() {
-            face.advance_cache_generation();
-        }
-    }
-
     pub fn update_platform_font_list(&mut self) -> Result<(), platform_font_provider::UpdateError> {
         if self.provider.write().unwrap().update_if_changed(self.sbr)? {
             self.family_cache.clear();

@@ -116,11 +116,64 @@ impl<T: ?Sized> Drop for ReadonlyAliasableBox<T> {
     }
 }
 
-#[test]
-fn readonly_aliasable_box() {
-    _ = ReadonlyAliasableBox::new(String::from("hello"));
-    let boxed = ReadonlyAliasableBox::new(String::from("second"));
-    let aliasing = boxed.as_ptr();
-    _ = boxed;
-    _ = aliasing;
+pub fn human_size_suffix(size: usize) -> (usize, &'static str) {
+    const TABLE: &[&str] = &["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei"];
+
+    let mut current_pow = 1;
+    let mut next_pow = 1024;
+    let mut current_idx = 0;
+    while next_pow <= size && current_idx < TABLE.len() - 1 {
+        current_pow = next_pow;
+        current_idx += 1;
+        next_pow = match next_pow.checked_mul(1024) {
+            Some(next_pow) => next_pow,
+            None => break,
+        };
+    }
+
+    (current_pow, TABLE[current_idx])
+}
+
+#[cfg(test)]
+mod test {
+    use crate::human_size_suffix;
+
+    use super::ReadonlyAliasableBox;
+
+    #[test]
+    fn readonly_aliasable_box() {
+        _ = ReadonlyAliasableBox::new(String::from("hello"));
+        let boxed = ReadonlyAliasableBox::new(String::from("second"));
+        let aliasing = boxed.as_ptr();
+        _ = boxed;
+        _ = aliasing;
+    }
+
+    fn human_size_one(size: usize, exp_div: usize, exp_suffix: &str) {
+        assert_eq!(human_size_suffix(size), (exp_div, exp_suffix));
+    }
+
+    // Make sure not to break this on 32-bit by running it on a 32-bit miri target.
+    #[test]
+    fn human_size() {
+        const KB: usize = 1024;
+        const MB: usize = KB * 1024;
+        const GB: usize = MB * 1024;
+        #[cfg(target_pointer_width = "64")]
+        const TB: usize = GB * 1024;
+        #[cfg(target_pointer_width = "64")]
+        const PB: usize = TB * 1024;
+        #[cfg(target_pointer_width = "64")]
+        const EB: usize = PB * 1024;
+
+        human_size_one(0, 1, "");
+        human_size_one(1023, 1, "");
+        human_size_one(KB + 1, KB, "Ki");
+        human_size_one(MB, MB, "Mi");
+        human_size_one(1749685123, GB, "Gi");
+        #[cfg(target_pointer_width = "64")]
+        human_size_one(1000 * PB, PB, "Pi");
+        #[cfg(target_pointer_width = "64")]
+        human_size_one(5 * EB, EB, "Ei");
+    }
 }

@@ -728,6 +728,15 @@ pub(super) struct TextureImpl {
     pub data: TextureData,
 }
 
+impl TextureImpl {
+    pub(super) fn memory_footprint(&self) -> usize {
+        match &self.data {
+            TextureData::OwnedMono(mono) => mono.len(),
+            TextureData::OwnedBgra(bgra) => bgra.len() * 4,
+        }
+    }
+}
+
 enum UnwrappedTextureData<'a> {
     Mono(&'a [u8]),
     Bgra(&'a [BGRA8]),

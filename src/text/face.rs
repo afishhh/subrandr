@@ -1,6 +1,4 @@
 use std::{
-    cell::{Cell, UnsafeCell},
-    collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
     ops::RangeInclusive,
@@ -8,10 +6,11 @@ use std::{
     sync::Arc,
 };
 
-use once_cell::unsync::OnceCell;
 use rasterize::{Rasterizer, Texture};
 use text_sys::hb_font_t;
 use util::math::{I16Dot16, I26Dot6, Vec2};
+
+use crate::text::{CacheValue, FontSizeCacheKey, GlyphCache};
 
 use super::FreeTypeError;
 
@@ -126,10 +125,17 @@ impl FontMetrics {
     }
 }
 
+#[derive(Clone)]
+pub struct SingleGlyphBitmap {
+    pub offset: Vec2<I26Dot6>,
+    pub texture: Texture,
+}
+
 trait FaceImpl: Sized {
     type Font: FontImpl<Face = Self>;
 
     fn family_name(&self) -> &str;
+    fn addr(&self) -> usize;
 
     fn axes(&self) -> &[Axis];
     fn axis(&self, tag: OpenTypeTag) -> Option<Axis> {
@@ -153,10 +159,7 @@ trait FontImpl: Sized {
     fn metrics(&self) -> &FontMetrics;
     fn point_size(&self) -> I26Dot6;
 
-    type FontSizeKey: Debug + Eq + Hash;
-    fn font_size_key(&self) -> Self::FontSizeKey;
-
-    fn glyph_cache(&self) -> &GlyphCache<Self>;
+    fn size_cache_key(&self) -> FontSizeCacheKey;
 
     type MeasureError;
     fn measure_glyph_uncached(&self, index: u32) -> Result<GlyphMetrics, Self::MeasureError>;
@@ -170,109 +173,16 @@ trait FontImpl: Sized {
     ) -> Result<SingleGlyphBitmap, Self::RenderError>;
 }
 
-struct CacheSlot {
-    generation: u64,
-    metrics: OnceCell<GlyphMetrics>,
-    bitmap: [OnceCell<Box<SingleGlyphBitmap>>; 8],
-}
-
-impl CacheSlot {
-    fn new() -> Self {
-        Self {
-            generation: 0,
-            metrics: OnceCell::new(),
-            bitmap: [const { OnceCell::new() }; 8],
-        }
-    }
-}
-
-struct GlyphCache<F: FontImpl> {
-    generation: Cell<u64>,
-    glyphs: UnsafeCell<HashMap<(u32, F::FontSizeKey), CacheSlot>>,
-}
-
-impl<F: FontImpl> GlyphCache<F> {
-    fn new() -> Self {
-        Self {
-            generation: Cell::new(0),
-            glyphs: UnsafeCell::new(HashMap::new()),
-        }
-    }
-
-    pub fn advance_generation(&self) {
-        let glyphs = unsafe { &mut *self.glyphs.get() };
-
-        let keep_after = self.generation.get().saturating_sub(2);
-        // TODO: A scan-resistant LRU?
-        if glyphs.len() > 200 {
-            glyphs.retain(|_, slot| slot.generation > keep_after);
-        }
-        self.generation.set(self.generation.get() + 1);
-    }
-
-    #[allow(clippy::mut_from_ref)] // This is why it's unsafe
-    unsafe fn slot(&self, font: &F, index: u32) -> &mut CacheSlot {
-        let glyphs = unsafe { &mut *self.glyphs.get() };
-        let size_info = font.font_size_key();
-
-        let slot = glyphs
-            .entry((index, size_info))
-            .or_insert_with(CacheSlot::new);
-        slot.generation = self.generation.get();
-        slot
-    }
-
-    pub fn get_or_try_measure(
-        &self,
-        font: &F,
-        index: u32,
-    ) -> Result<&GlyphMetrics, F::MeasureError> {
-        unsafe { self.slot(font, index) }
-            .metrics
-            .get_or_try_init(|| font.measure_glyph_uncached(index))
-    }
-
-    pub fn get_or_try_render(
-        &self,
-        rasterizer: &mut dyn Rasterizer,
-        font: &F,
-        index: u32,
-        offset_value: I26Dot6,
-        offset_axis_is_y: bool,
-    ) -> Result<&SingleGlyphBitmap, F::RenderError> {
-        let offset_trunc = I26Dot6::from_raw(offset_value.into_raw() & 0b110000);
-        let bucket_idx = (offset_trunc.into_raw() >> 3) as usize | offset_axis_is_y as usize;
-        let render_offset = if offset_axis_is_y {
-            Vec2::new(I26Dot6::ZERO, offset_trunc)
-        } else {
-            Vec2::new(offset_trunc, I26Dot6::ZERO)
-        };
-
-        unsafe { self.slot(font, index) }.bitmap[bucket_idx]
-            .get_or_try_init(|| {
-                font.render_glyph_uncached(rasterizer, index, render_offset)
-                    .map(Box::new)
-            })
-            .map(Box::as_ref)
-    }
-}
-
-#[derive(Clone)]
-pub struct SingleGlyphBitmap {
-    pub offset: Vec2<I26Dot6>,
-    pub texture: Texture,
-}
-
 macro_rules! forward_methods {
     (
         variants = $enum: ident :: $variants: tt;
-        $(pub fn $name: ident $selfref: tt $params: tt -> $ret: ty;)*
+        $($vis: vis fn $name: ident $selfref: tt $params: tt -> $ret: ty;)*
     ) => {
-        $(forward_methods!(@once $enum $variants $name $selfref $params $params $ret);)*
+        $(forward_methods!(@once $enum $variants $vis $name $selfref $params $params $ret);)*
     };
-    (@once $enum: ident [$($variant: ident),*] $name: ident [$($selfref: tt)*] $params: tt ($($params_unwrapped: tt)*) $ret: ty) => {
+    (@once $enum: ident [$($variant: ident),*] $vis: vis $name: ident [$($selfref: tt)*] $params: tt ($($params_unwrapped: tt)*) $ret: ty) => {
         #[allow(dead_code)]
-        pub fn $name($($selfref)* self, $($params_unwrapped)*) -> $ret {
+        $vis fn $name($($selfref)* self, $($params_unwrapped)*) -> $ret {
             match self {
                 $($enum :: $variant(value) => forward_methods!(@build_call {value.$name} $params),)*
             }
@@ -325,19 +235,19 @@ impl Face {
         pub fn contains_codepoint[&](codepoint: u32) -> bool;
     );
 
+    pub fn addr(&self) -> usize {
+        match self {
+            Face::FreeType(face) => face.addr(),
+            Face::Tofu(face) => face.addr(),
+        }
+    }
+
     pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
         match &self {
             Face::FreeType(face) => face.with_size(point_size, dpi).map(Font::FreeType),
             Face::Tofu(face) => match face.with_size(point_size, dpi) {
                 Ok(font) => Ok(Font::Tofu(font)),
             },
-        }
-    }
-
-    pub fn advance_cache_generation(&self) {
-        match &self {
-            Face::FreeType(face) => face.glyph_cache().advance_generation(),
-            Face::Tofu(_) => (),
         }
     }
 }
@@ -352,14 +262,31 @@ impl Font {
     forward_methods!(
         variants = Font::[FreeType, Tofu];
 
+        fn size_cache_key[&]() -> FontSizeCacheKey;
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
     );
 
-    pub fn glyph_extents(&self, index: u32) -> Result<&GlyphMetrics, FreeTypeError> {
+    fn face(&self) -> Face {
         match self {
-            Self::FreeType(font) => font.glyph_cache().get_or_try_measure(font, index),
-            Self::Tofu(font) => Ok(font.glyph_metrics()),
+            Font::FreeType(font) => Face::FreeType(font.face().clone()),
+            Font::Tofu(_) => Face::tofu(),
+        }
+    }
+
+    pub fn glyph_extents<'c>(
+        &'c self,
+        cache: &'c GlyphCache,
+        glyph: u32,
+    ) -> Result<&'c GlyphMetrics, FreeTypeError> {
+        match self {
+            Font::FreeType(font) => {
+                let key = self
+                    .size_cache_key()
+                    .for_glyph::<GlyphMetrics>(self.face(), glyph, 0);
+                cache.get_or_try_insert_with(key, || font.measure_glyph_uncached(glyph))
+            }
+            Font::Tofu(font) => Ok(font.glyph_metrics()),
         }
     }
 
@@ -370,25 +297,39 @@ impl Font {
         }
     }
 
-    pub fn render_glyph(
+    pub fn render_glyph<'c>(
         &self,
+        cache: &'c GlyphCache,
         rasterizer: &mut dyn Rasterizer,
-        index: u32,
+        glyph: u32,
         offset_value: I26Dot6,
         offset_axis_is_y: bool,
-    ) -> Result<&SingleGlyphBitmap, GlyphRenderError> {
-        match self {
-            Self::FreeType(font) => font.glyph_cache().get_or_try_render(
-                rasterizer,
-                font,
-                index,
-                offset_value,
-                offset_axis_is_y,
-            ),
+    ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
+        let (render_offset, subpixel_bucket) =
+            FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
+        let key = self.size_cache_key().for_glyph::<SingleGlyphBitmap>(
+            self.face(),
+            glyph,
+            subpixel_bucket,
+        );
+
+        cache.get_or_try_insert_with(key, || match self {
+            Self::FreeType(font) => font.render_glyph_uncached(rasterizer, glyph, render_offset),
             Self::Tofu(font) => Ok(font
-                .glyph_cache()
-                .get_or_try_render(rasterizer, font, index, offset_value, offset_axis_is_y)
+                .render_glyph_uncached(rasterizer, glyph, render_offset)
                 .unwrap()),
-        }
+        })
+    }
+}
+
+impl CacheValue for GlyphMetrics {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+}
+
+impl CacheValue for SingleGlyphBitmap {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of_val(self) + self.texture.memory_footprint()
     }
 }

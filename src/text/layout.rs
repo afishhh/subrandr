@@ -6,7 +6,7 @@ use util::math::{I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{
     style::computed::HorizontalAlignment,
-    text::{self, FontArena, FontDb, FontMatcher, GlyphString, TextMetrics},
+    text::{self, FontArena, FontDb, FontMatcher, GlyphCache, GlyphString, TextMetrics},
 };
 
 const MULTILINE_SHAPER_DEBUG_PRINT: bool = false;
@@ -69,6 +69,7 @@ fn shape_simple_segment<'f>(
     range: impl text::ItemRange,
     font_iterator: text::FontMatchIterator<'_, 'f>,
     font_arena: &'f FontArena,
+    cache: &GlyphCache,
     fonts: &mut FontDb,
 ) -> Result<(Vec<text::Glyph<'f>>, TextMetrics), LayoutError> {
     let primary = font_iterator
@@ -87,7 +88,7 @@ fn shape_simple_segment<'f>(
         buffer.shape(font_iterator, font_arena, fonts)?
     };
 
-    let mut metrics = text::compute_extents_ex(true, &glyphs)?;
+    let mut metrics = text::compute_extents_ex(cache, true, &glyphs)?;
     metrics.extend_by_font(primary);
 
     Ok((glyphs, metrics))
@@ -266,6 +267,7 @@ impl<'f> MultilineTextShaper<'f> {
         wrap_width: I26Dot6,
         line_height: LineHeight,
         font_arena: &'f FontArena,
+        cache: &GlyphCache,
         fonts: &mut FontDb,
     ) -> Result<(Vec<ShapedLine<'f>>, Rect2<I26Dot6>), LayoutError> {
         while self
@@ -364,7 +366,7 @@ impl<'f> MultilineTextShaper<'f> {
                         let (mut glyphs, mut extents) = match post_wrap_glyphs.take() {
                             Some(glyphs) => {
                                 let mut metrics =
-                                    text::compute_extents_ex(true, glyphs.iter_glyphs())?;
+                                    text::compute_extents_ex(cache, true, glyphs.iter_glyphs())?;
                                 metrics.extend_by_font(primary);
 
                                 (glyphs, metrics)
@@ -375,6 +377,7 @@ impl<'f> MultilineTextShaper<'f> {
                                     segment_slice.clone(),
                                     font_matcher.iterator(),
                                     font_arena,
+                                    cache,
                                     fonts,
                                 )?;
                                 (GlyphString::from_glyphs(text.clone(), vec), metrics)
@@ -433,7 +436,11 @@ impl<'f> MultilineTextShaper<'f> {
                                     end = candidate;
                                     line_boundary = candidate;
 
-                                    extents = text::compute_extents_ex(true, glyphs.iter_glyphs())?;
+                                    extents = text::compute_extents_ex(
+                                        cache,
+                                        true,
+                                        glyphs.iter_glyphs(),
+                                    )?;
                                     extents.extend_by_font(primary);
 
                                     break;
@@ -468,6 +475,7 @@ impl<'f> MultilineTextShaper<'f> {
                                 ..,
                                 annotation.font_matcher.iterator(),
                                 font_arena,
+                                cache,
                                 fonts,
                             )?;
 
@@ -548,8 +556,11 @@ impl<'f> MultilineTextShaper<'f> {
                                     None => break,
                                 };
                                 let local_max_ascender = extents.max_ascender;
-                                let extents =
-                                    text::compute_extents_ex(true, glyph_slice.iter_glyphs())?;
+                                let extents = text::compute_extents_ex(
+                                    cache,
+                                    true,
+                                    glyph_slice.iter_glyphs(),
+                                )?;
 
                                 segments.push(ShapedSegment {
                                     glyphs: glyph_slice,

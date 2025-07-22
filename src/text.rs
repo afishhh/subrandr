@@ -23,6 +23,8 @@ mod glyphstring;
 pub use glyphstring::*;
 mod font_match;
 pub use font_match::*;
+mod glyph_cache;
+pub use glyph_cache::*;
 pub mod layout;
 pub mod platform_font_provider;
 
@@ -151,6 +153,7 @@ impl TextMetrics {
 }
 
 pub fn compute_extents_ex<'a, 'f: 'a, I>(
+    cache: &GlyphCache,
     horizontal: bool,
     glyphs: I,
 ) -> Result<TextMetrics, FreeTypeError>
@@ -170,7 +173,7 @@ where
     let mut glyphs = glyphs.into_iter();
 
     if let Some(glyph) = glyphs.next_back() {
-        let extents = glyph.font.glyph_extents(glyph.index)?;
+        let extents = glyph.font.glyph_extents(cache, glyph.index)?;
         results.paint_size.y += extents.height.abs();
         results.paint_size.x += extents.width;
         if horizontal {
@@ -184,7 +187,7 @@ where
     }
 
     for glyph in glyphs {
-        let extents = glyph.font.glyph_extents(glyph.index)?;
+        let extents = glyph.font.glyph_extents(cache, glyph.index)?;
         if horizontal {
             results.paint_size.y = results.paint_size.y.max(extents.height.abs());
             results.paint_size.x += glyph.x_advance;
@@ -673,6 +676,7 @@ impl Image {
 }
 
 pub fn render(
+    cache: &GlyphCache,
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
@@ -697,7 +701,13 @@ pub fn render(
         };
 
         let font = shaped_glyph.font;
-        let cached = font.render_glyph(rasterizer, shaped_glyph.index, subpixel_offset, false)?;
+        let cached = font.render_glyph(
+            cache,
+            rasterizer,
+            shaped_glyph.index,
+            subpixel_offset,
+            false,
+        )?;
 
         result.glyphs.push(GlyphBitmap {
             offset: (

@@ -13,7 +13,7 @@ use crate::{
     text::{
         self,
         layout::{MultilineTextShaper, TextWrapOptions},
-        FontArena, FontDb,
+        FontArena, FontDb, GlyphCache,
     },
 };
 
@@ -79,6 +79,7 @@ impl BlockContainerFragment {
 #[derive(Debug)]
 pub struct LayoutContext<'l, 'a> {
     pub dpi: u32,
+    pub glyph_cache: &'l GlyphCache,
     pub fonts: &'l mut FontDb<'a>,
 }
 
@@ -174,6 +175,7 @@ fn layout_inline(
         constraints.size.x,
         text::layout::LineHeight::Normal,
         unsafe { std::mem::transmute::<&FontArena, &'static FontArena>(&font_arena) },
+        context.glyph_cache,
         context.fonts,
     )?;
 
@@ -267,7 +269,7 @@ mod test {
     };
     use crate::{
         style::{computed::Ruby, ComputedStyle},
-        text::FontDb,
+        text::{FontDb, GlyphCache},
     };
 
     #[test]
@@ -303,6 +305,7 @@ mod test {
         let fragment = layout(
             &mut LayoutContext {
                 dpi: 72,
+                glyph_cache: &GlyphCache::new(),
                 fonts: &mut FontDb::new(&crate::Subrandr::init()).unwrap(),
             },
             LayoutConstraints {

@@ -89,6 +89,14 @@ impl TextureInner {
 pub struct Texture(TextureInner);
 
 impl Texture {
+    pub fn memory_footprint(&self) -> usize {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.memory_footprint(),
+            #[cfg(feature = "wgpu")]
+            TextureInner::Wgpu(wgpu) => wgpu.memory_footprint(),
+        }
+    }
+
     pub fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width,

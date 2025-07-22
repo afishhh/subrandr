@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, VecDeque},
     fmt::Debug,
     ops::Range,
@@ -117,6 +118,7 @@ impl FrameLayoutPass<'_, '_> {
 
 pub struct FrameRenderPass<'s, 'frame> {
     sctx: &'frame SubtitleContext,
+    glyph_cache: &'frame text::GlyphCache,
     fonts: &'frame mut text::FontDb<'s>,
     rasterizer: &'frame mut dyn Rasterizer,
 }
@@ -144,11 +146,12 @@ impl FrameRenderPass<'_, '_> {
         let final_pos = pos
             + Self::translate_for_aligned_text(
                 matches.primary(&font_arena, self.fonts)?,
-                &text::compute_extents_ex(true, &glyphs)?,
+                &text::compute_extents_ex(self.glyph_cache, true, &glyphs)?,
                 alignment,
             );
 
         let image = text::render(
+            self.glyph_cache,
             self.rasterizer,
             I26Dot6::ZERO,
             I26Dot6::ZERO,
@@ -203,7 +206,13 @@ impl FrameRenderPass<'_, '_> {
             return Ok(());
         }
 
-        let image = text::render(self.rasterizer, x.fract(), y.fract(), glyphs)?;
+        let image = text::render(
+            self.glyph_cache,
+            self.rasterizer,
+            x.fract(),
+            y.fract(),
+            glyphs,
+        )?;
 
         let mut blurs = HashMap::new();
 
@@ -407,6 +416,7 @@ impl PerfStats {
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     pub(crate) fonts: text::FontDb<'a>,
+    pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
 
     unchanged_range: Range<u32>,
@@ -434,6 +444,7 @@ impl<'a> Renderer<'a> {
         Self {
             sbr,
             fonts: text::FontDb::new(sbr).unwrap(),
+            glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
             unchanged_range: 0..0,
             previous_context: SubtitleContext {
@@ -558,7 +569,7 @@ impl Renderer<'_> {
 
         self.perf.start_frame();
         self.fonts.update_platform_font_list()?;
-        self.fonts.advance_cache_generation();
+        self.glyph_cache.advance_generation();
 
         let ctx = SubtitleContext {
             dpi: self.sbr.debug.dpi_override.unwrap_or(ctx.dpi),
@@ -583,6 +594,7 @@ impl Renderer<'_> {
             let mut pass = FrameLayoutPass {
                 sctx: &ctx,
                 lctx: &mut LayoutContext {
+                    glyph_cache: &self.glyph_cache,
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
                 },
@@ -605,6 +617,7 @@ impl Renderer<'_> {
         {
             let mut pass = FrameRenderPass {
                 sctx: &ctx,
+                glyph_cache: &self.glyph_cache,
                 fonts: &mut self.fonts,
                 rasterizer,
             };
@@ -640,7 +653,7 @@ impl Renderer<'_> {
                 )?;
                 y += debug_line_height;
 
-                let rasterizer_line = format!("rasterizer: {}", pass.rasterizer.name());
+                let rasterizer_line = format!("=== rasterizer: {} ===", pass.rasterizer.name());
                 pass.debug_text(
                     target,
                     Point2L::new(FixedL::ZERO, y),
@@ -660,6 +673,35 @@ impl Renderer<'_> {
                             target,
                             Point2L::new(FixedL::ZERO, y),
                             line,
+                            Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
+                            debug_font_size,
+                            BGRA8::WHITE,
+                        )?;
+                        y += debug_line_height;
+                    }
+                }
+
+                {
+                    let stats = pass.glyph_cache.stats();
+
+                    let (footprint_divisor, footprint_suffix) =
+                        util::human_size_suffix(stats.total_memory_footprint);
+                    for line in [
+                        format_args!("=== glyph cache stats ==="),
+                        format_args!(
+                            "approximate memory footprint: {:.3}{footprint_suffix}B",
+                            stats.total_memory_footprint as f32 / footprint_divisor as f32
+                        ),
+                        format_args!("total entries: {}", stats.total_entries),
+                        format_args!("current generation: {}", stats.generation),
+                    ] {
+                        pass.debug_text(
+                            target,
+                            Point2L::new(FixedL::ZERO, y),
+                            &match line.as_str() {
+                                Some(value) => Cow::Borrowed(value),
+                                None => Cow::Owned(line.to_string()),
+                            },
                             Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
                             debug_font_size,
                             BGRA8::WHITE,

@@ -13,10 +13,10 @@ use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Outline, OutlineBuilder, Point2f, SegmentDegree, Vec2};
 
 use super::{
-    Axis, FaceImpl, FontImpl, FontMetrics, GlyphCache, GlyphMetrics, OpenTypeTag,
-    SingleGlyphBitmap, ITALIC_AXIS, WEIGHT_AXIS,
+    Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap,
+    ITALIC_AXIS, WEIGHT_AXIS,
 };
-use crate::text::ft_utils::*;
+use crate::text::{ft_utils::*, FontSizeCacheKey};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
 // This is required because we currently rely on subpixel positioning while rendering
@@ -83,7 +83,6 @@ pub(super) type MmCoords = [FT_Fixed; T1_MAX_MM_AXIS as usize];
 
 struct SharedFaceData {
     axes: Vec<Axis>,
-    glyph_cache: GlyphCache<Font>,
     // This is only here to ensure the memory backing the font doesn't get
     // deallocated while FreeType is still using it.
     #[expect(dead_code)]
@@ -166,11 +165,8 @@ impl Face {
         }
 
         unsafe {
-            (*face).generic.data = Box::into_raw(Box::new(SharedFaceData {
-                axes,
-                glyph_cache: GlyphCache::new(),
-                memory,
-            })) as *mut std::ffi::c_void;
+            (*face).generic.data =
+                Box::into_raw(Box::new(SharedFaceData { axes, memory })) as *mut std::ffi::c_void;
             (*face).generic.finalizer = Some(SharedFaceData::finalize);
         }
 
@@ -182,10 +178,6 @@ impl Face {
 
     fn shared_data(&self) -> &SharedFaceData {
         SharedFaceData::get_ref(self.face)
-    }
-
-    pub(super) fn glyph_cache(&self) -> &GlyphCache<Font> {
-        &self.shared_data().glyph_cache
     }
 
     fn os2_weight(&self) -> Option<u16> {
@@ -202,6 +194,10 @@ impl FaceImpl for Face {
     fn family_name(&self) -> &str {
         // NOTE: FreeType says this is *always* an ASCII string.
         unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
+    }
+
+    fn addr(&self) -> usize {
+        self.face.addr()
     }
 
     fn axes(&self) -> &[Axis] {
@@ -655,13 +651,6 @@ pub enum GlyphRenderError {
     UnsupportedBitmapFormat(std::ffi::c_uchar),
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub(super) struct SizeInfo {
-    coords: MmCoords,
-    point_size: I26Dot6,
-    dpi: u32,
-}
-
 impl FontImpl for Font {
     type Face = Face;
 
@@ -677,17 +666,12 @@ impl FontImpl for Font {
         self.size.point_size
     }
 
-    type FontSizeKey = SizeInfo;
-    fn font_size_key(&self) -> Self::FontSizeKey {
-        Self::FontSizeKey {
-            coords: self.coords,
-            point_size: self.point_size(),
-            dpi: self.size.dpi,
-        }
-    }
-
-    fn glyph_cache(&self) -> &GlyphCache<Self> {
-        self.face().glyph_cache()
+    fn size_cache_key(&self) -> FontSizeCacheKey {
+        FontSizeCacheKey::new(
+            self.point_size(),
+            self.size.dpi,
+            self.coords.map(I16Dot16::from_ft),
+        )
     }
 
     type MeasureError = FreeTypeError;

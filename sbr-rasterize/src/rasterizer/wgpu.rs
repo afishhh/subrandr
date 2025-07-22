@@ -299,7 +299,22 @@ pub(super) enum TextureImpl {
     Packed(PackedTexture, PixelFormat),
     Empty,
 }
+
 impl TextureImpl {
+    pub fn memory_footprint(&self) -> usize {
+        match self {
+            TextureImpl::Full(texture) => texture
+                .format()
+                .theoretical_memory_footprint(texture.size())
+                as usize,
+            TextureImpl::Packed(texture, format) => {
+                let size = texture.size();
+                format.width() as usize * size.x as usize * size.y as usize
+            }
+            TextureImpl::Empty => 0,
+        }
+    }
+
     pub fn width(&self) -> u32 {
         match self {
             TextureImpl::Full(texture) => texture.width(),

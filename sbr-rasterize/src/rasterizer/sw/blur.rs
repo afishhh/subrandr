@@ -26,8 +26,8 @@ unsafe fn sliding_sum(
     }
 
     while x < radius {
-        unsafe { back.add(x * stride).write(sum * iextent) };
         sum += unsafe { *front.add((x + radius) * stride) };
+        unsafe { back.add(x * stride).write(sum * iextent) };
         x += 1;
     }
 

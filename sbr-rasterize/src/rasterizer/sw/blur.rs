@@ -73,7 +73,7 @@ impl Blurer {
         let size = twidth * theight;
 
         self.front.clear();
-        self.front.resize(twidth * theight, 0.0);
+        self.front.resize(size, 0.0);
         self.back.resize(size, MaybeUninit::uninit());
 
         self.width = twidth;
@@ -180,7 +180,7 @@ impl Blurer {
     }
 
     pub fn padding(&self) -> usize {
-        self.radius * PADDING_RADIUS
+        PADDING_RADIUS * self.radius
     }
 
     pub fn width(&self) -> usize {

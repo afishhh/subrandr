@@ -19,17 +19,13 @@ use super::{
 use crate::text::ft_utils::*;
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
-// This is required because:
-// a) HarfBuzz uses unhinted metrics, and it is not practically possible to make it
-//    use hinted metrics AND perform subpixel positioning[1].
-// b) Since the above seems true, we also take the liberty of relying on being able to splice
-//    together text runs on the x axis with subpixel precision.
+// This is required because we currently rely on subpixel positioning while rendering
+// text which would defeat the point of grid-fitting done by full hinting.
+// I believe this is what web browsers do anyway, pango also switched its defaults at
+// one point which did make some complain[1]. In subrandr's case hopefully there will be
+// no difference since subtitles are usually large enough not to care much about hinting.
 //
-// [1] This is because harfbuzz's font funcs for getting the glyph advance DON'T
-//     pass you in a position, thus it follows that hinting CANNOT change the metrics
-//     on subpixel positions.
-//
-//     See https://github.com/harfbuzz/harfbuzz/issues/2394 for people complaining about
+// [1] See https://github.com/harfbuzz/harfbuzz/issues/2394 for people complaining about
 //     the lack of full hinting in newer pango versions.
 //     See https://github.com/harfbuzz/harfbuzz/issues/1892 for pango developer complaining about
 //     people complaining about the metrics being different (unhinted).

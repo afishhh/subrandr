@@ -562,6 +562,9 @@ pub struct MonochromeImage {
 }
 
 impl MonochromeImage {
+    // TODO: Remove the need for this via a blit with monochrome filter operation
+    //       or at least use a per-glyph monochrome cache.
+    //       Non-monochrome glyphs are rare so maybe the second option will be just fine.
     pub fn from_image(rasterizer: &mut dyn Rasterizer, image: &Image) -> Self {
         let mut offset = Vec2::<i32>::ZERO;
         let (mut width, mut height) = (0, 0);
@@ -649,33 +652,6 @@ impl Image {
             glyph.blit(rasterizer, target, dx, dy, color);
         }
     }
-
-    pub fn prepare_for_blur(&self, rasterizer: &mut dyn Rasterizer, sigma: f32) -> Vec2<i32> {
-        let mut offset = Vec2::new(0, 0);
-        let (mut width, mut height) = (0, 0);
-
-        for glyph in &self.glyphs {
-            offset.x = offset.x.min(glyph.offset.0);
-            offset.y = offset.y.min(glyph.offset.1);
-
-            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
-            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
-        }
-
-        width += (-offset.x).max(0) as u32;
-        height += (-offset.y).max(0) as u32;
-
-        rasterizer.blur_prepare(width, height, sigma);
-
-        for bitmap in &self.glyphs {
-            let offx = bitmap.offset.0 - offset.x;
-            let offy = bitmap.offset.1 - offset.y;
-
-            rasterizer.blur_buffer_blit(offx, offy, &bitmap.texture);
-        }
-
-        offset
-    }
 }
 
 pub fn render(
@@ -683,6 +659,7 @@ pub fn render(
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
+    blur_sigma: f32,
     glyphs: &GlyphString<'_, impl GlyphStringText>,
 ) -> Result<Image, GlyphRenderError> {
     let mut result = Image {
@@ -704,20 +681,21 @@ pub fn render(
         };
 
         let font = shaped_glyph.font;
-        let cached = font.render_glyph(
+        let bitmap = font.render_glyph(
             cache,
             rasterizer,
             shaped_glyph.index,
+            blur_sigma,
             subpixel_offset,
             false,
         )?;
 
         result.glyphs.push(GlyphBitmap {
             offset: (
-                (x + cached.offset.x + shaped_glyph.x_offset).floor_to_inner(),
-                (y + cached.offset.y + shaped_glyph.y_offset).floor_to_inner(),
+                (x + bitmap.offset.x + shaped_glyph.x_offset).floor_to_inner(),
+                (y + bitmap.offset.y + shaped_glyph.y_offset).floor_to_inner(),
             ),
-            texture: cached.texture.clone(),
+            texture: bitmap.texture.clone(),
         });
 
         x += shaped_glyph.x_advance;

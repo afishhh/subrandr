@@ -117,6 +117,41 @@ impl<T: ?Sized> Drop for ReadonlyAliasableBox<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HashF32(f32);
+
+impl HashF32 {
+    pub fn new(value: f32) -> Self {
+        Self(if value == 0.0 {
+            // normalize negative zero
+            0.0
+        } else if value.is_nan() {
+            // normalize NaN
+            f32::NAN
+        } else {
+            value
+        })
+    }
+
+    pub fn to_inner(self) -> f32 {
+        self.0
+    }
+}
+
+impl PartialEq for HashF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for HashF32 {}
+
+impl Hash for HashF32 {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
 pub fn human_size_suffix(size: usize) -> (usize, &'static str) {
     const TABLE: &[&str] = &["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei"];
 
@@ -137,9 +172,7 @@ pub fn human_size_suffix(size: usize) -> (usize, &'static str) {
 
 #[cfg(test)]
 mod test {
-    use crate::human_size_suffix;
-
-    use super::ReadonlyAliasableBox;
+    use super::{human_size_suffix, ReadonlyAliasableBox};
 
     #[test]
     fn readonly_aliasable_box() {

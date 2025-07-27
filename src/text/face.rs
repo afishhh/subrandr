@@ -283,7 +283,7 @@ impl Font {
     ) -> Result<&'c GlyphMetrics, FreeTypeError> {
         match self {
             Font::FreeType(font) => {
-                let key = self.size_cache_key().for_glyph(self.face(), glyph, 0);
+                let key = self.size_cache_key().for_glyph(self.face(), glyph, 0.0, 0);
                 cache.get_or_try_insert_with(key, || font.measure_glyph_uncached(glyph))
             }
             Font::Tofu(font) => Ok(font.glyph_metrics()),
@@ -297,26 +297,75 @@ impl Font {
         }
     }
 
+    fn render_glyph_impl<'c>(
+        &self,
+        cache: &'c GlyphCache,
+        rasterizer: &mut dyn Rasterizer,
+        glyph: u32,
+        blur_sigma: f32,
+        render_offset: Vec2<I26Dot6>,
+        subpixel_bucket: u8,
+    ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
+        let key = self
+            .size_cache_key()
+            .for_glyph(self.face(), glyph, blur_sigma, subpixel_bucket);
+
+        if blur_sigma == 0.0 {
+            cache.get_or_try_insert_with(key, || match self {
+                Self::FreeType(font) => {
+                    font.render_glyph_uncached(rasterizer, glyph, render_offset)
+                }
+                Self::Tofu(font) => Ok(font
+                    .render_glyph_uncached(rasterizer, glyph, render_offset)
+                    .unwrap()),
+            })
+        } else {
+            cache.get_or_try_insert_with(key, || {
+                let unblurred = self.render_glyph_impl(
+                    cache,
+                    rasterizer,
+                    glyph,
+                    0.0,
+                    render_offset,
+                    subpixel_bucket,
+                )?;
+
+                rasterizer.blur_prepare(
+                    unblurred.texture.width(),
+                    unblurred.texture.height(),
+                    blur_sigma,
+                );
+                rasterizer.blur_buffer_blit(0, 0, &unblurred.texture);
+                let pad = rasterizer.blur_padding();
+                Ok(SingleGlyphBitmap {
+                    offset: unblurred.offset
+                        - Vec2::new(I26Dot6::from_f32(pad.x), I26Dot6::from_f32(pad.y)),
+                    texture: rasterizer.blur_to_mono_texture(),
+                })
+            })
+        }
+    }
+
     pub fn render_glyph<'c>(
         &self,
         cache: &'c GlyphCache,
         rasterizer: &mut dyn Rasterizer,
         glyph: u32,
+        blur_sigma: f32,
         offset_value: I26Dot6,
         offset_axis_is_y: bool,
     ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
         let (render_offset, subpixel_bucket) =
             FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
-        let key = self
-            .size_cache_key()
-            .for_glyph(self.face(), glyph, subpixel_bucket);
 
-        cache.get_or_try_insert_with(key, || match self {
-            Self::FreeType(font) => font.render_glyph_uncached(rasterizer, glyph, render_offset),
-            Self::Tofu(font) => Ok(font
-                .render_glyph_uncached(rasterizer, glyph, render_offset)
-                .unwrap()),
-        })
+        self.render_glyph_impl(
+            cache,
+            rasterizer,
+            glyph,
+            blur_sigma,
+            render_offset,
+            subpixel_bucket,
+        )
     }
 }
 

@@ -1,14 +1,9 @@
-use std::{
-    borrow::Cow,
-    collections::{HashMap, VecDeque},
-    fmt::Debug,
-    ops::Range,
-};
+use std::{borrow::Cow, collections::VecDeque, fmt::Debug, ops::Range};
 
 use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
 use thiserror::Error;
 use util::{
-    math::{I26Dot6, Point2, Point2f, Rect2, Vec2, Vec2f},
+    math::{I26Dot6, Point2, Point2f, Rect2, Vec2},
     rc::Rc,
 };
 
@@ -161,6 +156,7 @@ impl FrameRenderPass<'_, '_> {
             self.rasterizer,
             I26Dot6::ZERO,
             I26Dot6::ZERO,
+            0.0,
             &GlyphString::from_glyphs(text, glyphs, text::Direction::Ltr),
         )?;
         image.blit(
@@ -217,10 +213,9 @@ impl FrameRenderPass<'_, '_> {
             self.rasterizer,
             x.fract(),
             y.fract(),
+            0.0,
             glyphs,
         )?;
-
-        let mut blurs = HashMap::new();
 
         // TODO: This should also draw an offset underline I think and possibly strike through?
         for shadow in shadows.iter().rev() {
@@ -232,20 +227,19 @@ impl FrameRenderPass<'_, '_> {
                     // equal to half the blur radius.
                     let sigma = shadow.blur_radius / 2;
 
-                    let (blurred, offset) = blurs.entry(sigma).or_insert_with(|| {
-                        let offset = image.prepare_for_blur(self.rasterizer, sigma.into_f32());
-                        let padding = self.rasterizer.blur_padding();
-                        (
-                            self.rasterizer.blur_to_mono_texture(),
-                            -Vec2f::new(offset.x as f32, offset.y as f32) + padding,
-                        )
-                    });
-
-                    self.rasterizer.blit(
+                    text::render(
+                        self.glyph_cache,
+                        self.rasterizer,
+                        x.fract(),
+                        y.fract(),
+                        sigma.into_f32(),
+                        glyphs,
+                    )?
+                    .blit(
+                        self.rasterizer,
                         target,
-                        (x + shadow.offset.x - offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y - offset.y).trunc_to_inner(),
-                        blurred,
+                        (x + shadow.offset.x).trunc_to_inner(),
+                        (y + shadow.offset.y).trunc_to_inner(),
                         shadow.color,
                     );
                 } else {

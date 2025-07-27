@@ -1,5 +1,5 @@
 use util::{
-    math::{I16Dot16, I26Dot6, Point2, Vec2},
+    math::{I26Dot6, Point2, Vec2},
     rc::Rc,
 };
 
@@ -44,12 +44,6 @@ impl BlockContainerFragment {
 pub struct LayoutContext<'l, 'a> {
     pub dpi: u32,
     pub fonts: &'l mut FontDb<'a>,
-}
-
-impl LayoutContext<'_, '_> {
-    fn pixel_scale(&self) -> I16Dot16 {
-        I16Dot16::from_quotient(self.dpi as i32, 72)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

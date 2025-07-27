@@ -356,7 +356,7 @@ fn font_matcher_from_style<'f>(
                 FontSlant::Italic => true,
             },
         },
-        style.font_size() * lctx.pixel_scale(),
+        style.font_size(),
         lctx.dpi,
         font_arena,
         lctx.fonts,
@@ -654,20 +654,7 @@ fn shape_run_initial<'a, 'f>(
                 }
             },
             InlineItem::Text(text) => {
-                let font_matcher = text::FontMatcher::match_all(
-                    current_style.font_family(),
-                    text::FontStyle {
-                        weight: current_style.font_weight(),
-                        italic: match current_style.font_slant() {
-                            FontSlant::Regular => false,
-                            FontSlant::Italic => true,
-                        },
-                    },
-                    current_style.font_size() * lctx.pixel_scale(),
-                    lctx.dpi,
-                    font_arena,
-                    lctx.fonts,
-                )?;
+                let font_matcher = font_matcher_from_style(current_style, font_arena, lctx)?;
 
                 match current_text {
                     Some(ref mut queued)

@@ -280,6 +280,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
     let mut computed_style_impl = TokenStream2::new();
     let mut create_child_impl = TokenStream2::new();
     let mut default_const_impl = TokenStream2::new();
+    let mut debug_fields_impl = TokenStream2::new();
     for group in &input.groups {
         let group_name = &group.name;
         let group_type_name = snake_case_to_pascal_case(&group.name);
@@ -304,10 +305,11 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             let type_ = &prop.value_type;
             let rc_type_ = &prop.rcified_type();
 
+            let ampersand = proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone);
             let ampersand_if_not_copy = if prop.copy {
                 None
             } else {
-                Some(proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone))
+                Some(ampersand.clone())
             };
 
             computed_style_impl.extend(quote! {
@@ -365,6 +367,11 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                     },
                 })
             }
+
+            let name_str = syn::LitStr::new(&name.to_string(), name.span());
+            debug_fields_impl.extend(quote! {
+                .field(#name_str, &self.#name())
+            });
         }
 
         if inherit_whole_group {
@@ -379,7 +386,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
     }
 
     result.extend(quote! {
-        #[derive(Debug, Clone)]
+        #[derive(Clone)]
         pub struct ComputedStyle {
             #computed_style_fields
         }
@@ -401,6 +408,14 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         impl ::std::default::Default for ComputedStyle {
             fn default() -> Self {
                 Self::DEFAULT
+            }
+        }
+
+        impl ::std::fmt::Debug for ComputedStyle {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("ComputedStyle")
+                    #debug_fields_impl
+                    .finish()
             }
         }
     });

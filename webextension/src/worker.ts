@@ -56,7 +56,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         subtitles = null
       }
 
-      console.log("reloading subs")
+      console.log("subrandr: Render worker reloading subtitles")
       
       subtitles = Subtitles.parseFromString(event.data.text)
       renderer = new Renderer()

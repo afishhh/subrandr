@@ -54,27 +54,56 @@ function extractPlayerResponse(code: string): any {
   return null
 }
 
-function extractAttestationResponse(code: string): any {
-  const prefix = "ytAtR = "
-  const start = code.indexOf(prefix)
-  if (start !== -1) {
-    const end = code.indexOf(";", start)
-    //evil
-    const jsonValue = code.substring(start + prefix.length + 1, end - 1)
-    .replace(/\\x22/g, "\x22")
-    .replace(/\\x7b/g, "\x7b")
-    .replace(/\\x5b/g, "\x5b")
-    .replace(/\\x7d/g, "\x7d")
-    .replace(/\\x3d/g, "\x3d")
-    .replace(/\\x5d/g, "\x5d")
-    const result = JSON.parse(jsonValue)
-    if (typeof result != "object")
-      return null
-    return result
-  }
-  return null
+interface AttestationParams {
+  token: string,
+  device: string
 }
 
+async function generateAttestationParams(videoId: string): Promise<AttestationParams> {
+  const RESULT_MESSAGE_TYPE: string = "PMgBwOGHkuhqGFEofJKH";
+  const MAX_TRIES: number = 5
+  const ATTEMPT_DELAY: number = 1500
+  
+  const script = document.createElement("script");
+  script.innerHTML = `
+    (async () => {
+      const webPoClient = await window.top["havuokmhhs-0"]?.bevasrs?.wpc();
+      let tries = 0;
+      for (let tries = 0; tries < ${MAX_TRIES}; ++tries) {
+        try {
+          const token = await webPoClient.mws({c:"${videoId}",mc:false,me:false});
+          window.postMessage({type: "${RESULT_MESSAGE_TYPE}", token, device: yt.config_.DEVICE});
+          return;
+        } catch (e) {
+          const message = e?.message;
+          if (typeof message === "string" && message.includes(":notready:")) {
+            await new Promise<AttestationParams>((resolve) => setTimeout(resolve, ${ATTEMPT_DELAY}))
+            continue;
+          } else {
+            throw e;
+          }
+        }
+      }
+    })();
+  `;
+
+  return Promise.race([
+    new Promise<AttestationParams>((resolve) => {
+      window.addEventListener("message", message => {
+        if (message.data?.type === RESULT_MESSAGE_TYPE &&
+          typeof message.data.token === "string" &&
+          typeof message.data.device === "string"
+        ) {
+          script.remove()
+          resolve(message.data);
+        }
+      });
+
+      document.body.appendChild(script)
+    }),
+    new Promise<AttestationParams>((_, reject) => setTimeout(() => reject("po token minting timed out"), (MAX_TRIES + 1) * ATTEMPT_DELAY))
+  ])
+}
 
 const TRACK_CACHE: { [key: string]: SubtitleTrack[] } = {}
 
@@ -103,35 +132,14 @@ async function getYoutubeSubtitleTracks(videoId: string) {
       console.log("subrandr: Retrieved player response for video id", playerResponse.videoDetails.videoId)
   }
 
-  // const challenge: {
-  //   globalName: string,
-  //   program: string,
-  // } = attestationResponse.bgChallenge;
-
-  // console.log(`subrandr: Running pot challenge with interpreter ${challenge.globalName}`);
-  // const interpreter = (window as any).wrappedJSObject[challenge.globalName];
-  // console.log(interpreter)
-  // const syncSnapshot = await interpreter.a(challenge.program, (_a: any, _b: any, _c: any, _d: any) => { }, true, undefined, () => { });
-  // const webPoSignalOutput: any[] = [];
-  // syncSnapshot({ webPoSignalOutput });
-  // console.log(webPoSignalOutput)
-  // const integrityTokenResponse = (await fetch('https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIT', {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json+protobuf',
-  //     'x-goog-api-key': 'AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw',
-  //     'x-user-agent': 'grpc-web-javascript/0.1',
-  //   },
-  //   body: JSON.stringify([ "O43z0dpjhgX20SCx4KAo", webPoSignalOutput ])
-  // }));
-
-  // console.log(integrityTokenResponse)
-
+   const att = await generateAttestationParams(videoId);
+   console.log("subrandr: Minted video PO Token \"%s\" (device: \"%s\")", att.token, att.device);
+ 
   for (const track of playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks) {
     result.push({
       name: track.name.simpleText,
       language: track.languageCode,
-      url: track.baseUrl + "&potc=1&pot=MlR8acEd4RrhUnxU6FsvOBsNkQTadecTRp82MW76vZxjzGr4Ou_iSqH4oCidjwAYglCjTNos0eKHvM2ogWSPfgYIlN0A8uZpSDiGVUZcjTeuyiePkQI=&fmt=srv3&c=WEB&cver=20250807.01.00&cplayer=UNIPLAYER&cos=X11&cplatform=DESKTOp",
+      url: track.baseUrl + `&potc=1&pot=${att.token}&c=WEB&${att.device}&fmt=srv3`,
       format: "srv3"
     })
   }

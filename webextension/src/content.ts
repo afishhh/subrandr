@@ -55,9 +55,11 @@ import type { WorkerMessage } from "./worker"
     }
 
     static async start(): Promise<RenderWorker> {
-      let fullUrl = browser.runtime.getURL("worker.js")
-      fullUrl += "?wasm=" + encodeURIComponent(browser.runtime.getURL("subrandr.wasm"))
-      fullUrl += "&js=" + encodeURIComponent(browser.runtime.getURL("subrandr.js"))
+      // this is not the correct type, the APIs are different but this specific one is the same :)
+      let browser_: typeof browser = globalThis?.browser ?? (globalThis as any).chrome;
+      let fullUrl = browser_.runtime.getURL("worker.js")
+      fullUrl += "?wasm=" + encodeURIComponent(browser_.runtime.getURL("subrandr.wasm"))
+      fullUrl += "&js=" + encodeURIComponent(browser_.runtime.getURL("subrandr.js"))
 
       const worker = new Worker(fullUrl, {
         type: "module"

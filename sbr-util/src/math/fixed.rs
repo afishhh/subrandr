@@ -224,6 +224,12 @@ macro_rules! define_fixed_for_type {
                 self.0.partial_cmp(&(other << P))
             }
         }
+
+        impl<const P: u32> std::iter::Sum<Fixed<P, $type>> for Fixed<P, $type> {
+            fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+                iter.fold(Self::ZERO, <Self as std::ops::Add>::add)
+            }
+        }
     };
     (@signed $type: ty, $wide: ty, $unsigned: ty) => {
         impl<const P: u32> Fixed<P, $type> {

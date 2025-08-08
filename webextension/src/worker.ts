@@ -33,12 +33,12 @@ const notoSansItalic = fetch("https://fishhh.dev/files/cors/NotoSans-Italic-Vari
   .then(r => r.bytes())
   .then(b => new Font(b))
 
-const jetbrainsMono = fetch("https://fishhh.dev/files/cors/JetBrainsMono[wght].ttf")
-  .then(r => r.bytes())
-  .then(b => new Font(b))
-const jetbrainsItalic = fetch("https://fishhh.dev/files/cors/JetBrainsMono-Italic[wght].ttf")
-  .then(r => r.bytes())
-  .then(b => new Font(b))
+// const jetbrainsMono = fetch("https://fishhh.dev/files/cors/JetBrainsMono[wght].ttf")
+//   .then(r => r.bytes())
+//   .then(b => new Font(b))
+// const jetbrainsItalic = fetch("https://fishhh.dev/files/cors/JetBrainsMono-Italic[wght].ttf")
+//   .then(r => r.bytes())
+//   .then(b => new Font(b))
 
 const fb = new Framebuffer(0, 0)
 let subtitles: S.Subtitles | null = null
@@ -75,19 +75,21 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         await notoSansItalic
       );
 
-      renderer.addFont(
-        "monospace",
-        "auto",
-        false,
-        await jetbrainsMono
-      );
+      // renderer.addFont(
+      //   "monospace",
+      //   "auto",
+      //   false,
+      //   await jetbrainsMono
+      // );
 
-      renderer.addFont(
-        "monospace",
-        "auto",
-        true,
-        await jetbrainsItalic
-      );
+      // renderer.addFont(
+      //   "monospace",
+      //   "auto",
+      //   true,
+      //   await jetbrainsItalic
+      // );
+
+      renderer.setSubtitles(subtitles)
 
       postMessage({ id: event.data.id })
       break;
@@ -95,7 +97,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       const params = event.data
 
       fb.resize(Math.ceil(params.player_width), Math.ceil(params.player_height))
-      renderer!!.render(params.ctx, fb, subtitles!!, params.playback_time)
+      renderer!!.render(params.ctx, fb, params.playback_time)
 
       const bitmap = await fb.imageBitmap()
       postMessage({ id: event.data.id, bitmap }, { transfer: [bitmap] })

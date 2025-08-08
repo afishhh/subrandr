@@ -127,21 +127,6 @@ import type { WorkerMessage } from "./worker"
     }
   }
 
-  // const observer = new MutationObserver(updateState)
-
-  // if(document.body)
-  //   observer.observe(document.body, {
-  //     subtree: true,
-  //     childList: true
-  //   })
-  // else
-  //   document.addEventListener("DOMContentLoaded", () => {
-  //     observer.observe(document.body, {
-  //       subtree: true,
-  //       childList: true
-  //     })
-  //   })
-
   const onframe = async () => {
     updateState();
 

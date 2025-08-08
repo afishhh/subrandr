@@ -21,6 +21,9 @@ export class Subtitles {
         /* SBR_SUBTITLE_FORMAT_UNKNOWN */ 0,
         WASM_NULL
       )
+      if (ptr == WASM_NULL) {
+        g.mod.handleError()
+      }
     } finally {
       g.mod.dealloc(text_ptr, text_len)
     }
@@ -202,12 +205,20 @@ export class Renderer {
     }
   }
 
-  render(ctx: SubtitleContext, fb: Framebuffer, subs: Subtitles, t: number) {
+  setSubtitles(subs: Subtitles) {
+    const g = state();
+    g.mod.exports.sbr_renderer_set_subtitles(
+      this.__ptr,
+      subs.__ptr,
+    );
+  }
+
+  render(ctx: SubtitleContext, fb: Framebuffer, t: number) {
     const g = state();
     writeStruct(
       new DataView(g.mod.memoryBuffer, this.__ctxptr, SUBCTX_LEN),
       [
-        structField("u32", ctx.dpi ?? 72 * window.devicePixelRatio),
+        structField("u32", ctx.dpi ?? 72 * (globalThis?.window?.devicePixelRatio ?? 1)),
         structField("i32", ctx.video_width << 6),
         structField("i32", ctx.video_height << 6),
         structField("i32", (ctx.padding_left ?? 0) << 6),
@@ -221,7 +232,6 @@ export class Renderer {
     g.mod.exports.sbr_renderer_render(
       this.__ptr,
       this.__ctxptr,
-      subs.__ptr,
       t,
       back.ptr,
       fb._width,

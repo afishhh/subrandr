@@ -34,10 +34,13 @@ export interface SubrandrExports {
 		format: number, language_hint: WasmPtr
 	): SubtitlesPtr;
 	sbr_renderer_create(sbr: LibraryPtr): RendererPtr
+	sbr_renderer_set_subtitles(
+		renderer: RendererPtr,
+		subs: SubtitlesPtr,
+	): void;
 	sbr_renderer_render(
 		renderer: RendererPtr,
 		subtitle_context: WasmPtr,
-		subs: SubtitlesPtr,
 		t: number,
 		buf_ptr: WasmPtr,
 		buf_width: number,

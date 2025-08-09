@@ -753,6 +753,7 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
             ShapedItemKind::Ruby(_) => {
                 // TODO: Implement ruby line breaking
                 //       It should only allow breaking between distinct base-annotation pairs.
+                shaped_item_width(current_width, self);
                 Ok(BreakOutcome::None)
             }
         }
@@ -831,6 +832,31 @@ impl<'f> ShapedItemText<'f> {
         }
 
         Ok(BreakOutcome::None)
+    }
+}
+
+fn shaped_item_width(result: &mut FixedL, item: &ShapedItem) {
+    match &item.kind {
+        ShapedItemKind::Text(text) => {
+            for glyph in text.glyphs.iter_glyphs() {
+                *result += glyph.x_advance;
+            }
+        }
+        ShapedItemKind::Ruby(ruby) => {
+            for (base, annotation) in &ruby.base_annotation_pairs {
+                let mut base_width = FixedL::ZERO;
+                let mut annotation_width = FixedL::ZERO;
+
+                for item in &base.inner.shaped {
+                    shaped_item_width(&mut base_width, item);
+                }
+                for item in &annotation.inner.shaped {
+                    shaped_item_width(&mut annotation_width, item);
+                }
+
+                *result += base_width.max(annotation_width);
+            }
+        }
     }
 }
 
@@ -1129,31 +1155,6 @@ fn layout_run_full(
                             .max(base_metrics.max_ascender + annotation_metrics.max_ascender);
                         self.expand_to(base_metrics.max_ascender, base_metrics.min_descender);
                     }
-                }
-            }
-        }
-    }
-
-    fn shaped_item_width(result: &mut FixedL, item: &ShapedItem) {
-        match &item.kind {
-            ShapedItemKind::Text(text) => {
-                for glyph in text.glyphs.iter_glyphs() {
-                    *result += glyph.x_advance;
-                }
-            }
-            ShapedItemKind::Ruby(ruby) => {
-                for (base, annotation) in &ruby.base_annotation_pairs {
-                    let mut base_width = FixedL::ZERO;
-                    let mut annotation_width = FixedL::ZERO;
-
-                    for item in &base.inner.shaped {
-                        shaped_item_width(&mut base_width, item);
-                    }
-                    for item in &annotation.inner.shaped {
-                        shaped_item_width(&mut annotation_width, item);
-                    }
-
-                    *result += base_width.max(annotation_width);
                 }
             }
         }

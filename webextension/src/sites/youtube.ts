@@ -77,7 +77,7 @@ async function generateAttestationParams(videoId: string): Promise<AttestationPa
         } catch (e) {
           const message = e?.message;
           if (typeof message === "string" && message.includes(":notready:")) {
-            await new Promise<AttestationParams>((resolve) => setTimeout(resolve, ${ATTEMPT_DELAY}))
+            await new Promise((resolve) => setTimeout(resolve, ${ATTEMPT_DELAY}))
             continue;
           } else {
             throw e;

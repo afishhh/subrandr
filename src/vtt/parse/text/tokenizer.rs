@@ -222,7 +222,6 @@ impl<'a> Annotation<'a> {
 pub struct ClassList<'a>(&'a str);
 
 impl<'a> ClassList<'a> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn new(value: &'a str) -> Self {
         Self(value)
     }
@@ -255,13 +254,16 @@ impl<'a> CueTextTokenizer<'a> {
 
         Some(match self.step() {
             TokenizerState::Data => Token::Text(Text(self.buffers[0])),
-            TokenizerState::Tag | TokenizerState::StartTag | TokenizerState::StartTagClass => {
-                Token::StartTag(StartTagToken {
-                    name: self.buffers[0],
-                    classes: ClassList(self.buffers[1]),
-                    annotation: None,
-                })
-            }
+            TokenizerState::Tag | TokenizerState::StartTag => Token::StartTag(StartTagToken {
+                name: self.buffers[0],
+                classes: ClassList::new(""),
+                annotation: None,
+            }),
+            TokenizerState::StartTagClass => Token::StartTag(StartTagToken {
+                name: self.buffers[0],
+                classes: ClassList(self.buffers[1]),
+                annotation: None,
+            }),
             TokenizerState::StartTagAnnotation => Token::StartTag(StartTagToken {
                 name: self.buffers[0],
                 classes: ClassList(self.buffers[1]),
@@ -540,6 +542,28 @@ mod test {
                 (Token::StartTag(StartTagToken::simple("b"))),
                 (Token::text("hi")),
                 (Token::StartTag(StartTagToken::simple(""))),
+            ],
+        );
+    }
+
+    #[test]
+    fn tokens_ruby_after_class() {
+        check_tokenizer_tokens(
+            r#"
+<c.red>some red text </c>
+<ruby>preceeding ruby<rt>with an annotation</ruby>
+"#
+            .trim(),
+            &[
+                (Token::StartTag(StartTagToken::new("c", "red", None))),
+                (Token::text("some red text ")),
+                (Token::EndTag("c")),
+                (Token::text("\n")),
+                (Token::StartTag(StartTagToken::simple("ruby"))),
+                (Token::text("preceeding ruby")),
+                (Token::StartTag(StartTagToken::simple("rt"))),
+                (Token::text("with an annotation")),
+                (Token::EndTag("ruby")),
             ],
         );
     }

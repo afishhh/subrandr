@@ -215,4 +215,42 @@ mod test {
             ]
         )
     }
+
+    #[test]
+    fn ruby_after_class() {
+        let list = parse_cue_text(
+            r#"
+<c.red>some red text </c>
+<ruby>preceeding ruby<rt>with an annotation</ruby>
+"#
+            .trim(),
+        );
+
+        assert_eq!(
+            &list,
+            &[
+                Node::Internal(InternalNode {
+                    kind: InternalNodeKind::Class,
+                    classes: ClassList::new("red"),
+                    language: None,
+                    children: vec![Node::Text(Text("some red text "))]
+                }),
+                Node::Text(Text("\n")),
+                Node::Internal(InternalNode {
+                    kind: InternalNodeKind::Ruby,
+                    classes: ClassList::new(""),
+                    language: None,
+                    children: vec![
+                        Node::Text(Text("preceeding ruby")),
+                        Node::Internal(InternalNode {
+                            kind: InternalNodeKind::RubyText,
+                            classes: ClassList::new(""),
+                            language: None,
+                            children: vec![Node::Text(Text("with an annotation"))]
+                        }),
+                    ]
+                }),
+            ]
+        )
+    }
 }

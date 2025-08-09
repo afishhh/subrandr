@@ -7,7 +7,7 @@ The first goal is to achieve good rendering of YouTube's SRV3 format, currently 
 
 #### Supported subtitle formats:
 - SRV3 (incomplete, no window style (justification, vertical text) support, some rarer attributes may be currently unsupported)
-- WebVTT (incomplete, no css, ruby or vertical text support)
+- WebVTT (incomplete, no css or vertical text support)
 
 #### WebAssembly library and extension
 

@@ -10,7 +10,7 @@ use util::{
 use crate::{
     layout::{
         self,
-        inline::{InlineContentBuilder, LineBoxFragment},
+        inline::{InlineContentBuilder, InlineSpanBuilder, LineBoxFragment},
         BlockContainer, BlockContainerFragment, FixedL, InlineLayoutError, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
@@ -95,7 +95,7 @@ impl vtt::Cue<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Event {
     range: Range<u32>,
     writing_direction: vtt::WritingDirection,
@@ -103,15 +103,9 @@ struct Event {
     horizontal_alignment: HorizontalAlignment,
     line: vtt::Line,
     size: f64,
-    segments: Vec<Segment>,
+    root: Element,
     x: f64,
     y: f64,
-}
-
-#[derive(Debug, Clone)]
-struct Segment {
-    base_style: ComputedStyle,
-    text: std::rc::Rc<str>,
 }
 
 impl Event {
@@ -135,16 +129,7 @@ impl Event {
                 },
                 contents: {
                     let mut builder = InlineContentBuilder::new();
-
-                    {
-                        let mut root = builder.root();
-                        for segment in &self.segments {
-                            let mut style = segment.base_style.clone();
-                            *style.make_font_size_mut() = font_size;
-                            root.push_span(style).push_text(&segment.text);
-                        }
-                    }
-
+                    self.root.append_to(&mut builder.root(), font_size);
                     vec![builder.finish()]
                 },
             },
@@ -368,110 +353,169 @@ impl Event {
     }
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum InternalNodeKind<'a> {
-//     Class,
-//     Italic,
-//     Bold,
-//     Underline,
-//     Ruby,
-//     RubyText,
-//     Voice { value: Annotation<'a> },
-//     Language,
-// }
-
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct InternalNode<'a> {
-//     pub kind: InternalNodeKind<'a>,
-//     pub classes: ClassList<'a>,
-//     pub language: Option<Cow<'a, str>>,
-//     pub children: Vec<Node<'a>>,
-// }
-
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum Node<'a> {
-//     Internal(InternalNode<'a>),
-//     Text(Text<'a>),
-//     Timestamp(u32),
-// }
-
-// TODO: Ruby
-struct TextConverter {
-    style: ComputedStyle,
-    segments: Vec<Segment>,
+// A simplified vtt node tree meant to easily translate into an inline layout tree.
+#[derive(Debug)]
+enum Node {
+    Text(Box<str>),
+    Element(Element),
 }
 
-impl TextConverter {
-    fn process_node(&mut self, node: &vtt::Node) {
-        match node {
-            vtt::Node::Internal(internal) => {
-                let old = self.style.clone();
-                match internal.kind {
-                    vtt::InternalNodeKind::Italic => {
-                        *self.style.make_font_slant_mut() = FontSlant::Italic;
-                    }
-                    vtt::InternalNodeKind::Bold => {
-                        *self.style.make_font_weight_mut() = I16Dot16::new(700);
-                    }
-                    vtt::InternalNodeKind::Underline => {
-                        *self.style.make_text_decoration_mut() = TextDecorations {
-                            underline: true,
-                            underline_color: self.style.color(),
-                            strike_out: false,
-                            strike_out_color: BGRA8::ZERO,
-                        };
-                    }
+#[derive(Debug)]
+struct Element {
+    base_style: ComputedStyle,
+    kind: ElementKind,
+    children: Vec<Node>,
+}
+
+#[derive(Debug)]
+enum ElementKind {
+    Span,
+    Ruby,
+    RubyText,
+}
+
+fn convert_node(
+    output: &mut Vec<Node>,
+    parent_style: &ComputedStyle,
+    node: &vtt::Node,
+    mut in_ruby: bool,
+) {
+    match node {
+        vtt::Node::Internal(internal) => {
+            // FIXME: This being `.clone()` instead of `.create_derived()` is kind of a hack.
+            let mut style = parent_style.clone();
+            match internal.kind {
+                vtt::InternalNodeKind::Italic => {
+                    *style.make_font_slant_mut() = FontSlant::Italic;
+                }
+                vtt::InternalNodeKind::Bold => {
+                    *style.make_font_weight_mut() = I16Dot16::new(700);
+                }
+                vtt::InternalNodeKind::Underline => {
+                    *style.make_text_decoration_mut() = TextDecorations {
+                        underline: true,
+                        underline_color: style.color(),
+                        strike_out: false,
+                        strike_out_color: BGRA8::ZERO,
+                    };
+                }
+                _ => (),
+            }
+
+            for class in internal.classes.iter() {
+                match class {
+                    "white" => *style.make_color_mut() = BGRA8::WHITE,
+                    "lime" => *style.make_color_mut() = BGRA8::LIME,
+                    "cyan" => *style.make_color_mut() = BGRA8::CYAN,
+                    "red" => *style.make_color_mut() = BGRA8::RED,
+                    "yellow" => *style.make_color_mut() = BGRA8::YELLOW,
+                    "magenta" => *style.make_color_mut() = BGRA8::MAGENTA,
+                    "blue" => *style.make_color_mut() = BGRA8::BLUE,
+                    "black" => *style.make_color_mut() = BGRA8::BLACK,
+                    "bg_white" => *style.make_background_color_mut() = BGRA8::WHITE,
+                    "bg_lime" => *style.make_background_color_mut() = BGRA8::LIME,
+                    "bg_cyan" => *style.make_background_color_mut() = BGRA8::CYAN,
+                    "bg_red" => *style.make_background_color_mut() = BGRA8::RED,
+                    "bg_yellow" => *style.make_background_color_mut() = BGRA8::YELLOW,
+                    "bg_magenta" => *style.make_background_color_mut() = BGRA8::MAGENTA,
+                    "bg_blue" => *style.make_background_color_mut() = BGRA8::BLUE,
+                    "bg_black" => *style.make_background_color_mut() = BGRA8::BLACK,
                     _ => (),
                 }
-
-                for class in internal.classes.iter() {
-                    match class {
-                        "white" => *self.style.make_color_mut() = BGRA8::WHITE,
-                        "lime" => *self.style.make_color_mut() = BGRA8::LIME,
-                        "cyan" => *self.style.make_color_mut() = BGRA8::CYAN,
-                        "red" => *self.style.make_color_mut() = BGRA8::RED,
-                        "yellow" => *self.style.make_color_mut() = BGRA8::YELLOW,
-                        "magenta" => *self.style.make_color_mut() = BGRA8::MAGENTA,
-                        "blue" => *self.style.make_color_mut() = BGRA8::BLUE,
-                        "black" => *self.style.make_color_mut() = BGRA8::BLACK,
-                        "bg_white" => *self.style.make_background_color_mut() = BGRA8::WHITE,
-                        "bg_lime" => *self.style.make_background_color_mut() = BGRA8::LIME,
-                        "bg_cyan" => *self.style.make_background_color_mut() = BGRA8::CYAN,
-                        "bg_red" => *self.style.make_background_color_mut() = BGRA8::RED,
-                        "bg_yellow" => *self.style.make_background_color_mut() = BGRA8::YELLOW,
-                        "bg_magenta" => *self.style.make_background_color_mut() = BGRA8::MAGENTA,
-                        "bg_blue" => *self.style.make_background_color_mut() = BGRA8::BLUE,
-                        "bg_black" => *self.style.make_background_color_mut() = BGRA8::BLACK,
-                        _ => (),
-                    }
-                }
-
-                for child in &internal.children {
-                    self.process_node(child);
-                }
-
-                self.style = old;
             }
-            vtt::Node::Text(text) => self.segments.push(Segment {
-                base_style: self.style.clone(),
-                text: text.content().into(),
-            }),
-            vtt::Node::Timestamp(_) => (),
+
+            let mut result = Element {
+                base_style: style.clone(),
+                kind: match internal.kind {
+                    // NOTE: Based on the wording in https://www.w3.org/TR/webvtt1/#webvtt-cue-ruby-span
+                    //       I assume that nested ruby is not allowed, so we don't accept it.
+                    //       Also nested ruby seems to break current inline layout :) (FIXME)
+                    vtt::InternalNodeKind::Ruby if !in_ruby => {
+                        in_ruby = true;
+                        ElementKind::Ruby
+                    }
+                    vtt::InternalNodeKind::RubyText => ElementKind::RubyText,
+                    _ => ElementKind::Span,
+                },
+                children: Vec::new(),
+            };
+
+            for child in &internal.children {
+                convert_node(&mut result.children, &style, child, in_ruby);
+            }
+
+            output.push(Node::Element(result));
+        }
+        vtt::Node::Text(text) => output.push(Node::Text(text.content().into())),
+        vtt::Node::Timestamp(_) => (),
+    }
+}
+
+fn convert_text(text: &str, base_style: ComputedStyle) -> Element {
+    let mut result = Vec::new();
+
+    for node in vtt::parse_cue_text(text) {
+        convert_node(&mut result, &base_style, &node, false);
+    }
+
+    Element {
+        base_style,
+        kind: ElementKind::Span,
+        children: result,
+    }
+}
+
+impl Node {
+    fn append_to(&self, span_builder: &mut InlineSpanBuilder, font_size: I26Dot6) {
+        match self {
+            Node::Text(text) => span_builder.push_text(text),
+            Node::Element(element) => element.append_to(span_builder, font_size),
         }
     }
 }
 
-fn convert_text(text: &str, base_style: &ComputedStyle) -> Vec<Segment> {
-    let mut converter = TextConverter {
-        style: base_style.clone(),
-        segments: Vec::new(),
-    };
+impl Element {
+    fn append_to(&self, span_builder: &mut InlineSpanBuilder, font_size: I26Dot6) {
+        let mut style = self.base_style.clone();
+        *style.make_font_size_mut() = font_size;
 
-    for node in vtt::parse_cue_text(text) {
-        converter.process_node(&node);
+        match self.kind {
+            ElementKind::Span | ElementKind::RubyText => {
+                let mut builder = span_builder.push_span(style);
+                for child in &self.children {
+                    child.append_to(&mut builder, font_size);
+                }
+            }
+            ElementKind::Ruby => {
+                let mut builder = span_builder.push_ruby(style.clone());
+                let annotation_font_size = font_size / 2;
+                // FIXME: Same as in `convert_node()`.
+                let base_style = style.clone();
+                let annotation_style = {
+                    let mut result = style.clone();
+                    *result.make_font_size_mut() = annotation_font_size;
+                    result
+                };
+
+                for child in &self.children {
+                    match child {
+                        Node::Element(Element {
+                            kind: ElementKind::RubyText,
+                            ..
+                        }) => {
+                            child.append_to(
+                                &mut builder.push_annotation(annotation_style.clone()),
+                                annotation_font_size,
+                            );
+                        }
+                        _ => {
+                            child.append_to(&mut builder.push_base(base_style.clone()), font_size);
+                        }
+                    }
+                }
+            }
+        }
     }
-
-    converter.segments
 }
 
 #[derive(Debug)]
@@ -576,7 +620,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
             size,
             x: x_position / 100.,
             y: y_position / 100.,
-            segments: convert_text(cue.text, &base_style),
+            root: convert_text(cue.text, base_style.clone()),
         });
     }
 

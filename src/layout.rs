@@ -4,8 +4,8 @@ use util::{
 };
 
 use crate::{
-    layout::inline::InlineContentFragment,
-    style::{computed::Ruby, ComputedStyle},
+    layout::inline::{InlineContent, InlineContentFragment},
+    style::ComputedStyle,
     text::FontDb,
 };
 
@@ -57,22 +57,14 @@ pub struct LayoutConstraints {
     pub size: Vec2L,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockContainer {
     pub style: ComputedStyle,
-    pub contents: Vec<Vec<InlineText>>,
+    pub contents: Vec<InlineContent>,
 }
 
 pub mod inline;
 pub use inline::InlineLayoutError;
-
-// TODO: remove
-#[derive(Debug, Clone)]
-pub struct InlineText {
-    pub style: ComputedStyle,
-    pub text: std::rc::Rc<str>,
-    pub ruby: Ruby,
-}
 
 fn layout_block(
     context: &mut LayoutContext,
@@ -87,40 +79,9 @@ fn layout_block(
     for child in &container.contents {
         let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.size.y);
         let fragment = {
-            let mut builder = inline::InlineContentBuilder::new();
-            {
-                let mut root = builder.root();
-                let mut it = child.iter();
-                while let Some(segment) = it.next() {
-                    match segment.ruby {
-                        Ruby::None => {
-                            root.push_span(segment.style.clone())
-                                .push_text(&segment.text);
-                        }
-                        Ruby::Base => {
-                            let mut ruby = root.push_ruby(segment.style.clone());
-                            ruby.push_base(segment.style.clone())
-                                .push_text(&segment.text);
-                            if let Some(next) = it.as_slice().first() {
-                                if let Ruby::Over = next.ruby {
-                                    ruby.push_annotation(next.style.clone())
-                                        .push_text(&next.text);
-                                    _ = it.next();
-                                }
-                            }
-                        }
-                        Ruby::Over => {
-                            root.push_ruby(segment.style.clone())
-                                .push_annotation(segment.style.clone())
-                                .push_text(&segment.text);
-                        }
-                    }
-                }
-            }
-
             inline::layout(
                 context,
-                &builder.finish(),
+                child,
                 &LayoutConstraints {
                     size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
                 },
@@ -153,12 +114,10 @@ mod test {
     use util::rc_static;
 
     use super::{
-        layout, BlockContainer, FixedL, InlineText, LayoutConstraints, LayoutContext, Vec2L,
+        inline::InlineContentBuilder, layout, BlockContainer, FixedL, LayoutConstraints,
+        LayoutContext, Vec2L,
     };
-    use crate::{
-        style::{computed::Ruby, ComputedStyle},
-        text::FontDb,
-    };
+    use crate::{style::ComputedStyle, text::FontDb};
 
     #[test]
     fn does_not_crash() {
@@ -171,16 +130,22 @@ mod test {
         let tree = BlockContainer {
             style: ComputedStyle::DEFAULT,
             contents: vec![
-                vec![InlineText {
-                    style: text_style.clone(),
-                    text: "hello world".into(),
-                    ruby: Ruby::None,
-                }],
-                vec![InlineText {
-                    style: text_style,
-                    text: "this is a separate inline container".into(),
-                    ruby: Ruby::None,
-                }],
+                {
+                    let mut builder = InlineContentBuilder::new();
+                    builder
+                        .root()
+                        .push_span(text_style.clone())
+                        .push_text("hello world");
+                    builder.finish()
+                },
+                {
+                    let mut builder = InlineContentBuilder::new();
+                    builder
+                        .root()
+                        .push_span(text_style)
+                        .push_text("this is a separate inline container");
+                    builder.finish()
+                },
             ],
         };
 

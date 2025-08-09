@@ -10,8 +10,9 @@ use util::{
 
 use crate::{
     layout::{
-        self, BlockContainer, FixedL, InlineLayoutError, InlineText, LayoutConstraints, Point2L,
-        Vec2L,
+        self,
+        inline::{InlineContent, InlineContentBuilder},
+        BlockContainer, FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning},
     renderer::FrameLayoutPass,
@@ -294,47 +295,74 @@ struct Segment {
     ruby: Ruby,
 }
 
+impl Segment {
+    fn compute_style(&self, sctx: &SubtitleContext) -> ComputedStyle {
+        let mut result = self.base_style.clone();
+
+        let mut size = pixels_to_points(font_size_to_pixels(self.font_size) * 0.75)
+            * font_scale_from_ctx(sctx);
+        if matches!(self.ruby, Ruby::Over) {
+            size /= 2.0;
+        }
+
+        *result.make_font_size_mut() = I26Dot6::from(size);
+
+        let mut shadows = vec![];
+        self.shadow.to_css(sctx, &mut shadows);
+
+        if !shadows.is_empty() {
+            *result.make_text_shadows_mut() = shadows.into();
+        }
+
+        result
+    }
+}
+
 fn segments_to_inline(
     pass: &mut FrameLayoutPass,
     event_time: u32,
     segments: &[Segment],
-) -> Vec<InlineText> {
-    segments
-        .iter()
-        .filter_map(|segment| {
-            pass.add_animation_point(event_time + segment.time_offset);
+) -> InlineContent {
+    let mut builder = InlineContentBuilder::new();
+    {
+        let sctx = pass.sctx;
+        let mut root = builder.root();
+        let mut it = segments
+            .iter()
+            .filter(|segment| {
+                pass.add_animation_point(event_time + segment.time_offset);
+                segment.time_offset <= pass.t - event_time
+            })
+            .peekable();
 
-            if segment.time_offset <= pass.t - event_time {
-                Some(InlineText {
-                    style: {
-                        let mut result = segment.base_style.clone();
+        while let Some(segment) = it.next() {
+            let style = segment.compute_style(sctx);
 
-                        let mut size =
-                            pixels_to_points(font_size_to_pixels(segment.font_size) * 0.75)
-                                * font_scale_from_ctx(pass.sctx);
-                        if matches!(segment.ruby, Ruby::Over) {
-                            size /= 2.0;
+            match segment.ruby {
+                Ruby::None => {
+                    root.push_span(style).push_text(&segment.text);
+                }
+                Ruby::Base => {
+                    let mut ruby = root.push_ruby(style.create_derived());
+                    ruby.push_base(style.clone()).push_text(&segment.text);
+                    if let Some(next) = it.peek() {
+                        if let Ruby::Over = next.ruby {
+                            ruby.push_annotation(next.compute_style(sctx))
+                                .push_text(&next.text);
+                            _ = it.next();
                         }
-
-                        *result.make_font_size_mut() = I26Dot6::from(size);
-
-                        let mut shadows = vec![];
-                        segment.shadow.to_css(pass.sctx, &mut shadows);
-
-                        if !shadows.is_empty() {
-                            *result.make_text_shadows_mut() = shadows.into();
-                        }
-
-                        result
-                    },
-                    text: segment.text.clone(),
-                    ruby: segment.ruby,
-                })
-            } else {
-                None
+                    }
+                }
+                Ruby::Over => {
+                    root.push_ruby(style.clone())
+                        .push_annotation(style)
+                        .push_text(&segment.text);
+                }
             }
-        })
-        .collect()
+        }
+    }
+
+    builder.finish()
 }
 
 impl Window {
@@ -352,7 +380,7 @@ impl Window {
             result
         };
 
-        let contents: Vec<Vec<InlineText>> = self
+        let contents: Vec<InlineContent> = self
             .events
             .iter()
             .filter_map(|line| {

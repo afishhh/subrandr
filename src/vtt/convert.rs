@@ -9,13 +9,14 @@ use util::{
 
 use crate::{
     layout::{
-        self, inline::LineBoxFragment, BlockContainer, BlockContainerFragment, FixedL,
-        InlineLayoutError, InlineText, Point2L, Vec2L,
+        self,
+        inline::{InlineContentBuilder, LineBoxFragment},
+        BlockContainer, BlockContainerFragment, FixedL, InlineLayoutError, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     style::{
-        computed::{FontSlant, HorizontalAlignment, Ruby, TextDecorations},
+        computed::{FontSlant, HorizontalAlignment, TextDecorations},
         ComputedStyle,
     },
     vtt, Subrandr, SubtitleContext,
@@ -102,9 +103,15 @@ struct Event {
     horizontal_alignment: HorizontalAlignment,
     line: vtt::Line,
     size: f64,
-    segments: Vec<InlineText>,
+    segments: Vec<Segment>,
     x: f64,
     y: f64,
+}
+
+#[derive(Debug, Clone)]
+struct Segment {
+    base_style: ComputedStyle,
+    text: std::rc::Rc<str>,
 }
 
 impl Event {
@@ -126,15 +133,20 @@ impl Event {
                     *result.make_text_align_mut() = self.horizontal_alignment;
                     result
                 },
-                contents: vec![self
-                    .segments
-                    .iter()
-                    .cloned()
-                    .map(|mut text| {
-                        *text.style.make_font_size_mut() = font_size;
-                        text
-                    })
-                    .collect()],
+                contents: {
+                    let mut builder = InlineContentBuilder::new();
+
+                    {
+                        let mut root = builder.root();
+                        for segment in &self.segments {
+                            let mut style = segment.base_style.clone();
+                            *style.make_font_size_mut() = font_size;
+                            root.push_span(style).push_text(&segment.text);
+                        }
+                    }
+
+                    vec![builder.finish()]
+                },
             },
         )?;
 
@@ -386,7 +398,7 @@ impl Event {
 // TODO: Ruby
 struct TextConverter {
     style: ComputedStyle,
-    segments: Vec<InlineText>,
+    segments: Vec<Segment>,
 }
 
 impl TextConverter {
@@ -440,9 +452,8 @@ impl TextConverter {
 
                 self.style = old;
             }
-            vtt::Node::Text(text) => self.segments.push(InlineText {
-                style: self.style.clone(),
-                ruby: Ruby::None,
+            vtt::Node::Text(text) => self.segments.push(Segment {
+                base_style: self.style.clone(),
                 text: text.content().into(),
             }),
             vtt::Node::Timestamp(_) => (),
@@ -450,7 +461,7 @@ impl TextConverter {
     }
 }
 
-fn convert_text(text: &str, base_style: &ComputedStyle) -> Vec<InlineText> {
+fn convert_text(text: &str, base_style: &ComputedStyle) -> Vec<Segment> {
     let mut converter = TextConverter {
         style: base_style.clone(),
         segments: Vec::new(),

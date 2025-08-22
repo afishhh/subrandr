@@ -280,7 +280,7 @@ pub struct InlineContentFragment {
 
 impl InlineContentFragment {
     const EMPTY: Self = Self {
-        fbox: FragmentBox { size: Vec2L::ZERO },
+        fbox: FragmentBox::ZERO,
         lines: Vec::new(),
     };
 }
@@ -1051,6 +1051,7 @@ fn layout_run_full(
         line_align: HorizontalAlignment,
         bidi: unicode_bidi::BidiInfo<'t>,
         styles: Vec<(usize, &'t ComputedStyle)>,
+        dpi: u32,
     }
 
     #[derive(Debug)]
@@ -1058,6 +1059,7 @@ fn layout_run_full(
         output: &'a mut OffsetInlineItemFragmentVec,
         line_ascender: FixedL,
         current_x: FixedL,
+        dpi: u32,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -1165,9 +1167,11 @@ fn layout_run_full(
                         let logical_height = font_metrics.ascender - font_metrics.descender;
                         let logical_width = glyphs.iter_glyphs().map(|g| g.x_advance).sum();
                         let fragment = TextFragment {
-                            fbox: FragmentBox {
-                                size: Vec2L::new(logical_width, logical_height),
-                            },
+                            fbox: FragmentBox::new_styled(
+                                Vec2L::new(logical_width, logical_height),
+                                self.dpi,
+                                style,
+                            ),
                             style: style.clone(),
                             glyphs: unsafe {
                                 std::mem::transmute::<GlyphString<'_, _>, GlyphString<'static, _>>(
@@ -1178,7 +1182,7 @@ fn layout_run_full(
                             baseline_offset: Vec2::new(FixedL::ZERO, font_metrics.ascender),
                         };
 
-                        let item_width = fragment.fbox.size.x;
+                        let item_width = fragment.fbox.padding_box().width();
                         self.output.push((
                             Vec2L::new(self.current_x, self.line_ascender - font_metrics.ascender),
                             InlineItemFragment::Text(fragment).into(),
@@ -1190,9 +1194,7 @@ fn layout_run_full(
                     let mut result = RubyFragment {
                         // TODO: What box should a ruby container fragment have?
                         //       For now we'll just leave it zero-sized.
-                        fbox: FragmentBox {
-                            size: Vec2::new(FixedL::ZERO, FixedL::ZERO),
-                        },
+                        fbox: FragmentBox::ZERO,
                         style: ruby.style.clone(),
                         content: Vec::new(),
                     };
@@ -1229,9 +1231,11 @@ fn layout_run_full(
                         //        However I'm not certain what this means for ruby base
                         //        boxes? Should they just fit their contents?
                         let mut base_fragment = RubyBaseFragment {
-                            fbox: FragmentBox {
-                                size: Vec2::new(ruby_width, base_height),
-                            },
+                            fbox: FragmentBox::new_styled(
+                                Vec2::new(ruby_width, base_height),
+                                self.dpi,
+                                base.style,
+                            ),
                             style: base.style.clone(),
                             children: Vec::new(),
                         };
@@ -1239,6 +1243,7 @@ fn layout_run_full(
                             output: &mut base_fragment.children,
                             line_ascender: base_font_metrics.ascender,
                             current_x: base_half_padding,
+                            dpi: self.dpi,
                         }
                         .reorder_and_append(
                             &base.inner.shaped,
@@ -1248,9 +1253,11 @@ fn layout_run_full(
                         )?;
 
                         let mut annotation_fragment = RubyAnnotationFragment {
-                            fbox: FragmentBox {
-                                size: Vec2::new(ruby_width, annotation_height),
-                            },
+                            fbox: FragmentBox::new_styled(
+                                Vec2::new(ruby_width, annotation_height),
+                                self.dpi,
+                                annotation.style,
+                            ),
                             style: annotation.style.clone(),
                             children: Vec::new(),
                         };
@@ -1258,6 +1265,7 @@ fn layout_run_full(
                             output: &mut annotation_fragment.children,
                             line_ascender: annotation_metrics.max_ascender,
                             current_x: annotation_half_padding,
+                            dpi: self.dpi,
                         }
                         .reorder_and_append(
                             &annotation.inner.shaped,
@@ -1271,7 +1279,7 @@ fn layout_run_full(
                             -annotation_metrics.max_ascender - annotation_metrics.min_descender,
                         );
 
-                        ruby_current_x += base_fragment.fbox.size.x;
+                        ruby_current_x += base_fragment.fbox.size_for_layout().x;
                         result.content.push((
                             base_offset,
                             base_fragment,
@@ -1309,9 +1317,7 @@ fn layout_run_full(
 
             let line_height = line_metrics.height();
             let mut line_box = LineBoxFragment {
-                fbox: FragmentBox {
-                    size: { Vec2::new(line_width, line_height) },
-                },
+                fbox: FragmentBox::new_content_only(Vec2::new(line_width, line_height)),
                 children: Vec::new(),
             };
 
@@ -1320,6 +1326,7 @@ fn layout_run_full(
                     output: &mut line_box.children,
                     line_ascender: line_metrics.max_ascender,
                     current_x: FixedL::ZERO,
+                    dpi: self.dpi,
                 }
                 .reorder_and_append(
                     shaped,
@@ -1342,14 +1349,19 @@ fn layout_run_full(
                 - line_metrics.max_ascender;
             let ruby_half_leading = ruby_leading / 2;
 
-            self.result.fbox.size.x = self.result.fbox.size.x.max(line_box.fbox.size.x);
+            self.result.fbox.content_size.x = self
+                .result
+                .fbox
+                .content_size
+                .x
+                .max(line_box.fbox.size_for_layout().x);
             self.current_y += ruby_half_leading;
             self.result.lines.push((
                 Vec2L::new(aligning_x_offset, self.current_y),
                 line_box.into(),
             ));
             self.current_y += line_height;
-            self.result.fbox.size.y = self.current_y;
+            self.result.fbox.content_size.y = self.current_y;
 
             Ok(())
         }
@@ -1392,6 +1404,7 @@ fn layout_run_full(
         line_align: align,
         bidi,
         styles,
+        dpi: lctx.dpi,
     };
 
     if constraints.size.x != FixedL::MAX && !break_opportunities.is_empty() {

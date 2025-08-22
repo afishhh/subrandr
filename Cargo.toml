@@ -1,5 +1,6 @@
 [package]
 name = "subrandr"
+rust-version = "1.84"
 version.workspace = true
 edition.workspace = true
 

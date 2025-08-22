@@ -1,5 +1,5 @@
 use util::{
-    math::{I26Dot6, Point2, Vec2},
+    math::{I26Dot6, Point2, Rect2, Vec2},
     rc::Rc,
 };
 
@@ -19,10 +19,82 @@ use crate::{
 pub type FixedL = I26Dot6;
 pub type Point2L = Point2<FixedL>;
 pub type Vec2L = Vec2<FixedL>;
+pub type Rect2L = Rect2<FixedL>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct EdgeExtents {
+    pub top: FixedL,
+    pub bottom: FixedL,
+    pub left: FixedL,
+    pub right: FixedL,
+}
+
+impl EdgeExtents {
+    const ZERO: Self = Self {
+        top: FixedL::ZERO,
+        bottom: FixedL::ZERO,
+        left: FixedL::ZERO,
+        right: FixedL::ZERO,
+    };
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct FragmentBox {
-    pub size: Vec2L,
+    pub content_size: Vec2L,
+    pub padding: EdgeExtents,
+}
+
+impl FragmentBox {
+    const ZERO: Self = Self {
+        content_size: Vec2L::ZERO,
+        padding: EdgeExtents::ZERO,
+    };
+
+    const fn new_content_only(content_size: Vec2L) -> Self {
+        Self {
+            content_size,
+            padding: EdgeExtents::ZERO,
+        }
+    }
+
+    // TODO: Make a newtype for dpi everywhere
+    fn new_styled(content_size: Vec2L, dpi: u32, style: &ComputedStyle) -> Self {
+        Self {
+            content_size,
+            padding: EdgeExtents {
+                top: style.padding_top().to_physical_pixels(dpi),
+                bottom: style.padding_bottom().to_physical_pixels(dpi),
+                left: style.padding_left().to_physical_pixels(dpi),
+                right: style.padding_right().to_physical_pixels(dpi),
+            },
+        }
+    }
+
+    pub fn content_box(&self) -> Rect2L {
+        Rect2L::from_min_size(
+            Point2::new(self.padding.left, self.padding.top),
+            self.content_size,
+        )
+    }
+
+    pub fn padding_box(&self) -> Rect2L {
+        Rect2L::from_min_size(
+            Point2L::ZERO,
+            self.content_size
+                + Vec2L::new(
+                    self.padding.left + self.padding.right,
+                    self.padding.top + self.padding.bottom,
+                ),
+        )
+    }
+
+    pub fn margin_box(&self) -> Rect2L {
+        self.padding_box()
+    }
+
+    pub fn size_for_layout(&self) -> Vec2L {
+        self.margin_box().max.to_vec()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,12 +104,13 @@ pub struct BlockContainerFragment {
 }
 
 impl BlockContainerFragment {
-    pub const fn empty() -> Self {
-        Self {
-            fbox: FragmentBox { size: Vec2L::ZERO },
-            children: Vec::new(),
-        }
-    }
+    pub const EMPTY: Self = Self {
+        fbox: FragmentBox {
+            content_size: Vec2L::ZERO,
+            padding: EdgeExtents::ZERO,
+        },
+        children: Vec::new(),
+    };
 }
 
 #[derive(Debug)]
@@ -66,25 +139,29 @@ fn layout_block(
     container: &BlockContainer,
 ) -> Result<BlockContainerFragment, InlineLayoutError> {
     let mut result = BlockContainerFragment {
-        fbox: FragmentBox { size: Vec2L::ZERO },
+        fbox: FragmentBox::new_styled(Vec2L::ZERO, context.dpi, &container.style),
         children: Vec::new(),
     };
 
     for child in &container.contents {
-        let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.size.y);
+        let child_offset = Vec2L::new(FixedL::ZERO, result.fbox.content_size.y);
         let fragment = {
             inline::layout(
                 context,
                 child,
                 &LayoutConstraints {
-                    size: Vec2L::new(constraints.size.x, constraints.size.y - result.fbox.size.y),
+                    size: Vec2L::new(
+                        constraints.size.x,
+                        constraints.size.y - result.fbox.content_size.y,
+                    ),
                 },
                 container.style.text_align(),
             )?
         };
 
-        result.fbox.size.x = result.fbox.size.x.max(fragment.fbox.size.x);
-        result.fbox.size.y += fragment.fbox.size.y;
+        let fragment_size = fragment.fbox.size_for_layout();
+        result.fbox.content_size.x = result.fbox.content_size.x.max(fragment_size.x);
+        result.fbox.content_size.y += fragment_size.y;
 
         result.children.push((child_offset, Rc::new(fragment)));
     }

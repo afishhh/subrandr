@@ -162,15 +162,11 @@ impl GlyphCache {
         let slot = occupied.get();
         slot.generation.set(self.generation.get());
         // SAFETY: This reference is behind a Box and won't be removed from the map
-        //         without a &mut reference to the glyph cache.
-        //         The entry is only ever accessed immutably.
-        Ok(unsafe {
-            std::mem::transmute::<&V, &'static V>(
-                (&slot.value as &dyn Any)
-                    .downcast_ref::<V>()
-                    .unwrap_unchecked(),
-            )
-        })
+        //         without a &mut reference to the glyph cache and the entry is only
+        //         ever accessed immutably.
+        //         The type of the value must match because the `TypeId` is part of the
+        //         cache key.
+        Ok(unsafe { &*(&raw const slot.value as *const () as *const V) })
     }
 }
 

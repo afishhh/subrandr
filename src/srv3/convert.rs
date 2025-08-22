@@ -412,16 +412,17 @@ impl Window {
             (self.y * pass.sctx.player_height().into_f32()).into(),
         );
 
+        let fragment_size = fragment.fbox.size_for_layout();
         match self.alignment.0 {
             HorizontalAlignment::Left => (),
-            HorizontalAlignment::Center => pos.x -= fragment.fbox.size.x / 2,
-            HorizontalAlignment::Right => pos.x -= fragment.fbox.size.x,
+            HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
+            HorizontalAlignment::Right => pos.x -= fragment_size.x,
         }
 
         match self.alignment.1 {
             VerticalAlignment::Top => (),
-            VerticalAlignment::Center => pos.y -= fragment.fbox.size.y / 2,
-            VerticalAlignment::Bottom => pos.y -= fragment.fbox.size.y,
+            VerticalAlignment::Center => pos.y -= fragment_size.y / 2,
+            VerticalAlignment::Bottom => pos.y -= fragment_size.y,
         }
 
         Ok(Some((pos, fragment)))

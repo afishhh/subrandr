@@ -1,6 +1,8 @@
 use rasterize::color::BGRA8;
 use util::math::{I26Dot6, Vec2f};
 
+use crate::layout::FixedL;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
 
@@ -60,5 +62,27 @@ impl TextDecorations {
 impl Default for TextDecorations {
     fn default() -> Self {
         Self::NONE
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Length(FixedL);
+
+impl Length {
+    pub const ZERO: Self = Self(FixedL::ZERO);
+
+    #[expect(dead_code)]
+    pub const fn from_pixels(pixels: FixedL) -> Self {
+        Self(pixels)
+    }
+
+    pub const fn from_points(pixels: FixedL) -> Self {
+        // 96 / 72 = 4/3
+        Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
+    }
+
+    pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
+        self.0 * dpi as i32 / 72
     }
 }

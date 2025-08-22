@@ -139,7 +139,7 @@ impl Event {
 
         let lines = &mut container.lines;
         if lines.is_empty() {
-            return Ok((Point2L::ZERO, BlockContainerFragment::empty()));
+            return Ok((Point2L::ZERO, BlockContainerFragment::EMPTY));
         }
 
         let mut result = Point2L::new(
@@ -171,8 +171,8 @@ impl Event {
 
         match self.horizontal_alignment {
             HorizontalAlignment::Left => (),
-            HorizontalAlignment::Center => result.x -= fragment.fbox.size.x / 2,
-            HorizontalAlignment::Right => result.x -= fragment.fbox.size.x,
+            HorizontalAlignment::Center => result.x -= fragment.fbox.size_for_layout().x / 2,
+            HorizontalAlignment::Right => result.x -= fragment.fbox.size_for_layout().x,
         }
 
         Self::process_cue_settings_adjust_boxes(
@@ -180,12 +180,12 @@ impl Event {
             sctx,
             &mut result,
             lines,
-            Rect2::from_min_size(Point2L::ZERO, container.fbox.size),
+            Rect2::from_min_size(Point2L::ZERO, container.fbox.size_for_layout()),
             self,
         );
 
         for &(off, ref line) in &lines[..] {
-            output.push(Rect2::from_min_size(result + off, line.fbox.size));
+            output.push(Rect2::from_min_size(result + off, line.fbox.content_size));
         }
 
         result.x += sctx.padding_left;
@@ -215,10 +215,10 @@ impl Event {
 
                 let mut step = if extra.writing_direction.is_horizontal() {
                     // 2. Horizontal: Let step be the height of the first line box in boxes.
-                    lines[0].1.fbox.size.y
+                    lines[0].1.fbox.content_size.y
                 } else {
                     // 2. Vertical: Let step be the width of the first line box in boxes.
-                    lines[0].1.fbox.size.x
+                    lines[0].1.fbox.content_size.x
                 };
 
                 // 3. If step is zero, then jump to the step labeled done positioning below.
@@ -270,7 +270,8 @@ impl Event {
                 loop {
                     let mut done = true;
                     'check: for &(off, ref line) in &lines[..] {
-                        let effective_rect = Rect2::from_min_size(*result + off, line.fbox.size);
+                        let effective_rect =
+                            Rect2::from_min_size(*result + off, line.fbox.content_size);
 
                         if !title_area.includes(effective_rect) {
                             done = false;
@@ -290,7 +291,8 @@ impl Event {
                     }
 
                     let mut switch_direction = false;
-                    let first_line_box = Rect2::from_min_size(*result, lines[0].1.fbox.size);
+                    let first_line_box =
+                        Rect2::from_min_size(*result, lines[0].1.fbox.content_size);
                     if extra.writing_direction.is_horizontal() {
                         // Horizontal: If step is negative and the top of the first line box in boxes is now above the top of the title area, or if step is positive and the bottom of the first line box in boxes is now below the bottom of the title area, jump to the step labeled switch direction.
                         if (step < FixedL::ZERO && first_line_box.min.y < title_area.min.y)

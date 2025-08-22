@@ -19,7 +19,7 @@ use crate::{
     srv3::RubyPosition,
     style::{
         computed::{
-            Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment,
+            Alignment, FontSlant, HorizontalAlignment, Length, Ruby, TextShadow, VerticalAlignment,
         },
         ComputedStyle,
     },
@@ -325,6 +325,8 @@ fn segments_to_inline(
 ) -> InlineContent {
     let mut builder = InlineContentBuilder::new();
     {
+        // What lack of Peekable::inner() and Filter::inner() does to a language...
+        let mut next_idx = 0;
         let sctx = pass.sctx;
         let mut root = builder.root();
         let mut it = segments
@@ -336,7 +338,17 @@ fn segments_to_inline(
             .peekable();
 
         while let Some(segment) = it.next() {
-            let style = segment.compute_style(sctx);
+            let mut style = segment.compute_style(sctx);
+
+            if next_idx == 0 {
+                *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+            }
+            next_idx += 1;
+            // NOTE: This purposefully ignores whether or not the next segment is
+            //       currently visible as that is what YouTube seems to do.
+            if segments.get(next_idx).is_none() {
+                *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
+            }
 
             match segment.ruby {
                 Ruby::None => {

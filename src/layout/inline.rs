@@ -82,19 +82,29 @@ pub struct InlineSpanBuilder<'a> {
 impl<'a> InlineSpanBuilder<'a> {
     fn span_mut(&mut self) -> &mut InlineSpan {
         match &mut self.parent.items[self.span_index] {
-            InlineItem::Span(span) => span,
+            InlineItem {
+                kind: InlineItemKind::Span(span),
+                ..
+            } => span,
             _ => unreachable!(),
         }
+    }
+
+    fn push_child(&mut self, kind: InlineItemKind) {
+        self.parent.items.push(InlineItem {
+            parent: self.span_index,
+            kind,
+        });
+        self.length += 1;
     }
 
     pub fn push_text(&mut self, content: &str) {
         let text_run = &mut self.parent.text_runs[self.run_index];
         let start = text_run.len();
         text_run.push_str(content);
-        self.parent.items.push(InlineItem::Text(InlineText {
-            content_range: start..text_run.len(),
-        }));
-        self.length += 1;
+        let content_range = start..text_run.len();
+
+        self.push_child(InlineItemKind::Text(InlineText { content_range }));
     }
 
     fn push_object_replacement(&mut self) -> usize {
@@ -117,12 +127,11 @@ impl<'a> InlineSpanBuilder<'a> {
         run_index: usize,
     ) -> InlineSpanBuilder<'_> {
         let span_index = self.parent.items.len();
-        self.parent.items.push(InlineItem::Span(InlineSpan {
+        self.push_child(InlineItemKind::Span(InlineSpan {
             style,
             length: 0,
             kind,
         }));
-        self.length += 1;
 
         InlineSpanBuilder {
             parent: self.parent,
@@ -186,7 +195,14 @@ impl<'a> InlineRubyBuilder<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum InlineItem {
+pub struct InlineItem {
+    // The index of the parent item in this `InlineContent` stream.
+    parent: usize,
+    kind: InlineItemKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum InlineItemKind {
     Span(InlineSpan),
     Text(InlineText),
 }
@@ -217,8 +233,14 @@ pub struct InlineText {
 }
 
 #[derive(Debug)]
-pub struct TextFragment {
+pub struct SpanFragment {
     pub fbox: FragmentBox,
+    pub style: ComputedStyle,
+    pub content: OffsetInlineItemFragmentVec,
+}
+
+#[derive(Debug)]
+pub struct TextFragment {
     pub style: ComputedStyle,
     // self-referential
     glyphs: text::GlyphString<'static, std::rc::Rc<str>>,
@@ -234,10 +256,6 @@ impl TextFragment {
 
 #[derive(Debug)]
 pub struct RubyFragment {
-    #[expect(
-        dead_code,
-        reason = "ruby fragment box is not used for anything nor implemented yet"
-    )]
     pub fbox: FragmentBox,
     #[expect(dead_code, reason = "ruby fragment style is not used for anything yet")]
     pub style: ComputedStyle,
@@ -260,6 +278,7 @@ pub struct RubyAnnotationFragment {
 
 #[derive(Debug)]
 pub enum InlineItemFragment {
+    Span(SpanFragment),
     Text(TextFragment),
     Ruby(RubyFragment),
 }
@@ -280,7 +299,7 @@ pub struct InlineContentFragment {
 
 impl InlineContentFragment {
     const EMPTY: Self = Self {
-        fbox: FragmentBox { size: Vec2L::ZERO },
+        fbox: FragmentBox::ZERO,
         lines: Vec::new(),
     };
 }
@@ -299,14 +318,64 @@ pub enum InlineLayoutError {
 struct InitialShapingResult<'a, 'f> {
     shaped: Vec<ShapedItem<'a, 'f>>,
     break_opportunities: Vec<usize>,
-    styles: Vec<(usize, &'a ComputedStyle)>,
+    text_leaf_items: Vec<LeafItemRange<'a>>,
     bidi: unicode_bidi::BidiInfo<'a>,
+}
+
+impl InitialShapingResult<'_, '_> {
+    fn empty() -> Self {
+        Self {
+            shaped: Vec::new(),
+            break_opportunities: Vec::new(),
+            text_leaf_items: Vec::new(),
+            bidi: unicode_bidi::BidiInfo::new("", None),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LeafItemRange<'a> {
+    range: Range<usize>,
+    item: &'a InlineItem,
+    style: &'a ComputedStyle,
 }
 
 #[derive(Debug)]
 struct ShapedItem<'a, 'f> {
     range: Range<usize>,
     kind: ShapedItemKind<'a, 'f>,
+    /// Padding metrics used during line breaking, note that due to bidi
+    /// reordering this *may not correspond to the final padding* applied
+    /// to these glyphs. In fact, since shaped items don't even correspond
+    /// to particular spans, this should be entirely ignored as soon as we
+    /// leave line breaking!
+    padding: ShapedItemPadding,
+}
+
+#[derive(Debug, Clone)]
+struct ShapedItemPadding {
+    current_padding_left: FixedL,
+    current_padding_right: FixedL,
+}
+
+impl ShapedItemPadding {
+    // Basically placeholder values for when we don't care about this anymore but
+    // need to construct a `ShapedItem`.
+    // Must only be used after line-breaking when this information is no longer
+    // necessary.
+    const MAX: Self = Self {
+        current_padding_left: FixedL::MAX,
+        current_padding_right: FixedL::MAX,
+    };
+
+    fn fragment_break(&mut self) -> Self {
+        let remainder = Self {
+            current_padding_left: FixedL::ZERO,
+            ..*self
+        };
+        self.current_padding_right = FixedL::ZERO;
+        remainder
+    }
 }
 
 #[derive(Debug)]
@@ -327,6 +396,7 @@ struct ShapedItemText<'f> {
 struct ShapedItemRuby<'a, 'f> {
     style: ComputedStyle,
     base_annotation_pairs: Vec<(ShapedRubyBase<'a, 'f>, ShapedRubyAnnotation<'a, 'f>)>,
+    item: &'a InlineItem,
 }
 
 #[derive(Debug)]
@@ -386,6 +456,7 @@ fn shape_run_initial<'a, 'f>(
             font_arena: &'f FontArena,
             lctx: &mut LayoutContext,
             result: &mut Vec<ShapedItem<'_, 'f>>,
+            left_padding: &mut FixedL,
         ) -> Result<(), InlineLayoutError> {
             let mut current_paragraph = match bidi
                 .paragraphs
@@ -414,6 +485,7 @@ fn shape_run_initial<'a, 'f>(
                     buffer.shape(self.matcher.iterator(), font_arena, lctx.fonts)?
                 };
 
+                dbg!(*left_padding);
                 result.push(ShapedItem {
                     range,
                     kind: ShapedItemKind::Text(ShapedItemText {
@@ -422,7 +494,12 @@ fn shape_run_initial<'a, 'f>(
                         glyphs: GlyphString::from_glyphs(text.clone(), glyphs, direction),
                         break_after,
                     }),
+                    padding: ShapedItemPadding {
+                        current_padding_left: *left_padding,
+                        current_padding_right: FixedL::ZERO,
+                    },
                 });
+                *left_padding = FixedL::ZERO;
 
                 Ok(())
             };
@@ -465,6 +542,13 @@ fn shape_run_initial<'a, 'f>(
         break_opportunities: Vec<usize>,
         shaped: Vec<ShapedItem<'a, 'f>>,
         queued_text: Option<QueuedText<'f>>,
+        queued_padding: FixedL,
+    }
+
+    struct SpanStackEntry<'a> {
+        parent_style: &'a ComputedStyle,
+        first_shaped_item_index: usize,
+        remaining_children: usize,
     }
 
     impl<'a, 'f> ShapedItemBuilder<'a, 'f, '_, '_, '_> {
@@ -528,6 +612,75 @@ fn shape_run_initial<'a, 'f>(
             }
         }
 
+        fn handle_span_start(&mut self, style: &ComputedStyle) -> Result<(), InlineLayoutError> {
+            let left_padding = style.padding_left().to_physical_pixels(self.lctx.dpi);
+            dbg!(left_padding);
+
+            if left_padding != FixedL::ZERO {
+                // NOTE: When thinking about this padding system, one may stumble upon the consideration:
+                //       "what if some segment of text needs to have different (cloned) padding but we
+                //        want to shape it along with some preceeding one" or similar.
+                //       This cannot happen precisely because any change in padding parameters will also
+                //       trigger a `QueuedText::flush` and shaping break.
+                //       The only exception is right-side cloned padding which needs to be communicated
+                //       via a side-channel because it may differ inside a single `ShapedItem`.
+                if let Some(queued) = self.queued_text.take() {
+                    queued.flush(
+                        self.run_text.clone(),
+                        &self.bidi,
+                        self.font_arena,
+                        self.lctx,
+                        &mut self.shaped,
+                        &mut self.queued_padding,
+                    )?;
+                }
+
+                self.queued_padding += left_padding;
+            }
+            dbg!(self.queued_padding);
+
+            Ok(())
+        }
+
+        fn handle_span_end(
+            &mut self,
+            style: &ComputedStyle,
+            entry: &SpanStackEntry,
+        ) -> Result<(), InlineLayoutError> {
+            if self.shaped.get_mut(entry.first_shaped_item_index).is_some() {
+                debug_assert_eq!(self.queued_padding, FixedL::ZERO);
+            } else {
+                // FIXME: Padding for spans that have no leaf items is currently ignored.
+                //        We should somehow populate such spans with a leaf "empty item" that would provide an
+                //        object replacement character in the run.
+                //        This has to happen during `InlineContent` construction which makes it somewhat difficult.
+                let left_padding = style.padding_left().to_physical_pixels(self.lctx.dpi);
+                self.queued_padding -= left_padding;
+                return Ok(());
+            };
+
+            let right_padding = style.padding_right().to_physical_pixels(self.lctx.dpi);
+
+            if right_padding != FixedL::ZERO {
+                if let Some(queued) = self.queued_text.take() {
+                    queued.flush(
+                        self.run_text.clone(),
+                        &self.bidi,
+                        self.font_arena,
+                        self.lctx,
+                        &mut self.shaped,
+                        &mut self.queued_padding,
+                    )?;
+                }
+
+                if let Some(item) = self.shaped.last_mut() {
+                    item.padding.current_padding_right += right_padding;
+                }
+            }
+
+            Ok(())
+        }
+
         fn process_items(
             mut self,
             item_index: usize,
@@ -538,8 +691,8 @@ fn shape_run_initial<'a, 'f>(
             let mut current_item = item_index;
             let mut current_style = const { &ComputedStyle::DEFAULT };
             let mut span_left = usize::MAX;
-            let mut span_stack: Vec<(&ComputedStyle, usize)> = Vec::new();
-            let mut styles = vec![];
+            let mut span_stack: Vec<SpanStackEntry> = Vec::new();
+            let mut text_leaf_items = Vec::new();
 
             while let Some(item) = items
                 .get(current_item)
@@ -547,10 +700,15 @@ fn shape_run_initial<'a, 'f>(
             {
                 span_left -= 1;
                 current_item += 1;
-                match item {
-                    InlineItem::Span(span) => match span.kind {
+                match &item.kind {
+                    InlineItemKind::Span(span) => match span.kind {
                         InlineSpanKind::Span | InlineSpanKind::RubyInternal { .. } => {
-                            span_stack.push((current_style, span_left));
+                            self.handle_span_start(&span.style)?;
+                            span_stack.push(SpanStackEntry {
+                                parent_style: current_style,
+                                first_shaped_item_index: self.shaped.len(),
+                                remaining_children: span_left,
+                            });
                             current_style = &span.style;
                             span_left = span.length;
                         }
@@ -562,6 +720,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.font_arena,
                                     self.lctx,
                                     &mut self.shaped,
+                                    &mut self.queued_padding,
                                 )?;
                             }
 
@@ -569,19 +728,20 @@ fn shape_run_initial<'a, 'f>(
                                 range: content_index..content_index + 1,
                                 kind: ShapedItemKind::Ruby(ShapedItemRuby {
                                     style: span.style.clone(),
+                                    item,
                                     base_annotation_pairs: {
                                         let mut result = Vec::new();
 
                                         let mut remaining = span.length;
                                         while remaining > 0 {
-                                            let &InlineItem::Span(InlineSpan {
+                                            let &InlineItemKind::Span(InlineSpan {
                                                 kind:
                                                     InlineSpanKind::RubyInternal {
                                                         run_index,
                                                         outer_style: ref base_style,
                                                     },
                                                 ..
-                                            }) = &items[current_item]
+                                            }) = &items[current_item].kind
                                             else {
                                                 unreachable!("Illegal ruby base item");
                                             };
@@ -609,14 +769,14 @@ fn shape_run_initial<'a, 'f>(
                                             };
                                             remaining -= 1;
                                             let annotation = if remaining > 0 {
-                                                let &InlineItem::Span(InlineSpan {
+                                                let &InlineItemKind::Span(InlineSpan {
                                                     kind:
                                                         InlineSpanKind::RubyInternal {
                                                             run_index,
                                                             outer_style: ref annotation_style,
                                                         },
                                                     ..
-                                                }) = &items[current_item]
+                                                }) = &items[current_item].kind
                                                 else {
                                                     unreachable!("Illegal ruby annotation item");
                                                 };
@@ -641,12 +801,7 @@ fn shape_run_initial<'a, 'f>(
                                             } else {
                                                 ShapedRubyAnnotation {
                                                     style: const { &ComputedStyle::DEFAULT },
-                                                    inner: InitialShapingResult {
-                                                        shaped: Vec::new(),
-                                                        break_opportunities: Vec::new(),
-                                                        styles: Vec::new(),
-                                                        bidi: unicode_bidi::BidiInfo::new("", None),
-                                                    },
+                                                    inner: InitialShapingResult::empty(),
                                                 }
                                             };
 
@@ -656,7 +811,12 @@ fn shape_run_initial<'a, 'f>(
                                         result
                                     },
                                 }),
+                                padding: ShapedItemPadding {
+                                    current_padding_left: self.queued_padding,
+                                    current_padding_right: FixedL::ZERO,
+                                },
                             });
+                            self.queued_padding = FixedL::ZERO;
 
                             if compute_break_opportunities {
                                 if content_index != 0 {
@@ -668,7 +828,7 @@ fn shape_run_initial<'a, 'f>(
                             }
                         }
                     },
-                    InlineItem::Text(text) => {
+                    InlineItemKind::Text(text) => {
                         let font_matcher =
                             font_matcher_from_style(current_style, self.font_arena, self.lctx)?;
 
@@ -686,6 +846,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.font_arena,
                                     self.lctx,
                                     &mut self.shaped,
+                                    &mut self.queued_padding,
                                 )?;
                                 self.queued_text = Some(QueuedText {
                                     matcher: font_matcher,
@@ -700,7 +861,11 @@ fn shape_run_initial<'a, 'f>(
                             }
                         }
 
-                        styles.push((text.content_range.start, current_style));
+                        text_leaf_items.push(LeafItemRange {
+                            range: text.content_range.clone(),
+                            item,
+                            style: current_style,
+                        });
                         if compute_break_opportunities {
                             self.compute_text_break_opportunities(
                                 text.content_range.clone(),
@@ -712,8 +877,9 @@ fn shape_run_initial<'a, 'f>(
 
                 while span_left == 0 {
                     let popped = span_stack.pop().unwrap();
-                    current_style = popped.0;
-                    span_left = popped.1;
+                    self.handle_span_end(current_style, &popped)?;
+                    current_style = popped.parent_style;
+                    span_left = popped.remaining_children;
                 }
             }
             *end_item_index = current_item;
@@ -725,6 +891,7 @@ fn shape_run_initial<'a, 'f>(
                     self.font_arena,
                     self.lctx,
                     &mut self.shaped,
+                    &mut self.queued_padding,
                 )?;
             }
 
@@ -737,7 +904,7 @@ fn shape_run_initial<'a, 'f>(
             Ok(InitialShapingResult {
                 shaped: self.shaped,
                 break_opportunities: self.break_opportunities,
-                styles,
+                text_leaf_items,
                 bidi: self.bidi,
             })
         }
@@ -763,6 +930,7 @@ fn shape_run_initial<'a, 'f>(
         break_opportunities: Vec::new(),
         queued_text: None,
         shaped: Vec::new(),
+        queued_padding: FixedL::ZERO,
     }
     .process_items(item_index, end_item_index, compute_break_opportunities)
 }
@@ -778,6 +946,7 @@ struct BreakingContext<'f, 'l, 'a, 'b> {
 enum BreakOutcome<'a, 'f> {
     BreakSplit(ShapedItem<'a, 'f>),
     BreakAfter,
+    BreakBefore,
     None,
 }
 
@@ -787,13 +956,22 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
         current_width: &mut FixedL,
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
+        *current_width += self.padding.current_padding_left;
+
         match &mut self.kind {
-            ShapedItemKind::Text(text) => text.line_break(&mut self.range, current_width, ctx),
+            ShapedItemKind::Text(text) => {
+                text.line_break(&mut self.range, current_width, ctx, &mut self.padding)
+            }
             ShapedItemKind::Ruby(_) => {
-                // TODO: Implement ruby line breaking
+                // TODO: Implement proper ruby line breaking
                 //       It should only allow breaking between distinct base-annotation pairs.
                 shaped_item_width(current_width, self);
-                Ok(BreakOutcome::None)
+                *current_width += self.padding.current_padding_right;
+                if *current_width > ctx.constraints.size.x {
+                    Ok(BreakOutcome::BreakBefore)
+                } else {
+                    Ok(BreakOutcome::None)
+                }
             }
         }
     }
@@ -812,10 +990,16 @@ impl<'f> ShapedItemText<'f> {
         range: &mut Range<usize>,
         current_width: &mut FixedL,
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
+        padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
-        let mut glyph_it = self.glyphs.iter_glyphs();
+        let mut glyph_it = self.glyphs.iter_glyphs().peekable();
         while let Some(glyph) = glyph_it.next() {
             *current_width += glyph.x_advance;
+
+            if glyph_it.peek().is_none() {
+                *current_width += padding.current_padding_right;
+            }
+
             if *current_width > ctx.constraints.size.x {
                 let opportunities = &ctx.break_opportunities[..=match ctx
                     .break_opportunities
@@ -859,6 +1043,7 @@ impl<'f> ShapedItemText<'f> {
                                 glyphs: remaining,
                                 break_after: self.break_after,
                             }),
+                            padding: padding.fragment_break(),
                         }));
                     }
                 }
@@ -908,63 +1093,69 @@ fn layout_run_full(
     lctx: &mut LayoutContext,
     constraints: &LayoutConstraints,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
-    fn split_on_style<'s, 'f>(
+    fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
         shaped: &ShapedItemText<'f>,
-        styles: &[(usize, &'s ComputedStyle)],
-        mut push_section: impl FnMut(&'s ComputedStyle, GlyphString<'f, Rc<str>>),
+        leaves: &[LeafItemRange<'s>],
+        mut push_section: impl FnMut(
+            &LeafItemRange<'s>,
+            GlyphString<'f, Rc<str>>,
+        ) -> Result<(), InlineLayoutError>,
     ) -> Result<(), InlineLayoutError> {
         let mut glyphs = shaped.glyphs.clone();
 
         // TODO: Can this code be deduplicated? It seems kinda hard to do so
         //       Maybe the LTR loop could be simplified though...
         //       kind of accidentally made this RTL optimised...
+        // TODO!: This can be done now that the whole range is stored.
         if !shaped.glyphs.direction().is_reverse() {
-            let mut si = match styles.binary_search_by_key(&range.start, |&(start, _)| start) {
+            let mut si = match leaves.binary_search_by_key(&range.start, |l| l.range.start) {
                 Ok(s) => s,
                 Err(s) => s - 1,
             };
 
-            if styles
+            if leaves
                 .get(si + 1)
-                .is_none_or(|&(start, _)| start >= range.end)
+                .is_none_or(|l| l.range.start >= range.end)
             {
-                push_section(styles[si].1, glyphs);
+                push_section(&leaves[si], glyphs)?;
                 return Ok(());
             }
 
             let mut i = range.start;
             while i != range.end {
-                let end = styles
+                let end = leaves
                     .get(si + 1)
-                    .map(|&(next_start, _)| next_start.min(range.end))
+                    .map(|l| l.range.start.min(range.end))
                     .unwrap_or(range.end);
-                let style = styles[si].1;
 
                 if let Some(section_glyphs) = glyphs.split_off_until_cluster(end) {
-                    push_section(style, section_glyphs);
+                    push_section(&leaves[si], section_glyphs)?;
                 }
 
                 i = end;
                 si += 1;
             }
         } else {
-            let mut si = match styles.binary_search_by_key(&range.end, |&(start, _)| start) {
+            let mut si = match leaves.binary_search_by_key(&range.end, |l| l.range.start) {
                 Ok(s) => s - 1,
                 Err(s) => s - 1,
             };
 
-            if styles[si].0 <= range.start {
-                push_section(styles[si].1, glyphs);
+            if leaves[si].range.start <= range.start {
+                push_section(&leaves[si], glyphs)?;
                 return Ok(());
             }
 
             let mut i = range.end;
             while i != range.start {
-                let (start, style) = styles[si];
+                let ref leaf @ LeafItemRange {
+                    range: Range { start, .. },
+                    ..
+                } = leaves[si];
 
                 if let Some(section_glyphs) = glyphs.split_off_until_cluster(start) {
-                    push_section(style, section_glyphs);
+                    push_section(leaf, section_glyphs)?;
                 }
 
                 i = start;
@@ -1045,6 +1236,7 @@ fn layout_run_full(
                         push_item(&ShapedItem {
                             range: range.start..item.range.start,
                             kind: ShapedItemKind::Text(tmp),
+                            padding: ShapedItemPadding::MAX,
                         })
                     } else {
                         debug_assert!(range.end < item.range.end);
@@ -1053,6 +1245,7 @@ fn layout_run_full(
                             push_item(&ShapedItem {
                                 range: item.range.start..range.end,
                                 kind: ShapedItemKind::Text(tmp),
+                                padding: ShapedItemPadding::MAX,
                             })
                         } else {
                             Ok(())
@@ -1102,14 +1295,18 @@ fn layout_run_full(
         current_y: FixedL,
         line_align: HorizontalAlignment,
         bidi: unicode_bidi::BidiInfo<'t>,
-        styles: Vec<(usize, &'t ComputedStyle)>,
+        text_leaf_items: &'t [LeafItemRange<'t>],
+        dpi: u32,
+        content: &'t InlineContent,
     }
 
     #[derive(Debug)]
-    struct InlineItemFragmentBuilder<'a> {
-        output: &'a mut OffsetInlineItemFragmentVec,
+    struct InlineItemFragmentBuilder<'o, 'a> {
+        output: &'o mut OffsetInlineItemFragmentVec,
         line_ascender: FixedL,
         current_x: FixedL,
+        content: &'a InlineContent,
+        dpi: u32,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -1171,6 +1368,7 @@ fn layout_run_full(
                         let half_leading = ((computed_font_size * value)
                             - (metrics.ascender - metrics.descender))
                             / 2;
+
                         self.expand_to(
                             metrics.ascender + half_leading,
                             metrics.descender - half_leading,
@@ -1199,7 +1397,79 @@ fn layout_run_full(
         }
     }
 
-    impl InlineItemFragmentBuilder<'_> {
+    impl<'o, 'a> InlineItemFragmentBuilder<'o, 'a> {
+        fn child_builder(
+            &self,
+            output: &'o mut OffsetInlineItemFragmentVec,
+            line_ascender: FixedL,
+            current_x: FixedL,
+        ) -> InlineItemFragmentBuilder<'o, 'a> {
+            InlineItemFragmentBuilder {
+                output,
+                line_ascender,
+                current_x,
+                dpi: self.dpi,
+                content: self.content,
+            }
+        }
+
+        fn rebuild_leaf_branch(
+            &self,
+            mut item: &'a InlineItem,
+            mut inner_width: FixedL,
+            leaf: util::rc::Rc<InlineItemFragment>,
+            font_arena: &FontArena,
+            lctx: &mut LayoutContext,
+        ) -> Result<(util::rc::Rc<InlineItemFragment>, FixedL), InlineLayoutError> {
+            let mut result = leaf;
+            let mut y_correction = FixedL::ZERO;
+
+            while item.parent != usize::MAX {
+                item = &self.content.items[item.parent];
+
+                // https://drafts.csswg.org/css-inline/#valdef-inline-sizing-normal
+                match &item.kind {
+                    InlineItemKind::Span(span) => match span.kind {
+                        InlineSpanKind::Span => {
+                            let font_metrics =
+                                font_matcher_from_style(&span.style, font_arena, lctx)?
+                                    .primary(font_arena, lctx.fonts)?
+                                    .metrics();
+                            let logical_height = font_metrics.ascender - font_metrics.descender;
+                            let y_asc_offset = self.line_ascender - font_metrics.ascender;
+
+                            let fbox = FragmentBox::new_styled(
+                                Vec2L::new(inner_width, logical_height),
+                                self.dpi,
+                                &span.style,
+                            );
+                            inner_width = fbox.size_for_layout().x;
+                            result = util::rc::Rc::new(InlineItemFragment::Span(SpanFragment {
+                                content: vec![(
+                                    Vec2L::new(FixedL::ZERO, y_correction - y_asc_offset),
+                                    result,
+                                )],
+                                fbox,
+                                style: span.style.clone(),
+                            }));
+                            y_correction = y_asc_offset - fbox.content_offset().y;
+                        }
+                        // This is a stop condition because fragment creation on this boundary
+                        // is handled by `reorder_and_append`.
+                        InlineSpanKind::RubyInternal { .. } => break,
+                        _ => unreachable!(
+                            "Illegal parent span encountered on path to inline leaf: {span:?}"
+                        ),
+                    },
+                    _ => {
+                        unreachable!("Illegal parent encountered on path to inline leaf: {item:?}")
+                    }
+                }
+            }
+
+            Ok((result, y_correction))
+        }
+
         // These functions are unsafe because there is a "this FontArena must hold all fonts used by
         // the input items" invarant.
         unsafe fn reorder_and_append(
@@ -1207,44 +1477,45 @@ fn layout_run_full(
             shaped: &[ShapedItem],
             font_arena: util::rc::Rc<FontArena>,
             bidi: &unicode_bidi::BidiInfo,
-            styles: &[(usize, &ComputedStyle)],
+            text_leaf_items: &[LeafItemRange],
+            // TODO: remove
+            lctx: &mut LayoutContext,
         ) -> Result<(), InlineLayoutError> {
             reorder(shaped, bidi, |item| match &item.kind {
                 ShapedItemKind::Text(text) => {
-                    split_on_style(item.range.clone(), text, styles, |style, glyphs| {
-                        let font_metrics = text.primary_font.metrics();
-                        // https://drafts.csswg.org/css-inline/#valdef-inline-sizing-normal
-                        let logical_height = font_metrics.ascender - font_metrics.descender;
-                        let logical_width = glyphs.iter_glyphs().map(|g| g.x_advance).sum();
+                    split_on_leaves(item.range.clone(), text, text_leaf_items, |leaf, glyphs| {
+                        let inner_width: FixedL = glyphs.iter_glyphs().map(|g| g.x_advance).sum();
                         let fragment = TextFragment {
-                            fbox: FragmentBox {
-                                size: Vec2L::new(logical_width, logical_height),
-                            },
-                            style: style.clone(),
+                            style: leaf.style.clone(),
                             glyphs: unsafe {
                                 std::mem::transmute::<GlyphString<'_, _>, GlyphString<'static, _>>(
                                     glyphs,
                                 )
                             },
                             _font_arena: font_arena.clone(),
-                            baseline_offset: Vec2::new(FixedL::ZERO, font_metrics.ascender),
+                            baseline_offset: Vec2::new(FixedL::ZERO, self.line_ascender),
                         };
 
-                        let item_width = fragment.fbox.size.x;
-                        self.output.push((
-                            Vec2L::new(self.current_x, self.line_ascender - font_metrics.ascender),
+                        let (fragment, y_correction) = self.rebuild_leaf_branch(
+                            leaf.item,
+                            inner_width,
                             InlineItemFragment::Text(fragment).into(),
-                        ));
-                        self.current_x += item_width;
+                            &font_arena,
+                            lctx,
+                        )?;
+                        self.output
+                            .push((Vec2L::new(self.current_x, y_correction), fragment));
+                        // TODO: INCLUDE PADDING!!!!
+                        self.current_x += inner_width;
+
+                        Ok(())
                     })
                 }
                 ShapedItemKind::Ruby(ruby) => {
                     let mut result = RubyFragment {
                         // TODO: What box should a ruby container fragment have?
                         //       For now we'll just leave it zero-sized.
-                        fbox: FragmentBox {
-                            size: Vec2::new(FixedL::ZERO, FixedL::ZERO),
-                        },
+                        fbox: FragmentBox::ZERO,
                         style: ruby.style.clone(),
                         content: Vec::new(),
                     };
@@ -1281,41 +1552,49 @@ fn layout_run_full(
                         //        However I'm not certain what this means for ruby base
                         //        boxes? Should they just fit their contents?
                         let mut base_fragment = RubyBaseFragment {
-                            fbox: FragmentBox {
-                                size: Vec2::new(ruby_width, base_height),
-                            },
+                            fbox: FragmentBox::new_styled(
+                                Vec2::new(ruby_width, base_height),
+                                self.dpi,
+                                base.style,
+                            ),
                             style: base.style.clone(),
                             children: Vec::new(),
                         };
-                        InlineItemFragmentBuilder {
-                            output: &mut base_fragment.children,
-                            line_ascender: base_font_metrics.ascender,
-                            current_x: base_half_padding,
-                        }
+
+                        self.child_builder(
+                            &mut base_fragment.children,
+                            base_font_metrics.ascender,
+                            base_half_padding,
+                        )
                         .reorder_and_append(
                             &base.inner.shaped,
                             font_arena.clone(),
                             &base.inner.bidi,
-                            &base.inner.styles,
+                            &base.inner.text_leaf_items,
+                            lctx,
                         )?;
 
                         let mut annotation_fragment = RubyAnnotationFragment {
-                            fbox: FragmentBox {
-                                size: Vec2::new(ruby_width, annotation_height),
-                            },
+                            fbox: FragmentBox::new_styled(
+                                Vec2::new(ruby_width, annotation_height),
+                                self.dpi,
+                                annotation.style,
+                            ),
                             style: annotation.style.clone(),
                             children: Vec::new(),
                         };
-                        InlineItemFragmentBuilder {
-                            output: &mut annotation_fragment.children,
-                            line_ascender: annotation_metrics.max_ascender,
-                            current_x: annotation_half_padding,
-                        }
+
+                        self.child_builder(
+                            &mut annotation_fragment.children,
+                            annotation_metrics.max_ascender,
+                            annotation_half_padding,
+                        )
                         .reorder_and_append(
                             &annotation.inner.shaped,
                             font_arena.clone(),
                             &annotation.inner.bidi,
-                            &annotation.inner.styles,
+                            &annotation.inner.text_leaf_items,
+                            lctx,
                         )?;
 
                         let annotation_offset = Vec2::new(
@@ -1323,7 +1602,7 @@ fn layout_run_full(
                             -annotation_metrics.max_ascender - annotation_metrics.min_descender,
                         );
 
-                        ruby_current_x += base_fragment.fbox.size.x;
+                        ruby_current_x += base_fragment.fbox.size_for_layout().x;
                         result.content.push((
                             base_offset,
                             base_fragment,
@@ -1332,10 +1611,15 @@ fn layout_run_full(
                         ));
                     }
 
-                    self.output.push((
-                        Vec2::new(self.current_x, FixedL::ZERO),
+                    let (fragment, y_correction) = self.rebuild_leaf_branch(
+                        ruby.item,
+                        ruby_current_x,
                         InlineItemFragment::Ruby(result).into(),
-                    ));
+                        &font_arena,
+                        lctx,
+                    )?;
+                    self.output
+                        .push((Vec2L::new(self.current_x, y_correction), fragment));
                     self.current_x += ruby_current_x;
 
                     Ok(())
@@ -1351,6 +1635,7 @@ fn layout_run_full(
             &mut self,
             shaped: &mut [ShapedItem],
             font_arena: util::rc::Rc<FontArena>,
+            lctx: &mut LayoutContext,
         ) -> Result<(), InlineLayoutError> {
             let mut line_width = FixedL::ZERO;
             let mut line_metrics = LineHeightMetrics::ZERO;
@@ -1361,9 +1646,7 @@ fn layout_run_full(
 
             let line_height = line_metrics.height();
             let mut line_box = LineBoxFragment {
-                fbox: FragmentBox {
-                    size: { Vec2::new(line_width, line_height) },
-                },
+                fbox: FragmentBox::new_content_only(Vec2::new(line_width, line_height)),
                 children: Vec::new(),
             };
 
@@ -1372,12 +1655,15 @@ fn layout_run_full(
                     output: &mut line_box.children,
                     line_ascender: line_metrics.max_ascender,
                     current_x: FixedL::ZERO,
+                    dpi: self.dpi,
+                    content: self.content,
                 }
                 .reorder_and_append(
                     shaped,
                     font_arena,
                     &self.bidi,
-                    &self.styles,
+                    self.text_leaf_items,
+                    lctx,
                 )?;
             }
 
@@ -1394,14 +1680,19 @@ fn layout_run_full(
                 - line_metrics.max_ascender;
             let ruby_half_leading = ruby_leading / 2;
 
-            self.result.fbox.size.x = self.result.fbox.size.x.max(line_box.fbox.size.x);
+            self.result.fbox.content_size.x = self
+                .result
+                .fbox
+                .content_size
+                .x
+                .max(line_box.fbox.size_for_layout().x);
             self.current_y += ruby_half_leading;
             self.result.lines.push((
                 Vec2L::new(aligning_x_offset, self.current_y),
                 line_box.into(),
             ));
             self.current_y += line_height;
-            self.result.fbox.size.y = self.current_y;
+            self.result.fbox.content_size.y = self.current_y;
 
             Ok(())
         }
@@ -1426,7 +1717,7 @@ fn layout_run_full(
     let InitialShapingResult {
         mut shaped,
         break_opportunities,
-        styles,
+        ref text_leaf_items,
         bidi,
     } = shape_run_initial(
         content,
@@ -1443,7 +1734,9 @@ fn layout_run_full(
         result: InlineContentFragment::EMPTY,
         line_align: align,
         bidi,
-        styles,
+        text_leaf_items,
+        dpi: lctx.dpi,
+        content,
     };
 
     if constraints.size.x != FixedL::MAX && !break_opportunities.is_empty() {
@@ -1457,15 +1750,25 @@ fn layout_run_full(
 
         'break_loop: loop {
             let mut current_width = FixedL::ZERO;
-            'item_loop: for i in 0..shaped.len() {
+            'item_loop: for mut i in 0..shaped.len() {
                 let item = &mut shaped[i];
                 let remaining = match item.line_break(&mut current_width, &mut breaking_context)? {
                     BreakOutcome::BreakSplit(item) => Some(item),
                     BreakOutcome::BreakAfter => None,
+                    BreakOutcome::BreakBefore => {
+                        i = i.saturating_sub(1);
+                        None
+                    }
                     BreakOutcome::None => continue 'item_loop,
                 };
 
-                unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
+                unsafe {
+                    builder.push_line(
+                        &mut shaped[..=i],
+                        font_arena.clone(),
+                        breaking_context.layout,
+                    )?
+                };
 
                 if let Some(remaining) = remaining {
                     shaped.drain(..i);
@@ -1478,21 +1781,21 @@ fn layout_run_full(
             }
 
             if !shaped.is_empty() {
-                unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+                unsafe { builder.push_line(&mut shaped, font_arena.clone(), lctx)? };
             }
             break;
         }
     } else {
         'break_loop: for i in 0..shaped.len() {
             if shaped[i].forces_line_break_after() {
-                unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
+                unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone(), lctx)? };
                 shaped.drain(..=i);
                 continue 'break_loop;
             }
         }
 
         if !shaped.is_empty() {
-            unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+            unsafe { builder.push_line(&mut shaped, font_arena.clone(), lctx)? };
         }
     }
 

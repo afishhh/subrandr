@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
+pub mod cache;
 pub mod math;
 pub mod rc;
 

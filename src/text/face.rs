@@ -8,11 +8,13 @@ use std::{
 
 use rasterize::{Rasterizer, Texture};
 use text_sys::hb_font_t;
-use util::math::{I16Dot16, I26Dot6, Vec2};
-
-use crate::text::{CacheValue, FontSizeCacheKey, GlyphCache};
+use util::{
+    cache::CacheValue,
+    math::{I16Dot16, I26Dot6, Vec2},
+};
 
 use super::FreeTypeError;
+use crate::text::{FontSizeCacheKey, GlyphCache};
 
 pub mod freetype;
 pub use freetype::GlyphRenderError;
@@ -281,9 +283,7 @@ impl Font {
     ) -> Result<&'c GlyphMetrics, FreeTypeError> {
         match self {
             Font::FreeType(font) => {
-                let key = self
-                    .size_cache_key()
-                    .for_glyph::<GlyphMetrics>(self.face(), glyph, 0);
+                let key = self.size_cache_key().for_glyph(self.face(), glyph, 0);
                 cache.get_or_try_insert_with(key, || font.measure_glyph_uncached(glyph))
             }
             Font::Tofu(font) => Ok(font.glyph_metrics()),
@@ -307,11 +307,9 @@ impl Font {
     ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
         let (render_offset, subpixel_bucket) =
             FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
-        let key = self.size_cache_key().for_glyph::<SingleGlyphBitmap>(
-            self.face(),
-            glyph,
-            subpixel_bucket,
-        );
+        let key = self
+            .size_cache_key()
+            .for_glyph(self.face(), glyph, subpixel_bucket);
 
         cache.get_or_try_insert_with(key, || match self {
             Self::FreeType(font) => font.render_glyph_uncached(rasterizer, glyph, render_offset),

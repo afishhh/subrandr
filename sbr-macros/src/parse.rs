@@ -1,7 +1,5 @@
 //! Utilities that help with using syn as part of a more robust parser.
 
-use std::str::FromStr;
-
 pub use proc_macro2::{Span as Span2, TokenStream as TokenStream2, TokenTree as TokenTree2};
 use syn::parse::{ParseStream, Parser as _};
 
@@ -29,19 +27,6 @@ impl ParseContext {
             // ... and then throw away the error because it was `AlreadyReported`.
             Err(_) => Err(AlreadyReported),
         }
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn parse_str<R>(
-        &mut self,
-        fun: impl FnOnce(ParseStream, &mut ParseContext) -> Result<R, AlreadyReported>,
-        str: &str,
-    ) -> Result<R, AlreadyReported> {
-        let ts = TokenStream2::from_str(str)
-            .map_err(syn::Error::from)
-            .report_in(self)?;
-
-        self.parse2(fun, ts)
     }
 
     pub fn report(&mut self, error: syn::Error) {

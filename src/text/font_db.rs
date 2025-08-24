@@ -60,6 +60,7 @@ pub struct FaceInfo {
 }
 
 impl FaceInfo {
+    #[cfg_attr(not(font_provider = "android-ndk"), expect(dead_code))]
     pub(super) fn from_face_and_source(face: &Face, source: FontSource) -> Self {
         // TODO: Collect all names
         let name = face.family_name();
@@ -108,7 +109,10 @@ impl FontAxisValues {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
-    #[cfg_attr(not(target_family = "unix"), expect(dead_code))]
+    #[cfg_attr(
+        not(any(font_provider = "fontconfig", font_provider = "android-ndk")),
+        expect(dead_code)
+    )]
     File {
         path: PathBuf,
         index: i32,

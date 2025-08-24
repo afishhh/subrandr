@@ -15,8 +15,17 @@ abiver = "0"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
-default = []
+default = ["platform-defaults"]
 wgpu = ["rasterize/wgpu"]
+
+font-provider-fontconfig = []
+font-provider-directwrite = []
+font-provider-android-ndk = []
+
+# Sets some additional default features appropriate for the target platform.
+# Note that these are set using a build script as they differ per-platform.
+# Currently this just enables a reasonable default set of font providers.
+platform-defaults = []
 
 [dependencies]
 thiserror = "1"

@@ -12,13 +12,13 @@ use crate::{
 #[derive(Error, Debug)]
 pub enum InitError {
     #[error(transparent)]
-    #[cfg(target_family = "unix")]
+    #[cfg(font_provider = "fontconfig")]
     Fontconfig(#[from] fontconfig::NewError),
     #[error(transparent)]
-    #[cfg(target_family = "windows")]
+    #[cfg(font_provider = "directwrite")]
     DirectWrite(#[from] directwrite::NewError),
     #[error(transparent)]
-    #[cfg(target_os = "android")]
+    #[cfg(font_provider = "android-ndk")]
     AndroidNdk(#[from] ndk::NewError),
 }
 
@@ -26,10 +26,10 @@ pub enum InitError {
 #[derive(Error, Debug)]
 pub enum UpdateError {
     #[error(transparent)]
-    #[cfg(target_family = "unix")]
+    #[cfg(font_provider = "fontconfig")]
     Fontconfig(#[from] fontconfig::UpdateError),
     #[error(transparent)]
-    #[cfg(target_family = "windows")]
+    #[cfg(font_provider = "directwrite")]
     DirectWrite(#[from] directwrite::UpdateError),
 }
 
@@ -37,10 +37,10 @@ pub enum UpdateError {
 #[derive(Error, Debug)]
 pub enum SubstituteError {
     #[error(transparent)]
-    #[cfg(target_family = "unix")]
+    #[cfg(font_provider = "fontconfig")]
     Fontconfig(#[from] fontconfig::SubstituteError),
     #[error(transparent)]
-    #[cfg(target_family = "windows")]
+    #[cfg(font_provider = "directwrite")]
     DirectWrite(#[from] directwrite::SubstituteError),
 }
 
@@ -48,13 +48,13 @@ pub enum SubstituteError {
 #[derive(Error, Debug)]
 pub enum FallbackError {
     #[error(transparent)]
-    #[cfg(target_family = "unix")]
+    #[cfg(font_provider = "fontconfig")]
     Fontconfig(#[from] fontconfig::FallbackError),
     #[error(transparent)]
-    #[cfg(target_family = "windows")]
+    #[cfg(font_provider = "directwrite")]
     DirectWrite(#[from] directwrite::FallbackError),
     #[error(transparent)]
-    #[cfg(target_os = "android")]
+    #[cfg(font_provider = "android-ndk")]
     AndroidNdk(#[from] ndk::FallbackError),
 }
 
@@ -74,14 +74,13 @@ pub trait PlatformFontProvider: Debug + Send + Sync {
     fn fallback(&self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, FallbackError>;
 }
 
-#[cfg(target_family = "unix")]
-#[cfg_attr(target_os = "android", expect(dead_code))]
+#[cfg(font_provider = "fontconfig")]
 pub mod fontconfig;
 
-#[cfg(target_family = "windows")]
+#[cfg(font_provider = "directwrite")]
 pub mod directwrite;
 
-#[cfg(target_os = "android")]
+#[cfg(font_provider = "android-ndk")]
 pub mod ndk;
 
 pub type LockedPlatformFontProvider = RwLock<dyn PlatformFontProvider>;
@@ -91,25 +90,29 @@ static PLATFORM_FONT_SOURCE: OnceLock<Box<LockedPlatformFontProvider>> = OnceLoc
 fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvider>, InitError> {
     _ = sbr;
 
-    #[cfg(all(target_family = "unix", not(target_os = "android")))]
+    #[cfg(all(font_provider = "fontconfig", not(font_provider = "android-ndk")))]
     {
         fontconfig::FontconfigFontProvider::new()
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(font_provider = "directwrite")]
     {
         directwrite::DirectWriteFontProvider::new()
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }
-    #[cfg(target_os = "android")]
+    #[cfg(font_provider = "android-ndk")]
     {
         ndk::AndroidNdkFontProvider::new(sbr)
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }
-    #[cfg(not(any(target_family = "unix", target_os = "windows")))]
+    #[cfg(not(any(
+        font_provider = "fontconfig",
+        font_provider = "directwrite",
+        font_provider = "android-ndk"
+    )))]
     {
         #[derive(Debug)]
         struct NullFontProvider;

@@ -1,6 +1,114 @@
-use std::{path::PathBuf, process::Command};
+use std::{collections::HashSet, path::PathBuf, process::Command};
 
-fn main() {
+struct Target {
+    unix: bool,
+    os: Box<str>,
+    env: Box<str>,
+}
+
+impl Target {
+    fn read() -> Self {
+        Self {
+            unix: std::env::var_os("CARGO_CFG_UNIX").is_some(),
+            os: std::env::var("CARGO_CFG_TARGET_OS").unwrap().into(),
+            env: std::env::var("CARGO_CFG_TARGET_ENV").unwrap().into(),
+        }
+    }
+
+    fn is_windows(&self) -> bool {
+        matches!(&*self.os, "windows")
+    }
+
+    fn is_android(&self) -> bool {
+        matches!(&*self.os, "android")
+    }
+}
+
+struct Features {
+    enabled_by_script: HashSet<&'static str>,
+}
+
+impl Features {
+    fn new() -> Self {
+        Self {
+            enabled_by_script: HashSet::new(),
+        }
+    }
+
+    fn enable(&mut self, name: &'static str) {
+        println!("cargo::rustc-cfg=feature=\"{name}\"");
+        self.enabled_by_script.insert(name);
+    }
+
+    fn is_enabled(&self, name: &'static str) -> bool {
+        self.enabled_by_script.contains(name) || {
+            let var_name = format!(
+                "CARGO_FEATURE_{}",
+                name.to_ascii_uppercase().replace('-', "_")
+            );
+            std::env::var_os(var_name).is_some()
+        }
+    }
+}
+
+const FEATURE_FP_DIRECTWRITE: &str = "font-provider-directwrite";
+const FEATURE_FP_FONTCONFIG: &str = "font-provider-fontconfig";
+const FEATURE_FP_ANDROID_NDK: &str = "font-provider-android-ndk";
+
+fn add_default_features(target: &Target, features: &mut Features) {
+    if std::env::var_os("CARGO_FEATURE_PLATFORM_DEFAULTS").is_some() {
+        if target.is_windows() {
+            features.enable(FEATURE_FP_DIRECTWRITE);
+        }
+
+        if target.unix && !target.is_android() {
+            features.enable(FEATURE_FP_FONTCONFIG);
+        }
+
+        if target.is_android() {
+            features.enable(FEATURE_FP_ANDROID_NDK);
+        }
+    }
+}
+
+fn setup_aliases_and_link_libraries_for_features(target: &Target, features: &Features) {
+    fn register_cfg(name: &str, values: &[&str]) {
+        print!("cargo::rustc-check-cfg=cfg({name}, values(");
+        let mut first = true;
+        for value in values {
+            if !first {
+                print!(",")
+            }
+            first = false;
+            print!("{value:?}")
+        }
+        println!("))")
+    }
+
+    fn enable_fp_alias(name: &str) {
+        println!("cargo::rustc-cfg=font_provider=\"{name}\"")
+    }
+
+    register_cfg(
+        "font_provider",
+        &["fontconfig", "directwrite", "android-ndk"],
+    );
+
+    if target.is_windows() && features.is_enabled(FEATURE_FP_DIRECTWRITE) {
+        enable_fp_alias("directwrite");
+    }
+
+    if target.unix && features.is_enabled(FEATURE_FP_FONTCONFIG) {
+        enable_fp_alias("fontconfig");
+        println!("cargo::rustc-link-lib=fontconfig");
+    }
+
+    if target.is_android() && features.is_enabled(FEATURE_FP_ANDROID_NDK) {
+        enable_fp_alias("android-ndk");
+    }
+}
+
+fn set_build_rev() {
     if let Ok(rev) = std::env::var("SUBRANDR_BUILD_REV") {
         println!("cargo:rustc-env=BUILD_REV_SUFFIX= rev {}", &rev[..7]);
         println!("cargo:rustc-env=BUILD_DIRTY=");
@@ -28,7 +136,9 @@ fn main() {
         println!("cargo:rustc-env=BUILD_REV_SUFFIX=");
         println!("cargo:rustc-env=BUILD_DIRTY=");
     };
+}
 
+fn setup_abi_versioning(target: &Target) {
     let abiver = {
         let manifest_content =
             std::fs::read_to_string(std::env::var_os("CARGO_MANIFEST_PATH").unwrap()).unwrap();
@@ -55,8 +165,6 @@ fn main() {
     }
     .unwrap();
 
-    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();
     let major = std::env::var("CARGO_PKG_VERSION_MAJOR").unwrap();
     let minor = std::env::var("CARGO_PKG_VERSION_MINOR").unwrap();
     let patch = std::env::var("CARGO_PKG_VERSION_PATCH").unwrap();
@@ -75,7 +183,7 @@ fn main() {
         };
     }
 
-    match (&*os, &*env) {
+    match (&*target.os, &*target.env) {
         ("linux", _) => {
             cdylib_link_arg!("-Wl,-soname,libsubrandr.so.{}", abiver);
         }
@@ -104,4 +212,18 @@ fn main() {
         }
         _ => (),
     }
+}
+
+fn main() {
+    set_build_rev();
+
+    let target = Target::read();
+
+    {
+        let mut features = Features::new();
+        add_default_features(&target, &mut features);
+        setup_aliases_and_link_libraries_for_features(&target, &features);
+    }
+
+    setup_abi_versioning(&target);
 }

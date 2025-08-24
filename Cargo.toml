@@ -41,6 +41,9 @@ workspace = true
 windows = { version = "0.61", features = ["Win32_Graphics_DirectWrite"] }
 windows-core = "0.61"
 
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-sys = { version = "0.6" }
+
 [profile.release]
 panic = "abort"
 

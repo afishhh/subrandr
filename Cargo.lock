@@ -1808,6 +1808,7 @@ name = "subrandr"
 version = "0.2.0"
 dependencies = [
  "icu_segmenter",
+ "ndk-sys",
  "once_cell",
  "quick-xml 0.36.2",
  "sbr-macros",

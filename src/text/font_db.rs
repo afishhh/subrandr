@@ -46,6 +46,7 @@ impl Default for FontStyle {
 }
 
 #[derive(Debug, Clone)]
+// TODO: Split into (FaceDescription, FontSource)?
 pub struct FaceInfo {
     pub family_names: Arc<[Arc<str>]>,
     // TODO: Implement font width support
@@ -56,6 +57,24 @@ pub struct FaceInfo {
     pub weight: FontAxisValues,
     pub italic: bool,
     pub source: FontSource,
+}
+
+impl FaceInfo {
+    pub(super) fn from_face_and_source(face: &Face, source: FontSource) -> Self {
+        // TODO: Collect all names
+        let name = face.family_name();
+
+        Self {
+            family_names: Arc::new([name.into()]),
+            width: FontAxisValues::Fixed(I16Dot16::new(100)),
+            weight: face.axis(WEIGHT_AXIS).map_or_else(
+                || FontAxisValues::Fixed(face.weight()),
+                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
+            ),
+            italic: face.italic(),
+            source,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

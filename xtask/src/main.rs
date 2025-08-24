@@ -94,6 +94,10 @@ impl Triple {
                 | "vita"
         )
     }
+
+    fn is_macos(&self) -> bool {
+        matches!(&*self.os, "darwin")
+    }
 }
 
 impl FromStr for Triple {
@@ -396,6 +400,12 @@ fn main() -> Result<()> {
                     &install.bindir,
                     format!("subrandr-{abiver}.dll"),
                 )
+            } else if install.build.target.is_macos() {
+                (
+                    "libsubrandr.dylib",
+                    &install.libdir,
+                    "libsubrandr.dylib".to_owned(),
+                )
             } else {
                 (
                     "libsubrandr.so",
@@ -420,7 +430,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to copy `{shared_in}`"))?;
 
                 #[cfg(unix)]
-                if install.build.target.is_unix() {
+                if install.build.target.is_unix() && !install.build.target.is_macos() {
                     let link = libdir.join("libsubrandr.so");
                     match std::fs::remove_file(&link) {
                         Ok(()) => (),

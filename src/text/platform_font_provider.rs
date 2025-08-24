@@ -17,6 +17,9 @@ pub enum InitError {
     #[error(transparent)]
     #[cfg(target_family = "windows")]
     DirectWrite(#[from] directwrite::NewError),
+    #[error(transparent)]
+    #[cfg(target_os = "android")]
+    AndroidNdk(#[from] ndk::NewError),
 }
 
 #[non_exhaustive]
@@ -50,8 +53,16 @@ pub enum FallbackError {
     #[error(transparent)]
     #[cfg(target_family = "windows")]
     DirectWrite(#[from] directwrite::FallbackError),
+    #[error(transparent)]
+    #[cfg(target_os = "android")]
+    AndroidNdk(#[from] ndk::FallbackError),
 }
 
+// TODO: Remove or change `FontSource::Memory`? Currently the `Send + Sync` bound is impossible
+//       to statically guarantee because `FontSource::Memory` does not fullfil it (but font
+//       providers basically must always store a `Vec<FaceInfo>`).
+//       It's probably best if `FontSource::Memory` just stores an `Arc<[u8]>` instead of
+//       a `Face`.
 pub trait PlatformFontProvider: Debug + Send + Sync {
     fn update_if_changed(&mut self, sbr: &Subrandr) -> Result<bool, UpdateError> {
         _ = sbr;
@@ -64,10 +75,14 @@ pub trait PlatformFontProvider: Debug + Send + Sync {
 }
 
 #[cfg(target_family = "unix")]
+#[cfg_attr(target_os = "android", expect(dead_code))]
 pub mod fontconfig;
 
 #[cfg(target_family = "windows")]
 pub mod directwrite;
+
+#[cfg(target_os = "android")]
+pub mod ndk;
 
 pub type LockedPlatformFontProvider = RwLock<dyn PlatformFontProvider>;
 
@@ -76,7 +91,7 @@ static PLATFORM_FONT_SOURCE: OnceLock<Box<LockedPlatformFontProvider>> = OnceLoc
 fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvider>, InitError> {
     _ = sbr;
 
-    #[cfg(target_family = "unix")]
+    #[cfg(all(target_family = "unix", not(target_os = "android")))]
     {
         fontconfig::FontconfigFontProvider::new()
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
@@ -85,6 +100,12 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
     #[cfg(target_os = "windows")]
     {
         directwrite::DirectWriteFontProvider::new()
+            .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
+            .map_err(Into::into)
+    }
+    #[cfg(target_os = "android")]
+    {
+        ndk::AndroidNdkFontProvider::new(sbr)
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }

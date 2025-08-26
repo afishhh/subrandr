@@ -13,7 +13,7 @@ ipc-browser-cdp = ["dep:tungstenite", "dep:serde_json", "_serde"]
 _serde = ["dep:serde"]
 
 [dependencies]
-subrandr = { path = "..", default-features = false }
+subrandr = { path = ".." }
 util = { workspace = true }
 
 anyhow = "1.0.97"

@@ -32,6 +32,11 @@ rustPlatform.buildRustPackage {
     fontconfig
   ];
 
+  buildPhase = ''
+    cargo xtask build --target ${stdenv.targetPlatform.rust.rustcTarget}
+    #
+  '';
+
   installPhase = ''
     cargo xtask install -p $out --target ${stdenv.targetPlatform.rust.rustcTarget}
   '';

@@ -1,9 +1,9 @@
 use std::{
     ffi::OsString,
     fmt::Display,
-    io::IsTerminal,
+    io::{BufRead, BufReader, IsTerminal},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     str::FromStr,
 };
 
@@ -155,18 +155,51 @@ fn copy_file(src: &Path, dst: &Path, file: &str) -> anyhow::Result<()> {
         .map(|_| ())
 }
 
+fn get_required_system_static_libs(target: &Triple) -> Result<String> {
+    let mut process = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
+        .arg("--target")
+        .arg(target.to_string())
+        .arg("--crate-type=staticlib")
+        .arg("--print=native-static-libs")
+        .arg("-")
+        .arg("-o")
+        .arg("-")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Failed to spawn rustc")?;
+
+    let mut stderr = BufReader::new(process.stderr.as_mut().unwrap());
+    let mut line = String::new();
+    while stderr.read_line(&mut line)? != 0 {
+        const NEEDLE: &str = "native-static-libs: ";
+        if let Some(offset) = line.find(NEEDLE) {
+            drop(stderr);
+            process.wait()?;
+            return Ok(line[offset + NEEDLE.len()..].trim().to_owned());
+        }
+        line.clear();
+    }
+
+    process.wait()?;
+    bail!("Failed to extract required static libraries from rustc output")
+}
+
 fn make_pkgconfig_file(
     prefix: &Path,
     version: &str,
     target: &Triple,
     libdir: &Path,
     includedir: &Path,
-) -> String {
+    static_library: bool,
+) -> Result<String> {
     let prefix_str = prefix.to_str().unwrap().trim_end_matches('/');
-    let extra_link_flags = if target.is_windows() {
-        "-lWs2_32 -lUserenv"
+    let required_static_libs = if static_library {
+        get_required_system_static_libs(target)
+            .context("Failed to query rustc for required static libraries")?
     } else {
-        ""
+        String::new()
     };
     let extra_requires = if target.is_unix() {
         ", fontconfig >= 2"
@@ -187,7 +220,7 @@ fn make_pkgconfig_file(
     ]
     .concat();
 
-    format!(
+    Ok(format!(
         r#"prefix={prefix_str}
 libdir={libdir_str}
 includedir={includedir_str}
@@ -198,9 +231,9 @@ Version: {version}
 Requires.private: freetype2 >= 26, harfbuzz >= 10{extra_requires}
 Cflags: -I${{includedir}}
 Libs: -L${{libdir}} -lsubrandr
-Libs.private: {extra_link_flags}
+Libs.private: {required_static_libs}
 "#
-    )
+    ))
 }
 
 fn target_has_broken_implib(target: &Triple) -> bool {
@@ -466,7 +499,8 @@ fn main() -> Result<()> {
                     &install.build.target,
                     &install.libdir,
                     &install.includedir,
-                ),
+                    install.static_library,
+                )?,
             )
             .context("Failed to write pkgconfig file")?;
         }

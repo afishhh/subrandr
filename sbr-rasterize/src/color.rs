@@ -136,6 +136,19 @@ impl Premultiplied<BGRA8> {
             a: mul_rgb(self.0.a, other),
         })
     }
+
+    pub fn unpremultiply(&self) -> BGRA8 {
+        if self.0.a == 0 {
+            BGRA8::ZERO
+        } else {
+            BGRA8 {
+                b: div_rgb(self.0.b, self.0.a),
+                g: div_rgb(self.0.g, self.0.a),
+                r: div_rgb(self.0.r, self.0.a),
+                a: self.0.a,
+            }
+        }
+    }
 }
 
 /// Calculates `(a * b + 127) / 255` but without a division.
@@ -144,9 +157,14 @@ pub(crate) const fn mul_rgb(a: u8, b: u8) -> u8 {
     ((c + (c >> 8)) >> 8) as u8
 }
 
+/// Calculates `((a * 255 + 127) / b)`.
+pub(crate) const fn div_rgb(a: u8, b: u8) -> u8 {
+    ((a as u16 * 255 + 127) / b as u16) as u8
+}
+
 #[cfg(test)]
 mod test {
-    use super::mul_rgb;
+    use super::{mul_rgb, Premultiply, BGRA8};
 
     #[test]
     fn mul_rgb_exhaustive() {
@@ -161,6 +179,23 @@ mod test {
                     "{a} * {b} yielded incorrect result"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn premultiply_unpremultiply_identity() {
+        let cases = [
+            BGRA8::ZERO,
+            BGRA8::GREEN,
+            BGRA8::YELLOW,
+            BGRA8::RED,
+            BGRA8::LIME,
+            BGRA8::CYAN,
+            BGRA8::GOLD,
+        ];
+
+        for case in cases {
+            assert_eq!(case.premultiply().unpremultiply(), case);
         }
     }
 }

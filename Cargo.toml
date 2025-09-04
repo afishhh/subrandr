@@ -2,6 +2,7 @@
 name = "subrandr"
 version.workspace = true
 edition.workspace = true
+autotests = false
 
 [workspace.package]
 version = "0.2.2"
@@ -42,6 +43,10 @@ unicode-bidi = "0.3"
 util = { workspace = true }
 rasterize = { workspace = true }
 macros = { workspace = true }
+
+[dev-dependencies]
+sha2 = "0.10"
+png = "0.18"
 
 [lints]
 workspace = true

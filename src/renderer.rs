@@ -74,6 +74,9 @@ pub enum Subtitles {
 enum FormatLayouter {
     Srv3(srv3::Layouter),
     Vtt(vtt::Layouter),
+    // TODO: Instead make layout tests directly use layout + render code skipping Renderer.
+    #[cfg(test)]
+    Test(Box<dyn FnMut(&mut FrameLayoutPass) -> Result<(), layout::InlineLayoutError>>),
 }
 
 pub(crate) struct FrameLayoutPass<'s, 'frame> {
@@ -636,9 +639,13 @@ impl<'a> Renderer<'a> {
             );
         }
 
+        Self::with_font_db(sbr, text::FontDb::new(sbr).unwrap())
+    }
+
+    pub(crate) fn with_font_db(sbr: &'a Subrandr, font_db: text::FontDb<'a>) -> Self {
         Self {
             sbr,
-            fonts: text::FontDb::new(sbr).unwrap(),
+            fonts: font_db,
             glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
             unchanged_range: 0..0,
@@ -692,6 +699,14 @@ impl<'a> Renderer<'a> {
             }
             None => None,
         };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_layouter(
+        &mut self,
+        fun: impl FnMut(&mut FrameLayoutPass) -> Result<(), layout::InlineLayoutError> + 'static,
+    ) {
+        self.layouter = Some(FormatLayouter::Test(Box::new(fun)));
     }
 }
 
@@ -776,6 +791,8 @@ impl Renderer<'_> {
             match this {
                 FormatLayouter::Srv3(_) => "srv3",
                 FormatLayouter::Vtt(_) => "vtt",
+                #[cfg(test)]
+                FormatLayouter::Test(_) => "test",
             }
         });
 
@@ -800,6 +817,8 @@ impl Renderer<'_> {
             match self.layouter {
                 Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(&mut pass)?,
                 Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.layout(&mut pass)?,
+                #[cfg(test)]
+                Some(FormatLayouter::Test(ref mut layouter)) => layouter(&mut pass)?,
                 None => (),
             }
 

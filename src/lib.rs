@@ -80,3 +80,7 @@ impl log::AsLogger for Subrandr {
 
 mod renderer;
 pub use renderer::{Renderer, SubtitleContext, Subtitles};
+
+#[cfg(test)]
+#[path = "../tests/layout_tests/all.rs"]
+mod layout_tests;

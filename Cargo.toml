@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 
 [package.metadata.capi]

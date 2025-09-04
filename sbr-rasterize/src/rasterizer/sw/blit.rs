@@ -15,9 +15,11 @@ unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
     process: impl Fn(S, &mut D),
 ) {
     let width = xs.end - xs.start;
-    let mut si = ys.start + xs.start;
+    let mut si = ys.start * src_stride + xs.start;
     let src_row_step = src_stride - width;
-    let mut di = (si as isize + dx as isize + dy as isize * dst_stride as isize) as usize;
+    let mut di = (xs.start as isize
+        + dx as isize
+        + (ys.start as isize + dy as isize) * dst_stride as isize) as usize;
     let dst_row_step = dst_stride - width;
 
     for _ in ys {

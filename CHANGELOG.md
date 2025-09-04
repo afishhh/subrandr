@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+- Fixed out-of-bounds write in software rasterizer.
+  (This is what releasing 3AM code gets me)
+
 ## [v0.2.1]
 
 - *Significantly* improved software rasterization performance.

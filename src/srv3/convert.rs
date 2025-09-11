@@ -19,7 +19,7 @@ use crate::{
     srv3::RubyPosition,
     style::{
         computed::{
-            Alignment, FontSlant, HorizontalAlignment, Ruby, TextShadow, VerticalAlignment,
+            Alignment, FontSlant, HorizontalAlignment, Length, Ruby, TextShadow, VerticalAlignment,
         },
         ComputedStyle,
     },
@@ -325,6 +325,7 @@ fn segments_to_inline(
 ) -> InlineContent {
     let mut builder = InlineContentBuilder::new();
     {
+        let mut first = true;
         let sctx = pass.sctx;
         let mut root = builder.root();
         let mut it = segments
@@ -336,7 +337,17 @@ fn segments_to_inline(
             .peekable();
 
         while let Some(segment) = it.next() {
-            let style = segment.compute_style(sctx);
+            let mut style = segment.compute_style(sctx);
+
+            if first {
+                *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+                first = false;
+            }
+
+            if it.peek().is_none() {
+                *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
+                first = false;
+            }
 
             match segment.ruby {
                 Ruby::None => {
@@ -412,16 +423,17 @@ impl Window {
             (self.y * pass.sctx.player_height().into_f32()).into(),
         );
 
+        let fragment_size = fragment.fbox.size_for_layout();
         match self.alignment.0 {
             HorizontalAlignment::Left => (),
-            HorizontalAlignment::Center => pos.x -= fragment.fbox.size.x / 2,
-            HorizontalAlignment::Right => pos.x -= fragment.fbox.size.x,
+            HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
+            HorizontalAlignment::Right => pos.x -= fragment_size.x,
         }
 
         match self.alignment.1 {
             VerticalAlignment::Top => (),
-            VerticalAlignment::Center => pos.y -= fragment.fbox.size.y / 2,
-            VerticalAlignment::Bottom => pos.y -= fragment.fbox.size.y,
+            VerticalAlignment::Center => pos.y -= fragment_size.y / 2,
+            VerticalAlignment::Bottom => pos.y -= fragment_size.y,
         }
 
         Ok(Some((pos, fragment)))

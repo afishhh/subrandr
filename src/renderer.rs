@@ -321,7 +321,7 @@ impl FrameRenderPass<'_, '_> {
         if background.a != 0 {
             self.rasterizer.fill_axis_aligned_rect(
                 target,
-                Rect2::to_float(Rect2::from_min_size(pos, fragment_box.size)),
+                Rect2::to_float(fragment_box.padding_box().translate(pos.to_vec())),
                 background,
             );
         }
@@ -379,7 +379,7 @@ impl FrameRenderPass<'_, '_> {
         match fragment {
             InlineItemFragment::Text(text) => {
                 if sbr.debug.draw_layout_info {
-                    let final_logical_box = Rect2::from_min_size(pos, text.fbox.size);
+                    let final_logical_box = text.fbox.margin_box().translate(pos.to_vec());
 
                     self.debug_text(
                         target,
@@ -427,8 +427,8 @@ impl FrameRenderPass<'_, '_> {
 
                 self.draw_text_full(
                     target,
-                    pos.x + text.baseline_offset.x,
-                    (pos.y + text.baseline_offset.y).round(),
+                    pos.x + text.fbox.content_box().min.x + text.baseline_offset.x,
+                    (pos.y + text.fbox.content_box().min.y + text.baseline_offset.y).round(),
                     text.glyphs(),
                     text.style.color(),
                     &text.style.text_decoration(),
@@ -972,7 +972,7 @@ impl Renderer<'_> {
             self.perf.end_debug_raster();
 
             for &(pos, ref fragment) in &fragments {
-                let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
+                let final_total_rect = fragment.fbox.margin_box().translate(pos.to_vec());
 
                 if self.sbr.debug.draw_layout_info {
                     pass.rasterizer.stroke_axis_aligned_rect(
@@ -993,11 +993,11 @@ impl Renderer<'_> {
 
                 let total_position_debug_pos = match VerticalAlignment::Top {
                     VerticalAlignment::Top => (
-                        fragment.fbox.size.y + 20,
+                        final_total_rect.max.y + 20,
                         Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
                     ),
                     VerticalAlignment::Center => (
-                        fragment.fbox.size.y + 20,
+                        final_total_rect.max.y + 20,
                         Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
                     ),
                     VerticalAlignment::Bottom => (
@@ -1011,7 +1011,7 @@ impl Renderer<'_> {
                         target,
                         Point2L::new(
                             final_total_rect.min.x + final_total_rect.width() / 2,
-                            final_total_rect.min.y + total_position_debug_pos.0,
+                            total_position_debug_pos.0,
                         ),
                         &format!(
                             "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",

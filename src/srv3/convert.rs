@@ -491,6 +491,17 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     }
 
     for event in document.events() {
+        // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
+        // Don't know what the exact rule is but this at least fixes auto-generated subs.
+        if event.segments.iter().all(|segment| {
+            segment
+                .text
+                .bytes()
+                .all(|byte| matches!(byte, b'\r' | b'\n'))
+        }) {
+            continue;
+        }
+
         let mut segments = vec![];
 
         let mut it = event.segments.iter();

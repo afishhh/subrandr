@@ -454,54 +454,48 @@ fn shape_run_initial<'a, 'f>(
         }
     }
 
-    let run_text = &content.text_runs[run_index];
-    let bidi = unicode_bidi::BidiInfo::new(run_text, None);
-    let grapheme_cluster_boundaries = {
-        let mut result: Vec<usize> = GraphemeClusterSegmenter::new()
-            .segment_str(run_text)
-            .collect();
-        // The segmenter always inserts `text.len()` as a grapheme cluster boundary
-        // but we want this list to only include the start indices of graphemes.
-        result.pop();
-        result
-    };
-    let items = &content.items;
-    let mut current_item = item_index;
-    let mut current_style = const { &ComputedStyle::DEFAULT };
-    let mut span_left = usize::MAX;
-    let mut span_stack: Vec<(&ComputedStyle, usize)> = Vec::new();
-    let mut current_text: Option<QueuedText> = None;
-    let mut shaped = Vec::new();
-    let mut break_opportunities: Vec<usize> = Vec::new();
-    let mut styles = vec![];
+    struct ShapedItemBuilder<'a, 'f, 'l, 'll, 'la> {
+        content: &'a InlineContent,
+        run_text: &'a Rc<str>,
+        bidi: unicode_bidi::BidiInfo<'a>,
+        grapheme_cluster_boundaries: Vec<usize>,
+        lctx: &'l mut LayoutContext<'ll, 'la>,
+        font_arena: &'f FontArena,
 
-    let push_break_opportunity = |break_opportunities: &mut Vec<usize>, idx: usize| {
-        if let Some(&previous) = break_opportunities.last() {
-            if previous == idx {
-                return;
+        break_opportunities: Vec<usize>,
+        shaped: Vec<ShapedItem<'a, 'f>>,
+        queued_text: Option<QueuedText<'f>>,
+    }
+
+    impl<'a, 'f> ShapedItemBuilder<'a, 'f, '_, '_, '_> {
+        fn push_break_opportunity(&mut self, idx: usize) {
+            if let Some(&previous) = self.break_opportunities.last() {
+                if previous == idx {
+                    return;
+                }
+
+                debug_assert!(previous < idx);
             }
 
-            debug_assert!(previous < idx);
+            self.break_opportunities.push(idx);
         }
 
-        break_opportunities.push(idx);
-    };
-    let compute_text_break_opportunities =
-        |break_opportunities: &mut Vec<usize>, range: Range<usize>, style: &ComputedStyle| {
+        fn compute_text_break_opportunities(&mut self, range: Range<usize>, style: &ComputedStyle) {
             // FIXME: This makes sense conceptually but may fall apart in the presence of
             //        dictionary line segmenters. Some testing has to be done to make sure
             //        this produces correct results.
             //        (for now we can also just not care since I can't even get Firefox
             //         or Chromium to do dictionary based breaking...)
             let padded_start_grapheme_index =
-                match grapheme_cluster_boundaries.binary_search(&range.start) {
+                match self.grapheme_cluster_boundaries.binary_search(&range.start) {
                     Ok(found) => found.saturating_sub(1),
                     Err(left) => left - 1,
                 };
-            let padded_start = grapheme_cluster_boundaries[padded_start_grapheme_index];
-            let padded_end = grapheme_cluster_boundaries
+            let padded_start = self.grapheme_cluster_boundaries[padded_start_grapheme_index];
+            let padded_end = self
+                .grapheme_cluster_boundaries
                 .get(
-                    match grapheme_cluster_boundaries[padded_start_grapheme_index..]
+                    match self.grapheme_cluster_boundaries[padded_start_grapheme_index..]
                         .binary_search(&range.end)
                     {
                         Ok(found) => padded_start_grapheme_index + found + 1,
@@ -509,7 +503,7 @@ fn shape_run_initial<'a, 'f>(
                     },
                 )
                 .copied()
-                .unwrap_or(run_text.len());
+                .unwrap_or(self.run_text.len());
 
             let segmenter = icu_segmenter::LineSegmenter::new_auto({
                 let mut options = LineBreakOptions::default();
@@ -518,9 +512,9 @@ fn shape_run_initial<'a, 'f>(
                 options
             });
 
-            let ignore_after = range.end.min(run_text.len() - 1);
+            let ignore_after = range.end.min(self.run_text.len() - 1);
             let mut iter = segmenter
-                .segment_str(&run_text[padded_start..padded_end])
+                .segment_str(&self.run_text[padded_start..padded_end])
                 .map(|idx| idx + padded_start);
             // The first break is going to be either at the start of the string or
             // before our "padding" look-behind character, both of which we want to ignore.
@@ -530,189 +524,247 @@ fn shape_run_initial<'a, 'f>(
                     break;
                 }
 
-                push_break_opportunity(break_opportunities, idx);
+                self.push_break_opportunity(idx);
             }
-        };
+        }
 
-    while let Some(item) = items
-        .get(current_item)
-        .filter(|_| !span_stack.is_empty() || current_item < *end_item_index)
-    {
-        span_left -= 1;
-        current_item += 1;
-        match item {
-            InlineItem::Span(span) => match span.kind {
-                InlineSpanKind::Span | InlineSpanKind::RubyInternal { .. } => {
-                    span_stack.push((current_style, span_left));
-                    current_style = &span.style;
-                    span_left = span.length;
-                }
-                InlineSpanKind::Ruby { content_index } => {
-                    if let Some(queued) = current_text.take() {
-                        queued.flush(run_text.clone(), &bidi, font_arena, lctx, &mut shaped)?;
-                    }
+        fn process_items(
+            mut self,
+            item_index: usize,
+            end_item_index: &mut usize,
+            compute_break_opportunities: bool,
+        ) -> Result<InitialShapingResult<'a, 'f>, InlineLayoutError> {
+            let items = &self.content.items;
+            let mut current_item = item_index;
+            let mut current_style = const { &ComputedStyle::DEFAULT };
+            let mut span_left = usize::MAX;
+            let mut span_stack: Vec<(&ComputedStyle, usize)> = Vec::new();
+            let mut styles = vec![];
 
-                    shaped.push(ShapedItem {
-                        range: content_index..content_index + 1,
-                        kind: ShapedItemKind::Ruby(ShapedItemRuby {
-                            style: span.style.clone(),
-                            base_annotation_pairs: {
-                                let mut result = Vec::new();
+            while let Some(item) = items
+                .get(current_item)
+                .filter(|_| !span_stack.is_empty() || current_item < *end_item_index)
+            {
+                span_left -= 1;
+                current_item += 1;
+                match item {
+                    InlineItem::Span(span) => match span.kind {
+                        InlineSpanKind::Span | InlineSpanKind::RubyInternal { .. } => {
+                            span_stack.push((current_style, span_left));
+                            current_style = &span.style;
+                            span_left = span.length;
+                        }
+                        InlineSpanKind::Ruby { content_index } => {
+                            if let Some(queued) = self.queued_text.take() {
+                                queued.flush(
+                                    self.run_text.clone(),
+                                    &self.bidi,
+                                    self.font_arena,
+                                    self.lctx,
+                                    &mut self.shaped,
+                                )?;
+                            }
 
-                                let mut remaining = span.length;
-                                while remaining > 0 {
-                                    let &InlineItem::Span(InlineSpan {
-                                        kind:
-                                            InlineSpanKind::RubyInternal {
-                                                run_index,
-                                                outer_style: ref base_style,
-                                            },
-                                        ..
-                                    }) = &items[current_item]
-                                    else {
-                                        unreachable!("Illegal ruby base item");
-                                    };
+                            self.shaped.push(ShapedItem {
+                                range: content_index..content_index + 1,
+                                kind: ShapedItemKind::Ruby(ShapedItemRuby {
+                                    style: span.style.clone(),
+                                    base_annotation_pairs: {
+                                        let mut result = Vec::new();
 
-                                    let base = ShapedRubyBase {
-                                        style: base_style,
-                                        primary_font: font_matcher_from_style(
-                                            base_style, font_arena, lctx,
-                                        )?
-                                        .primary(font_arena, lctx.fonts)?,
-                                        inner: shape_run_initial(
-                                            content,
-                                            run_index,
-                                            current_item,
-                                            {
-                                                current_item += 1;
-                                                &mut current_item
-                                            },
-                                            lctx,
-                                            font_arena,
-                                            false,
-                                        )?,
-                                    };
-                                    remaining -= 1;
-                                    let annotation = if remaining > 0 {
-                                        let &InlineItem::Span(InlineSpan {
-                                            kind:
-                                                InlineSpanKind::RubyInternal {
+                                        let mut remaining = span.length;
+                                        while remaining > 0 {
+                                            let &InlineItem::Span(InlineSpan {
+                                                kind:
+                                                    InlineSpanKind::RubyInternal {
+                                                        run_index,
+                                                        outer_style: ref base_style,
+                                                    },
+                                                ..
+                                            }) = &items[current_item]
+                                            else {
+                                                unreachable!("Illegal ruby base item");
+                                            };
+
+                                            let base = ShapedRubyBase {
+                                                style: base_style,
+                                                primary_font: font_matcher_from_style(
+                                                    base_style,
+                                                    self.font_arena,
+                                                    self.lctx,
+                                                )?
+                                                .primary(self.font_arena, self.lctx.fonts)?,
+                                                inner: shape_run_initial(
+                                                    self.content,
                                                     run_index,
-                                                    outer_style: ref annotation_style,
-                                                },
-                                            ..
-                                        }) = &items[current_item]
-                                        else {
-                                            unreachable!("Illegal ruby annotation item");
-                                        };
+                                                    current_item,
+                                                    {
+                                                        current_item += 1;
+                                                        &mut current_item
+                                                    },
+                                                    self.lctx,
+                                                    self.font_arena,
+                                                    false,
+                                                )?,
+                                            };
+                                            remaining -= 1;
+                                            let annotation = if remaining > 0 {
+                                                let &InlineItem::Span(InlineSpan {
+                                                    kind:
+                                                        InlineSpanKind::RubyInternal {
+                                                            run_index,
+                                                            outer_style: ref annotation_style,
+                                                        },
+                                                    ..
+                                                }) = &items[current_item]
+                                                else {
+                                                    unreachable!("Illegal ruby annotation item");
+                                                };
 
-                                        let result = shape_run_initial(
-                                            content,
-                                            run_index,
-                                            current_item,
-                                            {
-                                                current_item += 1;
-                                                &mut current_item
-                                            },
-                                            lctx,
-                                            font_arena,
-                                            false,
-                                        )?;
-                                        remaining -= 1;
-                                        ShapedRubyAnnotation {
-                                            style: annotation_style,
-                                            inner: result,
-                                        }
-                                    } else {
-                                        ShapedRubyAnnotation {
-                                            style: const { &ComputedStyle::DEFAULT },
-                                            inner: InitialShapingResult {
-                                                shaped: Vec::new(),
-                                                break_opportunities: Vec::new(),
-                                                styles: Vec::new(),
-                                                bidi: unicode_bidi::BidiInfo::new("", None),
-                                            },
-                                        }
-                                    };
+                                                let result = shape_run_initial(
+                                                    self.content,
+                                                    run_index,
+                                                    current_item,
+                                                    {
+                                                        current_item += 1;
+                                                        &mut current_item
+                                                    },
+                                                    self.lctx,
+                                                    self.font_arena,
+                                                    false,
+                                                )?;
+                                                remaining -= 1;
+                                                ShapedRubyAnnotation {
+                                                    style: annotation_style,
+                                                    inner: result,
+                                                }
+                                            } else {
+                                                ShapedRubyAnnotation {
+                                                    style: const { &ComputedStyle::DEFAULT },
+                                                    inner: InitialShapingResult {
+                                                        shaped: Vec::new(),
+                                                        break_opportunities: Vec::new(),
+                                                        styles: Vec::new(),
+                                                        bidi: unicode_bidi::BidiInfo::new("", None),
+                                                    },
+                                                }
+                                            };
 
-                                    result.push((base, annotation));
+                                            result.push((base, annotation));
+                                        }
+
+                                        result
+                                    },
+                                }),
+                            });
+
+                            if compute_break_opportunities {
+                                if content_index != 0 {
+                                    self.push_break_opportunity(content_index);
                                 }
-
-                                result
-                            },
-                        }),
-                    });
-
-                    if compute_break_opportunities {
-                        if content_index != 0 {
-                            push_break_opportunity(&mut break_opportunities, content_index);
+                                if content_index + 1 != self.run_text.len() {
+                                    self.push_break_opportunity(content_index + 1);
+                                }
+                            }
                         }
-                        if content_index + 1 != run_text.len() {
-                            push_break_opportunity(&mut break_opportunities, content_index + 1);
+                    },
+                    InlineItem::Text(text) => {
+                        let font_matcher =
+                            font_matcher_from_style(current_style, self.font_arena, self.lctx)?;
+
+                        match self.queued_text {
+                            Some(ref mut queued)
+                                if queued.matcher == font_matcher
+                                    && queued.range.end == text.content_range.start =>
+                            {
+                                queued.range.end = text.content_range.end
+                            }
+                            Some(queued) => {
+                                queued.flush(
+                                    self.run_text.clone(),
+                                    &self.bidi,
+                                    self.font_arena,
+                                    self.lctx,
+                                    &mut self.shaped,
+                                )?;
+                                self.queued_text = Some(QueuedText {
+                                    matcher: font_matcher,
+                                    range: text.content_range.clone(),
+                                });
+                            }
+                            None => {
+                                self.queued_text = Some(QueuedText {
+                                    matcher: font_matcher,
+                                    range: text.content_range.clone(),
+                                })
+                            }
+                        }
+
+                        styles.push((text.content_range.start, current_style));
+                        if compute_break_opportunities {
+                            self.compute_text_break_opportunities(
+                                text.content_range.clone(),
+                                current_style,
+                            );
                         }
                     }
                 }
-            },
-            InlineItem::Text(text) => {
-                let font_matcher = font_matcher_from_style(current_style, font_arena, lctx)?;
 
-                match current_text {
-                    Some(ref mut queued)
-                        if queued.matcher == font_matcher
-                            && queued.range.end == text.content_range.start =>
-                    {
-                        queued.range.end = text.content_range.end
-                    }
-                    Some(queued) => {
-                        queued.flush(run_text.clone(), &bidi, font_arena, lctx, &mut shaped)?;
-                        current_text = Some(QueuedText {
-                            matcher: font_matcher,
-                            range: text.content_range.clone(),
-                        });
-                    }
-                    None => {
-                        current_text = Some(QueuedText {
-                            matcher: font_matcher,
-                            range: text.content_range.clone(),
-                        })
-                    }
-                }
-
-                styles.push((text.content_range.start, current_style));
-                if compute_break_opportunities {
-                    compute_text_break_opportunities(
-                        &mut break_opportunities,
-                        text.content_range.clone(),
-                        current_style,
-                    );
+                while span_left == 0 {
+                    let popped = span_stack.pop().unwrap();
+                    current_style = popped.0;
+                    span_left = popped.1;
                 }
             }
-        }
+            *end_item_index = current_item;
 
-        while span_left == 0 {
-            let popped = span_stack.pop().unwrap();
-            current_style = popped.0;
-            span_left = popped.1;
+            if let Some(queued) = self.queued_text {
+                queued.flush(
+                    self.run_text.clone(),
+                    &self.bidi,
+                    self.font_arena,
+                    self.lctx,
+                    &mut self.shaped,
+                )?;
+            }
+
+            debug_assert!(if !compute_break_opportunities {
+                self.break_opportunities.is_empty()
+            } else {
+                true
+            });
+
+            Ok(InitialShapingResult {
+                shaped: self.shaped,
+                break_opportunities: self.break_opportunities,
+                styles,
+                bidi: self.bidi,
+            })
         }
     }
-    *end_item_index = current_item;
 
-    if let Some(queued) = current_text {
-        queued.flush(run_text.clone(), &bidi, font_arena, lctx, &mut shaped)?;
+    let run_text = &content.text_runs[run_index];
+    ShapedItemBuilder {
+        content,
+        run_text,
+        bidi: unicode_bidi::BidiInfo::new(run_text, None),
+        grapheme_cluster_boundaries: {
+            let mut result: Vec<usize> = GraphemeClusterSegmenter::new()
+                .segment_str(run_text)
+                .collect();
+            // The segmenter always inserts `text.len()` as a grapheme cluster boundary
+            // but we want this list to only include the start indices of graphemes.
+            result.pop();
+            result
+        },
+        lctx,
+        font_arena,
+
+        break_opportunities: Vec::new(),
+        queued_text: None,
+        shaped: Vec::new(),
     }
-
-    debug_assert!(if !compute_break_opportunities {
-        break_opportunities.is_empty()
-    } else {
-        true
-    });
-
-    Ok(InitialShapingResult {
-        shaped,
-        break_opportunities,
-        styles,
-        bidi,
-    })
+    .process_items(item_index, end_item_index, compute_break_opportunities)
 }
 
 struct BreakingContext<'f, 'l, 'a, 'b> {

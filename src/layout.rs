@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use util::{
     math::{BoolExt, I26Dot6, Point2, Rect2, Vec2},
     rc::Rc,
@@ -53,16 +55,14 @@ impl EdgeExtents {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct BoxFragmentationPart(u8);
 
 impl BoxFragmentationPart {
-    const HORIZONTAL_MIDDLE: Self = Self(0b00);
     const HORIZONTAL_FIRST: Self = Self(0b01);
     const HORIZONTAL_LAST: Self = Self(0b10);
     const HORIZONTAL_FULL: Self = Self(0b11);
 
-    const VERTICAL_MIDDLE: Self = Self(0);
     const VERTICAL_FIRST: Self = Self(0b01 << 2);
     const VERTICAL_LAST: Self = Self(0b10 << 2);
     const VERTICAL_FULL: Self = Self(0b11 << 2);
@@ -91,6 +91,35 @@ impl std::ops::BitOr for BoxFragmentationPart {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for BoxFragmentationPart {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl Debug for BoxFragmentationPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BoxFragmentationPart(")?;
+        let mut first = true;
+        for (bit, name) in [
+            (Self::VERTICAL_FIRST, "VERTICAL_FIRST"),
+            (Self::VERTICAL_LAST, "VERTICAL_LAST"),
+            (Self::HORIZONTAL_FIRST, "HORIZONTAL_FIRST"),
+            (Self::HORIZONTAL_LAST, "HORIZONTAL_LAST"),
+        ] {
+            if self.0 & bit.0 != 0 {
+                if !first {
+                    write!(f, " | ")?;
+                } else {
+                    first = false;
+                }
+                write!(f, "{name}")?
+            }
+        }
+        write!(f, ")")
     }
 }
 

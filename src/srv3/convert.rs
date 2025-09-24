@@ -336,18 +336,20 @@ fn segments_to_inline(
             })
             .peekable();
 
+        let mut root = root.push_span({
+            let mut style = it
+                .peek()
+                .map_or(ComputedStyle::DEFAULT, |s| s.compute_style(sctx));
+            *style.make_padding_top_mut() = Length::from_pixels(FixedL::new(8));
+            *style.make_padding_left_mut() = Length::from_pixels(FixedL::new(8));
+            *style.make_padding_right_mut() = Length::from_pixels(FixedL::new(8));
+            *style.make_padding_bottom_mut() = Length::from_pixels(FixedL::new(8));
+            *style.make_background_color_mut() = BGRA8::new(255, 0, 0, 255);
+            style
+        });
+
         while let Some(segment) = it.next() {
             let mut style = segment.compute_style(sctx);
-
-            let mut root = root.push_span({
-                let mut style = style.create_derived();
-                *style.make_padding_top_mut() = Length::from_pixels(FixedL::new(8));
-                *style.make_padding_left_mut() = Length::from_pixels(FixedL::new(8));
-                *style.make_padding_right_mut() = Length::from_pixels(FixedL::new(8));
-                *style.make_padding_bottom_mut() = Length::from_pixels(FixedL::new(8));
-                *style.make_background_color_mut() = BGRA8::new(255, 0, 0, 255);
-                style
-            });
 
             if first {
                 *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);

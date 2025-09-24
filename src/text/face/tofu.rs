@@ -292,6 +292,10 @@ impl FontImpl for Font {
         self.shared().point_size
     }
 
+    fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
+        I26Dot6::ONE
+    }
+
     fn size_cache_key(&self) -> FontSizeCacheKey {
         FontSizeCacheKey::new(
             self.point_size(),

@@ -111,13 +111,16 @@ impl<'f> Glyph<'f> {
         original_cluster: usize,
         font: &'f Font,
     ) -> Self {
+        // Fix up incorrect metrics for scaled bitmap glyphs which HarfBuzz sees as unscaled.
+        let scale = font.harfbuzz_scale_factor_for(info.codepoint);
+
         Self {
             index: info.codepoint,
             cluster: original_cluster,
-            x_advance: I26Dot6::from_raw(position.x_advance),
-            y_advance: I26Dot6::from_raw(position.y_advance),
-            x_offset: I26Dot6::from_raw(position.x_offset),
-            y_offset: I26Dot6::from_raw(position.y_offset),
+            x_advance: I26Dot6::from_raw(position.x_advance) * scale,
+            y_advance: I26Dot6::from_raw(position.y_advance) * scale,
+            x_offset: I26Dot6::from_raw(position.x_offset) * scale,
+            y_offset: I26Dot6::from_raw(position.y_offset) * scale,
             font,
             flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }

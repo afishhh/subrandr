@@ -666,6 +666,19 @@ impl FontImpl for Font {
         self.size.point_size
     }
 
+    // FIXME: This is not really correct since it should also scale bitmaps in scalable
+    //        fonts but doing that with FreeType is a pain. Since fonts rarely mix
+    //        outlines and bitmaps let's just ignore that for now.
+    fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
+        let is_scalable =
+            unsafe { (*self.ft_face).face_flags & (FT_FACE_FLAG_SCALABLE as FT_Long) != 0 };
+        if is_scalable {
+            I26Dot6::ONE
+        } else {
+            self.size.bitmap_scale
+        }
+    }
+
     fn size_cache_key(&self) -> FontSizeCacheKey {
         FontSizeCacheKey::new(
             self.point_size(),

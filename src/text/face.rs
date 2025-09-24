@@ -160,6 +160,10 @@ trait FontImpl: Sized {
 
     fn metrics(&self) -> &FontMetrics;
     fn point_size(&self) -> I26Dot6;
+    // Used to fix HarfBuzz metrics for scaled bitmap fonts which HarfBuzz sees in
+    // their unscaled form. It would be ideal to instead handle this in
+    // the font funcs but that's non-trivial so this works.
+    fn harfbuzz_scale_factor_for(&self, glyph: u32) -> I26Dot6;
 
     fn size_cache_key(&self) -> FontSizeCacheKey;
 
@@ -267,6 +271,7 @@ impl Font {
         fn size_cache_key[&]() -> FontSizeCacheKey;
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
+        pub fn harfbuzz_scale_factor_for[&](glyph: u32) -> I26Dot6;
     );
 
     fn face(&self) -> Face {

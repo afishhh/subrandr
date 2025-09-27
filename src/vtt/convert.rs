@@ -384,8 +384,7 @@ fn convert_node(
 ) {
     match node {
         vtt::Node::Internal(internal) => {
-            // FIXME: This being `.clone()` instead of `.create_derived()` is kind of a hack.
-            let mut style = parent_style.clone();
+            let mut style = parent_style.create_derived();
             match internal.kind {
                 vtt::InternalNodeKind::Italic => {
                     *style.make_font_slant_mut() = FontSlant::Italic;
@@ -491,10 +490,9 @@ impl Element {
             ElementKind::Ruby => {
                 let mut builder = span_builder.push_ruby(style.clone());
                 let annotation_font_size = font_size / 2;
-                // FIXME: Same as in `convert_node()`.
-                let base_style = style.clone();
+                let base_style = style.create_derived();
                 let annotation_style = {
-                    let mut result = style.clone();
+                    let mut result = style.create_derived();
                     *result.make_font_size_mut() = annotation_font_size;
                     result
                 };

@@ -377,6 +377,20 @@ impl<N: Copy + Into<f32>> Rect2<N> {
     }
 }
 
+pub trait BoolExt {
+    fn then_or_zero<N: Number>(self, fun: impl FnOnce() -> N) -> N;
+}
+
+impl BoolExt for bool {
+    fn then_or_zero<N: Number>(self, fun: impl FnOnce() -> N) -> N {
+        if self {
+            fun()
+        } else {
+            N::ZERO
+        }
+    }
+}
+
 pub fn fast_divide_by_sqrt<O, T>(numerator: T, squared_denominator: f32) -> O
 where
     T: Div<f32, Output = O> + Mul<f32, Output = O>,

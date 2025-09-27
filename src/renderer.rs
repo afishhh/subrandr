@@ -321,7 +321,7 @@ impl FrameRenderPass<'_, '_> {
         if background.a != 0 {
             self.rasterizer.fill_axis_aligned_rect(
                 target,
-                Rect2::to_float(Rect2::from_min_size(pos, fragment_box.size)),
+                Rect2::to_float(fragment_box.padding_box().translate(pos.to_vec())),
                 background,
             );
         }
@@ -334,22 +334,28 @@ impl FrameRenderPass<'_, '_> {
         fragment: &InlineItemFragment,
     ) {
         match fragment {
-            InlineItemFragment::Text(text) => {
-                self.draw_background(target, pos, &text.style, &text.fbox);
+            InlineItemFragment::Span(span) => {
+                self.draw_background(target, pos, &span.style, &span.fbox);
+
+                for &(offset, ref child) in &span.content {
+                    let child_pos = pos + span.fbox.content_offset() + offset;
+                    self.draw_inline_item_fragment_background(target, child_pos, child);
+                }
             }
+            InlineItemFragment::Text(_) => {}
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + base_offset;
+                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
                     self.draw_background(target, base_pos, &base.style, &base.fbox);
                     for &(base_item_offset, ref base_item) in &base.children {
                         self.draw_inline_item_fragment_background(
                             target,
-                            base_pos + base_item_offset,
+                            base_pos + base.fbox.content_offset() + base_item_offset,
                             base_item,
                         );
                     }
 
-                    let annotation_pos = pos + annotation_offset;
+                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
                     self.draw_background(
                         target,
                         annotation_pos,
@@ -359,7 +365,9 @@ impl FrameRenderPass<'_, '_> {
                     for &(annotation_item_offset, ref annotation_item) in &annotation.children {
                         self.draw_inline_item_fragment_background(
                             target,
-                            annotation_pos + annotation_item_offset,
+                            annotation_pos
+                                + annotation.fbox.content_offset()
+                                + annotation_item_offset,
                             annotation_item,
                         );
                     }
@@ -373,58 +381,15 @@ impl FrameRenderPass<'_, '_> {
         target: &mut RenderTarget,
         pos: Point2L,
         fragment: &InlineItemFragment,
-        sbr: &Subrandr,
-        debug_font_size: I26Dot6,
     ) -> Result<(), RenderError> {
         match fragment {
-            InlineItemFragment::Text(text) => {
-                if sbr.debug.draw_layout_info {
-                    let final_logical_box = Rect2::from_min_size(pos, text.fbox.size);
-
-                    self.debug_text(
-                        target,
-                        final_logical_box.min,
-                        &format!("{:.0},{:.0}", pos.x, pos.y),
-                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom),
-                        debug_font_size,
-                        BGRA8::RED,
-                    )?;
-
-                    self.debug_text(
-                        target,
-                        Point2L::new(final_logical_box.min.x, final_logical_box.max.y),
-                        &format!("{:.1}", pos.x + text.baseline_offset.x),
-                        Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                        debug_font_size,
-                        BGRA8::RED,
-                    )?;
-
-                    self.debug_text(
-                        target,
-                        Point2L::new(final_logical_box.max.x, final_logical_box.min.y),
-                        &format!("{:.0}pt", text.style.font_size()),
-                        Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom),
-                        debug_font_size,
-                        BGRA8::GOLD,
-                    )?;
-
-                    let final_logical_boxf = Rect2::to_float(final_logical_box);
-
-                    self.rasterizer.stroke_axis_aligned_rect(
-                        target,
-                        final_logical_boxf,
-                        BGRA8::BLUE,
-                    );
-
-                    self.rasterizer.horizontal_line(
-                        target,
-                        (pos.y + text.baseline_offset.y).into_f32(),
-                        final_logical_boxf.min.x,
-                        final_logical_boxf.max.x,
-                        BGRA8::GREEN,
-                    );
+            InlineItemFragment::Span(span) => {
+                for &(offset, ref child) in &span.content {
+                    let child_pos = pos + span.fbox.content_offset() + offset;
+                    self.draw_inline_item_fragment_content(target, child_pos, child)?;
                 }
-
+            }
+            InlineItemFragment::Text(text) => {
                 self.draw_text_full(
                     target,
                     pos.x + text.baseline_offset.x,
@@ -437,25 +402,23 @@ impl FrameRenderPass<'_, '_> {
             }
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + base_offset;
+                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
                     for &(base_item_offset, ref base_item) in &base.children {
                         self.draw_inline_item_fragment_content(
                             target,
-                            base_pos + base_item_offset,
+                            base_pos + base.fbox.content_offset() + base_item_offset,
                             base_item,
-                            sbr,
-                            debug_font_size,
                         )?;
                     }
 
-                    let annotation_pos = pos + annotation_offset;
+                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
                     for &(annotation_item_offset, ref annotation_item) in &annotation.children {
                         self.draw_inline_item_fragment_content(
                             target,
-                            annotation_pos + annotation_item_offset,
+                            annotation_pos
+                                + annotation.fbox.content_offset()
+                                + annotation_item_offset,
                             annotation_item,
-                            sbr,
-                            debug_font_size,
                         )?;
                     }
                 }
@@ -972,7 +935,7 @@ impl Renderer<'_> {
             self.perf.end_debug_raster();
 
             for &(pos, ref fragment) in &fragments {
-                let final_total_rect = Rect2::from_min_size(pos, fragment.fbox.size);
+                let final_total_rect = fragment.fbox.margin_box().translate(pos.to_vec());
 
                 if self.sbr.debug.draw_layout_info {
                     pass.rasterizer.stroke_axis_aligned_rect(
@@ -993,11 +956,11 @@ impl Renderer<'_> {
 
                 let total_position_debug_pos = match VerticalAlignment::Top {
                     VerticalAlignment::Top => (
-                        fragment.fbox.size.y + 20,
+                        final_total_rect.max.y + 20,
                         Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
                     ),
                     VerticalAlignment::Center => (
-                        fragment.fbox.size.y + 20,
+                        final_total_rect.max.y + 20,
                         Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
                     ),
                     VerticalAlignment::Bottom => (
@@ -1011,7 +974,7 @@ impl Renderer<'_> {
                         target,
                         Point2L::new(
                             final_total_rect.min.x + final_total_rect.width() / 2,
-                            final_total_rect.min.y + total_position_debug_pos.0,
+                            total_position_debug_pos.0,
                         ),
                         &format!(
                             "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
@@ -1049,13 +1012,7 @@ impl Renderer<'_> {
                         for &(offset, ref item) in &line.children {
                             let current = current + offset;
 
-                            pass.draw_inline_item_fragment_content(
-                                target,
-                                current,
-                                item,
-                                self.sbr,
-                                debug_font_size,
-                            )?;
+                            pass.draw_inline_item_fragment_content(target, current, item)?;
                         }
                     }
                 }

@@ -38,6 +38,10 @@ macros::implement_style_module! {
     rc uninherited {
         #[inherit(no)] background_color: BGRA8 = BGRA8::ZERO,
         #[inherit(no)] text_decoration: TextDecorations = TextDecorations::NONE,
+        #[inherit(no)] padding_top: Length = Length::ZERO,
+        #[inherit(no)] padding_left: Length = Length::ZERO,
+        #[inherit(no)] padding_right: Length = Length::ZERO,
+        #[inherit(no)] padding_bottom: Length = Length::ZERO,
     }
 
     rc misc {

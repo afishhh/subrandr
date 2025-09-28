@@ -13,9 +13,9 @@ use crate::{
         self, inline::InlineContentBuilder, FixedL, InlineLayoutError, LayoutConstraints, Point2L,
         Vec2L,
     },
-    log::{log_once_state, warning},
+    log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
-    srv3::RubyPosition,
+    srv3::{Event, RubyPosition},
     style::{
         computed::{
             Alignment, FontSlant, HorizontalAlignment, Length, Ruby, TextShadow, VerticalAlignment,
@@ -275,11 +275,11 @@ struct Window {
     //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
     alignment: Alignment,
-    events: Vec<WindowEvent>,
+    lines: Vec<VisualLine>,
 }
 
 #[derive(Debug)]
-struct WindowEvent {
+struct VisualLine {
     range: Range<u32>,
     segments: Vec<Segment>,
 }
@@ -379,7 +379,7 @@ impl Window {
     ) -> Result<Option<(Point2L, layout::inline::InlineContentFragment)>, layout::InlineLayoutError>
     {
         let mut content = InlineContentBuilder::new();
-        for line in &self.events {
+        for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
                 if !content.is_empty() {
                     content.root().push_text("\n");
@@ -450,12 +450,17 @@ fn pen_to_size_independent_styles(
     base
 }
 
-fn convert_segment(segment: &super::Segment, ruby: Ruby, base_style: &ComputedStyle) -> Segment {
+fn convert_segment(
+    segment: &super::Segment,
+    text: &str,
+    ruby: Ruby,
+    base_style: &ComputedStyle,
+) -> Segment {
     Segment {
         base_style: pen_to_size_independent_styles(segment.pen(), false, base_style.clone()),
         font_size: segment.pen().font_size,
         time_offset: segment.time_offset,
-        text: segment.text.as_str().into(),
+        text: text.into(),
         shadow: Srv3TextShadow {
             kind: segment.pen().edge_type,
             color: BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000),
@@ -464,39 +469,21 @@ fn convert_segment(segment: &super::Segment, ruby: Ruby, base_style: &ComputedSt
     }
 }
 
-pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
-    let base_style = pen_to_size_independent_styles(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);
-    let mut result = Subtitles {
-        windows: Vec::new(),
-    };
+struct WindowBuilder<'a> {
+    sbr: &'a Subrandr,
+    base_style: ComputedStyle,
+    logset: LogOnceSet,
+}
 
-    log_once_state!(ruby_under_unsupported);
+impl WindowBuilder<'_> {
+    fn extend_lines(&mut self, window: &mut Window, event: &Event) {
+        let event_range = event.time..event.time + event.duration;
+        let mut current_line = VisualLine {
+            range: event_range.clone(),
+            segments: Vec::new(),
+        };
 
-    let mut wname_to_index = HashMap::new();
-    for (name, window) in document.windows() {
-        wname_to_index.insert(&**name, result.windows.len());
-        result.windows.push(Window {
-            x: convert_coordinate(window.position().x as f32),
-            y: convert_coordinate(window.position().y as f32),
-            range: window.time..window.time + window.duration,
-            alignment: window.position().point.to_alignment(),
-            events: Vec::new(),
-        });
-    }
-
-    for event in document.events() {
-        // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
-        // Don't know what the exact rule is but this at least fixes auto-generated subs.
-        if event.segments.iter().all(|segment| {
-            segment
-                .text
-                .bytes()
-                .all(|byte| matches!(byte, b'\r' | b'\n'))
-        }) {
-            continue;
-        }
-
-        let mut segments = vec![];
+        log_once_state!(in &self.logset; ruby_under_unsupported);
 
         let mut it = event.segments.iter();
         'segment_loop: while let Some(segment) = it.next() {
@@ -515,7 +502,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                         RubyPosition::Over => Ruby::Over,
                         RubyPosition::Under => {
                             warning!(
-                                sbr,
+                                self.sbr,
                                 once(ruby_under_unsupported),
                                 "`ruby-position: under`-style ruby text is not supported yet"
                             );
@@ -523,16 +510,88 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
                         }
                     };
 
-                    segments.push(convert_segment(segment, Ruby::Base, &base_style));
+                    current_line.segments.push(convert_segment(
+                        segment,
+                        &segment.text,
+                        Ruby::Base,
+                        &self.base_style,
+                    ));
                     _ = it.next().unwrap();
-                    segments.push(convert_segment(it.next().unwrap(), ruby, &base_style));
+                    let next = it.next().unwrap();
+                    current_line.segments.push(convert_segment(
+                        next,
+                        &next.text,
+                        ruby,
+                        &self.base_style,
+                    ));
                     _ = it.next().unwrap();
 
                     continue 'segment_loop;
                 }
             }
 
-            segments.push(convert_segment(segment, Ruby::None, &base_style));
+            let mut last = 0;
+            loop {
+                let end = segment.text[last..]
+                    .find('\n')
+                    .map_or(segment.text.len(), |i| last + i);
+
+                current_line.segments.push(convert_segment(
+                    segment,
+                    &segment.text[last..end],
+                    Ruby::None,
+                    &self.base_style,
+                ));
+
+                if end == segment.text.len() {
+                    break;
+                }
+
+                window.lines.push(current_line);
+                current_line = VisualLine {
+                    range: event_range.clone(),
+                    segments: Vec::new(),
+                };
+                last = end + 1;
+            }
+        }
+
+        window.lines.push(current_line);
+    }
+}
+
+pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
+    let mut result = Subtitles {
+        windows: Vec::new(),
+    };
+    let mut window_builder = WindowBuilder {
+        sbr,
+        base_style: pen_to_size_independent_styles(&Pen::DEFAULT, true, ComputedStyle::DEFAULT),
+        logset: LogOnceSet::new(),
+    };
+
+    let mut wname_to_index = HashMap::new();
+    for (name, window) in document.windows() {
+        wname_to_index.insert(&**name, result.windows.len());
+        result.windows.push(Window {
+            x: convert_coordinate(window.position().x as f32),
+            y: convert_coordinate(window.position().y as f32),
+            range: window.time..window.time + window.duration,
+            alignment: window.position().point.to_alignment(),
+            lines: Vec::new(),
+        });
+    }
+
+    for event in document.events() {
+        // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
+        // Don't know what the exact rule is but this at least fixes auto-generated subs.
+        if event.segments.iter().all(|segment| {
+            segment
+                .text
+                .bytes()
+                .all(|byte| matches!(byte, b'\r' | b'\n'))
+        }) {
+            continue;
         }
 
         if let Some(&widx) = event
@@ -540,22 +599,17 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
             .as_ref()
             .and_then(|wname| wname_to_index.get(&**wname))
         {
-            let window = &mut result.windows[widx];
-            window.events.push(WindowEvent {
-                range: event.time..event.time + event.duration,
-                segments,
-            });
+            window_builder.extend_lines(&mut result.windows[widx], event);
         } else {
-            result.windows.push(Window {
+            let mut window = Window {
                 x: convert_coordinate(event.position().x as f32),
                 y: convert_coordinate(event.position().y as f32),
                 range: event.time..event.time + event.duration,
                 alignment: event.position().point.to_alignment(),
-                events: vec![WindowEvent {
-                    range: event.time..event.time + event.duration,
-                    segments,
-                }],
-            });
+                lines: Vec::new(),
+            };
+            window_builder.extend_lines(&mut window, event);
+            result.windows.push(window);
         }
     }
 

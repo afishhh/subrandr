@@ -29,6 +29,18 @@ enum Task {
 struct BuildCommand {
     #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
     target: Triple,
+    #[clap(
+        long = "shared-library",
+        action = clap::ArgAction::Set,
+        default_value = "true"
+    )]
+    shared_library: bool,
+    #[clap(
+        long = "static-library",
+        action = clap::ArgAction::Set,
+        default_value = "false"
+    )]
+    static_library: bool,
     /// Arguments passed through to `cargo rustc`.
     cargo_rustc_args: Vec<OsString>,
 }
@@ -49,18 +61,6 @@ struct InstallCommand {
     includedir: PathBuf,
     #[clap(long = "pkgconfigdir")]
     pkgconfigdir: Option<PathBuf>,
-    #[clap(
-        long = "shared-library",
-        action = clap::ArgAction::Set,
-        default_value = "true"
-    )]
-    shared_library: bool,
-    #[clap(
-        long = "static-library",
-        action = clap::ArgAction::Set,
-        default_value = "false"
-    )]
-    static_library: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -306,12 +306,30 @@ struct CApiMetadata {
 }
 
 fn build_library(manifest_dir: &Path, build: &BuildCommand, quiet: bool) -> Result<()> {
+    if !build.shared_library && !build.static_library {
+        return Ok(());
+    }
+
     let status = Command::new(env!("CARGO"))
         .arg("rustc")
         .arg("--manifest-path")
         .arg(manifest_dir.join("Cargo.toml"))
         .arg("--target")
         .arg(build.target.to_string())
+        .arg("--crate-type")
+        .arg({
+            let mut types = String::new();
+            if build.shared_library {
+                types.push_str("cdylib")
+            }
+            if build.static_library {
+                if !types.is_empty() {
+                    types.push(',');
+                }
+                types.push_str("staticlib");
+            }
+            types
+        })
         .arg("--release")
         .arg("-p")
         .arg("subrandr")
@@ -420,7 +438,7 @@ fn main() -> Result<()> {
                 .join(install.build.target.to_string())
                 .join("release");
 
-            if install.static_library {
+            if install.build.static_library {
                 if !args.quiet {
                     statusln!("Installing", "libsubrandr.a to `{}`", libdir.display());
                 }
@@ -447,7 +465,7 @@ fn main() -> Result<()> {
                 )
             };
 
-            if install.shared_library {
+            if install.build.shared_library {
                 let full_shared_dir = destdir.join(shared_dir);
                 if !args.quiet {
                     statusln!(
@@ -499,7 +517,7 @@ fn main() -> Result<()> {
                     &install.build.target,
                     &install.libdir,
                     &install.includedir,
-                    install.static_library,
+                    install.build.static_library,
                 )?,
             )
             .context("Failed to write pkgconfig file")?;

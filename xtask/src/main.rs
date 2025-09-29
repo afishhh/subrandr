@@ -29,8 +29,8 @@ enum Task {
 struct BuildCommand {
     #[clap(short = 't', long = "target", default_value = env!("TARGET"))]
     target: Triple,
-    /// Arguments passed through to `cargo build`.
-    cargo_args: Vec<OsString>,
+    /// Arguments passed through to `cargo rustc`.
+    cargo_rustc_args: Vec<OsString>,
 }
 
 #[derive(Parser)]
@@ -307,7 +307,7 @@ struct CApiMetadata {
 
 fn build_library(manifest_dir: &Path, build: &BuildCommand, quiet: bool) -> Result<()> {
     let status = Command::new(env!("CARGO"))
-        .arg("build")
+        .arg("rustc")
         .arg("--manifest-path")
         .arg(manifest_dir.join("Cargo.toml"))
         .arg("--target")
@@ -316,7 +316,7 @@ fn build_library(manifest_dir: &Path, build: &BuildCommand, quiet: bool) -> Resu
         .arg("-p")
         .arg("subrandr")
         .args(if quiet { &["--quiet"][..] } else { &[][..] })
-        .args(&build.cargo_args)
+        .args(&build.cargo_rustc_args)
         .status()
         .context("Failed to run `cargo build`")?;
 

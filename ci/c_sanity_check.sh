@@ -8,7 +8,7 @@ if [[ -n "${CROSS_TARGET:-}" ]]; then
 fi
 
 cd ci
-cargo xtask install --prefix pfx "${target_arg[@]}"
+cargo xtask install --prefix pfx "${target_arg[@]}" --static-library true
 mkdir -p pfx/bin
 # shellcheck disable=SC2086
 "${CC:-cc}" ${CFLAGS:-} -I pfx/include ./c_sanity_check.c -L pfx/lib -lsubrandr -o pfx/bin/sanity_check.exe

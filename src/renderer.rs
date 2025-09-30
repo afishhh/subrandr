@@ -9,8 +9,9 @@ use util::{
 
 use crate::{
     layout::{
-        self, inline::InlineItemFragment, BlockContainerFragment, FixedL, FragmentBox,
-        LayoutContext, Point2L, Vec2L,
+        self,
+        inline::{InlineContentFragment, InlineItemFragment},
+        FixedL, FragmentBox, LayoutContext, Point2L, Vec2L,
     },
     log::{info, trace},
     srv3,
@@ -82,7 +83,7 @@ pub(crate) struct FrameLayoutPass<'s, 'frame> {
     pub lctx: &'frame mut LayoutContext<'frame, 's>,
     pub t: u32,
     unchanged_range: Range<u32>,
-    fragments: Vec<(Point2L, BlockContainerFragment)>,
+    fragments: Vec<(Point2L, InlineContentFragment)>,
 }
 
 impl FrameLayoutPass<'_, '_> {
@@ -112,7 +113,7 @@ impl FrameLayoutPass<'_, '_> {
         }
     }
 
-    pub fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
+    pub fn emit_fragment(&mut self, pos: Point2L, block: InlineContentFragment) {
         self.fragments.push((pos, block));
     }
 }
@@ -989,31 +990,23 @@ impl Renderer<'_> {
                     )?;
                 }
 
-                for &(offset, ref container) in &fragment.children {
+                for &(offset, ref line) in &fragment.lines {
                     let current = pos + offset;
 
-                    for &(offset, ref line) in &container.lines {
+                    for &(offset, ref item) in &line.children {
                         let current = current + offset;
 
-                        for &(offset, ref item) in &line.children {
-                            let current = current + offset;
-
-                            pass.draw_inline_item_fragment_background(target, current, item);
-                        }
+                        pass.draw_inline_item_fragment_background(target, current, item);
                     }
                 }
 
-                for &(offset, ref container) in &fragment.children {
+                for &(offset, ref line) in &fragment.lines {
                     let current = pos + offset;
 
-                    for &(offset, ref line) in &container.lines {
+                    for &(offset, ref item) in &line.children {
                         let current = current + offset;
 
-                        for &(offset, ref item) in &line.children {
-                            let current = current + offset;
-
-                            pass.draw_inline_item_fragment_content(target, current, item)?;
-                        }
+                        pass.draw_inline_item_fragment_content(target, current, item)?;
                     }
                 }
             }

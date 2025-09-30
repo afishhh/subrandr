@@ -10,8 +10,8 @@ use util::{
 use crate::{
     layout::{
         self,
-        inline::{InlineContentBuilder, InlineSpanBuilder, LineBoxFragment},
-        BlockContainer, BlockContainerFragment, FixedL, InlineLayoutError, Point2L, Vec2L,
+        inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
+        FixedL, InlineLayoutError, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
@@ -115,31 +115,23 @@ impl Event {
         lctx: &mut layout::LayoutContext<'_, '_>,
         font_size: I26Dot6,
         output: &mut Vec<Rect2<FixedL>>,
-    ) -> Result<(Point2L, layout::BlockContainerFragment), layout::InlineLayoutError> {
-        let mut fragment = layout::layout(
+    ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
+        let mut fragment = layout::inline::layout(
             lctx,
-            layout::LayoutConstraints {
+            &layout::LayoutConstraints {
                 size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
             },
-            &BlockContainer {
-                style: {
-                    let mut result = ComputedStyle::DEFAULT;
-                    *result.make_text_align_mut() = self.horizontal_alignment;
-                    result
-                },
-                contents: {
-                    let mut builder = InlineContentBuilder::new();
-                    self.root.append_to(&mut builder.root(), font_size);
-                    vec![builder.finish()]
-                },
+            &{
+                let mut builder = InlineContentBuilder::new();
+                self.root.append_to(&mut builder.root(), font_size);
+                builder.finish()
             },
+            self.horizontal_alignment,
         )?;
 
-        let container = Rc::make_mut(&mut fragment.children[0].1);
-
-        let lines = &mut container.lines;
+        let lines = &mut fragment.lines;
         if lines.is_empty() {
-            return Ok((Point2L::ZERO, BlockContainerFragment::EMPTY));
+            return Ok((Point2L::ZERO, InlineContentFragment::EMPTY));
         }
 
         let mut result = Point2L::new(
@@ -180,7 +172,7 @@ impl Event {
             sctx,
             &mut result,
             lines,
-            Rect2::from_min_size(Point2L::ZERO, container.fbox.size_for_layout()),
+            Rect2::from_min_size(Point2L::ZERO, fragment.fbox.size_for_layout()),
             self,
         );
 

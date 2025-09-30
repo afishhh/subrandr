@@ -53,6 +53,10 @@ impl InlineContentBuilder {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
     pub fn root(&mut self) -> InlineSpanBuilder<'_> {
         if self.text_runs.is_empty() {
             self.text_runs.push(String::new());
@@ -287,7 +291,7 @@ pub struct InlineContentFragment {
 }
 
 impl InlineContentFragment {
-    const EMPTY: Self = Self {
+    pub const EMPTY: Self = Self {
         fbox: FragmentBox::ZERO,
         lines: Vec::new(),
     };
@@ -1966,8 +1970,8 @@ fn layout_run_full(
 
 pub fn layout<'l, 'a, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l, 'a>,
-    content: &'c InlineContent,
     constraints: &LayoutConstraints,
+    content: &'c InlineContent,
     align: HorizontalAlignment,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     layout_run_full(

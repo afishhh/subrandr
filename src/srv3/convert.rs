@@ -10,9 +10,8 @@ use util::{
 
 use crate::{
     layout::{
-        self,
-        inline::{InlineContent, InlineContentBuilder},
-        BlockContainer, FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
+        self, inline::InlineContentBuilder, FixedL, InlineLayoutError, LayoutConstraints, Point2L,
+        Vec2L,
     },
     log::{log_once_state, warning},
     renderer::FrameLayoutPass,
@@ -320,104 +319,86 @@ impl Segment {
 
 fn segments_to_inline(
     pass: &mut FrameLayoutPass,
+    content: &mut InlineContentBuilder,
     event_time: u32,
     segments: &[Segment],
-) -> InlineContent {
-    let mut builder = InlineContentBuilder::new();
-    {
-        // What lack of Peekable::inner() and Filter::inner() does to a language...
-        let mut next_idx = 0;
-        let sctx = pass.sctx;
-        let mut root = builder.root();
-        let mut it = segments
-            .iter()
-            .filter(|segment| {
-                pass.add_animation_point(event_time + segment.time_offset);
-                segment.time_offset <= pass.t - event_time
-            })
-            .peekable();
+) {
+    // What lack of Peekable::inner() and Filter::inner() does to a language...
+    let mut next_idx = 0;
+    let sctx = pass.sctx;
+    let mut root = content.root();
+    let mut it = segments
+        .iter()
+        .filter(|segment| {
+            pass.add_animation_point(event_time + segment.time_offset);
+            segment.time_offset <= pass.t - event_time
+        })
+        .peekable();
 
-        while let Some(segment) = it.next() {
-            let mut style = segment.compute_style(sctx);
+    while let Some(segment) = it.next() {
+        let mut style = segment.compute_style(sctx);
 
-            if next_idx == 0 {
-                *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+        if next_idx == 0 {
+            *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+        }
+        next_idx += 1;
+        // NOTE: This purposefully ignores whether or not the next segment is
+        //       currently visible as that is what YouTube seems to do.
+        if segments.get(next_idx).is_none() {
+            *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
+        }
+
+        match segment.ruby {
+            Ruby::None => {
+                root.push_span(style).push_text(&segment.text);
             }
-            next_idx += 1;
-            // NOTE: This purposefully ignores whether or not the next segment is
-            //       currently visible as that is what YouTube seems to do.
-            if segments.get(next_idx).is_none() {
-                *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
-            }
-
-            match segment.ruby {
-                Ruby::None => {
-                    root.push_span(style).push_text(&segment.text);
-                }
-                Ruby::Base => {
-                    let mut ruby = root.push_ruby(style.create_derived());
-                    ruby.push_base(style.clone()).push_text(&segment.text);
-                    if let Some(next) = it.peek() {
-                        if let Ruby::Over = next.ruby {
-                            ruby.push_annotation(next.compute_style(sctx))
-                                .push_text(&next.text);
-                            _ = it.next();
-                        }
+            Ruby::Base => {
+                let mut ruby = root.push_ruby(style.create_derived());
+                ruby.push_base(style.clone()).push_text(&segment.text);
+                if let Some(next) = it.peek() {
+                    if let Ruby::Over = next.ruby {
+                        ruby.push_annotation(next.compute_style(sctx))
+                            .push_text(&next.text);
+                        _ = it.next();
                     }
                 }
-                Ruby::Over => {
-                    root.push_ruby(style.clone())
-                        .push_annotation(style)
-                        .push_text(&segment.text);
-                }
+            }
+            Ruby::Over => {
+                root.push_ruby(style.clone())
+                    .push_annotation(style)
+                    .push_text(&segment.text);
             }
         }
     }
-
-    builder.finish()
 }
 
 impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
-    ) -> Result<Option<(Point2L, layout::BlockContainerFragment)>, layout::InlineLayoutError> {
-        let block_style = {
-            let mut result = ComputedStyle::DEFAULT;
-
-            if self.alignment.0 != HorizontalAlignment::Left {
-                *result.make_text_align_mut() = self.alignment.0;
-            }
-
-            result
-        };
-
-        let contents: Vec<InlineContent> = self
-            .events
-            .iter()
-            .filter_map(|line| {
-                if pass.add_event_range(line.range.clone()) {
-                    Some(segments_to_inline(pass, line.range.start, &line.segments))
-                } else {
-                    None
+    ) -> Result<Option<(Point2L, layout::inline::InlineContentFragment)>, layout::InlineLayoutError>
+    {
+        let mut content = InlineContentBuilder::new();
+        for line in &self.events {
+            if pass.add_event_range(line.range.clone()) {
+                if !content.is_empty() {
+                    content.root().push_text("\n");
                 }
-            })
-            .collect();
 
-        if contents.is_empty() {
-            return Ok(None);
+                segments_to_inline(pass, &mut content, line.range.start, &line.segments)
+            }
         }
 
-        let block = BlockContainer {
-            style: block_style,
-            contents,
-        };
+        if content.is_empty() {
+            return Ok(None);
+        }
 
         let constraints = LayoutConstraints {
             size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment = layout::layout(pass.lctx, constraints, &block)?;
+        let fragment =
+            layout::inline::layout(pass.lctx, &constraints, &content.finish(), self.alignment.0)?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),

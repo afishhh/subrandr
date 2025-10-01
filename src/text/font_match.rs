@@ -200,6 +200,10 @@ impl<'f> FontMatcher<'f> {
         self.size
     }
 
+    pub fn dpi(&self) -> u32 {
+        self.dpi
+    }
+
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
     pub fn primary(

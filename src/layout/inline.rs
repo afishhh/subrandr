@@ -99,6 +99,12 @@ impl<'a> InlineSpanBuilder<'a> {
     }
 
     pub fn push_text(&mut self, content: &str) {
+        // `shape_run_initial` assumes `QueuedText` will never end up with an empty range,
+        // so make sure we don't emit empty inline text items which could cause exactly that.
+        if content.is_empty() {
+            return;
+        }
+
         let text_run = &mut self.parent.text_runs[self.run_index];
         let start = text_run.len();
         text_run.push_str(content);

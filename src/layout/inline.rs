@@ -963,11 +963,7 @@ fn shape_run_initial<'a, 'f>(
                 )?;
             }
 
-            debug_assert!(if !compute_break_opportunities {
-                self.break_opportunities.is_empty()
-            } else {
-                true
-            });
+            debug_assert!(compute_break_opportunities || self.break_opportunities.is_empty());
 
             Ok(InitialShapingResult {
                 shaped: self.shaped,

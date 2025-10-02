@@ -259,9 +259,6 @@ impl FrameRenderPass<'_, '_> {
         let text_end_x = {
             let mut end_x = x;
 
-            // TODO: Should this somehow ignore trailing advance?
-            //       The issue with that is that it causes issues with cross-segment decorations
-            //       so it would have to take those into account.
             for glyph in glyphs.iter_glyphs() {
                 end_x += glyph.x_advance;
             }

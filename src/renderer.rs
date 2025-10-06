@@ -10,15 +10,13 @@ use util::{
 use crate::{
     layout::{
         self,
-        inline::{InlineContentFragment, InlineItemFragment},
+        inline::{InlineContentFragment, InlineItemFragment, SpanFragment},
         FixedL, FragmentBox, LayoutContext, Point2L, Vec2L,
     },
     log::{info, trace},
     srv3,
     style::{
-        computed::{
-            Alignment, HorizontalAlignment, TextDecorations, TextShadow, VerticalAlignment,
-        },
+        computed::{Alignment, HorizontalAlignment, TextShadow, VerticalAlignment},
         ComputedStyle,
     },
     text::{
@@ -125,6 +123,19 @@ pub struct FrameRenderPass<'s, 'frame> {
     rasterizer: &'frame mut dyn Rasterizer,
 }
 
+struct LineDecoration {
+    baseline_offset: FixedL,
+    thickness: FixedL,
+    color: BGRA8,
+    /// Used to determine paint order: https://drafts.csswg.org/css-text-decor/#painting-order.
+    kind: LineDecorationKind,
+}
+
+enum LineDecorationKind {
+    Underline,
+    LineThrough,
+}
+
 impl FrameRenderPass<'_, '_> {
     fn debug_text(
         &mut self,
@@ -194,6 +205,29 @@ impl FrameRenderPass<'_, '_> {
         Vec2L::new(ox, oy)
     }
 
+    fn draw_line_decoration(
+        &mut self,
+        target: &mut RenderTarget,
+        x0: FixedL,
+        x1: FixedL,
+        baseline_y: I26Dot6,
+        decoration: &LineDecoration,
+    ) {
+        let decoration_y = baseline_y + decoration.baseline_offset;
+
+        self.rasterizer.fill_axis_aligned_antialias_rect(
+            target,
+            Rect2::new(
+                Point2::new(x0.into_f32(), decoration_y.into_f32()),
+                Point2::new(
+                    x1.into_f32(),
+                    (decoration_y + decoration.thickness).into_f32(),
+                ),
+            ),
+            decoration.color,
+        );
+    }
+
     fn draw_text_full(
         &mut self,
         target: &mut RenderTarget,
@@ -201,7 +235,7 @@ impl FrameRenderPass<'_, '_> {
         y: I26Dot6,
         glyphs: &GlyphString<'_, std::rc::Rc<str>>,
         color: BGRA8,
-        decoration: &TextDecorations,
+        decorations: &[LineDecoration],
         shadows: &[TextShadow],
     ) -> Result<(), RenderError> {
         if glyphs.is_empty() {
@@ -266,6 +300,13 @@ impl FrameRenderPass<'_, '_> {
             end_x
         };
 
+        for decoration in decorations
+            .iter()
+            .filter(|x| matches!(x.kind, LineDecorationKind::Underline))
+        {
+            self.draw_line_decoration(target, x, text_end_x, y, decoration);
+        }
+
         if color.a > 0 {
             image.blit(
                 self.rasterizer,
@@ -276,32 +317,22 @@ impl FrameRenderPass<'_, '_> {
             );
         }
 
-        // FIXME: This should use the main font for the segment, not the font
-        //        of the first glyph..
-        let font_metrics = glyphs.iter_glyphs().next().unwrap().font.metrics();
+        for decoration in decorations
+            .iter()
+            .filter(|x| matches!(x.kind, LineDecorationKind::LineThrough))
+        {
+            let decoration_y = y + decoration.baseline_offset;
 
-        if decoration.underline {
-            let thickness = font_metrics.underline_thickness;
             self.rasterizer.fill_axis_aligned_antialias_rect(
                 target,
                 Rect2::new(
-                    Point2::new(x.into_f32(), y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (y + thickness).into_f32()),
+                    Point2::new(x.into_f32(), decoration_y.into_f32()),
+                    Point2::new(
+                        text_end_x.into_f32(),
+                        (decoration_y + decoration.thickness).into_f32(),
+                    ),
                 ),
-                decoration.underline_color,
-            );
-        }
-
-        if decoration.strike_out {
-            let strike_y = y + font_metrics.strikeout_top_offset;
-            let thickness = font_metrics.strikeout_thickness;
-            self.rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), strike_y.into_f32()),
-                    Point2::new(text_end_x.into_f32(), (strike_y + thickness).into_f32()),
-                ),
-                decoration.strike_out_color,
+                decoration.color,
             );
         }
 
@@ -379,12 +410,53 @@ impl FrameRenderPass<'_, '_> {
         target: &mut RenderTarget,
         pos: Point2L,
         fragment: &InlineItemFragment,
+        current_decorations: &mut Vec<LineDecoration>,
     ) -> Result<(), RenderError> {
+        let previous_decoration_count = current_decorations.len();
+        match fragment {
+            InlineItemFragment::Span(SpanFragment {
+                style,
+                primary_font,
+                ..
+            }) => {
+                let font_metrics = primary_font.metrics();
+                let decoration = style.text_decoration();
+
+                if decoration.underline {
+                    current_decorations.push(LineDecoration {
+                        baseline_offset: font_metrics.underline_top_offset,
+                        thickness: font_metrics.underline_thickness,
+                        color: decoration.underline_color,
+                        kind: LineDecorationKind::Underline,
+                    });
+                }
+
+                if decoration.line_through {
+                    current_decorations.push(LineDecoration {
+                        baseline_offset: font_metrics.strikeout_top_offset,
+                        thickness: font_metrics.strikeout_thickness,
+                        color: decoration.line_through_color,
+                        kind: LineDecorationKind::LineThrough,
+                    });
+                }
+            }
+            // TODO: Technically ruby containers can also have decorations but we don't make
+            //       use of that right now, and don't store font metrics in the fragment anyway.
+            //       Decorations on ruby bases and annotations probably have the same problem.
+            InlineItemFragment::Ruby(_) => (),
+            InlineItemFragment::Text(_) => (),
+        }
+
         match fragment {
             InlineItemFragment::Span(span) => {
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.draw_inline_item_fragment_content(target, child_pos, child)?;
+                    self.draw_inline_item_fragment_content(
+                        target,
+                        child_pos,
+                        child,
+                        current_decorations,
+                    )?;
                 }
             }
             InlineItemFragment::Text(text) => {
@@ -394,7 +466,7 @@ impl FrameRenderPass<'_, '_> {
                     (pos.y + text.baseline_offset.y).round(),
                     text.glyphs(),
                     text.style.color(),
-                    &text.style.text_decoration(),
+                    current_decorations,
                     text.style.text_shadows(),
                 )?;
             }
@@ -406,6 +478,7 @@ impl FrameRenderPass<'_, '_> {
                             target,
                             base_pos + base.fbox.content_offset() + base_item_offset,
                             base_item,
+                            current_decorations,
                         )?;
                     }
 
@@ -417,11 +490,14 @@ impl FrameRenderPass<'_, '_> {
                                 + annotation.fbox.content_offset()
                                 + annotation_item_offset,
                             annotation_item,
+                            &mut Vec::new(),
                         )?;
                     }
                 }
             }
         }
+
+        current_decorations.truncate(previous_decoration_count);
 
         Ok(())
     }
@@ -997,13 +1073,19 @@ impl Renderer<'_> {
                     }
                 }
 
+                let mut decoration_stack = Vec::new();
                 for &(offset, ref line) in &fragment.lines {
                     let current = pos + offset;
 
                     for &(offset, ref item) in &line.children {
                         let current = current + offset;
 
-                        pass.draw_inline_item_fragment_content(target, current, item)?;
+                        pass.draw_inline_item_fragment_content(
+                            target,
+                            current,
+                            item,
+                            &mut decoration_stack,
+                        )?;
                     }
                 }
             }

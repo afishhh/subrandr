@@ -388,8 +388,8 @@ fn convert_node(
                     *style.make_text_decoration_mut() = TextDecorations {
                         underline: true,
                         underline_color: style.color(),
-                        strike_out: false,
-                        strike_out_color: BGRA8::ZERO,
+                        line_through: false,
+                        line_through_color: BGRA8::ZERO,
                     };
                 }
                 _ => (),

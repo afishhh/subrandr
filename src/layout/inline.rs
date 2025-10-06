@@ -11,7 +11,7 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment},
         ComputedStyle,
     },
-    text::{self, Direction, FontArena, FontMatcher, FontMetrics, GlyphString},
+    text::{self, Direction, Font, FontArena, FontMatcher, GlyphString},
 };
 
 // This character is used to represent opaque objects nested inside inline text content,
@@ -235,6 +235,7 @@ pub struct InlineText {
 pub struct SpanFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
+    pub primary_font: Font,
     pub content: OffsetInlineItemFragmentVec,
 }
 
@@ -242,7 +243,7 @@ pub struct SpanFragment {
 pub struct TextFragment {
     pub style: ComputedStyle,
     // self-referential
-    glyphs: text::GlyphString<'static, std::rc::Rc<str>>,
+    glyphs: GlyphString<'static, std::rc::Rc<str>>,
     _font_arena: util::rc::Rc<FontArena>,
     pub baseline_offset: Vec2L,
 }
@@ -339,7 +340,7 @@ impl InitialShapingResult<'_, '_> {
 #[derive(Debug, Clone, Copy)]
 struct SpanState<'a, 'f> {
     style: &'a ComputedStyle,
-    primary_font_metrics: &'f FontMetrics,
+    primary_font: &'f Font,
     remaining_content_bytes: u32,
     remaining_line_content_bytes: u32,
     seen_first: bool,
@@ -347,10 +348,10 @@ struct SpanState<'a, 'f> {
 }
 
 impl<'a, 'f> SpanState<'a, 'f> {
-    fn new(style: &'a ComputedStyle, primary_font_metrics: &'f FontMetrics, parent: usize) -> Self {
+    fn new(style: &'a ComputedStyle, primary_font: &'f Font, parent: usize) -> Self {
         Self {
             style,
-            primary_font_metrics,
+            primary_font,
             remaining_content_bytes: 0,
             remaining_line_content_bytes: 0,
             seen_first: false,
@@ -421,7 +422,7 @@ enum ShapedItemKind<'a, 'f> {
 #[derive(Debug)]
 struct ShapedItemText<'f> {
     font_matcher: FontMatcher<'f>,
-    primary_font: &'f text::Font,
+    primary_font: &'f Font,
     glyphs: GlyphString<'f, Rc<str>>,
     break_after: bool,
 }
@@ -436,7 +437,7 @@ struct ShapedItemRuby<'a, 'f> {
 #[derive(Debug)]
 struct ShapedRubyBase<'a, 'f> {
     style: &'a ComputedStyle,
-    primary_font: &'f text::Font,
+    primary_font: &'f Font,
     inner: InitialShapingResult<'a, 'f>,
 }
 
@@ -679,8 +680,7 @@ fn shape_run_initial<'a, 'f>(
             self.span_state.push(SpanState::new(
                 style,
                 font_matcher_from_style(style, self.font_arena, self.lctx)?
-                    .primary(self.font_arena, self.lctx.fonts)?
-                    .metrics(),
+                    .primary(self.font_arena, self.lctx.fonts)?,
                 self.current_span_id,
             ));
             self.current_span_id = next_span_id;
@@ -1508,7 +1508,7 @@ fn layout_run_full(
             // NOTE: can't use `SpanState::walk_up` because of `result` moving shenanigans
             while span_id != usize::MAX {
                 let state = &mut span_state[span_id];
-                let font_metrics = state.primary_font_metrics;
+                let font_metrics = state.primary_font.metrics();
 
                 // https://drafts.csswg.org/css-inline/#valdef-inline-sizing-normal
                 let logical_height = font_metrics.ascender - font_metrics.descender;
@@ -1538,6 +1538,7 @@ fn layout_run_full(
                     )],
                     fbox,
                     style: state.style.clone(),
+                    primary_font: state.primary_font.clone(),
                 }));
                 y_correction = y_asc_offset - fbox.content_offset().y;
                 span_id = state.parent;

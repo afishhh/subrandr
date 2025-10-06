@@ -43,19 +43,18 @@ pub struct TextShadow {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextDecorations {
-    // TODO: f32 for size
     pub underline: bool,
     pub underline_color: BGRA8,
-    pub strike_out: bool,
-    pub strike_out_color: BGRA8,
+    pub line_through: bool,
+    pub line_through_color: BGRA8,
 }
 
 impl TextDecorations {
     pub const NONE: Self = Self {
         underline: false,
         underline_color: BGRA8::ZERO,
-        strike_out: false,
-        strike_out_color: BGRA8::ZERO,
+        line_through: false,
+        line_through_color: BGRA8::ZERO,
     };
 }
 

@@ -261,23 +261,26 @@ impl FrameRenderPass<'_, '_> {
                     // ... by applying to the shadow a Gaussian blur with a standard deviation
                     // equal to half the blur radius.
                     let sigma = shadow.blur_radius / 2;
+                    let shadow_x = x + shadow.offset.x;
+                    let shadow_y = y + shadow.offset.y;
 
                     text::render(
                         self.glyph_cache,
                         self.rasterizer,
-                        x.fract(),
-                        y.fract(),
+                        shadow_x.fract(),
+                        shadow_y.fract(),
                         sigma.into_f32(),
                         glyphs,
                     )?
                     .blit(
                         self.rasterizer,
                         target,
-                        (x + shadow.offset.x).trunc_to_inner(),
-                        (y + shadow.offset.y).trunc_to_inner(),
+                        shadow_x.trunc_to_inner(),
+                        shadow_y.trunc_to_inner(),
                         shadow.color,
                     );
                 } else {
+                    // TODO: Re-render for correct fractional position
                     let monochrome = image.monochrome(self.rasterizer);
                     monochrome.blit(
                         self.rasterizer,

@@ -33,20 +33,18 @@ typedef uint8_t sbr_log_level;
 //
 // These strings are not null-terminated, the corresponding `_len` argument must
 // be used to avoid overruns. Do not rely on the contents of these strings.
-typedef void (*sbr_log_callback)(
-    sbr_log_level, char const *source, size_t source_len, char const *message,
-    size_t message_len, void *user_data
-);
+typedef void (*sbr_log_callback)(sbr_log_level, char const *source,
+                                 size_t source_len, char const *message,
+                                 size_t message_len, void *user_data);
 
-// Set a callback for subrandr log messages.
+// Set a callback for library log messages.
 //
 // Can only be called before any renderers are created.
 // Note that calling this after a renderer has been created is currently
 // *UNSOUND* even if done in a thread-safe manner.
 // This restriction may be relaxed in the future.
-void sbr_library_set_log_callback(
-    sbr_library *, sbr_log_callback, void *user_data
-);
+void sbr_library_set_log_callback(sbr_library *, sbr_log_callback,
+                                  void *user_data);
 
 #ifdef __cplusplus
 }

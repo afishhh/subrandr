@@ -16,11 +16,10 @@ extern "C" {
 #define SBR_UNSTABLE
 #else
 #define SBR_UNSTABLE                                                           \
-  __attribute__((unavailable(                                                  \
-      "This item is not part of subrandr's stable API yet.\n"                  \
-      "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "              \
-      "you still want to use it."                                              \
-  )))
+  __attribute__((                                                              \
+      unavailable("This item is not part of subrandr's stable API yet. "       \
+                  "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
+                  "you still want to use it.")))
 #endif
 
 typedef struct sbr_library sbr_library;
@@ -33,7 +32,16 @@ typedef struct sbr_subtitle_context {
   sbr_26dot6 padding_left, padding_right, padding_top, padding_bottom;
 } sbr_subtitle_context;
 
+// Construct a new `sbr_library *` that is required to use most subrandr APIs.
+//
+// `sbr_library` also allows you to set a log callback via
+// `sbr_library_set_log_callback`.
 sbr_library *sbr_library_init(void);
+
+// Finalize an `sbr_library *` object.
+//
+// Must only be called after all other subrandr objects created from this
+// library object are destroyed.
 void sbr_library_fini(sbr_library *);
 
 void sbr_library_version(uint32_t *major, uint32_t *minor, uint32_t *patch);
@@ -59,10 +67,9 @@ sbr_subtitle_format sbr_probe_text(char const *content, size_t content_len);
 // If `language_hint` is not NULL then the given subtitles will be assumed to
 // be in the given language. For example, it may be treated as the
 // "default language" in WebVTT.
-sbr_subtitles *sbr_load_text(
-    sbr_library *, char const *content, size_t content_len,
-    sbr_subtitle_format format, char const *language_hint
-);
+sbr_subtitles *sbr_load_text(sbr_library *, char const *content,
+                             size_t content_len, sbr_subtitle_format format,
+                             char const *language_hint);
 
 // TODO: Remove this. It shouldn't really exist or at least should
 //       probably have different semantics.
@@ -72,16 +79,27 @@ void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
 void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
-bool sbr_renderer_did_change(
-    sbr_renderer *, sbr_subtitle_context const *, uint32_t t
-);
-int sbr_renderer_render(
-    sbr_renderer *, sbr_subtitle_context const *,
-    // current time value in milliseconds
-    uint32_t t,
-    // BGRA8 pixel buffer
-    uint32_t *buffer, uint32_t width, uint32_t height, uint32_t stride
-);
+bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
+                             uint32_t t);
+
+// Fully renders a single subtitle frame into the provided pixel buffer.
+//
+// Renders the subtitles that were previously specified with
+// `sbr_renderer_set_subtitles` at the state they should be at millisecond `t`.
+//
+// The pixel buffer to render to is specified via `buffer`, `width`,
+// `height`, and `stride`. `width` and `height` should be set to the
+// pixel dimensions of the buffer pointed to by `buffer`. `stride` should be set
+// to the pixel stride of the `buffer`, note that this value is in 32-bit pixel
+// units and not bytes.
+//
+// The passed in `sbr_subtitle_context const *` determines what *logical*
+// parameters should be used for *layout*. This is strictly different from the
+// dimensions of the pixel buffer itself which only affect rasterization.
+int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
+                        uint32_t t, uint32_t *buffer, uint32_t width,
+                        uint32_t height, uint32_t stride);
+
 void sbr_renderer_destroy(sbr_renderer *);
 
 typedef uint32_t SBR_UNSTABLE sbr_error_code;

@@ -71,10 +71,6 @@ sbr_subtitles *sbr_load_text(sbr_library *, char const *content,
                              size_t content_len, sbr_subtitle_format format,
                              char const *language_hint);
 
-// TODO: Remove this. It shouldn't really exist or at least should
-//       probably have different semantics.
-SBR_UNSTABLE sbr_subtitles *sbr_load_file(sbr_library *, char const *path);
-
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);

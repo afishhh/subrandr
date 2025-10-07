@@ -14,12 +14,14 @@ extern "C" {
 
 #ifdef SBR_ALLOW_UNSTABLE
 #define SBR_UNSTABLE
-#else
+#elif defined(__has_attribute)
+#if __has_attribute(unavailable)
 #define SBR_UNSTABLE                                                           \
   __attribute__((                                                              \
       unavailable("This item is not part of subrandr's stable API yet. "       \
                   "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
                   "you still want to use it.")))
+#endif
 #endif
 
 typedef struct sbr_library sbr_library;
@@ -98,14 +100,18 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
 
 void sbr_renderer_destroy(sbr_renderer *);
 
+#ifdef SBR_UNSTABLE
 typedef uint32_t SBR_UNSTABLE sbr_error_code;
 #define SBR_ERR_OTHER (sbr_error_code)1
 #define SBR_ERR_IO (sbr_error_code)2
 #define SBR_ERR_INVALID_ARGUMENT (sbr_error_code)3
 #define SBR_ERR_UNRECOGNIZED_FORMAT (sbr_error_code)10
+#endif
 
 char const *sbr_get_last_error_string(void);
+#ifdef SBR_UNSTABLE
 SBR_UNSTABLE uint32_t sbr_get_last_error_code(void);
+#endif
 
 #undef SBR_UNSTABLE
 

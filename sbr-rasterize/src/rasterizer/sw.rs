@@ -6,7 +6,7 @@ use util::{
 };
 
 use super::PixelFormat;
-use crate::color::BGRA8;
+use crate::color::{Premultiply, BGRA8};
 
 mod blit;
 pub(super) mod blur;
@@ -252,7 +252,7 @@ trait DrawPixel: Copy + Sized {
 impl DrawPixel for BGRA8 {
     fn put(&mut self, value: Self) {
         // TODO: blend_over
-        *self = value;
+        *self = value.premultiply().0;
     }
 
     fn scale_alpha(self, scale: u8) -> Self {

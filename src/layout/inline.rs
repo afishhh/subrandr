@@ -1269,13 +1269,10 @@ fn layout_run_full(
 
         let mut visual_runs = Vec::new();
         for paragraph in &bidi.paragraphs {
-            if line_range.start <= paragraph.range.start || line_range.end >= paragraph.range.end {
-                let (_, mut paragraph_runs) = bidi.visual_runs(
-                    paragraph,
-                    line_range.start.max(paragraph.range.start)
-                        ..line_range.end.min(paragraph.range.end),
-                );
-
+            let start = line_range.start.max(paragraph.range.start);
+            let end = line_range.end.min(paragraph.range.end);
+            if start < end {
+                let (_, mut paragraph_runs) = bidi.visual_runs(paragraph, start..end);
                 visual_runs.append(&mut paragraph_runs);
             }
         }

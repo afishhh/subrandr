@@ -9,6 +9,7 @@
 - Improved text decorations to better conform to the `css-2` specification. WebVTT underlines will now be painted after shadows and before the text itself.
 - Fixed incorrect fractional positioning of blurred shadows. This fixes blurred shadows *slightly* jumping around in karaoke subtitles.
 - Fixed software rasterizer not pre-multiplying color values while drawing geometric primitives. Fixes sometimes broken partially transparent backgrounds.
+- Fixed panic in bidi reordering of some multi-paragraph text runs.
 
 ## [v0.2.2]
 

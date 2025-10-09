@@ -48,6 +48,7 @@ pub struct Pen {
 
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
 
     pub edge_type: EdgeType,
     pub edge_color: u32,
@@ -64,6 +65,7 @@ impl Pen {
         font_style: 0,
         bold: false,
         italic: false,
+        underline: false,
         edge_type: EdgeType::None,
         edge_color: 0x020202,
         ruby_part: RubyPart::None,
@@ -375,6 +377,9 @@ fn parse_pen(
         },
         "b"(value: Bool01) => {
             result.bold = value.0;
+        },
+        "u"(value: Bool01) => {
+            result.underline = value.0;
         },
         "rb"(value: RubyPart) => {
             result.ruby_part = value;

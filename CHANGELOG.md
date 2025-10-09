@@ -10,6 +10,7 @@
 - Fixed incorrect fractional positioning of blurred shadows. This fixes blurred shadows *slightly* jumping around in karaoke subtitles.
 - Fixed software rasterizer not pre-multiplying color values while drawing geometric primitives. Fixes sometimes broken partially transparent backgrounds.
 - Fixed panic in bidi reordering of some multi-paragraph text runs.
+- Implemented srv3 underline support.
 
 ## [v0.2.2]
 

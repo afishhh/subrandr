@@ -422,7 +422,7 @@ impl Window {
     }
 }
 
-fn pen_to_size_independent_styles(
+fn pen_to_size_independent_style(
     pen: &Pen,
     set_default: bool,
     mut base: ComputedStyle,
@@ -439,8 +439,15 @@ fn pen_to_size_independent_styles(
         *base.make_font_slant_mut() = FontSlant::Italic;
     }
 
+    let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);
+    if pen.underline {
+        let decorations = base.make_text_decoration_mut();
+        decorations.underline = true;
+        decorations.underline_color = bgra_foreground_color;
+    }
+
     if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {
-        *base.make_color_mut() = BGRA8::from_rgba32(pen.foreground_color);
+        *base.make_color_mut() = bgra_foreground_color;
     }
 
     if set_default || pen.background_color != Pen::DEFAULT.background_color {
@@ -457,7 +464,7 @@ fn convert_segment(
     base_style: &ComputedStyle,
 ) -> Segment {
     Segment {
-        base_style: pen_to_size_independent_styles(segment.pen(), false, base_style.clone()),
+        base_style: pen_to_size_independent_style(segment.pen(), false, base_style.clone()),
         font_size: segment.pen().font_size,
         time_offset: segment.time_offset,
         text: text.into(),
@@ -566,7 +573,7 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     };
     let mut window_builder = WindowBuilder {
         sbr,
-        base_style: pen_to_size_independent_styles(&Pen::DEFAULT, true, ComputedStyle::DEFAULT),
+        base_style: pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT),
         logset: LogOnceSet::new(),
     };
 

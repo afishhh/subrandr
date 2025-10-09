@@ -1,34 +1,52 @@
 ## subrandr
 
-### An experimental subtitle rendering library
+subrandr is a subtitle rendering library that aims to fill a gap in open-source rendering of non-ASS subtitles accurately.
 
-subrandr is a subtitle rendering library that aims to fill the gap in open-source rendering of non-ASS subtitles accurately.
-The first goal is to achieve good rendering of YouTube's SRV3 format, currently the library does a pretty good job of it if I do say so myself, but it is not perfect and still under heavy development.
+Currently most subtitle rendering happens in renderers specialized for a particular format into which other subtitles have to be converted. subrandr's goal is to support multiple formats in one library instead, this allows it to conform to format idiosyncrasies while still sharing a lot of code which would otherwise be repeated in specialized renderers[^1].
 
-#### Supported subtitle formats:
-- SRV3 (incomplete, no window style (justification, vertical text) support, some rarer attributes may be currently unsupported)
-- WebVTT (incomplete, no css or vertical text support)
+Note that the library is still under heavy development so beware of bugs and the many unimplemented features.
 
-#### WebAssembly library and extension
+[^1]: This is particularly useful for SRV3 and WebVTT which effectively require supporting non-trivial CSS inline layout.
 
-There's a WebAssembly library being worked on in the `wasi32` directory and a webextension that is able to successfully render subtitles over YouTube videos on youtube.com in the `webextension` directory.
+### Supported subtitle formats
 
-#### `sbr-overlay`
+#### SRV3
 
-An example program is also present in this repository. It allows testing this library by rendering subtitles onto a transparent window. To aid in this testing it also provides functionality that allows you to overlay the window on an existing video player (or even the YouTube website).
+YouTube's subtitle format in its XML form.
 
-Subtitles can be synchronized with video playback in the mpv video player by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (created using `--input-ipc-server` mpv option). You can also synchronize and overlay over a YouTube tab using `--connect youtube-cdp:<CDP_URL>` which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.
+Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConverter) are supported (with the exception of vertical text). Features outside of this set might not be supported, notably this includes auto-generated subtitles which have quirks that are currently not handled fully correctly (although they look *mostly* fine).
 
-The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target.
+> [!WARNING]
+> Since the SRV3 format is entirely undocumented, the format is implemented on a best-effort basis and many features are known to be handled incorrectly/unimplemented.
+>
+> However subrandr is generally more accurate (for the features it supports) than all implementations I know of that are not browser-based.
 
-#### Hardware acceleration
+The most notable limitations for this format currently are:
+- No vertical text[^2] or justification support.
+- Segments are laid out as `inline`s instead of `inline-block`s. This mostly manifests in background boxes that are too short vertically.
+- Some attributes seen in auto-generated subtitles that seem to vastly change how the HTML tree is generated are unsupported.
 
-subrandr supports hardware accelerated rasterization via `wgpu`. This rasterizer however is still experimental and doesn't provide significant performance gains outside of large blurs. It is also not exposed in either the C API or the WASM module. This is due to the complexity of integrating with external instances of graphics APIs on the C side, and due to subrandr's WASM approach being not trivially compatible with `wgpu`'s on the WASM side.
+[^2]: I have never encountered a YouTube video with subtitles which actually use SRV3 vertical text, so it is not very high-priority.
 
-#### Usage
+#### WebVTT
 
-Currently only a C API is provided, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.
-The C API is defined in the `subrandr.h` header, items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined and no API stability is guaranteed for them.
+[WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt1/), supported natively by browsers.
+
+Currently subrandr is in the [User agents that do not support CSS](https://www.w3.org/TR/webvtt1/#user-agents-that-do-not-support-css) conformance class of the specification. However note that subrandr does actually implement inline layout as specified by CSS and supports complex layout elements like ruby annotations.
+
+The most notable limitations for this format currently are:
+- No vertical text support
+- No CSS (`STYLE` block) support
+- No region support
+
+### Usage
+
+> [!WARNING]
+> Currently the only stable API provided is the C API, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.
+
+#### C
+
+The C API is defined and documented in the `subrandr/*` headers (`include/*` in this repository). Items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined.
 
 > [!WARNING]
 > No stability guarantees, neither ABI nor API, are provided for items marked unstable.
@@ -109,6 +127,29 @@ int main() {
 ```
 
 The example code above is licensed under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (public domain).
+
+#### WebAssembly library and extension
+
+There's a WebAssembly library being worked on in the `wasi32` directory and a webextension that is able to successfully render subtitles over YouTube videos on youtube.com in the `webextension` directory.
+
+Currently it is still a work-in-progress and there's a few difficult problems that still have to be solved. Although it does work, keep in mind that performance is not that great (especially on HiDPI displays) and no API stability is guaranteed.
+
+#### `sbr-overlay`
+
+The `sbr-overlay` directory contains a test program that can be used to test the library in software rasterization mode on X11 and with wgpu on other platforms. It renders subtitles onto a transparent window and also provides some additional functionality to synchronize with and overlay on top of existing video players. 
+
+Subtitles can be synchronized with video playback in [mpv](https://github.com/mpv-player/mpv/) by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (with a path to a socket created using the `--input-ipc-server` mpv option).
+
+~~It is also possible to overlay over a YouTube tab using `--connect youtube-cdp:<CDP_URL>` which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.~~
+[This is currently broken](https://github.com/afishhh/subrandr/issues/47) and likely to be removed soon&trade;.
+
+The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target (also only supported on X11).
+
+### Hardware acceleration
+
+subrandr currently supports an alpha-quality hardware-accelerated wgpu rasterizer. It is still experimental and provides zero or negative performance gains.
+
+There are quite a few blocking issues that need to be resolved before working on the wgpu rasterizer makes sense again. Due to these issues and more it is not exposed in either the C API or the WASM module yet.
 
 ### License
 

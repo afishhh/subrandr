@@ -46,7 +46,9 @@ The most notable limitations for this format currently are:
 
 #### C
 
-The C API is defined and documented in the `subrandr/*` headers (`include/*` in this repository). Items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined.
+The C library can be built and installed with `cargo xtask install` (see `--help` for options). Optionally the build step can also be run separately with `cargo xtask build`.
+
+Definitions and documentation is provided in the `subrandr/*` headers (`include/*` in this repository). Items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined. 
 
 > [!WARNING]
 > No stability guarantees, neither ABI nor API, are provided for items marked unstable.
@@ -55,38 +57,45 @@ The C API is defined and documented in the `subrandr/*` headers (`include/*` in 
 ```c
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <subrandr/subrandr.h>
 
 int main() {
   sbr_library *sbr = sbr_library_init();
-  if(!sbr)
-  // use sbr_get_last_error_string to get a string representation
-  // of the last error that occurred in a subrandr function
+  if (!sbr)
+    // use sbr_get_last_error_string to get a string representation
+    // of the last error that occurred in a subrandr function
     exit(1);
 
-  sbr_subtitles *subs = sbr_load_file(sbr, "./my/subtitle/file.srv3");
-  if(!subs)
+  char *content = "<timedtext format=\"3\"><head></head>"
+                  "<body><p t=\"0\" d=\"5000\">Hello, world!</p></body>"
+                  "</timedtext>";
+  sbr_subtitles *subs = sbr_load_text(sbr, content, strlen(content),
+                                      SBR_SUBTITLE_FORMAT_UNKNOWN, NULL);
+  if (!subs)
     exit(1);
-  
+
   sbr_renderer *renderer = sbr_renderer_create(sbr);
-  if(!renderer)
+  if (!renderer)
     exit(1);
 
   sbr_subtitle_context ctx = {
-    // this is **dots per inch**, not **pixels per inch**
-    // if you have pixels per inch: dpi = ppi * 72 / 96
-    .dpi = 144,
-    // video dimensions and padding are in 26.6 fixed point format
-    .video_width = 1920 << 6,
-    .video_height = 1080 << 6,
-    // if your player has additional padding around the video (for example black bars)
-    // you should provide it here, srv3 subtitles are laid out differently depending
-    // on this padding
-    .padding_left = 0,
-    .padding_right = 0,
-    .padding_top = 0,
-    .padding_bottom = 0,
+      // this is **dots per inch**, not **pixels per inch**
+      // if you have pixels per inch: dpi = ppi * 72 / 96
+      .dpi = 144,
+      // video dimensions and padding are in 26.6 fixed point format
+      .video_width = 1920 << 6,
+      .video_height = 1080 << 6,
+      // if your player has additional padding around the video (for example
+      // black bars)
+      // you should provide it here, srv3 subtitles are laid out differently
+      // depending
+      // on this padding
+      .padding_left = 0,
+      .padding_right = 0,
+      .padding_top = 0,
+      .padding_bottom = 0,
   };
 
   uint32_t t = 2424 /* milliseconds */;
@@ -94,21 +103,14 @@ int main() {
   uint32_t width = 1920;
   uint32_t height = 1080;
   uint32_t *pixel_buffer = malloc(height * width * 4);
-  if(!pixel_buffer) {
+  if (!pixel_buffer) {
     printf("malloc failed\n");
     exit(1);
   }
 
   sbr_renderer_set_subtitles(renderer, subs);
-  if(sbr_renderer_render(
-    renderer,
-    &ctx,
-    t,
-    pixel_buffer,
-    width,
-    height,
-    width
-  ) < 0)
+  if (sbr_renderer_render(renderer, &ctx, t, pixel_buffer, width, height,
+                          width) < 0)
     exit(1);
 
   // blit bitmap to the screen OVER the viewport
@@ -120,8 +122,8 @@ int main() {
   free(pixel_buffer);
   sbr_renderer_destroy(renderer);
   sbr_subtitles_destroy(subs);
-  // the library must be destroyed only after all associated renderers and subtitles
-  // have also been destroyed
+  // the library must be destroyed only after all associated renderers and
+  // subtitles have also been destroyed
   sbr_library_fini(sbr);
 }
 ```

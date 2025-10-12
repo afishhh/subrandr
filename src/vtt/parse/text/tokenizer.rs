@@ -2,11 +2,6 @@
 //!
 //! [here]: https://www.w3.org/TR/webvtt1/#webvtt-cue-text-tokenizer
 
-// TODO: Maybe also make class splitting lazy?
-//       This would also mean that there would be a predictable number of
-//       buffers in use at any given time depending on the state and the
-//       Vec would be completely unnecessary.
-
 use std::borrow::Cow;
 
 use crate::html;
@@ -210,6 +205,7 @@ impl<'a> Annotation<'a> {
         self.0
     }
 
+    #[expect(dead_code, reason = "WebVTT language is not used yet")]
     pub fn content(&self) -> Cow<'a, str> {
         // TODO: What does the standard mean by "with additional allowed characters being '>'"?
         html::unescape(self.raw_content())

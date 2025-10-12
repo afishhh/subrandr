@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 mod tokenizer;
 
 use tokenizer::CueTextTokenizer;
@@ -21,7 +19,7 @@ pub enum InternalNodeKind<'a> {
 pub struct InternalNode<'a> {
     pub kind: InternalNodeKind<'a>,
     pub classes: ClassList<'a>,
-    pub language: Option<Cow<'a, str>>,
+    pub language: Option<Annotation<'a>>,
     pub children: Vec<Node<'a>>,
 }
 
@@ -35,12 +33,12 @@ pub enum Node<'a> {
 pub(crate) fn parse_cue_text(input: &str) -> Vec<Node<'_>> {
     let mut tokenizer = CueTextTokenizer::new(input);
 
-    let mut node_info_stack: Vec<(InternalNodeKind, ClassList, Option<Cow<str>>)> = vec![];
+    let mut node_info_stack: Vec<(InternalNodeKind, ClassList, Option<Annotation>)> = vec![];
     let mut children_stack: Vec<Vec<Node>> = vec![Vec::new()];
-    let mut language_stack: Vec<Cow<str>> = Vec::new();
+    let mut language_stack: Vec<Annotation> = Vec::new();
 
     fn exit_node<'a>(
-        info_stack: &mut Vec<(InternalNodeKind<'a>, ClassList<'a>, Option<Cow<'a, str>>)>,
+        info_stack: &mut Vec<(InternalNodeKind<'a>, ClassList<'a>, Option<Annotation<'a>>)>,
         children_stack: &mut Vec<Vec<Node<'a>>>,
     ) {
         let info = info_stack.pop().unwrap();
@@ -75,7 +73,7 @@ pub(crate) fn parse_cue_text(input: &str) -> Vec<Node<'_>> {
                         value: start_tag.annotation.unwrap_or_default(),
                     },
                     "lang" => {
-                        language_stack.push(start_tag.annotation.unwrap_or_default().content());
+                        language_stack.push(start_tag.annotation.unwrap_or_default());
                         InternalNodeKind::Language
                     }
                     _ => continue,
@@ -209,7 +207,7 @@ mod test {
                 Node::Internal(InternalNode {
                     kind: InternalNodeKind::Language,
                     classes: ClassList::new("loud"),
-                    language: Some(Cow::Borrowed("en")),
+                    language: Some(Annotation("en")),
                     children: vec![Node::Text(Text("Yellow!"))]
                 }),
             ]

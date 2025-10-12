@@ -649,8 +649,7 @@ fn consume_magic(input: &mut ParsingBuffer) -> bool {
 
     if input.take_any([' ', '\t']) {
         input.collect_line_and_linefeed();
-    } else if input.take_linefeed() {
-    } else {
+    } else if !input.take_linefeed() {
         return false;
     }
 

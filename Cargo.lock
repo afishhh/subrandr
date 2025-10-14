@@ -822,8 +822,7 @@ checksum = "5360a2fbe97f617c4f8b944356dedb36d423f7da7f13c070995cf89e59f01220"
 [[package]]
 name = "implib"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7923c255262a0e44362e221f8b74b931fe21484b83f27386aa45f021a379caf6"
+source = "git+https://github.com/afishhh/implib-rs?branch=fix-gnu-i386#d8ba2338dd7d3ffd66ae72d6055bf67b69f0295d"
 dependencies = [
  "memoffset",
  "object",
@@ -1316,9 +1315,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.37.1"
+version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03fd943161069e1768b4b3d050890ba48730e590f57e56d4aa04e7e090e61b4a"
+checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
 dependencies = [
  "crc32fast",
  "hashbrown",

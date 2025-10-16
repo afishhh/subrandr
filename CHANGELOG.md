@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.0.0]
+
 - Fixed newline-only srv3 events creating empty visual lines (they are now ignored).
 - Fixed incorrect advance being used during layout of glyphs from non-scalable fonts. Mostly affects emoji which previously took up excessive horizontal space.
 - Implemented srv3 visual line padding.
@@ -35,6 +37,7 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.0.0...HEAD
+[v1.0.0]: https://github.com/afishhh/subrandr/compare/v0.2.2...v1.0.0
 [v0.2.2]: https://github.com/afishhh/subrandr/compare/v0.2.1...v0.2.2
 [v0.2.1]: https://github.com/afishhh/subrandr/compare/v0.2.0...v0.2.1

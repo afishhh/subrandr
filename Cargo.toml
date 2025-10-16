@@ -1,12 +1,13 @@
 [package]
 name = "subrandr"
-version.workspace = true
+version = "1.0.0"
 edition.workspace = true
 autotests = false
 rust-version.workspace = true
 
 [workspace.package]
-version = "0.2.2"
+# Version number for internal packages with unstable APIs.
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 

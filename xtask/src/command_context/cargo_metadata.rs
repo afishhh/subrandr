@@ -4,6 +4,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct CargoMetadata {
     pub packages: Vec<Package>,
+    pub workspace_metadata: MetadataTable,
 }
 
 #[derive(Debug, Deserialize)]

@@ -407,7 +407,19 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
             true => end_utf8_index,
         };
 
-        while let Some(mut segment) = self.segments.pop_front() {
+        while let Some(segment) = self.segments.front() {
+            // Make sure we're not already past the passed index which can happen
+            // due to whitespace collapsing during line-breaking.
+            if !self.direction.is_reverse() {
+                if segment.text_range.start >= end_utf8_index {
+                    break;
+                }
+            } else if segment.text_range.end < end_utf8_index {
+                // TODO: Is this case right?
+                break;
+            }
+            let mut segment = self.segments.pop_front().unwrap();
+
             match segment.glyph_at_utf8_index(target_utf8_index, self.direction) {
                 Some(last_glyph_index) => {
                     result.push_back(

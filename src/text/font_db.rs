@@ -61,7 +61,10 @@ pub struct FaceInfo {
 }
 
 impl FaceInfo {
-    #[cfg_attr(not(font_provider = "android-ndk"), expect(dead_code))]
+    #[cfg_attr(
+        not(any(font_provider = "android-ndk", all(test, feature = "_layout_tests"))),
+        expect(dead_code)
+    )]
     pub(super) fn from_face_and_source(face: &Face, source: FontSource) -> Self {
         // TODO: Collect all names
         let name = face.family_name();
@@ -76,6 +79,11 @@ impl FaceInfo {
             italic: face.italic(),
             source,
         }
+    }
+
+    #[cfg(all(test, feature = "_layout_tests"))]
+    pub fn from_face(face: &Face) -> Self {
+        Self::from_face_and_source(face, FontSource::Memory(face.clone()))
     }
 }
 
@@ -227,6 +235,27 @@ impl<'a> FontDb<'a> {
             result.rebuild_family_lookup_cache();
             result
         })
+    }
+
+    #[cfg(all(test, feature = "_layout_tests"))]
+    pub fn test(sbr: &'a Subrandr, faces: Vec<FaceInfo>) -> FontDb<'a> {
+        use std::sync::RwLock;
+
+        use platform_font_provider::null::NullFontProvider;
+
+        static NULL_PROVIDER: RwLock<NullFontProvider> = RwLock::new(NullFontProvider);
+
+        let mut result = Self {
+            sbr,
+            source_cache: HashMap::new(),
+            family_cache: HashMap::new(),
+            request_cache: HashMap::new(),
+            family_lookup_cache: HashMap::new(),
+            provider: &NULL_PROVIDER,
+            extra_faces: faces,
+        };
+        result.rebuild_family_lookup_cache();
+        result
     }
 
     pub fn clear_extra(&mut self) {

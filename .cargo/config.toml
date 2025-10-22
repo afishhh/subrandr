@@ -3,3 +3,4 @@ rustflags = ["-L./wasi32/deps"]
 
 [alias]
 xtask = "run --package xtask --"
+xxtask = "run --package xtask --features full --"

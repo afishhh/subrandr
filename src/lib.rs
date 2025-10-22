@@ -83,4 +83,4 @@ pub use renderer::{Renderer, SubtitleContext, Subtitles};
 
 #[cfg(test)]
 #[path = "../tests/layout/mod.rs"]
-mod layout;
+mod layout_tests;

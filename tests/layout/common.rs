@@ -160,6 +160,18 @@ fn read_pixel_hash_from_ptr(ptr: &Path) -> Option<String> {
     panic!("no pixel hash in pointer file {}", ptr.display())
 }
 
+fn hex_sha256(digest: &sha2::digest::Output<sha2::Sha256>) -> Box<str> {
+    let to_hex = |v: u8| if v < 10 { b'0' + v } else { b'a' - 10 + v };
+    let mut output = [0; 64];
+
+    for (idx, value) in digest.into_iter().enumerate() {
+        output[idx * 2] = to_hex(value >> 4);
+        output[idx * 2 + 1] = to_hex(value & 0xF);
+    }
+
+    str::from_utf8(&output).unwrap().into()
+}
+
 pub fn check_inline(
     name: &'static str,
     pos: Point2L,
@@ -212,7 +224,7 @@ pub fn check_inline(
         .unwrap();
 
     let project_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let base_path = project_dir.join("tests/layout_tests/").join(name);
+    let base_path = project_dir.join("tests/layout/").join(name);
     let ptr_path = base_path.with_extension("png.ptr");
     let expected_pixel_hash = read_pixel_hash_from_ptr(&ptr_path);
 
@@ -220,7 +232,7 @@ pub fn check_inline(
     let pixel_bytes =
         unsafe { std::slice::from_raw_parts_mut(pixels.as_mut_ptr() as *mut u8, pixels_byte_len) };
     let pixel_hash = sha2::Sha256::new().chain_update(&pixel_bytes).finalize();
-    let pixel_hash_str = util::hex::encode_to_string(&pixel_hash);
+    let pixel_hash_str = hex_sha256(&pixel_hash);
 
     if expected_pixel_hash.as_deref() != Some(&pixel_hash_str) {
         let new_path = base_path.with_extension("new.png");

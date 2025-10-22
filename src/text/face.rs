@@ -216,7 +216,7 @@ impl Font {
         pub fn harfbuzz_scale_factor_for[&](glyph: u32) -> I26Dot6;
     );
 
-    fn face(&self) -> Face {
+    pub fn face(&self) -> Face {
         match self {
             Font::FreeType(font) => Face::FreeType(font.face().clone()),
             Font::Tofu(_) => Face::tofu(),

@@ -152,8 +152,8 @@ fn read_pixel_hash_from_ptr(ptr: &Path) -> Option<String> {
     };
 
     for line in content.lines() {
-        if let Some(hash_str) = line.strip_prefix("pixels ") {
-            return Some(hash_str.trim().into());
+        if let Some(hash_str) = line.trim().strip_prefix("pixels ") {
+            return Some(hash_str.trim_start().into());
         }
     }
 
@@ -220,7 +220,7 @@ pub fn check_inline(
     let pixel_bytes =
         unsafe { std::slice::from_raw_parts_mut(pixels.as_mut_ptr() as *mut u8, pixels_byte_len) };
     let pixel_hash = sha2::Sha256::new().chain_update(&pixel_bytes).finalize();
-    let pixel_hash_str = util::hex::encode_to_string(pixel_hash.as_slice());
+    let pixel_hash_str = util::hex::encode_to_string(&pixel_hash);
 
     if expected_pixel_hash.as_deref() != Some(&pixel_hash_str) {
         let new_path = base_path.with_extension("new.png");

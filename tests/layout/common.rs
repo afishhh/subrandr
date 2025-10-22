@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use rasterize::color::{Premultiplied, BGRA8};
 use sha2::Digest;
@@ -134,14 +137,55 @@ macro_rules! make_tree {
     (@apply_style $parent_style: expr;) => { $parent_style.create_derived() };
 }
 
-const AHEM: &[u8] = include_bytes!("../assets/Ahem.ttf");
-pub const FONT_FAMILY_AHEM: Rc<[Rc<str>]> = rc_static!([rc_static!(str b"Ahem")]);
+struct TestFont {
+    family_static_rc: Rc<str>,
+    filename: &'static str,
+    data: &'static OnceLock<&'static [u8]>,
+}
+
+impl TestFont {
+    const fn family(&self) -> Rc<str> {
+        unsafe { std::ptr::read(&self.family_static_rc) }
+    }
+
+    fn load(&self, assets_dir: &Path) -> Face {
+        let data = *self
+            .data
+            .get_or_init(|| Vec::leak(std::fs::read(assets_dir.join(self.filename)).unwrap()));
+
+        Face::load_from_static_bytes(data, 0).unwrap()
+    }
+}
+
+macro_rules! test_font {
+    ($name: ident, $family: literal, $path: literal) => {
+        const $name: &'static TestFont = &{
+            static DATA: OnceLock<&'static [u8]> = OnceLock::new();
+
+            TestFont {
+                // FIXME: erm? rustfmt?
+        family_static_rc: rc_static!(str $family),
+                filename: $path,
+                data: &DATA,
+            }
+        };
+    };
+}
+
+test_font!(AHEM, b"Ahem", "Ahem.ttf");
+test_font!(NOTO_SERIF, b"Noto Serif", "NotoSerif-Regular.ttf");
+test_font!(
+    NOTO_SANS_ARABIC,
+    b"Noto Sans Arabic",
+    "NotoSansArabic-Regular.ttf"
+);
+
+const ALL_FONTS: &[&TestFont] = &[AHEM, NOTO_SERIF, NOTO_SANS_ARABIC];
 
 test_define_style! {
-    pub .ahem {
-        font_family: FONT_FAMILY_AHEM,
-        font_size: I26Dot6::new(16),
-    }
+    pub .ahem { font_family: rc_static!([AHEM.family()]) }
+    pub .noto_serif { font_family: rc_static!([NOTO_SERIF.family()])}
+    pub .noto_sans_arabic { font_family: rc_static!([NOTO_SANS_ARABIC.family()])}
 }
 
 fn read_pixel_hash_from_ptr(ptr: &Path) -> Option<String> {
@@ -173,19 +217,24 @@ fn hex_sha256(digest: &sha2::digest::Output<sha2::Sha256>) -> Box<str> {
 }
 
 pub fn check_inline(
-    name: &'static str,
+    name: &str,
     pos: Point2L,
     viewport_size: Vec2L,
     align: HorizontalAlignment,
     inline: InlineContent,
     dpi: u32,
 ) {
+    let project_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let tests_dir = project_dir.join("tests/");
+    let assets_dir = tests_dir.join("assets/");
+
     let sbr = Subrandr::init();
     let mut fonts = FontDb::test(
         &sbr,
-        vec![FaceInfo::from_face(
-            &Face::load_from_bytes(AHEM.into(), 0).unwrap(),
-        )],
+        ALL_FONTS
+            .iter()
+            .map(|font| FaceInfo::from_face(&font.load(&assets_dir)))
+            .collect(),
     );
 
     let width = viewport_size.x.ceil_to_inner() as u32;
@@ -224,8 +273,7 @@ pub fn check_inline(
         pixels
     };
 
-    let project_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let base_path = project_dir.join("tests/layout/snapshots/").join(name);
+    let base_path = tests_dir.join("layout/snapshots/").join(name);
     let ptr_path = base_path.with_extension("png.ptr");
     let expected_pixel_hash = read_pixel_hash_from_ptr(&ptr_path);
 
@@ -295,6 +343,11 @@ macro_rules! check_one {
 
         $what: ident $(.$class: ident)+ { $($block_content: tt)* }
     ) => {{
+        const TEST_ROOT_MODULE: &'static str = "layout_tests::";
+
+        let submodule_start = module_path!().find(TEST_ROOT_MODULE).unwrap() + TEST_ROOT_MODULE.len();
+        let prefix = module_path!()[submodule_start..].replace("::", "_");
+        let name = format!("{prefix}_{}", $name);
         let align = check_one!(@align $($align)?);
         let dpi = check_one!(@dpi $($dpi)?);
         let pos = check_one!(@pos $($p)?);
@@ -306,7 +359,7 @@ macro_rules! check_one {
         use $crate::layout_tests::common::make_tree;
         let tree = make_tree!($what $(.$class)+ { $($block_content)* }) ;
 
-        check_inline($name, pos, size, align, tree, dpi);
+        check_inline(&name, pos, size, align, tree, dpi);
     }};
     (@align $name: ident) => { $crate::style::computed::HorizontalAlignment::$name };
     (@align) => { check_one!(@align Left) };

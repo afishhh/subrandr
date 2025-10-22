@@ -125,22 +125,39 @@ impl Face {
     }
 
     pub fn load_from_bytes(bytes: Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
+        unsafe {
+            Self::adopt_ft(
+                Self::ft_from_memory(
+                    std::ptr::slice_from_raw_parts(bytes.as_ptr(), bytes.len()),
+                    index,
+                )?,
+                Some(bytes),
+            )
+        }
+    }
+
+    pub fn load_from_static_bytes(bytes: &'static [u8], index: i32) -> Result<Self, FreeTypeError> {
+        unsafe { Self::adopt_ft(Self::ft_from_memory(bytes, index)?, None) }
+    }
+
+    fn ft_from_memory(bytes: *const [u8], index: i32) -> Result<FT_Face, FreeTypeError> {
         let library = Library::get_or_init()?;
         let _guard = library.face_mutation_mutex.lock().unwrap();
 
-        let mut face = std::ptr::null_mut();
         unsafe {
+            let mut face = MaybeUninit::uninit();
+
             #[allow(clippy::unnecessary_cast)]
             fttry!(FT_New_Memory_Face(
                 library.ptr,
-                bytes.as_ptr(),
+                bytes.cast(),
                 bytes.len() as FT_Long,
                 index as FT_Long,
-                &mut face
+                face.as_mut_ptr()
             ))?;
-        }
 
-        unsafe { Self::adopt_ft(face, Some(bytes)) }
+            Ok(face.assume_init())
+        }
     }
 
     unsafe fn adopt_ft(face: FT_Face, memory: Option<Arc<[u8]>>) -> Result<Self, FreeTypeError> {

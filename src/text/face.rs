@@ -165,6 +165,10 @@ impl Face {
         freetype::Face::load_from_bytes(bytes, index).map(Face::FreeType)
     }
 
+    pub fn load_from_static_bytes(bytes: &'static [u8], index: i32) -> Result<Self, FreeTypeError> {
+        freetype::Face::load_from_static_bytes(bytes, index).map(Face::FreeType)
+    }
+
     pub const fn tofu() -> Self {
         Face::Tofu(tofu::Face)
     }

@@ -1151,12 +1151,19 @@ impl<'f> ShapedItemText<'f> {
             }
 
             if *current_width > ctx.constraints.size.x {
-                let opportunities = &ctx.break_opportunities[..=match ctx
+                // We want to also consider breaking within the current glyph so let's
+                // start looking for break opportunities anywhere before the *next* glyph.
+                let glyph_end = if self.glyphs.direction().is_reverse() {
+                    glyph.cluster + 1
+                } else {
+                    glyph_it.peek().map(|g| g.cluster).unwrap_or(range.end)
+                };
+                let opportunities = &ctx.break_opportunities[..match ctx
                     .break_opportunities
-                    .binary_search(&glyph.cluster)
+                    .binary_search(&glyph_end)
                 {
                     Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
+                    Err(idx) => idx,
                 }];
 
                 // TODO: Also try slightly overflowing break points if these fail

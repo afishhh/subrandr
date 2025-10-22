@@ -11,6 +11,9 @@ edition = "2021"
 # This is very crudely parsed by the build script, don't touch.
 abiver = "0"
 
+[workspace.metadata.ptr]
+lfs-remote = "ssh://git@github.com:afishhh/lfs-testing"
+
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
 

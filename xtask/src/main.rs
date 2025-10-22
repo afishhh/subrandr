@@ -6,6 +6,8 @@ use clap::{Parser, Subcommand};
 mod build;
 mod command_context;
 #[cfg(feature = "full")]
+mod diff_png;
+#[cfg(feature = "full")]
 mod lfs;
 #[cfg(feature = "full")]
 mod ptr;
@@ -27,6 +29,8 @@ enum Task {
     #[cfg(feature = "full")]
     #[clap(subcommand)]
     Ptr(ptr::PtrCommand),
+    #[cfg(feature = "full")]
+    DiffPng(diff_png::Command),
 }
 
 fn main() -> Result<()> {
@@ -44,5 +48,7 @@ fn main() -> Result<()> {
         Task::Install(install) => build::install_library(&ctx, install),
         #[cfg(feature = "full")]
         Task::Ptr(ptr) => ptr.run(&ctx),
+        #[cfg(feature = "full")]
+        Task::DiffPng(diff) => diff.run(&ctx),
     }
 }

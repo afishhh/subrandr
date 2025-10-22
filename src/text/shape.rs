@@ -130,7 +130,7 @@ impl ShapingBuffer {
                 self.raw.0,
                 context.as_ptr() as *const _,
                 context.len() as i32,
-                context.len() as u32,
+                0,
                 0,
             );
         }

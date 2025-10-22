@@ -1,3 +1,6 @@
+// Without the "full" feature a lot of the output functionality is not used.
+#![cfg_attr(not(feature = "full"), allow(dead_code, unused_imports, unused_macros))]
+
 use std::{
     cell::OnceCell,
     io::IsTerminal as _,
@@ -19,13 +22,41 @@ pub enum Verbosity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TermColor {
+    White,
+    Yellow,
+    Cyan,
     Green,
 }
 
 impl TermColor {
     fn bold_ansi_str(self) -> &'static str {
         match self {
+            TermColor::White => "\x1b[39;1m",
+            TermColor::Yellow => "\x1b[33;1m",
+            TermColor::Cyan => "\x1b[36;1m",
             TermColor::Green => "\x1b[32;1m",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MessageKind {
+    Note,
+    Warning,
+}
+
+impl MessageKind {
+    fn color(self) -> TermColor {
+        match self {
+            MessageKind::Note => TermColor::Cyan,
+            MessageKind::Warning => TermColor::Yellow,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            MessageKind::Note => "note",
+            MessageKind::Warning => "warning",
         }
     }
 }
@@ -128,4 +159,32 @@ macro_rules! statusln {
     }};
 }
 
+#[doc(hidden)]
+pub fn _messageln(kind: MessageKind, args: &std::fmt::Arguments) {
+    if std::io::stderr().is_terminal() {
+        eprint!(
+            "{}{}\x1b[39m:\x1b[0m ",
+            kind.color().bold_ansi_str(),
+            kind.as_str()
+        );
+    } else {
+        eprint!("{}: ", kind.as_str());
+    }
+
+    eprintln!("{args}");
+}
+
+macro_rules! messageln {
+    ($ctx: expr, $verbosity: ident, $kind: ident, $($fmt: tt)*) => {{
+        let ctx: &$crate::command_context::CommandContext = &$ctx;
+        if ctx.verbosity() >= $crate::command_context::Verbosity::$verbosity {
+            crate::command_context::_messageln(
+                $crate::command_context::MessageKind::$kind,
+                &format_args!($($fmt)*)
+            )
+        }
+    }};
+}
+
+pub(crate) use messageln;
 pub(crate) use statusln;

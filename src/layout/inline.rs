@@ -675,13 +675,17 @@ fn shape_run_initial<'a, 'f>(
             });
 
             let ignore_after = range.end.min(self.run_text.len() - 1);
-            let mut iter = segmenter
+            let iter = segmenter
                 .segment_str(&self.run_text[padded_start..padded_end])
                 .map(|idx| idx + padded_start);
-            // The first break is going to be either at the start of the string or
-            // before our "padding" look-behind character, both of which we want to ignore.
-            _ = iter.next();
+
             for idx in iter {
+                // The first breaks are going to be either at the start of the string or
+                // inside our "padding" look-behind character, both of which we want to ignore.
+                if idx < range.start {
+                    continue;
+                }
+
                 if idx > ignore_after {
                     break;
                 }

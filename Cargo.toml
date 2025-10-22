@@ -2,6 +2,7 @@
 name = "subrandr"
 version.workspace = true
 edition.workspace = true
+autotests = false
 
 [workspace.package]
 version = "0.2.2"
@@ -30,6 +31,11 @@ font-provider-android-ndk = []
 # Currently this just enables a reasonable default set of font providers.
 platform-defaults = []
 
+# Enables compiling the `layout_tests` module.
+# This is separate from `cfg(test)` because layout tests require
+# extra binary asset files to be present.
+_layout_tests = []
+
 [dependencies]
 thiserror = "1"
 quick-xml = "0.36"
@@ -45,6 +51,10 @@ unicode-bidi = "0.3"
 util = { workspace = true }
 rasterize = { workspace = true }
 macros = { workspace = true }
+
+[dev-dependencies]
+sha2 = "0.10"
+png = "0.18"
 
 [lints]
 workspace = true

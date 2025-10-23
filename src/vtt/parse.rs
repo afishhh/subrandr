@@ -467,11 +467,14 @@ enum Block<'a> {
 }
 
 // https://www.w3.org/TR/webvtt1/#collect-a-webvtt-block
-fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<Block<'a>> {
+fn collect_block<'a>(
+    input: &mut ParsingBuffer<'a>,
+    in_header: bool,
+    seen_cue: &mut bool,
+) -> Option<Block<'a>> {
     let mut buffer = "";
     let mut line_count = 0;
     let mut seen_eof = false;
-    let mut seen_cue = false;
     let mut seen_arrow = false;
     let mut previous_position = input.text;
     let mut cue = None;
@@ -539,7 +542,7 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
                     .is_some()
                 {
                     cue = Some(cue_);
-                    seen_cue = true;
+                    *seen_cue = true;
                     buffer = "";
                 } else {
                     cue = None;
@@ -557,7 +560,7 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
             // If in header is not set and line count is 2, run these substeps:
             if !in_header && line_count == 2 {
                 // If seen cue is false and buffer starts with the substring "STYLE", and the remaining characters in buffer (if any) are all ASCII whitespace, then run these substeps:
-                if !seen_cue
+                if !*seen_cue
                     && buffer
                         .strip_prefix("STYLE")
                         .is_some_and(|remaining| remaining.bytes().all(|b| b.is_ascii_whitespace()))
@@ -566,7 +569,7 @@ fn collect_block<'a>(input: &mut ParsingBuffer<'a>, in_header: bool) -> Option<B
                     stylesheet = Some(());
                     // Let buffer be the empty string.
                     buffer = "";
-                } else if !seen_cue
+                } else if !*seen_cue
                     && buffer
                         .strip_prefix("REGION")
                         .is_some_and(|remaining| remaining.bytes().all(|b| b.is_ascii_whitespace()))
@@ -668,6 +671,7 @@ pub fn parse(input: &str) -> Option<Captions<'_>> {
         return None;
     }
 
+    let mut seen_cue = false;
     let mut output = Captions {
         cues: Vec::new(),
         regions: Vec::new(),
@@ -675,13 +679,13 @@ pub fn parse(input: &str) -> Option<Captions<'_>> {
     };
 
     if !input.take_linefeed() {
-        _ = collect_block(&mut input, true);
+        _ = collect_block(&mut input, true, &mut seen_cue);
     }
 
     while input.take_linefeed() {}
 
     while !input.is_empty() {
-        match collect_block(&mut input, false) {
+        match collect_block(&mut input, false, &mut seen_cue) {
             Some(Block::Cue(cue)) => output.cues.push(cue),
             Some(Block::Region(region)) => output.regions.push(region),
             Some(Block::Stylesheet(stylesheet)) => output.stylesheets.push(stylesheet),

@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use indexmap::IndexMap;
+use serde::{Deserialize, de::IntoDeserializer};
 use sha2::Digest as _;
 
 use crate::{
@@ -20,6 +21,8 @@ mod path;
 pub use path::*;
 
 pub struct PtrInfo {
+    pub lfs_remote: Option<Box<str>>,
+    pub lfs_api: Option<Box<str>>,
     pub sha256: Box<HexSha256>,
     pub size: u64,
     pub extra: IndexMap<Box<str>, Box<str>>,
@@ -56,17 +59,19 @@ impl PtrInfo {
         }
 
         Ok(Self {
+            lfs_remote: fields.shift_remove("lfs-remote"),
+            lfs_api: fields.shift_remove("lfs-api"),
             sha256: fields
-                .shift_remove("filehash")
-                .ok_or_else(|| anyhow!("`filehash` field is missing"))?
+                .shift_remove("file-hash")
+                .ok_or_else(|| anyhow!("`file-hash` field is missing"))?
                 .parse::<&HexSha256>()
                 .map(|hash| Box::new(hash.clone()))
-                .context("`file` field has an invalid value")?,
+                .context("`file-hash` field has an invalid value")?,
             size: fields
-                .shift_remove("filesize")
-                .ok_or_else(|| anyhow!("`filesize` field is missing"))?
+                .shift_remove("file-size")
+                .ok_or_else(|| anyhow!("`file-size` field is missing"))?
                 .parse()
-                .context("`filesize` field has an invalid value")?,
+                .context("`file-size` field has an invalid value")?,
             extra: fields,
         })
     }
@@ -151,6 +156,8 @@ impl WriteCommand {
             .and_then(|mut file| Ok((HexSha256::from_reader(&mut file)?, file)))
             .context("Failed to hash data file")?;
         ptr_path.write(PtrInfo {
+            lfs_remote: None,
+            lfs_api: None,
             sha256: Box::new(sha256),
             size: file
                 .stream_position()
@@ -182,16 +189,94 @@ fn collect_committed_ptr_files(root: PathBuf, result: &mut Vec<PtrPathBuf>) -> R
     for path in output.stdout.split(|&b| b == b'\0') {
         let path = Path::new(std::str::from_utf8(path).context("Path is not valid UTF-8")?);
 
-        // TODO: let_chains not supported on our MSRV
-        #[allow(clippy::collapsible_if)]
-        if let Some(ptr_path) = PtrPath::new(path) {
-            if path.try_exists()? {
-                result.push(ptr_path.to_owned());
-            }
+        if let Some(ptr_path) = PtrPath::new(path)
+            && path.try_exists()?
+        {
+            result.push(ptr_path.to_owned());
         }
     }
 
     Ok(())
+}
+
+struct GitConfigOutput {
+    stdout: String,
+}
+
+impl GitConfigOutput {
+    fn iter(&self) -> impl Iterator<Item = (&'_ str, &'_ str)> {
+        let mut current = &self.stdout[..];
+        std::iter::from_fn(move || {
+            if current.is_empty() {
+                return None;
+            }
+
+            let (key, rest) = current.split_once('\n').unwrap();
+            let (value, rest) = rest.split_once('\0').unwrap();
+            current = rest;
+            Some((key.strip_suffix('\r').unwrap_or(key), value))
+        })
+    }
+}
+
+fn get_git_config() -> Result<GitConfigOutput> {
+    let output = std::process::Command::new("git")
+        .arg("config")
+        .arg("list")
+        .arg("-z")
+        .stderr(Stdio::inherit())
+        .output()
+        .context("Failed to execute `git config list -z`")?;
+
+    if !output.status.success() {
+        bail!(
+            "`git config list -z` failed with exit status: {}",
+            output.status
+        );
+    }
+
+    Ok(GitConfigOutput {
+        stdout: String::from_utf8(output.stdout)
+            .context("`git config` output was not valid UTF-8")?,
+    })
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct Config {
+    #[serde(rename = "lfs-remote-url")]
+    lfs_remote_url: String,
+    #[serde(rename = "lfs-api-url")]
+    lfs_api_url: Option<String>,
+}
+
+impl Config {
+    fn load() -> Result<Config> {
+        Config::deserialize(
+            serde::de::value::MapDeserializer::<_, serde::de::value::Error>::new(
+                get_git_config()?.iter().filter_map(|(k, v)| {
+                    k.strip_prefix("sbr.").map(|k| {
+                        (
+                            serde::de::value::StrDeserializer::new(k),
+                            serde::de::value::StrDeserializer::new(v),
+                        )
+                    })
+                }),
+            )
+            .into_deserializer(),
+        )
+        .context(concat!(
+            "Failed to load config from git values\n",
+            "Make sure you set `sbr.lfs-remote-url` to the git repo you want to store lfs data in.\n",
+            "You can do this by running `git config set sbr.lfs-remote-url <URL>`."
+        ))
+    }
+
+    fn get_or_guess_api_url(&self) -> Result<String> {
+        match &self.lfs_api_url {
+            Some(url) => Ok(url.clone()),
+            None => guess_api_url_from_repo_url(&self.lfs_remote_url),
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -200,9 +285,6 @@ pub struct PullCommand {
     #[clap(short = 'u', long = "update")]
     update: bool,
 }
-
-// TODO: un-hardcode
-const LFS_REPO: &str = "ssh://git@github.com/afishhh/lfs-testing";
 
 impl PullCommand {
     fn open_destination_path(
@@ -297,7 +379,7 @@ impl PullCommand {
         }
 
         if !objects.is_empty() {
-            let client = lfs::Client::new(guess_api_url_from_repo_url(LFS_REPO)?);
+            let client = lfs::Client::new(Config::load()?.get_or_guess_api_url()?);
 
             for handle in client
                 .batch(objects, None, lfs::Operation::Download)
@@ -451,9 +533,13 @@ impl PushCommand {
         }
 
         if !objects.is_empty() {
-            let client = lfs::Client::new(guess_api_url_from_repo_url(LFS_REPO)?);
-            let auth = lfs::Authorisation::authenticate_with_ssh(LFS_REPO, lfs::Operation::Upload)
-                .context("Failed to authenticate with lfs remote")?;
+            let config = Config::load()?;
+            let client = lfs::Client::new(config.get_or_guess_api_url()?);
+            let auth = lfs::Authorisation::authenticate_with_ssh(
+                &config.lfs_remote_url,
+                lfs::Operation::Upload,
+            )
+            .context("Failed to authenticate with lfs remote")?;
 
             for handle in client.batch(objects, Some(&auth), lfs::Operation::Upload)? {
                 let data_path = hash_to_data_path.remove(&handle.sha256).unwrap();

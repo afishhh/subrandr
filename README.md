@@ -81,8 +81,7 @@ int main() {
     exit(1);
 
   sbr_subtitle_context ctx = {
-      // this is **dots per inch**, not **pixels per inch**
-      // if you have pixels per inch: dpi = ppi * 72 / 96
+      // dots per inch
       .dpi = 144,
       // video dimensions and padding are in 26.6 fixed point format
       .video_width = 1920 << 6,

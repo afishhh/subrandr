@@ -263,32 +263,6 @@ fn write_implib(
 }
 
 #[derive(Debug, Deserialize)]
-struct Manifest {
-    package: Package,
-    workspace: WorkspaceMetadata,
-}
-
-#[derive(Debug, Deserialize)]
-struct Package {
-    metadata: PackageMetadata,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkspaceMetadata {
-    package: WorkspacePackageMetadata,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkspacePackageMetadata {
-    version: Box<str>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PackageMetadata {
-    capi: CApiMetadata,
-}
-
-#[derive(Debug, Deserialize)]
 struct CApiMetadata {
     abiver: Box<str>,
 }
@@ -358,16 +332,21 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         panic!("Build for broken platform aborted");
     }
 
-    build_library(&ctx, &install.build)?;
+    build_library(ctx, &install.build)?;
 
-    let manifest: Manifest = toml::from_str(
-        &std::fs::read_to_string(ctx.project_dir().join("Cargo.toml"))
-            .context("Failed to read Cargo.toml")?,
-    )
-    .context("Failed to parse Cargo.toml")?;
+    let package = ctx
+        .cargo_metadata()?
+        .packages
+        .iter()
+        .find(|&p| &*p.name == "subrandr")
+        .context("Package `subrandr` is missing from cargo metadata")?;
 
-    let version = manifest.workspace.package.version;
-    let abiver = manifest.package.metadata.capi.abiver;
+    let version = &package.version;
+    let abiver = package
+        .metadata
+        .try_parse_key::<CApiMetadata>("capi")
+        .context("Failed to parse `capi` metadata table")?
+        .abiver;
 
     let libdir = destdir.join(&install.libdir);
     let pkgconfigdir = if let Some(pkgconfigdir) = install.pkgconfigdir {
@@ -475,7 +454,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         pkgconfigdir.join("subrandr.pc"),
         make_pkgconfig_file(
             &prefix,
-            &version,
+            version,
             &install.build.target,
             &install.libdir,
             &install.includedir,

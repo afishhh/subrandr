@@ -1,9 +1,14 @@
 use std::{
+    cell::OnceCell,
     io::IsTerminal as _,
     path::{Path, PathBuf},
 };
 
+use anyhow::{Context, Result, bail};
+use cargo_metadata::CargoMetadata;
 use clap::Parser;
+
+pub mod cargo_metadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Verbosity {
@@ -36,6 +41,7 @@ pub struct GlobalArgs {
 pub struct CommandContext {
     manifest_dir: PathBuf,
     verbosity: Verbosity,
+    cargo_metadata: OnceCell<CargoMetadata>,
 }
 
 impl CommandContext {
@@ -51,6 +57,7 @@ impl CommandContext {
                     Verbosity::Normal
                 }
             },
+            cargo_metadata: OnceCell::new(),
         }
     }
 
@@ -64,6 +71,29 @@ impl CommandContext {
 
     pub fn verbosity(&self) -> Verbosity {
         self.verbosity
+    }
+
+    pub fn cargo_metadata(&self) -> Result<&CargoMetadata> {
+        // TODO: top 10 missing std features: `once_cell_try`
+        if let Some(meta) = self.cargo_metadata.get() {
+            return Ok(meta);
+        }
+
+        let output = std::process::Command::new(env!("CARGO"))
+            .arg("metadata")
+            .arg("--locked")
+            .arg("--offline")
+            .arg("--no-deps")
+            .arg("--format-version=1")
+            .output()
+            .context("Failed to run `cargo metadata`")?;
+        if !output.status.success() {
+            bail!("`cargo metadata` failed: {}", output.status)
+        }
+
+        let meta = serde_json::from_slice(&output.stdout)
+            .context("Failed to parse `cargo metadata` output")?;
+        Ok(self.cargo_metadata.get_or_init(|| meta))
     }
 }
 

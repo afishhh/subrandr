@@ -328,10 +328,10 @@ pub fn build_library(ctx: &CommandContext, build: &BuildCommand) -> Result<()> {
         })
         .args(&build.cargo_rustc_args)
         .status()
-        .context("Failed to run `cargo build`")?;
+        .context("Failed to run `cargo rustc`")?;
 
     if !status.success() {
-        bail!("`cargo build` failed: {}", status)
+        bail!("`cargo rustc` failed: {}", status)
     }
 
     Ok(())

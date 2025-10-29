@@ -8,7 +8,6 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use indexmap::IndexMap;
-use serde::{Deserialize, de::IntoDeserializer};
 use sha2::Digest as _;
 
 use crate::{
@@ -21,8 +20,6 @@ mod path;
 pub use path::*;
 
 pub struct PtrInfo {
-    pub lfs_remote: Option<Box<str>>,
-    pub lfs_api: Option<Box<str>>,
     pub sha256: Box<HexSha256>,
     pub size: u64,
     pub extra: IndexMap<Box<str>, Box<str>>,
@@ -59,8 +56,6 @@ impl PtrInfo {
         }
 
         Ok(Self {
-            lfs_remote: fields.shift_remove("lfs-remote"),
-            lfs_api: fields.shift_remove("lfs-api"),
             sha256: fields
                 .shift_remove("file-hash")
                 .ok_or_else(|| anyhow!("`file-hash` field is missing"))?
@@ -77,8 +72,8 @@ impl PtrInfo {
     }
 
     pub fn write(&self, mut to: impl Write) -> std::io::Result<()> {
-        writeln!(to, "filehash {}", self.sha256)?;
-        writeln!(to, "filesize {}", self.size)?;
+        writeln!(to, "file-hash {}", self.sha256)?;
+        writeln!(to, "file-size {}", self.size)?;
 
         for (key, value) in &self.extra {
             writeln!(to, "{key} {value}")?;
@@ -156,8 +151,6 @@ impl WriteCommand {
             .and_then(|mut file| Ok((HexSha256::from_reader(&mut file)?, file)))
             .context("Failed to hash data file")?;
         ptr_path.write(PtrInfo {
-            lfs_remote: None,
-            lfs_api: None,
             sha256: Box::new(sha256),
             size: file
                 .stream_position()
@@ -199,76 +192,19 @@ fn collect_committed_ptr_files(root: PathBuf, result: &mut Vec<PtrPathBuf>) -> R
     Ok(())
 }
 
-struct GitConfigOutput {
-    stdout: String,
-}
-
-impl GitConfigOutput {
-    fn iter(&self) -> impl Iterator<Item = (&'_ str, &'_ str)> {
-        let mut current = &self.stdout[..];
-        std::iter::from_fn(move || {
-            if current.is_empty() {
-                return None;
-            }
-
-            let (key, rest) = current.split_once('\n').unwrap();
-            let (value, rest) = rest.split_once('\0').unwrap();
-            current = rest;
-            Some((key.strip_suffix('\r').unwrap_or(key), value))
-        })
-    }
-}
-
-fn get_git_config() -> Result<GitConfigOutput> {
-    let output = std::process::Command::new("git")
-        .arg("config")
-        .arg("list")
-        .arg("-z")
-        .stderr(Stdio::inherit())
-        .output()
-        .context("Failed to execute `git config list -z`")?;
-
-    if !output.status.success() {
-        bail!(
-            "`git config list -z` failed with exit status: {}",
-            output.status
-        );
-    }
-
-    Ok(GitConfigOutput {
-        stdout: String::from_utf8(output.stdout)
-            .context("`git config` output was not valid UTF-8")?,
-    })
-}
-
 #[derive(serde::Deserialize, Debug)]
 struct Config {
-    #[serde(rename = "lfs-remote-url")]
+    #[serde(rename = "lfs-remote")]
     lfs_remote_url: String,
-    #[serde(rename = "lfs-api-url")]
+    #[serde(rename = "lfs-api")]
     lfs_api_url: Option<String>,
 }
 
 impl Config {
-    fn load() -> Result<Config> {
-        Config::deserialize(
-            serde::de::value::MapDeserializer::<_, serde::de::value::Error>::new(
-                get_git_config()?.iter().filter_map(|(k, v)| {
-                    k.strip_prefix("sbr.").map(|k| {
-                        (
-                            serde::de::value::StrDeserializer::new(k),
-                            serde::de::value::StrDeserializer::new(v),
-                        )
-                    })
-                }),
-            )
-            .into_deserializer(),
-        )
-        .context(concat!(
-            "Failed to load config from git values\n",
-            "Make sure you set `sbr.lfs-remote-url` to the git repo you want to store lfs data in.\n",
-            "You can do this by running `git config set sbr.lfs-remote-url <URL>`."
-        ))
+    fn load(ctx: &CommandContext) -> Result<Config> {
+        ctx.cargo_metadata()?
+            .workspace_metadata
+            .try_parse_key("ptr")
     }
 
     fn get_or_guess_api_url(&self) -> Result<String> {
@@ -379,7 +315,7 @@ impl PullCommand {
         }
 
         if !objects.is_empty() {
-            let client = lfs::Client::new(Config::load()?.get_or_guess_api_url()?);
+            let client = lfs::Client::new(Config::load(ctx)?.get_or_guess_api_url()?);
 
             for handle in client
                 .batch(objects, None, lfs::Operation::Download)
@@ -533,7 +469,7 @@ impl PushCommand {
         }
 
         if !objects.is_empty() {
-            let config = Config::load()?;
+            let config = Config::load(ctx)?;
             let client = lfs::Client::new(config.get_or_guess_api_url()?);
             let auth = lfs::Authorisation::authenticate_with_ssh(
                 &config.lfs_remote_url,

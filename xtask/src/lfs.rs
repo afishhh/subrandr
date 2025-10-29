@@ -32,10 +32,9 @@ fn remote_and_repo_from_ssh_url(url: &str) -> Result<(&str, &str)> {
         bail!("Repo URL must be a valid SSH URL");
     }
 
-    Ok(match url[6..].find("/") {
-        Some(i) => (&url[..6 + i], &url[7 + i..]),
-        None => (url, ""),
-    })
+    Ok(url[6..]
+        .find(':')
+        .map_or((url, ""), |i| (&url[..6 + i], &url[7 + i..])))
 }
 
 fn deserialize_header_map<'de, D: serde::Deserializer<'de>>(
@@ -124,21 +123,23 @@ impl Authorisation {
 }
 
 pub fn guess_api_url_from_repo_url(repo_url: &str) -> Result<String> {
-    let stripped_repo_url = if let Some(value) = repo_url.strip_prefix("ssh://") {
-        &value[value.find('@').map_or(0, |i| i + 1)..]
+    let (host, path) = if let Some(value) = repo_url.strip_prefix("ssh://") {
+        value[value.find('@').map_or(0, |i| i + 1)..]
+            .split_once(':')
+            .context("SSH repo url missing `:`")?
     } else if let Some(value) = repo_url
         .strip_prefix("http://")
         .or_else(|| repo_url.strip_prefix("https://"))
     {
         value
+            .split_once('/')
+            .context("HTTP repo url missing a path")?
     } else {
         bail!("Unknown repo URL schema");
     };
-    let stripped_repo_url = stripped_repo_url
-        .strip_suffix(".git")
-        .unwrap_or(stripped_repo_url);
+    let stripped_path = path.strip_suffix(".git").unwrap_or(path);
 
-    Ok(format!("https://{stripped_repo_url}.git/info/lfs"))
+    Ok(format!("https://{host}/{stripped_path}.git/info/lfs"))
 }
 
 pub struct Client {

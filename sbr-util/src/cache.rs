@@ -42,7 +42,7 @@ struct CacheSlotValue<V> {
 
 impl<V: CacheValue> ErasedCacheSlotValue for CacheSlotValue<V> {
     unsafe fn assume_init_ref(&self) -> &dyn CacheValue {
-        unsafe { (&*self.value.get()).assume_init_ref() }
+        unsafe { (*self.value.get()).assume_init_ref() }
     }
 
     unsafe fn assume_init_drop(&mut self) {

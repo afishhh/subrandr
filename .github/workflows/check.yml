@@ -6,13 +6,16 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  RUST_VERSION: 1.85
+
 jobs:
   run-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup default $RUST_VERSION
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
       - name: Install nextest
@@ -48,10 +51,14 @@ jobs:
             image: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy rustfmt
-          targets: ${{ matrix.rustc-cross-target }}
+      - run:
+          # This uses the nightly toolchain because we want to run clippy from
+          # nightly. 1.85 is tested in the unit tests job anyway so this should be fine.
+          rustup toolchain install nightly
+            --component clippy,rustfmt ${TARGET:+--target} $TARGET
+        env:
+          TARGET: ${{ matrix.rustc-cross-target }}
+      - run: rustup default nightly
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.cross-arch }}
@@ -62,7 +69,7 @@ jobs:
           LIBRARIES: libfontconfig-dev libfreetype-dev libharfbuzz-dev
 
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
+      - run: cargo clippy --workspace --exclude sbr-overlay --all-targets --all-features -- -D warnings
       - run: ./ci/c_sanity_check.sh
         env:
           CROSS_TARGET: ${{ matrix.rustc-cross-target }}
@@ -73,9 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
+      - run: rustup toolchain install $RUST_VERSION --target wasm32-wasip1
+      - run: rustup default $RUST_VERSION
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt update && sudo apt install -y build-essential
 

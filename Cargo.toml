@@ -3,10 +3,12 @@ name = "subrandr"
 version.workspace = true
 edition.workspace = true
 autotests = false
+rust-version.workspace = true
 
 [workspace.package]
 version = "0.2.2"
 edition = "2021"
+rust-version = "1.85"
 
 [package.metadata.capi]
 # This is very crudely parsed by the build script, don't touch.

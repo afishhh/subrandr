@@ -6,13 +6,21 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  RUST_VERSION: 1.85
+  # clippy::needless lifetimes is a little bit overzealous on 1.85 and conflicts
+  # with what nightly thinks (fixing this lint will trigger another lint on nightly)
+  # clippy::comparison-chain has since been moved to pedantic
+  STABLE_CLIPPY_OPTIONS: -D warnings -A clippy::needless_lifetimes -A clippy::comparison_chain
+
 jobs:
   run-tests:
     name: Run tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # The layout test suite and xxtask does not follow crate msrv.
+      - run: rustup default nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo xxtask ptr pull tests/assets/*.ptr
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
@@ -49,10 +57,12 @@ jobs:
             image: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy rustfmt
-          targets: ${{ matrix.rustc-cross-target }}
+      - run:
+          rustup toolchain install $RUST_VERSION
+            --component clippy,rustfmt ${TARGET:+--target} $TARGET
+        env:
+          TARGET: ${{ matrix.rustc-cross-target }}
+      - run: rustup default $RUST_VERSION
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.cross-arch }}
@@ -63,7 +73,16 @@ jobs:
           LIBRARIES: libfontconfig-dev libfreetype-dev libharfbuzz-dev
 
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
+      - run:
+          cargo clippy --workspace
+            --exclude sbr-overlay --exclude xtask --exclude subrandr
+            --all-targets --all-features -- $STABLE_CLIPPY_OPTIONS
+      # The xtask is checked separately because it cannot be tested with `--all-features` as
+      # the "full" feature does not follow our MSRV (yet).
+      - run: cargo clippy -p xtask --all-targets -- $STABLE_CLIPPY_OPTIONS
+      # The subrandr crate is checked separately because it has a `_layout_tests` feature which
+      # also does not follow our MSRV.
+      - run: cargo clippy --no-deps -p subrandr --features wgpu --all-targets -- $STABLE_CLIPPY_OPTIONS
       - run: ./ci/c_sanity_check.sh
         env:
           CROSS_TARGET: ${{ matrix.rustc-cross-target }}
@@ -74,9 +93,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1
+      - run: rustup toolchain install $RUST_VERSION --target wasm32-wasip1
+      - run: rustup default $RUST_VERSION
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt update && sudo apt install -y build-essential
 

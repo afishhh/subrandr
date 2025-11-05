@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 mod build;
 mod command_context;
 #[cfg(feature = "full")]
+#[cfg_attr(feature = "full", clippy::msrv = "1.88.0")]
 mod diff_png;
 #[cfg(feature = "full")]
 mod lfs;

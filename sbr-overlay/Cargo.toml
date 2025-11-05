@@ -2,6 +2,7 @@
 name = "sbr-overlay"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [features]
 default = ["ipc-mpv", "ipc-browser-cdp"]

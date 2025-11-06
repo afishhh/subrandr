@@ -514,7 +514,7 @@ fn shape_run_initial<'a, 'f>(
 
                 let glyphs = {
                     let mut buffer = text::ShapingBuffer::new();
-                    buffer.reset();
+                    buffer.clear();
                     buffer.guess_properties();
                     buffer.set_direction(direction.to_horizontal());
                     buffer.add(&text, range.clone());

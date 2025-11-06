@@ -23,6 +23,12 @@ pub fn vec_parts<T>(v: &mut Vec<T>) -> (*mut T, usize, usize) {
     (ptr, len, capacity)
 }
 
+pub fn vec_into_parts<T>(mut v: Vec<T>) -> (*mut T, usize, usize) {
+    let parts = vec_parts(&mut v);
+    std::mem::forget(v);
+    parts
+}
+
 // Formatting helpers
 // Remove once [debug_closure_helpers](https://github.com/rust-lang/rust/issues/117729) is stabilized.
 

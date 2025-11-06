@@ -26,6 +26,7 @@ macros::implement_style_module! {
         font_weight: I16Dot16 = I16Dot16::new(400),
         font_size: I26Dot6 = I26Dot6::new(16),
         font_slant: FontSlant = FontSlant::Regular,
+        #[copy(no)] font_feature_settings: FontFeatureSettings = FontFeatureSettings::empty(),
     }
 
     rc text_inherited {

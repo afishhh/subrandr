@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use rasterize::color::BGRA8;
 use util::math::{I26Dot6, Vec2f};
 
-use crate::layout::FixedL;
+use crate::{layout::FixedL, text::OpenTypeTag};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -83,5 +85,22 @@ impl Length {
 
     pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
         self.0 * dpi as i32 / 72
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FontFeatureSettings(BTreeMap<OpenTypeTag, u32>);
+
+impl FontFeatureSettings {
+    pub fn set(&mut self, tag: OpenTypeTag, value: u32) {
+        self.0.insert(tag, value);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (OpenTypeTag, u32)> + use<'_> {
+        self.0.iter().map(|(&t, &v)| (t, v))
+    }
+
+    pub const fn empty() -> Self {
+        Self(BTreeMap::new())
     }
 }

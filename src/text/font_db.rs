@@ -10,11 +10,12 @@ use crate::{
         platform_font_provider::{
             self, FallbackError, LockedPlatformFontProvider, SubstituteError,
         },
+        OpenTypeTag,
     },
     Subrandr,
 };
 
-use super::{ft_utils::FreeTypeError, Face, WEIGHT_AXIS};
+use super::{ft_utils::FreeTypeError, Face};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontFallbackRequest {
@@ -68,7 +69,7 @@ impl FaceInfo {
         Self {
             family_names: Arc::new([name.into()]),
             width: FontAxisValues::Fixed(I16Dot16::new(100)),
-            weight: face.axis(WEIGHT_AXIS).map_or_else(
+            weight: face.axis(OpenTypeTag::AXIS_WEIGHT).map_or_else(
                 || FontAxisValues::Fixed(face.weight()),
                 |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
             ),
@@ -206,7 +207,7 @@ pub struct FontDb<'a> {
 }
 
 pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
-    if let Some(axis) = face.axis(WEIGHT_AXIS) {
+    if let Some(axis) = face.axis(OpenTypeTag::AXIS_WEIGHT) {
         face.set_axis(axis.index, weight)
     }
 }

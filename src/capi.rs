@@ -12,7 +12,7 @@ use util::{math::I16Dot16, rc::Rc};
 
 use crate::{
     log::{CLogCallback, Logger},
-    text::{Face, FontAxisValues, WEIGHT_AXIS},
+    text::{Face, FontAxisValues, OpenTypeTag},
     Renderer, Subrandr, SubtitleContext, Subtitles,
 };
 
@@ -430,7 +430,7 @@ unsafe extern "C" fn sbr_renderer_add_font(
         family_names: Arc::new([family.into()]),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: match weight {
-            f if f.is_nan() => (*font).axis(WEIGHT_AXIS).map_or_else(
+            f if f.is_nan() => (*font).axis(OpenTypeTag::AXIS_WEIGHT).map_or_else(
                 || FontAxisValues::Fixed((*font).weight()),
                 |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
             ),

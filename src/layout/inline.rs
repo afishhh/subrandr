@@ -11,7 +11,7 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment},
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontArena, FontMatcher, GlyphString},
+    text::{self, Direction, Font, FontArena, FontMatcher, GlyphString, ShapingBuffer},
 };
 
 // This character is used to represent opaque objects nested inside inline text content,
@@ -493,6 +493,7 @@ fn shape_run_initial<'a, 'f>(
             lctx: &mut LayoutContext,
             result: &mut Vec<ShapedItem<'_, 'f>>,
             left_padding: &mut FixedL,
+            buffer: &mut ShapingBuffer,
         ) -> Result<(), InlineLayoutError> {
             let mut current_paragraph = match bidi
                 .paragraphs
@@ -513,13 +514,12 @@ fn shape_run_initial<'a, 'f>(
                 };
 
                 let glyphs = {
-                    let mut buffer = text::ShapingBuffer::new();
-                    buffer.clear();
                     buffer.guess_properties();
                     buffer.set_direction(direction.to_horizontal());
                     buffer.add(&text, range.clone());
                     buffer.shape(self.matcher.iterator(), font_arena, lctx.fonts)?
                 };
+                buffer.clear();
 
                 result.push(ShapedItem {
                     range,
@@ -577,6 +577,7 @@ fn shape_run_initial<'a, 'f>(
         break_opportunities: Vec<usize>,
         shaped: Vec<ShapedItem<'a, 'f>>,
         span_state: &'s mut Vec<SpanState<'a, 'f>>,
+        shaping_buffer: ShapingBuffer,
         queued_text: Option<QueuedText<'f>>,
         queued_padding: FixedL,
         current_span_id: usize,
@@ -670,6 +671,7 @@ fn shape_run_initial<'a, 'f>(
                         self.lctx,
                         &mut self.shaped,
                         &mut self.queued_padding,
+                        &mut self.shaping_buffer,
                     )?;
                 }
 
@@ -722,6 +724,7 @@ fn shape_run_initial<'a, 'f>(
                         self.lctx,
                         &mut self.shaped,
                         &mut self.queued_padding,
+                        &mut self.shaping_buffer,
                     )?;
                 }
 
@@ -778,6 +781,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.lctx,
                                     &mut self.shaped,
                                     &mut self.queued_padding,
+                                    &mut self.shaping_buffer,
                                 )?;
                             }
 
@@ -908,6 +912,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.lctx,
                                     &mut self.shaped,
                                     &mut self.queued_padding,
+                                    &mut self.shaping_buffer,
                                 )?;
                                 self.queued_text = Some(QueuedText {
                                     matcher: font_matcher,
@@ -920,6 +925,11 @@ fn shape_run_initial<'a, 'f>(
                                     range: text.content_range.clone(),
                                 })
                             }
+                        }
+
+                        for (tag, value) in current_style.font_feature_settings().iter() {
+                            self.shaping_buffer
+                                .set_feature(tag, value, text.content_range.clone());
                         }
 
                         text_leaf_items.push(LeafItemRange {
@@ -960,6 +970,7 @@ fn shape_run_initial<'a, 'f>(
                     self.lctx,
                     &mut self.shaped,
                     &mut self.queued_padding,
+                    &mut self.shaping_buffer,
                 )?;
             }
 
@@ -994,6 +1005,7 @@ fn shape_run_initial<'a, 'f>(
         break_opportunities: Vec::new(),
         shaped: Vec::new(),
         span_state,
+        shaping_buffer: ShapingBuffer::new(),
         queued_text: None,
         queued_padding: FixedL::ZERO,
         current_span_id: usize::MAX,

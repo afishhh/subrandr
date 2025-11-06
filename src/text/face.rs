@@ -1,10 +1,4 @@
-use std::{
-    fmt::{Debug, Display},
-    hash::Hash,
-    ops::RangeInclusive,
-    path::Path,
-    sync::Arc,
-};
+use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path, sync::Arc};
 
 use rasterize::{Rasterizer, Texture};
 use text_sys::hb_font_t;
@@ -14,65 +8,11 @@ use util::{
 };
 
 use super::FreeTypeError;
-use crate::text::{FontSizeCacheKey, GlyphCache};
+use crate::text::{FontSizeCacheKey, GlyphCache, OpenTypeTag};
 
 pub mod freetype;
 pub use freetype::GlyphRenderError;
 mod tofu;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct OpenTypeTag(u32);
-
-impl OpenTypeTag {
-    pub const fn from_bytes(text: [u8; 4]) -> Self {
-        Self(
-            ((text[0] as u32) << 24)
-                + ((text[1] as u32) << 16)
-                + ((text[2] as u32) << 8)
-                + (text[3] as u32),
-        )
-    }
-
-    pub const fn to_bytes(self) -> [u8; 4] {
-        self.0.to_be_bytes()
-    }
-
-    pub fn to_bytes_in(self, buf: &mut [u8; 4]) -> &[u8] {
-        *buf = self.to_bytes();
-        let offset = buf.iter().position(|b| *b != b'0').unwrap_or(buf.len());
-        &buf[offset..]
-    }
-}
-
-impl Display for OpenTypeTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buf = [0; 4];
-        let bytes = self.to_bytes_in(&mut buf);
-        if let Ok(string) = std::str::from_utf8(bytes) {
-            write!(f, "{string}")
-        } else {
-            write!(f, "{}", bytes.escape_ascii())
-        }
-    }
-}
-
-impl Debug for OpenTypeTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut buf = [0; 4];
-        let bytes = self.to_bytes_in(&mut buf);
-        if let Ok(string) = std::str::from_utf8(bytes) {
-            write!(f, "{string:?}")
-        } else {
-            write!(f, "{bytes:?}")
-        }
-    }
-}
-
-pub const WEIGHT_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"wght");
-#[expect(dead_code)]
-pub const WIDTH_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"wdth");
-pub const ITALIC_AXIS: OpenTypeTag = OpenTypeTag::from_bytes(*b"ital");
 
 #[derive(Debug, Clone, Copy)]
 pub struct Axis {

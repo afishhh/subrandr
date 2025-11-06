@@ -1,6 +1,7 @@
 use std::{
     cell::{OnceCell, UnsafeCell},
     collections::HashSet,
+    fmt::{Debug, Display},
 };
 
 use rasterize::{color::BGRA8, Rasterizer, RenderTarget, Texture};
@@ -25,6 +26,62 @@ pub use glyph_cache::*;
 pub mod platform_font_provider;
 mod shape;
 pub use shape::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct OpenTypeTag(u32);
+
+impl OpenTypeTag {
+    pub const fn from_bytes(text: [u8; 4]) -> Self {
+        Self(
+            ((text[0] as u32) << 24)
+                + ((text[1] as u32) << 16)
+                + ((text[2] as u32) << 8)
+                + (text[3] as u32),
+        )
+    }
+
+    pub const fn to_bytes(self) -> [u8; 4] {
+        self.0.to_be_bytes()
+    }
+
+    pub fn to_bytes_in(self, buf: &mut [u8; 4]) -> &[u8] {
+        *buf = self.to_bytes();
+        let offset = buf.iter().position(|b| *b != b'0').unwrap_or(buf.len());
+        &buf[offset..]
+    }
+
+    pub const AXIS_WEIGHT: OpenTypeTag = OpenTypeTag::from_bytes(*b"wght");
+    #[expect(dead_code)]
+    pub const AXIS_WIDTH: OpenTypeTag = OpenTypeTag::from_bytes(*b"wdth");
+    pub const AXIS_ITALIC: OpenTypeTag = OpenTypeTag::from_bytes(*b"ital");
+
+    pub const FEAT_RUBY: OpenTypeTag = OpenTypeTag::from_bytes(*b"ruby");
+}
+
+impl Display for OpenTypeTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut buf = [0; 4];
+        let bytes = self.to_bytes_in(&mut buf);
+        if let Ok(string) = std::str::from_utf8(bytes) {
+            write!(f, "{string}")
+        } else {
+            write!(f, "{}", bytes.escape_ascii())
+        }
+    }
+}
+
+impl Debug for OpenTypeTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut buf = [0; 4];
+        let bytes = self.to_bytes_in(&mut buf);
+        if let Ok(string) = std::str::from_utf8(bytes) {
+            write!(f, "{string:?}")
+        } else {
+            write!(f, "{bytes:?}")
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {

@@ -7,6 +7,8 @@ use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
 
+use crate::text::OpenTypeTag;
+
 use super::{Direction, FontArena, FontDb, FontMatchIterator, Glyph};
 
 mod sealed {
@@ -118,6 +120,7 @@ pub struct ShapingBuffer {
     raw: RawShapingBuffer,
     cluster_map_buffer: Vec<(u32, u32)>,
     glyph_scratch_buffer_parts: (*mut Glyph<'static>, usize),
+    features: Vec<hb_feature_t>,
 }
 
 #[derive(Debug, Error)]
@@ -137,6 +140,7 @@ impl ShapingBuffer {
                 let (ptr, _, cap) = vec_into_parts(Vec::new());
                 (ptr, cap)
             },
+            features: Vec::new(),
         }
     }
 
@@ -152,6 +156,15 @@ impl ShapingBuffer {
                 range.length(),
             );
         }
+    }
+
+    pub fn set_feature(&mut self, tag: OpenTypeTag, value: u32, range: Range<usize>) {
+        self.features.push(hb_feature_t {
+            tag: tag.0,
+            value,
+            start: range.start as u32,
+            end: range.end as u32,
+        });
     }
 
     pub fn direction(&self) -> Option<Direction> {
@@ -173,6 +186,7 @@ impl ShapingBuffer {
 
     pub fn clear(&mut self) {
         self.raw.clear();
+        self.features.clear()
     }
 
     pub fn shape<'f>(
@@ -188,6 +202,21 @@ impl ShapingBuffer {
                 x.cluster = i as u32;
                 (x.codepoint, original_cluster)
             }));
+        for feature in self.features.iter_mut() {
+            feature.start = match self
+                .cluster_map_buffer
+                .binary_search_by_key(&feature.start, |x| x.1)
+            {
+                Ok(i) => i,
+                Err(i) => i.saturating_sub(1),
+            } as u32;
+            feature.end = match self
+                .cluster_map_buffer
+                .binary_search_by_key(&feature.end, |x| x.1)
+            {
+                Ok(i) | Err(i) => i,
+            } as u32;
+        }
 
         let properties = unsafe {
             let mut buf = MaybeUninit::uninit();
@@ -212,6 +241,7 @@ impl ShapingBuffer {
             font_arena,
             fonts,
             properties,
+            features: &self.features,
         }
         .shape_layer(0..self.cluster_map_buffer.len(), font_iterator, false)?;
 
@@ -256,6 +286,7 @@ struct ShapingPass<'p, 'f, 'a> {
     font_arena: &'f FontArena,
     fonts: &'p mut FontDb<'a>,
     properties: hb_segment_properties_t,
+    features: &'p [hb_feature_t],
 }
 
 impl<'f> ShapingPass<'_, 'f, '_> {
@@ -304,7 +335,12 @@ impl<'f> ShapingPass<'_, 'f, '_> {
         let hb_font = font.as_harfbuzz_font()?;
 
         unsafe {
-            hb_shape(hb_font, self.buffer.0, std::ptr::null(), 0);
+            hb_shape(
+                hb_font,
+                self.buffer.0,
+                self.features.as_ptr(),
+                self.features.len() as u32,
+            );
         }
         let (infos, positions) = self.buffer.items_mut();
 

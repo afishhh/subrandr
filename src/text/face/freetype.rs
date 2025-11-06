@@ -12,10 +12,7 @@ use text_sys::*;
 use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Outline, OutlineBuilder, Point2f, SegmentDegree, Vec2};
 
-use super::{
-    Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap,
-    ITALIC_AXIS, WEIGHT_AXIS,
-};
+use super::{Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap};
 use crate::text::{ft_utils::*, FontSizeCacheKey};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
@@ -213,7 +210,7 @@ impl FaceImpl for Face {
         SharedFaceData::get_ref(self.face)
             .axes
             .iter()
-            .find_map(|x| (x.tag == WEIGHT_AXIS).then_some(x.index))
+            .find_map(|x| (x.tag == OpenTypeTag::AXIS_WEIGHT).then_some(x.index))
             .map_or_else(
                 || {
                     if let Some(weight) = self.os2_weight() {
@@ -234,7 +231,7 @@ impl FaceImpl for Face {
         SharedFaceData::get_ref(self.face)
             .axes
             .iter()
-            .find_map(|x| (x.tag == ITALIC_AXIS).then_some(x.index))
+            .find_map(|x| (x.tag == OpenTypeTag::AXIS_ITALIC).then_some(x.index))
             .map_or_else(
                 || unsafe { (*self.face).style_flags & (FT_STYLE_FLAG_ITALIC as FT_Long) != 0 },
                 |idx| I16Dot16::from_ft(self.coords[idx]) > I16Dot16::HALF,

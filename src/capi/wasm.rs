@@ -4,7 +4,7 @@ use rasterize::color::BGRA8;
 use util::math::I16Dot16;
 
 use crate::{
-    text::{Face, FaceInfo, FontAxisValues, WEIGHT_AXIS},
+    text::{Face, FaceInfo, FontAxisValues, OpenTypeTag},
     Renderer, Subrandr,
 };
 
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
         width: FontAxisValues::Fixed(I16Dot16::new(100)),
         weight: if weight0 == weight1 {
             if weight0 == -1 {
-                (*font).axis(WEIGHT_AXIS).map_or_else(
+                (*font).axis(OpenTypeTag::AXIS_WEIGHT).map_or_else(
                     || FontAxisValues::Fixed((*font).weight()),
                     |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
                 )

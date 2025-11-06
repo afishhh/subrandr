@@ -19,6 +19,7 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment, TextDecorations},
         ComputedStyle,
     },
+    text::OpenTypeTag,
     vtt, Subrandr, SubtitleContext,
 };
 
@@ -486,6 +487,9 @@ impl Element {
                 let annotation_style = {
                     let mut result = style.create_derived();
                     *result.make_font_size_mut() = annotation_font_size;
+                    result
+                        .make_font_feature_settings_mut()
+                        .set(OpenTypeTag::FEAT_RUBY, 1);
                     result
                 };
 

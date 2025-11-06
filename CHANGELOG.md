@@ -12,6 +12,7 @@
 - Fixed panic in bidi reordering of some multi-paragraph text runs.
 - Implemented srv3 underline support.
 - Made WebVTT parser correctly ignore STYLE and REGION blocks following the first cue.
+- Ruby annotations are now shaped with the `ruby` OpenType feature enabled.
 
 ## [v0.2.2]
 

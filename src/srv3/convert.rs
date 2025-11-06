@@ -22,6 +22,7 @@ use crate::{
         },
         ComputedStyle,
     },
+    text::OpenTypeTag,
     Subrandr, SubtitleContext,
 };
 
@@ -302,6 +303,9 @@ impl Segment {
             * font_scale_from_ctx(sctx);
         if matches!(self.ruby, Ruby::Over) {
             size /= 2.0;
+            result
+                .make_font_feature_settings_mut()
+                .set(OpenTypeTag::FEAT_RUBY, 1);
         }
 
         *result.make_font_size_mut() = I26Dot6::from(size);

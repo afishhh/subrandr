@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString},
+    fmt::Debug,
     hash::Hash,
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,
@@ -10,7 +11,7 @@ use std::{
 use rasterize::{PixelFormat, Rasterizer};
 use text_sys::*;
 use thiserror::Error;
-use util::math::{I16Dot16, I26Dot6, Outline, OutlineBuilder, Point2f, SegmentDegree, Vec2};
+use util::math::{I16Dot16, I26Dot6, OutlineEvent, Point2, Vec2};
 
 use super::{Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap};
 use crate::text::{ft_utils::*, FontSizeCacheKey};
@@ -29,6 +30,29 @@ use crate::text::{ft_utils::*, FontSizeCacheKey};
 //
 // Also this is not picked up by bindgen because it's a macro expression I think
 const FT_LOAD_TARGET_LIGHT: u32 = (FT_RENDER_MODE_LIGHT & 15) << 16;
+
+// Type layout-compatible with `FT_Pos`/`FT_Fixed` convertible to our
+// own fixed type.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct FtFixed(FT_Fixed);
+
+impl FtFixed {
+    fn as_26dot6(self) -> I26Dot6 {
+        I26Dot6::from_ft(self.0)
+    }
+}
+
+// Type layout-compatible with `FT_Vector` convertible to our own types.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct FtVec2(Vec2<FtFixed>);
+
+impl FtVec2 {
+    fn as_26dot6(self) -> Vec2<I26Dot6> {
+        Vec2::new(self.0.x.as_26dot6(), self.0.y.as_26dot6())
+    }
+}
 
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);
@@ -571,8 +595,7 @@ impl Font {
     /// Returns [`None`] if the glyph does not exist in this font, or it is not
     /// an outline glyph.
     // FIXME: This is an unused function but rustc doesn't think so anymore?
-    #[allow(dead_code)]
-    pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
+    pub fn glyph_outline(&self, index: u32) -> Result<Option<&Outline>, FreeTypeError> {
         let face = self.with_applied_size()?;
         unsafe {
             // According to FreeType documentation, bitmap-only fonts ignore
@@ -581,10 +604,16 @@ impl Font {
                 return Ok(None);
             }
 
-            // TODO: return none if the glyph does not exist in the font
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32))?;
+            let code = FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32);
+            // TODO: are these the correct error codes?
+            if code == FT_Err_Invalid_Glyph_Index as i32
+                || code == FT_Err_Invalid_Glyph_Format as i32
+            {
+                return Ok(None);
+            }
+            fttry!(code)?;
 
-            Ok(Some(outline_from_freetype(&(*(*face).glyph).outline)))
+            Ok(Some(Outline::from_ref(&(*(*face).glyph).outline)))
         }
     }
 }
@@ -962,80 +991,156 @@ fn copy_font_bitmap<const PIXEL_MODE: u8>(
     }
 }
 
-unsafe fn outline_from_freetype(ft: &FT_Outline) -> Outline {
-    let mut first = 0;
-    let mut builder = OutlineBuilder::new();
-    let contours = std::slice::from_raw_parts(ft.contours, ft.n_contours as usize);
-    let points = std::slice::from_raw_parts(ft.points, ft.n_points as usize);
-    let tags = std::slice::from_raw_parts(ft.tags, ft.n_points as usize);
+pub struct Outline(FT_Outline);
 
-    // TODO: Convert FT_CURVE_TAG* to u8 in text-sys
-    for last in contours.iter().map(|&x| x as usize) {
-        // FT_Pos in FT_Outline seems to be 26.6
-        let to_point = |vec: FT_Vector| {
-            Point2f::new(
-                vec.x as f32 * 2.0f32.powi(-6),
-                -vec.y as f32 * 2.0f32.powi(-6),
-            )
-        };
+impl PartialEq for Outline {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.n_points == other.0.n_points
+            && self.0.n_contours == other.0.n_contours
+            && self.0.flags == other.0.flags
+            && self.points() == other.points()
+            && self.tags() == other.tags()
+            && self.contours() == other.contours()
+    }
+}
 
-        let midpoint = |a: Point2f, b: Point2f| Point2f::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+impl Eq for Outline {}
 
-        let mut last_tag;
-        let mut final_degree = SegmentDegree::Linear;
-        let mut add_range = first..last + 1;
-        if (tags[first] & 0b11) != FT_CURVE_TAG_ON as u8 {
-            if (tags[last] & 0b11) == FT_CURVE_TAG_CONIC as u8 {
-                builder.add_point(midpoint(to_point(points[first]), to_point(points[last])));
-                last_tag = FT_CURVE_TAG_ON as u8;
-                final_degree = SegmentDegree::Quadratic;
-            } else {
-                assert_eq!(tags[last] & 0b11, FT_CURVE_TAG_ON as u8);
-                builder.add_point(to_point(points[last]));
-                last_tag = tags[last] & 0b11;
-                add_range.end -= 1;
-            }
-        } else {
-            builder.add_point(to_point(points[first]));
-            last_tag = tags[first] & 0b11;
-            add_range.start += 1;
-            if tags[last] & 0b11 == FT_CURVE_TAG_CUBIC as u8 {
-                final_degree = SegmentDegree::Cubic;
-            } else if tags[last] & 0b11 == FT_CURVE_TAG_CONIC as u8 {
-                final_degree = SegmentDegree::Quadratic;
-            }
-        }
+impl Hash for Outline {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.points().hash(state);
+        self.tags().hash(state);
+        self.contours().hash(state);
+    }
+}
 
-        for (&point, &tag) in points[add_range.clone()].iter().zip(tags[add_range].iter()) {
-            let tag = tag & 0b11;
-            let point = to_point(point);
-
-            if tag == FT_CURVE_TAG_ON as u8 {
-                if last_tag == FT_CURVE_TAG_ON as u8 {
-                    builder.add_segment(SegmentDegree::Linear);
-                } else if last_tag == FT_CURVE_TAG_CONIC as u8 {
-                    builder.add_segment(SegmentDegree::Quadratic);
-                } else {
-                    builder.add_segment(SegmentDegree::Cubic);
-                }
-            }
-
-            if tag == FT_CURVE_TAG_CONIC as u8 && last_tag == FT_CURVE_TAG_CONIC as u8 {
-                let last = *builder.points().last().unwrap();
-                builder.add_point(midpoint(last, point));
-                builder.add_segment(SegmentDegree::Quadratic);
-            }
-
-            last_tag = tag;
-            builder.add_point(point);
-        }
-
-        builder.add_segment(final_degree);
-        builder.close_contour();
-        first = last + 1;
+impl Outline {
+    unsafe fn from_ref(outline: &FT_Outline_) -> &Outline {
+        unsafe { std::mem::transmute(outline) }
     }
 
-    assert_eq!(first, points.len());
+    fn contours(&self) -> &[u16] {
+        unsafe { std::slice::from_raw_parts(self.0.contours, self.0.n_contours as usize) }
+    }
 
-    builder.build()
+    fn points(&self) -> &[FtVec2] {
+        unsafe { std::slice::from_raw_parts(self.0.points as *const _, self.0.n_points as usize) }
+    }
+
+    fn tags(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.0.tags, self.0.n_points as usize) }
+    }
+
+    pub fn try_clone(&self) -> Result<Self, FreeTypeError> {
+        unsafe {
+            let mut out = MaybeUninit::uninit();
+
+            fttry!(
+                #[allow(clippy::useless_conversion)]
+                FT_Outline_New(
+                    Library::get_or_init()?.ptr,
+                    self.0.n_points as std::ffi::c_uint,
+                    self.0.n_contours as std::ffi::c_int,
+                    out.as_mut_ptr(),
+                )
+            )?;
+
+            Ok(Self(out.assume_init()))
+        }
+    }
+}
+
+impl util::math::Outline<I26Dot6> for Outline {
+    fn events(&self) -> impl Iterator<Item = OutlineEvent<I26Dot6>> {
+        struct EventsIter<'a> {
+            outline: &'a Outline,
+            first: usize,
+            contours: std::slice::Iter<'a, u16>,
+
+            first_point: Point2<I26Dot6>,
+            current: std::iter::Zip<std::slice::Iter<'a, FtVec2>, std::slice::Iter<'a, u8>>,
+        }
+
+        fn to_point(ft: FtVec2) -> Point2<I26Dot6> {
+            // NOTE: y-inversion removed TODO: this has implications if these outlines are to be used in the future.
+            // FT_Pos in FT_Outline seems to be 26.6
+            ft.as_26dot6().to_point()
+        }
+
+        fn map_next((&p, &t): (&FtVec2, &u8)) -> (Point2<I26Dot6>, u8) {
+            (to_point(p), t & 0b11)
+        }
+
+        impl Iterator for EventsIter<'_> {
+            type Item = OutlineEvent<I26Dot6>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                loop {
+                    // TODO: Convert FT_CURVE_TAG* to u8 in text-sys
+                    if let Some((point, tag)) = self.current.next().map(map_next) {
+                        return if tag == FT_CURVE_TAG_ON as u8 {
+                            Some(OutlineEvent::LineTo(point))
+                        } else if tag == FT_CURVE_TAG_CONIC as u8 {
+                            let (np, ntag) = self
+                                .current
+                                .clone()
+                                .next()
+                                .map(map_next)
+                                .unwrap_or((self.first_point, FT_CURVE_TAG_ON as u8));
+                            let end = if ntag == FT_CURVE_TAG_CONIC as u8 {
+                                point.midpoint(np)
+                            } else {
+                                assert_eq!(ntag, FT_CURVE_TAG_ON as u8);
+                                _ = self.current.next();
+                                np
+                            };
+                            Some(OutlineEvent::QuadTo(point, end))
+                        } else if tag == FT_CURVE_TAG_CUBIC as u8 {
+                            let (c1, c1tag) = self.current.next().map(map_next).unwrap();
+                            assert_eq!(c1tag, FT_CURVE_TAG_CUBIC as u8);
+                            let (end, endtag) = self
+                                .current
+                                .next()
+                                .map(map_next)
+                                .unwrap_or((self.first_point, FT_CURVE_TAG_ON as u8));
+                            assert_eq!(endtag, FT_CURVE_TAG_ON as u8);
+                            Some(OutlineEvent::CubicTo(point, c1, end))
+                        } else {
+                            unreachable!()
+                        };
+                    }
+
+                    let last = *self.contours.next()? as usize;
+                    let points = self.outline.points();
+                    let tags = self.outline.tags();
+
+                    let mut add_range = self.first..last + 1;
+                    if (tags[self.first] & 0b11) != FT_CURVE_TAG_ON as u8 {
+                        if (tags[last] & 0b11) == FT_CURVE_TAG_CONIC as u8 {
+                            self.first_point =
+                                to_point(points[self.first]).midpoint(to_point(points[last]));
+                        } else {
+                            assert_eq!(tags[last] & 0b11, FT_CURVE_TAG_ON as u8);
+                            self.first_point = to_point(points[last]);
+                            add_range.end -= 1;
+                        }
+                    } else {
+                        self.first_point = to_point(points[self.first]);
+                        add_range.start += 1;
+                    };
+
+                    self.first = last + 1;
+                    self.current = std::iter::zip(&points[add_range.clone()], &tags[add_range])
+                }
+            }
+        }
+
+        EventsIter {
+            outline: self,
+            first: 0,
+            contours: self.contours().iter(),
+            first_point: Point2::ZERO,
+            current: std::iter::zip(&[], &[]),
+        }
+    }
 }

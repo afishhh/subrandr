@@ -13,7 +13,7 @@ pub use num::*;
 mod outline;
 pub use outline::*;
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct Point2<N> {
     pub x: N,
@@ -52,7 +52,7 @@ impl<N: Debug> Debug for Point2<N> {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct Vec2<N> {
     pub x: N,

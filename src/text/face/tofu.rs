@@ -77,7 +77,8 @@ impl Font {
             let dpi_scale = I16Dot16::from_quotient(dpi as i32, 72);
             let dpi_scale6 = I26Dot6::from_raw(dpi_scale.into_raw() >> 10);
             let decoration_thickness = point_size * dpi_scale6 / 192;
-            let pixel_height = point_size * 96 / dpi as i32;
+            let point_height = point_size * dpi_scale;
+            let pixel_height = point_height + point_height / 3;
             let pixel_width = pixel_height * 2 / 3;
             let ascender = pixel_height * 5 / 6;
             let descender = ascender - pixel_height;

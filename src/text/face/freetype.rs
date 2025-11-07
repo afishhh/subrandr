@@ -10,7 +10,7 @@ use std::{
 use rasterize::{PixelFormat, Rasterizer};
 use text_sys::*;
 use thiserror::Error;
-use util::math::{I16Dot16, I26Dot6, Outline, OutlineBuilder, Point2f, SegmentDegree, Vec2};
+use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use super::{Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap};
 use crate::text::{ft_utils::*, FontSizeCacheKey};
@@ -565,28 +565,6 @@ impl Font {
     ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
         Ok((self.with_applied_size()?, self.hb_font))
     }
-
-    /// Gets the Outline associated with the glyph at `index`.
-    ///
-    /// Returns [`None`] if the glyph does not exist in this font, or it is not
-    /// an outline glyph.
-    // FIXME: This is an unused function but rustc doesn't think so anymore?
-    #[allow(dead_code)]
-    pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
-        let face = self.with_applied_size()?;
-        unsafe {
-            // According to FreeType documentation, bitmap-only fonts ignore
-            // FT_LOAD_NO_BITMAP.
-            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
-                return Ok(None);
-            }
-
-            // TODO: return none if the glyph does not exist in the font
-            fttry!(FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32))?;
-
-            Ok(Some(outline_from_freetype(&(*(*face).glyph).outline)))
-        }
-    }
 }
 
 impl std::fmt::Debug for Font {
@@ -960,82 +938,4 @@ fn copy_font_bitmap<const PIXEL_MODE: u8>(
             });
         }
     }
-}
-
-unsafe fn outline_from_freetype(ft: &FT_Outline) -> Outline {
-    let mut first = 0;
-    let mut builder = OutlineBuilder::new();
-    let contours = std::slice::from_raw_parts(ft.contours, ft.n_contours as usize);
-    let points = std::slice::from_raw_parts(ft.points, ft.n_points as usize);
-    let tags = std::slice::from_raw_parts(ft.tags, ft.n_points as usize);
-
-    // TODO: Convert FT_CURVE_TAG* to u8 in text-sys
-    for last in contours.iter().map(|&x| x as usize) {
-        // FT_Pos in FT_Outline seems to be 26.6
-        let to_point = |vec: FT_Vector| {
-            Point2f::new(
-                vec.x as f32 * 2.0f32.powi(-6),
-                -vec.y as f32 * 2.0f32.powi(-6),
-            )
-        };
-
-        let midpoint = |a: Point2f, b: Point2f| Point2f::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
-
-        let mut last_tag;
-        let mut final_degree = SegmentDegree::Linear;
-        let mut add_range = first..last + 1;
-        if (tags[first] & 0b11) != FT_CURVE_TAG_ON as u8 {
-            if (tags[last] & 0b11) == FT_CURVE_TAG_CONIC as u8 {
-                builder.add_point(midpoint(to_point(points[first]), to_point(points[last])));
-                last_tag = FT_CURVE_TAG_ON as u8;
-                final_degree = SegmentDegree::Quadratic;
-            } else {
-                assert_eq!(tags[last] & 0b11, FT_CURVE_TAG_ON as u8);
-                builder.add_point(to_point(points[last]));
-                last_tag = tags[last] & 0b11;
-                add_range.end -= 1;
-            }
-        } else {
-            builder.add_point(to_point(points[first]));
-            last_tag = tags[first] & 0b11;
-            add_range.start += 1;
-            if tags[last] & 0b11 == FT_CURVE_TAG_CUBIC as u8 {
-                final_degree = SegmentDegree::Cubic;
-            } else if tags[last] & 0b11 == FT_CURVE_TAG_CONIC as u8 {
-                final_degree = SegmentDegree::Quadratic;
-            }
-        }
-
-        for (&point, &tag) in points[add_range.clone()].iter().zip(tags[add_range].iter()) {
-            let tag = tag & 0b11;
-            let point = to_point(point);
-
-            if tag == FT_CURVE_TAG_ON as u8 {
-                if last_tag == FT_CURVE_TAG_ON as u8 {
-                    builder.add_segment(SegmentDegree::Linear);
-                } else if last_tag == FT_CURVE_TAG_CONIC as u8 {
-                    builder.add_segment(SegmentDegree::Quadratic);
-                } else {
-                    builder.add_segment(SegmentDegree::Cubic);
-                }
-            }
-
-            if tag == FT_CURVE_TAG_CONIC as u8 && last_tag == FT_CURVE_TAG_CONIC as u8 {
-                let last = *builder.points().last().unwrap();
-                builder.add_point(midpoint(last, point));
-                builder.add_segment(SegmentDegree::Quadratic);
-            }
-
-            last_tag = tag;
-            builder.add_point(point);
-        }
-
-        builder.add_segment(final_degree);
-        builder.close_contour();
-        first = last + 1;
-    }
-
-    assert_eq!(first, points.len());
-
-    builder.build()
 }

@@ -13,7 +13,7 @@
 
 use std::{num::NonZeroU32, ops::Range};
 
-use util::math::{CubicBezier, I16Dot16, Outline, Point2, Point2f, QuadraticBezier, Vec2, Vec2f};
+use util::math::{FloatOutlineIterExt as _, I16Dot16, OutlineEvent, Point2, Point2f, Vec2};
 
 const QUADRATIC_FLATTEN_TOLERANCE: f32 = 0.2;
 const CUBIC_TO_QUADRATIC_TOLERANCE: f32 = 1.0;
@@ -70,40 +70,6 @@ impl GlyphRasterizer {
         );
     }
 
-    fn process_quadraticf(&mut self, quadratic: QuadraticBezier<f32>) {
-        let mut last = quadratic[0];
-        for next in quadratic.flatten(QUADRATIC_FLATTEN_TOLERANCE) {
-            self.process_linef(last, next);
-            last = next;
-        }
-    }
-
-    pub fn add_outline_with(&mut self, outline: &Outline, mapper: impl Fn(Point2f) -> Point2f) {
-        for contour in outline.iter_contours() {
-            for segment in contour {
-                match outline.curve_for_segment(segment) {
-                    util::math::SegmentCurve::Linear(line) => {
-                        self.process_linef(mapper(line[0]), mapper(line[1]));
-                    }
-                    util::math::SegmentCurve::Quadratic(quadratic) => {
-                        let mapped = QuadraticBezier(quadratic.0.map(&mapper));
-                        self.process_quadraticf(mapped);
-                    }
-                    util::math::SegmentCurve::Cubic(cubic) => {
-                        let mapped = CubicBezier(cubic.0.map(&mapper));
-                        for quadratic in mapped.to_quadratics(CUBIC_TO_QUADRATIC_TOLERANCE) {
-                            self.process_quadraticf(quadratic);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn add_outline(&mut self, outline: &Outline, translation: Vec2f) {
-        self.add_outline_with(outline, |p| p + translation);
-    }
-
     pub fn add_polyline(&mut self, points: &[Point2f]) {
         let Some(&(mut prev)) = points.first() else {
             return;
@@ -119,6 +85,14 @@ impl GlyphRasterizer {
         if last != first {
             self.process_linef(last, first)
         }
+    }
+
+    pub fn add_outline(&mut self, iter: impl Iterator<Item = OutlineEvent<f32>>) {
+        iter.visit_flattened_with(
+            |p0, p1| self.process_linef(p0, p1),
+            QUADRATIC_FLATTEN_TOLERANCE,
+            CUBIC_TO_QUADRATIC_TOLERANCE,
+        )
     }
 
     pub fn reset(&mut self, size: Vec2<u32>) {
@@ -359,7 +333,10 @@ fn fixed_to_u16(value: I16Dot16) -> u16 {
 
 #[cfg(test)]
 mod test {
-    use util::math::{I16Dot16, Outline, OutlineBuilder, Point2f, Vec2};
+    use util::{
+        make_static_outline,
+        math::{I16Dot16, Outline as _, StaticOutline, Vec2},
+    };
 
     use crate::sw::GlyphRasterizer;
 
@@ -444,12 +421,12 @@ mod test {
         }
     }
 
-    fn test_outline(outline: &Outline, expected: &[u8]) {
+    fn test_outline(outline: &StaticOutline<f32>, expected: &[u8]) {
         let sizef = outline.control_box().size();
         let size = Vec2::new(sizef.x.ceil() as u32 + 1, sizef.y.ceil() as u32);
         let mut rasterizer = GlyphRasterizer::new();
         rasterizer.reset(size);
-        rasterizer.add_outline(outline, Vec2::ZERO);
+        rasterizer.add_outline(outline.iter());
 
         let mut coverage = Vec::new();
         rasterizer.rasterize_to_vec(&mut coverage, size.x as usize);
@@ -476,14 +453,12 @@ mod test {
         ];
 
         test_outline(
-            &{
-                let mut builder = OutlineBuilder::new();
-                builder.move_to(Point2f::new(0.0, 0.0));
-                builder.line_to(Point2f::new(4.0, 10.0));
-                builder.line_to(Point2f::new(10.0, 7.5));
-                builder.line_to(Point2f::new(14.0, 3.0));
-                builder.build()
-            },
+            &make_static_outline![
+                #move_to (0, 0);
+                line_to (4, 10);
+                line_to (10, 7.5);
+                line_to (14, 3);
+            ],
             EXPECTED,
         );
     }
@@ -507,14 +482,12 @@ mod test {
         ];
 
         test_outline(
-            &{
-                let mut builder = OutlineBuilder::new();
-                builder.move_to(Point2f::new(0.0, 0.0));
-                builder.quad_to(Point2f::new(2.0, 10.0), Point2f::new(10.0, 10.0));
-                builder.line_to(Point2f::new(15.0, 7.5));
-                builder.quad_to(Point2f::new(10.0, 5.0), Point2f::new(7.5, 3.0));
-                builder.build()
-            },
+            &make_static_outline![
+                #move_to (0, 0);
+                quad_to (2, 10), (10, 10);
+                line_to (15, 7.5);
+                quad_to (10, 5), (7.5, 3);
+            ],
             EXPECTED,
         );
     }
@@ -536,13 +509,11 @@ mod test {
         ];
 
         test_outline(
-            &{
-                let mut builder = OutlineBuilder::new();
-                builder.move_to(Point2f::new(0.2, 0.0));
-                builder.line_to(Point2f::new(0.2, 10.0));
-                builder.line_to(Point2f::new(0.8, 10.0));
-                builder.line_to(Point2f::new(0.8, 0.0));
-                builder.build()
+            &make_static_outline! {
+                #move_to (0.2, 0);
+                line_to (0.2, 10);
+                line_to (0.8, 10);
+                line_to (0.8, 0);
             },
             EXPECTED,
         );

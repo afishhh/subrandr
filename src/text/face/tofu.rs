@@ -1,9 +1,10 @@
-use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit, sync::LazyLock};
+use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
 use rasterize::{sw::GlyphRasterizer, PixelFormat, Rasterizer};
 use text_sys::*;
 use util::{
-    math::{I16Dot16, I26Dot6, Outline, Point2, Rect2, Vec2},
+    make_static_outline,
+    math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
     slice_assume_init_mut,
 };
 
@@ -436,13 +437,14 @@ impl FontImpl for Font {
                     };
 
                     let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
-                        let outline = &GLYPHS[usize::from(digit)];
-                        rasterizer.add_outline_with(outline, |p| {
-                            Point2::new(
-                                offset.x.into_f32() + p.x * size.x.into_f32() / 200.,
-                                offset.y.into_f32() + p.y * size.y.into_f32() / 400.,
-                            )
-                        });
+                        rasterizer.add_outline(&mut GLYPHS[usize::from(digit)].iter().map_points(
+                            |p| {
+                                Point2::new(
+                                    offset.x.into_f32() + p.x * size.x.into_f32() / 200.,
+                                    offset.y.into_f32() + p.y * size.y.into_f32() / 400.,
+                                )
+                            },
+                        ));
                     };
 
                     // If we don't have at least 2.5x5 pixels per glyph then our digits
@@ -508,321 +510,309 @@ impl Drop for Font {
     }
 }
 
-macro_rules! outline {
-    {
-        $($command: ident $(($x: literal, $y: literal))+;)*
-    } => {{
-        let mut builder = util::math::OutlineBuilder::new();
-        $(builder.$command($(Point2::new($x as f32, $y as f32)),+);)*
-        builder.build()
-    }};
-}
-
 // All glyphs that make up our mini tofu font on a 200x400 canvas.
 // This includes all hex digits and a special question mark glyph.
 // TODO: Investigate using curves in this font. Would require some non-trivial manual stroking...
-static GLYPHS: LazyLock<[Outline; 17]> = LazyLock::new(|| {
-    [
-        // 0
-        outline! {
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+static GLYPHS: [StaticOutline<f32>; 17] = [
+    // 0
+    make_static_outline! {
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (40, 40);
-            line_to (40, 360);
-            line_to (160, 360);
-            line_to (160, 40);
+        #move_to (40, 40);
+        line_to (40, 360);
+        line_to (160, 360);
+        line_to (160, 40);
 
-            move_to (80, 170);
-            line_to (80, 230);
-            line_to (120, 230);
-            line_to (120, 170);
-        },
-        // 1
-        outline! {
-            move_to (40, 0);
-            line_to (120, 0);
-            line_to (120, 360);
+        #move_to (80, 170);
+        line_to (80, 230);
+        line_to (120, 230);
+        line_to (120, 170);
+    },
+    // 1
+    make_static_outline! {
+        #move_to (40, 0);
+        line_to (120, 0);
+        line_to (120, 360);
 
-            line_to (180, 360);
-            line_to (180, 400);
-            line_to (20, 400);
-            line_to (20, 360);
+        line_to (180, 360);
+        line_to (180, 400);
+        line_to (20, 400);
+        line_to (20, 360);
 
-            line_to (90, 360);
-            line_to (90, 40);
-            line_to (30, 40);
-        },
-        // 2
-        outline! {
-            move_to (30, 40);
-            line_to (30, 70);
-            line_to (0, 70);
-            line_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 220);
-            line_to (40, 220);
-            line_to (40, 360);
-            line_to (200, 360);
-            line_to (200, 400);
-            line_to (0, 400);
-            line_to (0, 180);
-            line_to (160, 180);
-            line_to (160, 40);
-        },
-        // 3
-        outline! {
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
+        line_to (90, 360);
+        line_to (90, 40);
+        line_to (30, 40);
+    },
+    // 2
+    make_static_outline! {
+        #move_to (30, 40);
+        line_to (30, 70);
+        line_to (0, 70);
+        line_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 220);
+        line_to (40, 220);
+        line_to (40, 360);
+        line_to (200, 360);
+        line_to (200, 400);
+        line_to (0, 400);
+        line_to (0, 180);
+        line_to (160, 180);
+        line_to (160, 40);
+    },
+    // 3
+    make_static_outline! {
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
 
-            line_to (0, 400);
-            line_to (0, 360);
-            line_to (160, 360);
+        line_to (0, 400);
+        line_to (0, 360);
+        line_to (160, 360);
 
-            line_to (160, 220);
-            line_to (0, 220);
-            line_to (0, 180);
-            line_to (160, 180);
+        line_to (160, 220);
+        line_to (0, 220);
+        line_to (0, 180);
+        line_to (160, 180);
 
-            line_to (160, 40);
-            line_to (0, 40);
-        },
-        // 4
-        outline! {
-            move_to (40, 0);
-            line_to (40, 180);
-            line_to (160, 180);
-            line_to (160, 0);
-            line_to (200, 0);
-            line_to (200, 400);
+        line_to (160, 40);
+        line_to (0, 40);
+    },
+    // 4
+    make_static_outline! {
+        #move_to (40, 0);
+        line_to (40, 180);
+        line_to (160, 180);
+        line_to (160, 0);
+        line_to (200, 0);
+        line_to (200, 400);
 
-            line_to (160, 400);
-            line_to (160, 360);
-            line_to (160, 220);
-            line_to (0, 220);
-            line_to (0, 0);
-        },
-        // 5 (pretty much a flipped 2)
-        outline! {
-            move_to (200, 40);
-            line_to (200, 0);
-            line_to (0, 0);
-            line_to (0, 220);
-            line_to (160, 220);
-            line_to (160, 360);
-            line_to (0, 360);
-            line_to (0, 400);
-            line_to (200, 400);
-            line_to (200, 180);
-            line_to (40, 180);
-            line_to (40, 40);
-        },
-        // 6
-        outline! {
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 40);
-            line_to (40, 40);
+        line_to (160, 400);
+        line_to (160, 360);
+        line_to (160, 220);
+        line_to (0, 220);
+        line_to (0, 0);
+    },
+    // 5 (pretty much a flipped 2)
+    make_static_outline! {
+        #move_to (200, 40);
+        line_to (200, 0);
+        line_to (0, 0);
+        line_to (0, 220);
+        line_to (160, 220);
+        line_to (160, 360);
+        line_to (0, 360);
+        line_to (0, 400);
+        line_to (200, 400);
+        line_to (200, 180);
+        line_to (40, 180);
+        line_to (40, 40);
+    },
+    // 6
+    make_static_outline! {
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 40);
+        line_to (40, 40);
 
-            line_to (40, 180);
-            line_to (200, 180);
-            line_to (200, 400);
-            line_to (0, 400);
+        line_to (40, 180);
+        line_to (200, 180);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (40, 220);
-            line_to (40, 360);
-            line_to (160, 360);
-            line_to (160, 220);
-        },
-        // 7
-        outline! {
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 40);
-            line_to (80, 400);
-            line_to (20, 400);
-            line_to (160, 40);
-            line_to (0, 40);
-        },
-        // 8
-        outline! {
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (40, 220);
+        line_to (40, 360);
+        line_to (160, 360);
+        line_to (160, 220);
+    },
+    // 7
+    make_static_outline! {
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 40);
+        line_to (80, 400);
+        line_to (20, 400);
+        line_to (160, 40);
+        line_to (0, 40);
+    },
+    // 8
+    make_static_outline! {
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (40, 40);
-            line_to (40, 180);
-            line_to (160, 180);
-            line_to (160, 40);
+        #move_to (40, 40);
+        line_to (40, 180);
+        line_to (160, 180);
+        line_to (160, 40);
 
-            move_to (40, 220);
-            line_to (40, 360);
-            line_to (160, 360);
-            line_to (160, 220);
-        },
-        // 9 (xy flipped 6)
-        outline! {
-            move_to (200, 400);
-            line_to (0, 400);
-            line_to (0, 360);
-            line_to (160, 360);
+        #move_to (40, 220);
+        line_to (40, 360);
+        line_to (160, 360);
+        line_to (160, 220);
+    },
+    // 9 (xy flipped 6)
+    make_static_outline! {
+        #move_to (200, 400);
+        line_to (0, 400);
+        line_to (0, 360);
+        line_to (160, 360);
 
-            line_to (160, 220);
-            line_to (0, 220);
-            line_to (0, 0);
-            line_to (200, 0);
+        line_to (160, 220);
+        line_to (0, 220);
+        line_to (0, 0);
+        line_to (200, 0);
 
-            move_to (160, 180);
-            line_to (160, 40);
-            line_to (40, 40);
-            line_to (40, 180);
-        },
-        // A
-        outline![
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (160, 180);
+        line_to (160, 40);
+        line_to (40, 40);
+        line_to (40, 180);
+    },
+    // A
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (40, 40);
-            line_to (40, 180);
-            line_to (160, 180);
-            line_to (160, 40);
+        #move_to (40, 40);
+        line_to (40, 180);
+        line_to (160, 180);
+        line_to (160, 40);
 
-            move_to (40, 220);
-            line_to (40, 400);
-            line_to (160, 400);
-            line_to (160, 220);
-        ],
-        // B (a slightly different 8)
-        outline![
-            move_to (0, 0);
-            line_to (180, 0);
-            line_to (180, 180);
-            line_to (200, 180);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (40, 220);
+        line_to (40, 400);
+        line_to (160, 400);
+        line_to (160, 220);
+    ],
+    // B (a slightly different 8)
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (180, 0);
+        line_to (180, 180);
+        line_to (200, 180);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (40, 40);
-            line_to (40, 180);
-            line_to (140, 180);
-            line_to (140, 40);
+        #move_to (40, 40);
+        line_to (40, 180);
+        line_to (140, 180);
+        line_to (140, 40);
 
-            move_to (40, 220);
-            line_to (40, 360);
-            line_to (160, 360);
-            line_to (160, 220);
-        ],
-        // C
-        outline![
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (40, 220);
+        line_to (40, 360);
+        line_to (160, 360);
+        line_to (160, 220);
+    ],
+    // C
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (200, 360);
-            line_to (200, 40);
-            line_to (40, 40);
-            line_to (40, 360);
-        ],
-        // D
-        outline![
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (200, 360);
+        line_to (200, 40);
+        line_to (40, 40);
+        line_to (40, 360);
+    ],
+    // D
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (160, 360);
-            line_to (160, 40);
-            line_to (40, 40);
-            line_to (40, 360);
+        #move_to (160, 360);
+        line_to (160, 40);
+        line_to (40, 40);
+        line_to (40, 360);
 
-            move_to (200, 0);
-            line_to (160, 0);
-            line_to (160, 40);
-            line_to (200, 40);
+        #move_to (200, 0);
+        line_to (160, 0);
+        line_to (160, 40);
+        line_to (200, 40);
 
-            move_to (200, 360);
-            line_to (160, 360);
-            line_to (160, 400);
-            line_to (200, 400);
-        ],
-        // E
-        outline![
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (200, 360);
+        line_to (160, 360);
+        line_to (160, 400);
+        line_to (200, 400);
+    ],
+    // E
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (200, 180);
-            line_to (200, 40);
-            line_to (40, 40);
-            line_to (40, 180);
+        #move_to (200, 180);
+        line_to (200, 40);
+        line_to (40, 40);
+        line_to (40, 180);
 
-            move_to (200, 360);
-            line_to (200, 220);
-            line_to (40, 220);
-            line_to (40, 360);
+        #move_to (200, 360);
+        line_to (200, 220);
+        line_to (40, 220);
+        line_to (40, 360);
 
-            move_to (200, 220);
-            line_to (200, 180);
-            line_to (160, 180);
-            line_to (160, 220);
-        ],
-        // F
-        outline![
-            move_to (0, 0);
-            line_to (200, 0);
-            line_to (200, 400);
-            line_to (0, 400);
+        #move_to (200, 220);
+        line_to (200, 180);
+        line_to (160, 180);
+        line_to (160, 220);
+    ],
+    // F
+    make_static_outline![
+        #move_to (0, 0);
+        line_to (200, 0);
+        line_to (200, 400);
+        line_to (0, 400);
 
-            move_to (200, 180);
-            line_to (200, 40);
-            line_to (40, 40);
-            line_to (40, 180);
+        #move_to (200, 180);
+        line_to (200, 40);
+        line_to (40, 40);
+        line_to (40, 180);
 
-            move_to (200, 400);
-            line_to (200, 220);
-            line_to (40, 220);
-            line_to (40, 400);
+        #move_to (200, 400);
+        line_to (200, 220);
+        line_to (40, 220);
+        line_to (40, 400);
 
-            move_to (200, 220);
-            line_to (200, 180);
-            line_to (160, 180);
-            line_to (160, 220);
-        ],
-        // ? (drawn in full content box if not enough space is available for hex)
-        outline![
-            move_to (10, 120);
-            line_to (50, 120);
-            line_to (50, 80);
-            line_to (10, 80);
+        #move_to (200, 220);
+        line_to (200, 180);
+        line_to (160, 180);
+        line_to (160, 220);
+    ],
+    // ? (drawn in full content box if not enough space is available for hex)
+    make_static_outline![
+        #move_to (10, 120);
+        line_to (50, 120);
+        line_to (50, 80);
+        line_to (10, 80);
 
-            move_to (50, 40);
-            line_to (50, 80);
-            line_to (150, 80);
-            line_to (150, 40);
+        #move_to (50, 40);
+        line_to (50, 80);
+        line_to (150, 80);
+        line_to (150, 40);
 
-            move_to (150, 160);
-            line_to (190, 160);
-            line_to (190, 80);
-            line_to (150, 80);
+        #move_to (150, 160);
+        line_to (190, 160);
+        line_to (190, 80);
+        line_to (150, 80);
 
-            move_to (150, 160);
-            line_to (80, 220);
-            line_to (80, 280);
-            line_to (120, 280);
-            line_to (120, 220);
-            line_to (190, 160);
+        #move_to (150, 160);
+        line_to (80, 220);
+        line_to (80, 280);
+        line_to (120, 280);
+        line_to (120, 220);
+        line_to (190, 160);
 
-            move_to (80, 320);
-            line_to (80, 360);
-            line_to (120, 360);
-            line_to (120, 320);
-        ],
-    ]
-});
+        #move_to (80, 320);
+        line_to (80, 360);
+        line_to (120, 360);
+        line_to (120, 320);
+    ],
+];

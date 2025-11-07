@@ -216,7 +216,11 @@ impl<'a> SceneContentBuilder<'a> {
             }));
     }
 
-    pub fn filled_outline(&mut self, outline: impl Outline<f32>, color: impl Into<SceneColor>) {
+    pub fn filled_outline(
+        &mut self,
+        outline: impl IntoIterator<Item = OutlineEvent<f32>>,
+        color: impl Into<SceneColor>,
+    ) {
         let transf = Vec2::new(
             self.current_translation.x.into_f32(),
             self.current_translation.y.into_f32(),
@@ -225,7 +229,10 @@ impl<'a> SceneContentBuilder<'a> {
         self.parent
             .nodes
             .push(SceneNode::FilledOutline(FilledOutline {
-                events: outline.iter().map_points(|point| point + transf).collect(),
+                events: outline
+                    .into_iter()
+                    .map_points(|point| point + transf)
+                    .collect(),
                 color: color.into(),
             }));
     }

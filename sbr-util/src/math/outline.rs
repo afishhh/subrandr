@@ -141,6 +141,15 @@ impl<N: Number> Outline<N> for StaticOutline<N> {
     }
 }
 
+impl<'a, N: Number> IntoIterator for &'a StaticOutline<N> {
+    type Item = OutlineEvent<N>;
+    type IntoIter = std::iter::Copied<std::slice::Iter<'a, OutlineEvent<N>>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self._events.iter().copied()
+    }
+}
+
 #[macro_export]
 macro_rules! make_static_outline {
     {

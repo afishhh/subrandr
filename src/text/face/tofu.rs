@@ -389,7 +389,7 @@ impl Font {
             }
         }
 
-        output.filled_outline(&*outline, SceneColor::ACTIVE);
+        output.filled_outline(outline.iter().copied(), SceneColor::ACTIVE);
     }
 }
 

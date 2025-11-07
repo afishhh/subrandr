@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString},
+    fmt::Debug,
     hash::Hash,
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,
@@ -10,7 +11,7 @@ use std::{
 use rasterize::{PixelFormat, Rasterizer};
 use text_sys::*;
 use thiserror::Error;
-use util::math::{I16Dot16, I26Dot6, Vec2};
+use util::math::{I16Dot16, I26Dot6, OutlineEvent, Point2, Vec2};
 
 use super::{Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap};
 use crate::text::{ft_utils::*, FontSizeCacheKey};
@@ -29,6 +30,29 @@ use crate::text::{ft_utils::*, FontSizeCacheKey};
 //
 // Also this is not picked up by bindgen because it's a macro expression I think
 const FT_LOAD_TARGET_LIGHT: u32 = (FT_RENDER_MODE_LIGHT & 15) << 16;
+
+// Type layout-compatible with `FT_Pos`/`FT_Fixed` convertible to our
+// own fixed type.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct FtFixed(FT_Fixed);
+
+impl FtFixed {
+    fn as_26dot6(self) -> I26Dot6 {
+        I26Dot6::from_ft(self.0)
+    }
+}
+
+// Type layout-compatible with `FT_Vector` convertible to our own types.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct FtVec2(Vec2<FtFixed>);
+
+impl FtVec2 {
+    fn as_26dot6(self) -> Vec2<I26Dot6> {
+        Vec2::new(self.0.x.as_26dot6(), self.0.y.as_26dot6())
+    }
+}
 
 #[repr(transparent)]
 struct FaceMmVar(*mut FT_MM_Var);
@@ -565,6 +589,36 @@ impl Font {
     ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
         Ok((self.with_applied_size()?, self.hb_font))
     }
+
+    /// Gets the [`Outline`] associated with the glyph at `index`.
+    ///
+    /// Returns [`None`] if the glyph does not exist in this font, or is not
+    /// an outline glyph.
+    // FIXME: This is an unused function but rustc doesn't think so anymore?
+    #[allow(dead_code)]
+    pub fn glyph_outline(&self, index: u32) -> Result<Option<Outline>, FreeTypeError> {
+        let face = self.with_applied_size()?;
+        unsafe {
+            // According to FreeType documentation, bitmap-only fonts ignore
+            // FT_LOAD_NO_BITMAP.
+            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
+                return Ok(None);
+            }
+
+            let code = FT_Load_Glyph(face, index, FT_LOAD_NO_BITMAP as i32);
+            // TODO: are these the correct error codes?
+            if code == FT_Err_Invalid_Glyph_Index as i32
+                || code == FT_Err_Invalid_Glyph_Format as i32
+            {
+                return Ok(None);
+            }
+            fttry!(code)?;
+
+            Ok(Some(
+                Outline::from_ref(&(*(*face).glyph).outline).try_clone()?,
+            ))
+        }
+    }
 }
 
 impl std::fmt::Debug for Font {
@@ -936,6 +990,211 @@ fn copy_font_bitmap<const PIXEL_MODE: u8>(
             out_data[i..i + pixel_width as usize].copy_from_slice(unsafe {
                 std::mem::transmute(&pixel_data[..pixel_width as usize])
             });
+        }
+    }
+}
+
+pub struct Outline(FT_Outline);
+
+impl PartialEq for Outline {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.n_points == other.0.n_points
+            && self.0.n_contours == other.0.n_contours
+            && self.0.flags == other.0.flags
+            && self.points() == other.points()
+            && self.tags() == other.tags()
+            && self.contours() == other.contours()
+    }
+}
+
+impl Eq for Outline {}
+
+impl Hash for Outline {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.points().hash(state);
+        self.tags().hash(state);
+        self.contours().hash(state);
+    }
+}
+
+impl Drop for Outline {
+    fn drop(&mut self) {
+        unsafe { FT_Outline_Done(Library::get_or_init().unwrap().ptr, &mut self.0) };
+    }
+}
+
+impl Outline {
+    unsafe fn from_ref(outline: &FT_Outline_) -> &Outline {
+        unsafe { std::mem::transmute(outline) }
+    }
+
+    fn contours(&self) -> &[u16] {
+        unsafe { std::slice::from_raw_parts(self.0.contours, self.0.n_contours as usize) }
+    }
+
+    fn points(&self) -> &[FtVec2] {
+        unsafe { std::slice::from_raw_parts(self.0.points as *const _, self.0.n_points as usize) }
+    }
+
+    fn tags(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.0.tags, self.0.n_points as usize) }
+    }
+
+    pub fn try_clone(&self) -> Result<Self, FreeTypeError> {
+        unsafe {
+            let mut out = MaybeUninit::uninit();
+
+            fttry!(
+                #[allow(clippy::useless_conversion)]
+                FT_Outline_New(
+                    Library::get_or_init()?.ptr,
+                    self.0.n_points as std::ffi::c_uint,
+                    self.0.n_contours as std::ffi::c_int,
+                    out.as_mut_ptr(),
+                )
+            )?;
+            fttry!(FT_Outline_Copy(&self.0, out.as_mut_ptr()))?;
+
+            Ok(Self(out.assume_init()))
+        }
+    }
+}
+
+impl util::math::Outline<I26Dot6> for Outline {
+    fn iter(&self) -> impl Iterator<Item = OutlineEvent<I26Dot6>> {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum DegreeTag {
+            On = 1,
+            Conic = 0,
+            Cubic = 2,
+        }
+
+        impl DegreeTag {
+            fn from_value(value: u8) -> Option<Self> {
+                // TODO: Convert FT_CURVE_TAG* to u8 in text-sys?
+                match value & 0b11 {
+                    0 => Some(Self::Conic),
+                    1 => Some(Self::On),
+                    2 => Some(Self::Cubic),
+                    _ => None,
+                }
+            }
+        }
+
+        fn to_point(ft: FtVec2) -> Point2<I26Dot6> {
+            // FT_Pos in FT_Outline seems to be 26.6
+            ft.as_26dot6().to_point()
+        }
+
+        #[derive(Debug, Clone)]
+        struct PointsAndTags<'a>(
+            std::iter::Zip<std::slice::Iter<'a, FtVec2>, std::slice::Iter<'a, u8>>,
+        );
+
+        impl Iterator for PointsAndTags<'_> {
+            type Item = (Point2<I26Dot6>, DegreeTag);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                self.0.next().map(|(&p, &t)| {
+                    (
+                        to_point(p),
+                        DegreeTag::from_value(t).expect("Invalid FreeType tag degree"),
+                    )
+                })
+            }
+        }
+
+        struct OutlineEventsIter<'a> {
+            outline: &'a Outline,
+            first: usize,
+            contours: std::slice::Iter<'a, u16>,
+
+            first_point: Point2<I26Dot6>,
+            closed: bool,
+            current: PointsAndTags<'a>,
+        }
+
+        impl Iterator for OutlineEventsIter<'_> {
+            type Item = OutlineEvent<I26Dot6>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if let Some((point, tag)) = self.current.next() {
+                    let mut peek_or_close_with_first =
+                        |iter: &PointsAndTags| match iter.clone().next() {
+                            Some(v) => v,
+                            None => {
+                                self.closed = true;
+                                (self.first_point, DegreeTag::On)
+                            }
+                        };
+
+                    return if tag == DegreeTag::On {
+                        Some(OutlineEvent::LineTo(point))
+                    } else if tag == DegreeTag::Conic {
+                        let (np, ntag) = peek_or_close_with_first(&self.current);
+                        let end = if ntag == DegreeTag::Conic {
+                            point.midpoint(np)
+                        } else {
+                            assert_eq!(ntag, DegreeTag::On);
+                            _ = self.current.next();
+                            np
+                        };
+                        Some(OutlineEvent::QuadTo(point, end))
+                    } else if tag == DegreeTag::Cubic {
+                        let (c1, c1tag) = self.current.next().unwrap();
+                        assert_eq!(c1tag, DegreeTag::Cubic);
+                        let (end, endtag) = peek_or_close_with_first(&self.current);
+                        assert_eq!(endtag, DegreeTag::On);
+                        Some(OutlineEvent::CubicTo(point, c1, end))
+                    } else {
+                        unreachable!()
+                    };
+                } else if !self.closed {
+                    self.closed = true;
+                    return Some(OutlineEvent::LineTo(self.first_point));
+                }
+
+                let last = match self.contours.next() {
+                    Some(&x) => x as usize,
+                    None => {
+                        debug_assert_eq!(self.first, self.outline.points().len());
+                        return None;
+                    }
+                } as usize;
+                let points = self.outline.points();
+                let tags = self.outline.tags();
+
+                let mut add_range = self.first..last + 1;
+                if (tags[self.first] & 0b11) != FT_CURVE_TAG_ON as u8 {
+                    if (tags[last] & 0b11) == FT_CURVE_TAG_CONIC as u8 {
+                        self.first_point =
+                            to_point(points[self.first]).midpoint(to_point(points[last]));
+                    } else {
+                        assert_eq!(tags[last] & 0b11, FT_CURVE_TAG_ON as u8);
+                        self.first_point = to_point(points[last]);
+                        add_range.end -= 1;
+                    }
+                } else {
+                    self.first_point = to_point(points[self.first]);
+                    add_range.start += 1;
+                };
+
+                self.first = last + 1;
+                self.current =
+                    PointsAndTags(std::iter::zip(&points[add_range.clone()], &tags[add_range]));
+                self.closed = false;
+
+                Some(OutlineEvent::MoveTo(self.first_point))
+            }
+        }
+
+        OutlineEventsIter {
+            outline: self,
+            first: 0,
+            contours: self.contours().iter(),
+            first_point: Point2::ZERO,
+            closed: true,
+            current: PointsAndTags(std::iter::zip(&[], &[])),
         }
     }
 }

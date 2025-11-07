@@ -1751,6 +1751,76 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn FT_Matrix_Invert(matrix: *mut FT_Matrix) -> FT_Error;
 }
+unsafe extern "C" {
+    pub fn FT_Outline_Decompose(
+        outline: *mut FT_Outline,
+        func_interface: *const FT_Outline_Funcs,
+        user: *mut ::std::os::raw::c_void,
+    ) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_New(
+        library: FT_Library,
+        numPoints: FT_UInt,
+        numContours: FT_Int,
+        anoutline: *mut FT_Outline,
+    ) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Done(library: FT_Library, outline: *mut FT_Outline) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Check(outline: *mut FT_Outline) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Get_CBox(outline: *const FT_Outline, acbox: *mut FT_BBox);
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Translate(outline: *const FT_Outline, xOffset: FT_Pos, yOffset: FT_Pos);
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Copy(source: *const FT_Outline, target: *mut FT_Outline) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Transform(outline: *const FT_Outline, matrix: *const FT_Matrix);
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Embolden(outline: *mut FT_Outline, strength: FT_Pos) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_EmboldenXY(
+        outline: *mut FT_Outline,
+        xstrength: FT_Pos,
+        ystrength: FT_Pos,
+    ) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Reverse(outline: *mut FT_Outline);
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Get_Bitmap(
+        library: FT_Library,
+        outline: *mut FT_Outline,
+        abitmap: *const FT_Bitmap,
+    ) -> FT_Error;
+}
+unsafe extern "C" {
+    pub fn FT_Outline_Render(
+        library: FT_Library,
+        outline: *mut FT_Outline,
+        params: *mut FT_Raster_Params,
+    ) -> FT_Error;
+}
+pub const FT_ORIENTATION_TRUETYPE: FT_Orientation_ = 0;
+pub const FT_ORIENTATION_POSTSCRIPT: FT_Orientation_ = 1;
+pub const FT_ORIENTATION_FILL_RIGHT: FT_Orientation_ = 0;
+pub const FT_ORIENTATION_FILL_LEFT: FT_Orientation_ = 1;
+pub const FT_ORIENTATION_NONE: FT_Orientation_ = 2;
+pub type FT_Orientation_ = ::std::os::raw::c_uint;
+pub use self::FT_Orientation_ as FT_Orientation;
+unsafe extern "C" {
+    pub fn FT_Outline_Get_Orientation(outline: *mut FT_Outline) -> FT_Orientation;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct FT_MM_Axis_ {

@@ -181,17 +181,6 @@ impl CubicBezier<f32> {
         flatten::cubic_to_quadratics(self, tolerance)
     }
 
-    // FIXME: This function probably shouldn't exist as the tolerance for
-    //        `cubic_to_quadratics` and `flatten_quadratic` should be separate.
-    //        Currently this is not used in any code paths so could be removed if
-    //        the debugging utility of `Outline::flatten_contour` is deemed not
-    //        important enough.
-    pub fn flatten_into(&self, tolerance: f32, out: &mut Vec<Point2f>) {
-        for quadratic in self.to_quadratics(tolerance) {
-            out.extend(quadratic.flatten(tolerance))
-        }
-    }
-
     pub fn from_b_spline(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> Self {
         Self([
             ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),

@@ -225,6 +225,10 @@ impl<'f> FontMatchIterator<'_, 'f> {
         self.matcher
     }
 
+    pub fn will_do_system_fallback(&self) -> bool {
+        self.index >= self.matcher.matched.len()
+    }
+
     pub fn did_system_fallback(&self) -> bool {
         self.index > self.matcher.matched.len()
     }

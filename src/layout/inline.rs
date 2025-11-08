@@ -11,7 +11,9 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment},
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontArena, FontMatcher, ShapingBuffer},
+    text::{
+        self, DefaultEmojiPresentation, Direction, Font, FontArena, FontMatcher, ShapingBuffer,
+    },
 };
 
 mod glyph_string;
@@ -495,7 +497,11 @@ fn set_buffer_content_from_range(
         let end = next_grapheme_boundary_it
             .next()
             .map_or(range.end, |end| end.min(range.end));
-        buffer.add_grapheme(&text[current..end], current);
+        buffer.add_grapheme(
+            &text[current..end],
+            current,
+            DefaultEmojiPresentation::Unicode,
+        );
         current = end;
     }
 

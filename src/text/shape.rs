@@ -3,6 +3,7 @@ use std::{
     ops::Range,
 };
 
+use icu_properties::{props as icu_props, CodePointSetData};
 use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
@@ -32,6 +33,11 @@ impl RawShapingBuffer {
             hb_buffer_set_cluster_level(self.0, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
             hb_buffer_set_flags(self.0, HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT);
             hb_buffer_set_content_type(self.0, HB_BUFFER_CONTENT_TYPE_UNICODE);
+            // By default, HarfBuzz removes variation selector glyphs that did not get matched.
+            // However we do want to know if this happens so that we can fallback to a different font instead.
+            // Otherwise emojis might get rendered with text presentation in a font that doesn't support
+            // emoji presentation and we'd be none the wiser.
+            hb_buffer_set_not_found_variation_selector_glyph(self.0, 0);
         }
     }
 
@@ -62,11 +68,56 @@ impl RawShapingBuffer {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum DefaultEmojiPresentation {
+    Unicode,
+    #[expect(
+        dead_code,
+        reason = "Fully general `font-variant-emoji` is not supported yet"
+    )]
+    Explicit(EmojiPresentation),
+}
+
+impl DefaultEmojiPresentation {
+    fn to_explicit_presentation(self) -> Option<EmojiPresentation> {
+        match self {
+            DefaultEmojiPresentation::Unicode => None,
+            DefaultEmojiPresentation::Explicit(explicit) => Some(explicit),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum EmojiPresentation {
+    Text,
+    Emoji,
+}
+
+impl EmojiPresentation {
+    fn default_for_char(chr: char) -> Self {
+        if CodePointSetData::new::<icu_props::EmojiPresentation>().contains(chr) {
+            EmojiPresentation::Emoji
+        } else {
+            EmojiPresentation::Text
+        }
+    }
+
+    fn to_variation_selector(self) -> char {
+        match self {
+            EmojiPresentation::Text => '\u{FE0E}',
+            EmojiPresentation::Emoji => '\u{FE0F}',
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ClusterEntry {
     codepoint: char,
     utf8_index: usize,
     is_grapheme_start: bool,
+    /// `true` if this cluster corresponds to a variation selector applied by
+    /// [`ShapingBuffer::add_grapheme`] in accordance with the [`DefaultEmojiPresentation`].
+    is_ephemeral_variation_selector: bool,
 }
 
 pub struct ShapingBuffer {
@@ -105,7 +156,7 @@ impl ShapingBuffer {
             .segment_str(text)
             .skip(1)
         {
-            self.add_grapheme(&text[last..next], last);
+            self.add_grapheme(&text[last..next], last, DefaultEmojiPresentation::Unicode);
             last = next;
         }
 
@@ -136,23 +187,73 @@ impl ShapingBuffer {
         }
     }
 
-    fn add_codepoint(&mut self, codepoint: char, utf8_index: usize, is_grapheme_start: bool) {
+    fn add_codepoint(
+        &mut self,
+        codepoint: char,
+        utf8_index: usize,
+        is_grapheme_start: bool,
+        is_ephemeral_variation_selector: bool,
+    ) {
         unsafe { hb_buffer_add(self.raw.0, codepoint as u32, self.cluster_map.len() as u32) };
         self.cluster_map.push(ClusterEntry {
             codepoint,
             utf8_index,
             is_grapheme_start,
+            is_ephemeral_variation_selector,
         });
     }
 
-    pub fn add_grapheme(&mut self, grapheme: &str, mut cluster: usize) {
+    pub fn add_grapheme(
+        &mut self,
+        grapheme: &str,
+        mut cluster: usize,
+        default_emoji_variation: DefaultEmojiPresentation,
+    ) {
         debug_assert!(!grapheme.is_empty());
 
         let mut is_grapheme_start = true;
         for chr in grapheme.chars() {
-            self.add_codepoint(chr, cluster, is_grapheme_start);
+            self.add_codepoint(chr, cluster, is_grapheme_start, false);
             cluster += chr.len_utf8();
             is_grapheme_start = false;
+        }
+
+        // https://unicode.org/reports/tr51/#Emoji_Variation_Selector_Notes
+        let mut chars = grapheme.chars();
+        if let Some(first) = chars.next() {
+            let second = chars.next();
+            let emoji_set = CodePointSetData::new::<icu_props::Emoji>();
+            let emoji_modifier_base_set = CodePointSetData::new::<icu_props::EmojiModifierBase>();
+            let emoji_modifier_set = CodePointSetData::new::<icu_props::EmojiModifier>();
+
+            let presentation = if emoji_set.contains(first) && second.is_none() {
+                // This is a simple emoji character
+                default_emoji_variation
+                    .to_explicit_presentation()
+                    .unwrap_or_else(|| EmojiPresentation::default_for_char(first))
+            } else if emoji_modifier_base_set.contains(first)
+                && second.is_some_and(|ch| emoji_modifier_set.contains(ch))
+            {
+                // This is an emoji modifier sequence so default presentation is going to always be emoji.
+                default_emoji_variation
+                    .to_explicit_presentation()
+                    .unwrap_or(EmojiPresentation::Emoji)
+            } else {
+                return;
+            };
+
+            println!("Adding presentation selector {presentation:?} after {grapheme:?}");
+            self.add_codepoint(
+                presentation.to_variation_selector(),
+                // These should not, under any circumstances, show up in the output glyph
+                // string, so this index ~~doesn't matter~~ except that `shape()` requires
+                // these to be monotonic for the feature fixup binary search.
+                // HACK: Instead consider splitting feature collection into a separate pass
+                //       and do this fixup on-line in `add_codepoint`.
+                cluster - 1,
+                false,
+                true,
+            );
         }
     }
 
@@ -202,12 +303,19 @@ impl ShapingBuffer {
                 Ok(i) => i,
                 Err(i) => i.saturating_sub(1),
             } as u32;
+            if self.cluster_map[feature.start as usize].is_ephemeral_variation_selector {
+                feature.start -= 1;
+            }
+
             feature.end = match self
                 .cluster_map
                 .binary_search_by_key(&feature.end, |x| x.utf8_index as u32)
             {
                 Ok(i) | Err(i) => i,
             } as u32;
+            if self.cluster_map[feature.end as usize].is_ephemeral_variation_selector {
+                feature.start -= 1;
+            }
         }
 
         let properties = unsafe {

@@ -10,7 +10,7 @@ use util::{
 use crate::{
     layout::{
         self,
-        inline::{InlineContentFragment, InlineItemFragment, SpanFragment},
+        inline::{GlyphString, InlineContentFragment, InlineItemFragment, SpanFragment},
         FixedL, FragmentBox, LayoutContext, Point2L, Vec2L,
     },
     log::{info, trace},
@@ -19,10 +19,7 @@ use crate::{
         computed::{Alignment, HorizontalAlignment, TextShadow, VerticalAlignment},
         ComputedStyle,
     },
-    text::{
-        self, platform_font_provider, FontArena, FreeTypeError, GlyphRenderError, GlyphString,
-        TextMetrics,
-    },
+    text::{self, platform_font_provider, FontArena, FreeTypeError, GlyphRenderError, TextMetrics},
     vtt, Subrandr,
 };
 
@@ -169,7 +166,7 @@ impl FrameRenderPass<'_, '_> {
             I26Dot6::ZERO,
             I26Dot6::ZERO,
             0.0,
-            &GlyphString::from_glyphs(text, glyphs, text::Direction::Ltr),
+            &mut glyphs.iter(),
         )?;
         image.blit(
             self.rasterizer,
@@ -249,7 +246,7 @@ impl FrameRenderPass<'_, '_> {
             x.fract(),
             y.fract(),
             0.0,
-            glyphs,
+            &mut glyphs.iter_glyphs(),
         )?;
 
         // TODO: This should also draw an offset underline I think and possibly strike through?
@@ -270,7 +267,7 @@ impl FrameRenderPass<'_, '_> {
                         shadow_x.fract(),
                         shadow_y.fract(),
                         sigma.into_f32(),
-                        glyphs,
+                        &mut glyphs.iter_glyphs(),
                     )?
                     .blit(
                         self.rasterizer,

@@ -7,8 +7,8 @@ use std::{
 
 use util::math::I26Dot6;
 
-use super::{
-    font_match::FontMatchIterator, Direction, FontArena, FontDb, Glyph, ShapingBuffer, ShapingError,
+use crate::text::{
+    Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
 };
 
 pub trait GlyphStringText: AsRef<str> + Clone {}
@@ -99,7 +99,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                     if !self.storage[i].unsafe_to_concat() {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
-                        crate::layout::inline::set_buffer_content_from_range(
+                        super::set_buffer_content_from_range(
                             buffer,
                             self.text.as_ref(),
                             if concat_glyph.cluster < cluster {
@@ -129,7 +129,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                crate::layout::inline::set_buffer_content_from_range(
+                super::set_buffer_content_from_range(
                     buffer,
                     self.text.as_ref(),
                     self.glyphs().first().unwrap().cluster..cluster,
@@ -174,7 +174,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                     if !self.storage[i].unsafe_to_concat() {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
-                        crate::layout::inline::set_buffer_content_from_range(
+                        super::set_buffer_content_from_range(
                             buffer,
                             self.text.as_ref(),
                             if concat_glyph.cluster > cluster {
@@ -204,7 +204,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                crate::layout::inline::set_buffer_content_from_range(
+                super::set_buffer_content_from_range(
                     buffer,
                     self.text.as_ref(),
                     cluster..self.glyphs().last().unwrap().cluster,

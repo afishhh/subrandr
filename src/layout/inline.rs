@@ -11,8 +11,11 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment},
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontArena, FontMatcher, GlyphString, ShapingBuffer},
+    text::{self, Direction, Font, FontArena, FontMatcher, ShapingBuffer},
 };
+
+mod glyph_string;
+pub use glyph_string::*;
 
 // This character is used to represent opaque objects nested inside inline text content,
 // this includes ruby containers and `inline-block`s.
@@ -249,7 +252,7 @@ pub struct TextFragment {
 }
 
 impl TextFragment {
-    pub fn glyphs(&self) -> &text::GlyphString<'_, std::rc::Rc<str>> {
+    pub fn glyphs(&self) -> &GlyphString<'_, std::rc::Rc<str>> {
         &self.glyphs
     }
 }
@@ -471,7 +474,7 @@ fn font_matcher_from_style<'f>(
     .map_err(Into::into)
 }
 
-pub(crate) fn set_buffer_content_from_range(
+fn set_buffer_content_from_range(
     buffer: &mut ShapingBuffer,
     text: &str,
     range: Range<usize>,

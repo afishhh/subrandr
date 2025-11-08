@@ -17,8 +17,6 @@ pub use face::*;
 pub use ft_utils::FreeTypeError;
 pub mod font_db;
 pub use font_db::*;
-mod glyph_string;
-pub use glyph_string::*;
 mod font_match;
 pub use font_match::*;
 mod glyph_cache;
@@ -367,13 +365,13 @@ impl Image {
     }
 }
 
-pub fn render(
+pub fn render<'g, 'f: 'g>(
     cache: &GlyphCache,
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
     blur_sigma: f32,
-    glyphs: &GlyphString<'_, impl GlyphStringText>,
+    glyphs: &mut dyn Iterator<Item = &'g Glyph<'f>>,
 ) -> Result<Image, GlyphRenderError> {
     let mut result = Image {
         glyphs: Vec::new(),
@@ -385,7 +383,7 @@ pub fn render(
 
     let mut x = xf;
     let mut y = yf;
-    for shaped_glyph in glyphs.iter_glyphs() {
+    for shaped_glyph in glyphs {
         // TODO: Once vertical text is supported, this should change depending on main axis
         let subpixel_offset = if x < 0 {
             I26Dot6::ONE - x.abs().fract()

@@ -74,6 +74,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         glyph_index: usize,
         cluster: usize,
         buffer: &mut ShapingBuffer,
+        grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -98,7 +99,8 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                     if !self.storage[i].unsafe_to_concat() {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
-                        buffer.add(
+                        crate::layout::inline::set_buffer_content_from_range(
+                            buffer,
                             self.text.as_ref(),
                             if concat_glyph.cluster < cluster {
                                 // This is left-to-right text
@@ -107,6 +109,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                                 // This is right-to-left text
                                 cluster..concat_glyph.cluster
                             },
+                            grapheme_cluster_boundaries,
                         );
                         let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.first().is_none_or(|first| !first.unsafe_to_concat()) {
@@ -126,9 +129,11 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(
+                crate::layout::inline::set_buffer_content_from_range(
+                    buffer,
                     self.text.as_ref(),
                     self.glyphs().first().unwrap().cluster..cluster,
+                    grapheme_cluster_boundaries,
                 );
                 GlyphString::from_glyphs(
                     self.text.clone(),
@@ -146,6 +151,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
         glyph_index: usize,
         cluster: usize,
         buffer: &mut ShapingBuffer,
+        grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -168,7 +174,8 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                     if !self.storage[i].unsafe_to_concat() {
                         let concat_glyph = &self.storage[i];
                         buffer.clear();
-                        buffer.add(
+                        crate::layout::inline::set_buffer_content_from_range(
+                            buffer,
                             self.text.as_ref(),
                             if concat_glyph.cluster > cluster {
                                 // This is left-to-right text
@@ -177,6 +184,7 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
                                 // This is right-to-left text
                                 concat_glyph.cluster..cluster
                             },
+                            grapheme_cluster_boundaries,
                         );
                         let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
                         if glyphs.last().is_none_or(|last| !last.unsafe_to_concat()) {
@@ -196,9 +204,11 @@ impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
 
                 // We have to reshape the whole segment, there's no place where we can safely concat.
                 buffer.clear();
-                buffer.add(
+                crate::layout::inline::set_buffer_content_from_range(
+                    buffer,
                     self.text.as_ref(),
                     cluster..self.glyphs().last().unwrap().cluster,
+                    grapheme_cluster_boundaries,
                 );
                 GlyphString::from_glyphs(
                     self.text.clone(),
@@ -288,6 +298,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
         cluster: usize,
         max_width: I26Dot6,
         buffer: &mut ShapingBuffer,
+        grapheme_cluster_boundaries: &[usize],
         font_iter: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -303,6 +314,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
                     split_at,
                     cluster,
                     buffer,
+                    grapheme_cluster_boundaries,
                     font_iter.clone(),
                     font_arena,
                     fonts,
@@ -320,6 +332,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
                         split_at,
                         cluster,
                         buffer,
+                        grapheme_cluster_boundaries,
                         font_iter,
                         font_arena,
                         fonts,

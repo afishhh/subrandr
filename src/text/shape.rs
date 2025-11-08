@@ -1,6 +1,6 @@
 use std::{
     mem::{ManuallyDrop, MaybeUninit},
-    ops::{Range, RangeFrom, RangeFull},
+    ops::Range,
 };
 
 use text_sys::*;
@@ -10,62 +10,6 @@ use util::{vec_into_parts, vec_parts};
 use crate::text::OpenTypeTag;
 
 use super::{Direction, FontArena, FontDb, FontMatchIterator, Glyph};
-
-mod sealed {
-    use std::ops::{Range, RangeFrom, RangeFull};
-
-    pub trait Sealed {}
-    impl Sealed for Range<usize> {}
-    impl Sealed for RangeFrom<usize> {}
-    impl Sealed for RangeFull {}
-}
-
-pub trait ItemRange: sealed::Sealed {
-    fn bounds_check(&self, length: usize);
-    fn start(&self) -> u32;
-    fn length(&self) -> i32;
-}
-
-impl ItemRange for Range<usize> {
-    fn bounds_check(&self, length: usize) {
-        assert!(self.start <= self.end);
-        assert!(self.end <= length);
-    }
-
-    fn start(&self) -> u32 {
-        self.start as u32
-    }
-
-    fn length(&self) -> i32 {
-        (self.end - self.start) as i32
-    }
-}
-
-impl ItemRange for RangeFrom<usize> {
-    fn bounds_check(&self, length: usize) {
-        assert!(self.start <= length);
-    }
-
-    fn start(&self) -> u32 {
-        self.start as u32
-    }
-
-    fn length(&self) -> i32 {
-        -1
-    }
-}
-
-impl ItemRange for RangeFull {
-    fn bounds_check(&self, _length: usize) {}
-
-    fn start(&self) -> u32 {
-        0
-    }
-
-    fn length(&self) -> i32 {
-        -1
-    }
-}
 
 struct RawShapingBuffer(*mut hb_buffer_t);
 
@@ -85,7 +29,9 @@ impl RawShapingBuffer {
     fn clear(&mut self) {
         unsafe {
             hb_buffer_clear_contents(self.0);
+            hb_buffer_set_cluster_level(self.0, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
             hb_buffer_set_flags(self.0, HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT);
+            hb_buffer_set_content_type(self.0, HB_BUFFER_CONTENT_TYPE_UNICODE);
         }
     }
 
@@ -116,9 +62,16 @@ impl RawShapingBuffer {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ClusterEntry {
+    codepoint: char,
+    utf8_index: usize,
+    is_grapheme_start: bool,
+}
+
 pub struct ShapingBuffer {
     raw: RawShapingBuffer,
-    cluster_map_buffer: Vec<(u32, u32)>,
+    cluster_map: Vec<ClusterEntry>,
     glyph_scratch_buffer_parts: (*mut Glyph<'static>, usize),
     features: Vec<hb_feature_t>,
 }
@@ -135,7 +88,7 @@ impl ShapingBuffer {
     pub fn new() -> Self {
         Self {
             raw: RawShapingBuffer::new(),
-            cluster_map_buffer: Vec::new(),
+            cluster_map: Vec::new(),
             glyph_scratch_buffer_parts: {
                 let (ptr, _, cap) = vec_into_parts(Vec::new());
                 (ptr, cap)
@@ -144,17 +97,59 @@ impl ShapingBuffer {
         }
     }
 
-    pub fn add(&mut self, text: &str, range: impl ItemRange) {
-        range.bounds_check(text.len());
+    pub fn add_text_simple(&mut self, text: &str) {
+        self.set_pre_context("");
 
+        let mut last = 0;
+        for next in icu_segmenter::GraphemeClusterSegmenter::new().segment_str(text) {
+            self.add_grapheme(&text[last..next], last);
+            last = next;
+        }
+
+        self.set_post_context("");
+    }
+
+    pub fn set_pre_context(&mut self, context: &str) {
         unsafe {
             hb_buffer_add_utf8(
                 self.raw.0,
-                text.as_ptr() as *const _,
-                text.len() as i32,
-                range.start(),
-                range.length(),
+                context.as_ptr() as *const _,
+                context.len() as i32,
+                context.len() as u32,
+                0,
             );
+        }
+    }
+
+    pub fn set_post_context(&mut self, context: &str) {
+        unsafe {
+            hb_buffer_add_utf8(
+                self.raw.0,
+                context.as_ptr() as *const _,
+                context.len() as i32,
+                context.len() as u32,
+                0,
+            );
+        }
+    }
+
+    fn add_codepoint(&mut self, codepoint: char, utf8_index: usize, is_grapheme_start: bool) {
+        unsafe { hb_buffer_add(self.raw.0, codepoint as u32, self.cluster_map.len() as u32) };
+        self.cluster_map.push(ClusterEntry {
+            codepoint,
+            utf8_index,
+            is_grapheme_start,
+        });
+    }
+
+    pub fn add_grapheme(&mut self, grapheme: &str, mut cluster: usize) {
+        debug_assert!(!grapheme.is_empty());
+
+        let mut is_grapheme_start = true;
+        for chr in grapheme.chars() {
+            self.add_codepoint(chr, cluster, is_grapheme_start);
+            cluster += chr.len_utf8();
+            is_grapheme_start = false;
         }
     }
 
@@ -186,7 +181,8 @@ impl ShapingBuffer {
 
     pub fn clear(&mut self) {
         self.raw.clear();
-        self.features.clear()
+        self.features.clear();
+        self.cluster_map.clear();
     }
 
     pub fn shape<'f>(
@@ -195,24 +191,17 @@ impl ShapingBuffer {
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Vec<Glyph<'f>>, ShapingError> {
-        self.cluster_map_buffer.clear();
-        self.cluster_map_buffer
-            .extend(self.raw.items_mut().0.iter_mut().enumerate().map(|(i, x)| {
-                let original_cluster = x.cluster;
-                x.cluster = i as u32;
-                (x.codepoint, original_cluster)
-            }));
         for feature in self.features.iter_mut() {
             feature.start = match self
-                .cluster_map_buffer
-                .binary_search_by_key(&feature.start, |x| x.1)
+                .cluster_map
+                .binary_search_by_key(&feature.start, |x| x.utf8_index as u32)
             {
                 Ok(i) => i,
                 Err(i) => i.saturating_sub(1),
             } as u32;
             feature.end = match self
-                .cluster_map_buffer
-                .binary_search_by_key(&feature.end, |x| x.1)
+                .cluster_map
+                .binary_search_by_key(&feature.end, |x| x.utf8_index as u32)
             {
                 Ok(i) | Err(i) => i,
             } as u32;
@@ -225,7 +214,7 @@ impl ShapingBuffer {
             buf.assume_init()
         };
 
-        let mut result = Vec::with_capacity(self.cluster_map_buffer.len());
+        let mut result = Vec::with_capacity(self.cluster_map.len());
         ShapingPass {
             buffer: RawShapingBuffer(self.raw.0),
             glyph_buffer: unsafe {
@@ -237,13 +226,13 @@ impl ShapingBuffer {
             },
             glyph_buffer_parts: &mut self.glyph_scratch_buffer_parts,
             result: &mut result,
-            cluster_map: &self.cluster_map_buffer,
+            cluster_map: &self.cluster_map,
             font_arena,
             fonts,
             properties,
             features: &self.features,
         }
-        .shape_layer(0..self.cluster_map_buffer.len(), font_iterator, false)?;
+        .shape_layer(0..self.cluster_map.len(), font_iterator, false)?;
 
         self.clear();
 
@@ -282,7 +271,7 @@ struct ShapingPass<'p, 'f, 'a> {
     glyph_buffer: ManuallyDrop<Vec<Glyph<'f>>>,
     glyph_buffer_parts: &'p mut (*mut Glyph<'static>, usize),
     result: &'p mut Vec<Glyph<'f>>,
-    cluster_map: &'p [(u32, u32)],
+    cluster_map: &'p [ClusterEntry],
     font_arena: &'f FontArena,
     fonts: &'p mut FontDb<'a>,
     properties: hb_segment_properties_t,
@@ -299,13 +288,11 @@ impl<'f> ShapingPass<'_, 'f, '_> {
         unsafe {
             self.buffer.clear();
             hb_buffer_set_segment_properties(self.buffer.0, &self.properties);
-            hb_buffer_set_content_type(self.buffer.0, HB_BUFFER_CONTENT_TYPE_UNICODE);
         }
 
-        for (&(codepoint, _), i) in std::iter::zip(&self.cluster_map[range.clone()], range.clone())
-        {
+        for (entry, i) in std::iter::zip(&self.cluster_map[range.clone()], range.clone()) {
             unsafe {
-                hb_buffer_add(self.buffer.0, codepoint, i as u32);
+                hb_buffer_add(self.buffer.0, entry.codepoint as u32, i as u32);
             }
         }
 
@@ -314,22 +301,30 @@ impl<'f> ShapingPass<'_, 'f, '_> {
         Ok(())
     }
 
-    // TODO: Reshape only on grapheme boundaries?
     fn shape_layer(
         &mut self,
         cluster_range: Range<usize>,
         mut font_iterator: FontMatchIterator<'_, 'f>,
         force_tofu: bool,
     ) -> Result<(), ShapingError> {
-        let Some(&(first_codepoint, _)) = self.cluster_map.get(cluster_range.start) else {
+        let Some(&ClusterEntry {
+            codepoint: first_codepoint,
+            is_grapheme_start,
+            ..
+        }) = self.cluster_map.get(cluster_range.start)
+        else {
             return Ok(());
         };
+        assert!(
+            is_grapheme_start,
+            "Attempted to reshape substring that starts in the middle of a grapheme"
+        );
 
         let font = if force_tofu {
             font_iterator.matcher().tofu(self.font_arena)
         } else {
             font_iterator
-                .next_with_fallback(first_codepoint, self.font_arena, self.fonts)?
+                .next_with_fallback(first_codepoint as u32, self.font_arena, self.fonts)?
                 .unwrap_or_else(|| font_iterator.matcher().tofu(self.font_arena))
         };
         let hb_font = font.as_harfbuzz_font()?;
@@ -352,17 +347,38 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             Glyph::from_info_and_position(
                 info,
                 position,
-                self.cluster_map[info.cluster as usize].1 as usize,
+                self.cluster_map[info.cluster as usize].utf8_index,
                 font,
             )
         };
 
         let first_cluster = infos[0].cluster as usize;
-        let last_cluster = infos.last().unwrap().cluster as usize;
-        let end_cluster = if first_cluster == cluster_range.start {
-            cluster_range.end
-        } else {
+        let is_reverse = first_cluster != cluster_range.start;
+        // NOTE: `start_cluster` isn't always equal to `first_cluster`!
+        //       This is because `first_cluster` is the first cluster that *emitted a glyph*
+        //       while `start_cluster` is the directionally-first cluster in this `cluster_range`.
+        let start_cluster = if !is_reverse {
             cluster_range.start
+        } else {
+            cluster_range.end - 1
+        };
+        // It is, in general, not possible to compute an excluded end bound for clusters here.
+        // This is because when working with RTL text such an end bound could be `-1`[1].
+        // So we use `usize::MAX` as a sentinel instead and are careful not to
+        // compare clusters with non-equality comparisons.
+        //
+        // [1] Although this placeholder is effectively `-1` :)
+        const END_CLUSTER_EXCLUDED: usize = usize::MAX;
+
+        let is_cluster_initial = |cluster: u32| {
+            // If `is_reverse` is true then HarfBuzz gave us final-cluster values in reverse order
+            // so if the cluster after this one is a grapheme start that must mean this cluster
+            // is a grapheme end hence it is an initial cluster in this direction.
+            // Otherwise, if `is_reverse` is false, we just check whether this cluster is
+            // a grapheme start since we're operating on first-cluster values.
+            self.cluster_map
+                .get(cluster as usize + usize::from(is_reverse))
+                .is_none_or(|c| c.is_grapheme_start)
         };
 
         let mut glyph_buffer_last = self.glyph_buffer.len();
@@ -373,58 +389,94 @@ impl<'f> ShapingPass<'_, 'f, '_> {
                 continue;
             };
 
+            // If the first valid cluster does not start a grapheme, then we have
+            // a partially successful grapheme here which we also need to skip.
+            //
+            // NOTE: There is an edge case here where if a font ligates
+            //       part of a grapheme with another grapheme we will never
+            //       be able to shape even that other grapheme with this font.
+            //       An anologous issue exists for the end trimming.
+            //       However this edge case seems pretty improbable/non-sensical
+            //       in real-world conditions so it's probably fine?
+            if !is_cluster_initial(info.cluster) {
+                continue;
+            }
+
             let mut len = 1;
+            // Number of glyphs that haven't yet been "flushed" by a grapheme start.
+            // If we don't see a grapheme start at the end of the valid subrange then we
+            // will roll back `len` by this value to get rid of the partial ending.
+            let mut pending_glyphs = 0;
             self.glyph_buffer.push(make_glyph(info, position));
             let cluster_subrange_start = info.cluster as usize;
-            let cluster_subrange_end = loop {
+            let mut cluster_subrange_end = cluster_subrange_start;
+            loop {
                 match it.next() {
-                    Some((info, position)) if info.codepoint != 0 => {
-                        self.glyph_buffer.push(make_glyph(info, position));
-                        len += 1;
-                    }
-                    Some((info, _)) => break info.cluster as usize,
-                    None => break end_cluster,
-                }
-            };
+                    Some((info, position)) => {
+                        if is_cluster_initial(info.cluster) {
+                            pending_glyphs = 0;
+                            cluster_subrange_end = info.cluster as usize;
+                        }
 
-            successful_ranges.push((cluster_subrange_start..cluster_subrange_end, len));
+                        if info.codepoint != 0 {
+                            self.glyph_buffer.push(make_glyph(info, position));
+                            len += 1;
+                            pending_glyphs += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        pending_glyphs = 0;
+                        cluster_subrange_end = END_CLUSTER_EXCLUDED;
+                        break;
+                    }
+                }
+            }
+
+            if pending_glyphs > 0 {
+                let new_glyph_buffer_len = self.glyph_buffer.len() - pending_glyphs;
+                self.glyph_buffer.truncate(new_glyph_buffer_len);
+                len -= pending_glyphs;
+            }
+
+            if len == 0 {
+                continue;
+            }
+
+            successful_ranges.push((cluster_subrange_start, cluster_subrange_end, len));
         }
 
         let mut broken_subrange_start = first_cluster;
-        for (cluster_subrange, len) in successful_ranges {
-            if broken_subrange_start != cluster_subrange.start {
+        for (cluster_subrange_start, cluster_subrange_end, len) in successful_ranges {
+            if broken_subrange_start != cluster_subrange_start {
                 self.retry_shaping(
-                    fixup_range(broken_subrange_start, cluster_subrange.start),
+                    fixup_range(broken_subrange_start, cluster_subrange_start),
                     font_iterator.clone(),
                     force_tofu,
                 )?;
             }
-            broken_subrange_start = cluster_subrange.end;
+            broken_subrange_start = cluster_subrange_end;
 
             self.result
                 .extend_from_slice(&self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len]);
             glyph_buffer_last += len;
         }
 
-        if broken_subrange_start != end_cluster {
+        if broken_subrange_start != END_CLUSTER_EXCLUDED {
+            assert!(!force_tofu, "Tofu font failed to shape any characters");
+
             // This means the font fallback system lied to us and gave us
             // a font that does not, in fact, have the character we asked for.
-            // Or the tofu font failed to shape any characters but that shouldn't
-            // happen, if it does anyway it will just incur an additional shaping pass.
             let next_force_tofu =
-                broken_subrange_start == first_cluster && font_iterator.did_system_fallback();
+                broken_subrange_start == start_cluster && font_iterator.did_system_fallback();
 
-            let left = broken_subrange_start;
-            let right = last_cluster;
-            self.retry_shaping(
-                if left > right {
-                    right..left + 1
-                } else {
-                    left..right + 1
-                },
-                font_iterator.clone(),
-                next_force_tofu,
-            )?
+            let range = if is_reverse {
+                cluster_range.start..broken_subrange_start + 1
+            } else {
+                broken_subrange_start..cluster_range.end
+            };
+            self.retry_shaping(range, font_iterator.clone(), next_force_tofu)?
         }
 
         Ok(())
@@ -447,6 +499,6 @@ pub fn simple_shape_text<'f>(
     fonts: &mut FontDb,
 ) -> Result<Vec<Glyph<'f>>, ShapingError> {
     let mut buffer = ShapingBuffer::new();
-    buffer.add(text, ..);
+    buffer.add_text_simple(text);
     buffer.shape(font_iterator, font_arena, fonts)
 }

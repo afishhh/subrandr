@@ -13,6 +13,7 @@
 - Implemented srv3 underline support.
 - Made WebVTT parser correctly ignore STYLE and REGION blocks following the first cue.
 - Ruby annotations are now shaped with the `ruby` OpenType feature enabled.
+- Shaping is now done with character cluster level. This means that intra-grapheme styling changes are now sometimes possible.
 
 ## [v0.2.2]
 

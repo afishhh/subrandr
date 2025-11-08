@@ -320,6 +320,7 @@ struct InitialShapingResult<'a, 'f> {
     break_opportunities: Vec<usize>,
     text_leaf_items: Vec<LeafItemRange<'a>>,
     bidi: unicode_bidi::BidiInfo<'a>,
+    grapheme_cluster_boundaries: Vec<usize>,
 }
 
 impl InitialShapingResult<'_, '_> {
@@ -329,6 +330,7 @@ impl InitialShapingResult<'_, '_> {
             break_opportunities: Vec::new(),
             text_leaf_items: Vec::new(),
             bidi: unicode_bidi::BidiInfo::new("", None),
+            grapheme_cluster_boundaries: Vec::new(),
         }
     }
 }
@@ -469,6 +471,34 @@ fn font_matcher_from_style<'f>(
     .map_err(Into::into)
 }
 
+pub(crate) fn set_buffer_content_from_range(
+    buffer: &mut ShapingBuffer,
+    text: &str,
+    range: Range<usize>,
+    grapheme_cluster_boundaries: &[usize],
+) {
+    buffer.set_pre_context(&text[..range.start]);
+
+    let next_grapheme_boundary_idx = match grapheme_cluster_boundaries.binary_search(&range.start) {
+        Ok(i) => i + 1,
+        Err(i) => i,
+    };
+    let mut next_grapheme_boundary_it = grapheme_cluster_boundaries[next_grapheme_boundary_idx..]
+        .iter()
+        .copied();
+
+    let mut current = range.start;
+    while current != range.end {
+        let end = next_grapheme_boundary_it
+            .next()
+            .map_or(range.end, |end| end.min(range.end));
+        buffer.add_grapheme(&text[current..end], current);
+        current = end;
+    }
+
+    buffer.set_post_context(&text[range.end..]);
+}
+
 fn shape_run_initial<'a, 'f>(
     content: &'a InlineContent,
     run_index: usize,
@@ -494,6 +524,7 @@ fn shape_run_initial<'a, 'f>(
             result: &mut Vec<ShapedItem<'_, 'f>>,
             left_padding: &mut FixedL,
             buffer: &mut ShapingBuffer,
+            grapheme_cluster_boundaries: &[usize],
         ) -> Result<(), InlineLayoutError> {
             let mut current_paragraph = match bidi
                 .paragraphs
@@ -516,7 +547,12 @@ fn shape_run_initial<'a, 'f>(
                 let glyphs = {
                     buffer.guess_properties();
                     buffer.set_direction(direction.to_horizontal());
-                    buffer.add(&text, range.clone());
+                    set_buffer_content_from_range(
+                        buffer,
+                        &text,
+                        range.clone(),
+                        grapheme_cluster_boundaries,
+                    );
                     buffer.shape(self.matcher.iterator(), font_arena, lctx.fonts)?
                 };
                 buffer.clear();
@@ -672,6 +708,7 @@ fn shape_run_initial<'a, 'f>(
                         &mut self.shaped,
                         &mut self.queued_padding,
                         &mut self.shaping_buffer,
+                        &self.grapheme_cluster_boundaries,
                     )?;
                 }
 
@@ -725,6 +762,7 @@ fn shape_run_initial<'a, 'f>(
                         &mut self.shaped,
                         &mut self.queued_padding,
                         &mut self.shaping_buffer,
+                        &self.grapheme_cluster_boundaries,
                     )?;
                 }
 
@@ -782,6 +820,7 @@ fn shape_run_initial<'a, 'f>(
                                     &mut self.shaped,
                                     &mut self.queued_padding,
                                     &mut self.shaping_buffer,
+                                    &self.grapheme_cluster_boundaries,
                                 )?;
                             }
 
@@ -913,6 +952,7 @@ fn shape_run_initial<'a, 'f>(
                                     &mut self.shaped,
                                     &mut self.queued_padding,
                                     &mut self.shaping_buffer,
+                                    &self.grapheme_cluster_boundaries,
                                 )?;
                                 self.queued_text = Some(QueuedText {
                                     matcher: font_matcher,
@@ -971,6 +1011,7 @@ fn shape_run_initial<'a, 'f>(
                     &mut self.shaped,
                     &mut self.queued_padding,
                     &mut self.shaping_buffer,
+                    &self.grapheme_cluster_boundaries,
                 )?;
             }
 
@@ -981,6 +1022,7 @@ fn shape_run_initial<'a, 'f>(
                 break_opportunities: self.break_opportunities,
                 text_leaf_items,
                 bidi: self.bidi,
+                grapheme_cluster_boundaries: self.grapheme_cluster_boundaries,
             })
         }
     }
@@ -1020,6 +1062,7 @@ struct BreakingContext<'f, 'l, 'a, 'b> {
     font_arena: &'f FontArena,
     break_opportunities: &'a [usize],
     break_buffer: text::ShapingBuffer,
+    grapheme_cluster_boundaries: &'a [usize],
 }
 
 #[derive(Debug)]
@@ -1106,6 +1149,7 @@ impl<'f> ShapedItemText<'f> {
                         opportunity,
                         ctx.constraints.size.x,
                         &mut ctx.break_buffer,
+                        ctx.grapheme_cluster_boundaries,
                         self.font_matcher.iterator(),
                         ctx.font_arena,
                         ctx.layout.fonts,
@@ -1903,6 +1947,7 @@ fn layout_run_full(
         break_opportunities,
         ref text_leaf_items,
         bidi,
+        grapheme_cluster_boundaries,
     } = shape_run_initial(
         content,
         run_index,
@@ -1932,6 +1977,7 @@ fn layout_run_full(
             font_arena: &font_arena,
             break_opportunities: &break_opportunities,
             break_buffer: text::ShapingBuffer::new(),
+            grapheme_cluster_boundaries: &grapheme_cluster_boundaries,
         };
 
         'break_loop: loop {

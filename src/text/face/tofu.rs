@@ -1,15 +1,7 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit, sync::LazyLock};
 
 use rasterize::{sw::GlyphRasterizer, PixelFormat, Rasterizer};
-use text_sys::{
-    hb_blob_get_empty, hb_bool_t, hb_codepoint_t, hb_face_create, hb_face_destroy,
-    hb_face_set_glyph_count, hb_font_create, hb_font_destroy, hb_font_extents_t,
-    hb_font_funcs_create, hb_font_funcs_set_font_h_extents_func,
-    hb_font_funcs_set_glyph_extents_func, hb_font_funcs_set_glyph_h_advance_func,
-    hb_font_funcs_set_glyph_h_origin_func, hb_font_funcs_set_nominal_glyph_func,
-    hb_font_get_user_data, hb_font_make_immutable, hb_font_reference, hb_font_set_funcs,
-    hb_font_set_user_data, hb_font_t, hb_glyph_extents_t, hb_position_t, hb_user_data_key_t,
-};
+use text_sys::*;
 use util::{
     math::{I16Dot16, I26Dot6, Outline, Point2, Rect2, Vec2},
     slice_assume_init_mut,
@@ -154,12 +146,21 @@ impl Font {
 
             set!(
                 hb_font_funcs_set_font_h_extents_func,
-                Font::hb_font_h_extents_func(extents: *mut hb_font_extents_t) -> i32
+                Font::hb_font_h_extents_func(extents: *mut hb_font_extents_t) -> hb_bool_t
             );
 
             set!(
                 hb_font_funcs_set_nominal_glyph_func,
-                Font::hb_nominal_glyph_func(unicode: hb_codepoint_t, glyph: *mut hb_codepoint_t) -> i32
+                Font::hb_nominal_glyph_func(unicode: hb_codepoint_t, glyph: *mut hb_codepoint_t) -> hb_bool_t
+            );
+
+            set!(
+                hb_font_funcs_set_variation_glyph_func,
+                Font::hb_variation_glyph_func(
+                    unicode: hb_codepoint_t,
+                    variation_selector: hb_codepoint_t,
+                    glyph: *mut hb_codepoint_t
+                ) -> hb_bool_t
             );
 
             set!(
@@ -214,8 +215,7 @@ impl Font {
         out.line_gap = (shared.font_metrics.height - shared.font_metrics.ascender
             + shared.font_metrics.descender)
             .into_raw();
-
-        0
+        1
     }
 
     unsafe fn hb_nominal_glyph_func(
@@ -226,7 +226,16 @@ impl Font {
         // NOTE: A zero glyph is treated as not found so we convert NUL into u32::MAX
         //       which should be outside the unicode range anyway.
         glyph.write(if unicode == 0 { u32::MAX } else { unicode });
-        0
+        1
+    }
+
+    unsafe fn hb_variation_glyph_func(
+        shared: &FontShared,
+        unicode: hb_codepoint_t,
+        _variation_selector: hb_codepoint_t,
+        glyph: *mut hb_codepoint_t,
+    ) -> i32 {
+        Self::hb_nominal_glyph_func(shared, unicode, glyph)
     }
 
     unsafe fn hb_glyph_h_advance_func(
@@ -257,8 +266,7 @@ impl Font {
         out.height = shared.pixel_height.into_raw();
         out.x_bearing = shared.glyph_metrics.hori_bearing_x.into_raw();
         out.y_bearing = shared.glyph_metrics.hori_bearing_y.into_raw();
-
-        0
+        1
     }
 
     fn shared(&self) -> &FontShared {

@@ -1261,10 +1261,7 @@ fn layout_run_full(
     ) -> Result<(), InlineLayoutError> {
         let mut glyphs = shaped.glyphs.clone();
 
-        // TODO: Can this code be deduplicated? It seems kinda hard to do so
-        //       Maybe the LTR loop could be simplified though...
-        //       kind of accidentally made this RTL optimised...
-        // TODO!: This can be done now that the whole range is stored.
+        // TODO: Simplify this code, it's kind of hacky at the moment.
         if !glyphs.direction().is_reverse() {
             let mut si = match leaves.binary_search_by_key(&range.start, |l| l.range.start) {
                 Ok(s) => s,
@@ -1295,7 +1292,7 @@ fn layout_run_full(
             }
         } else {
             let mut si = match leaves.binary_search_by_key(&range.end, |l| l.range.start) {
-                Ok(s) => s - 1,
+                Ok(s) => s.saturating_sub(1),
                 Err(s) => s - 1,
             };
 
@@ -1317,7 +1314,13 @@ fn layout_run_full(
                 }
 
                 i = start;
-                si -= 1;
+                si = match si.checked_sub(1) {
+                    Some(i) => i,
+                    None => {
+                        debug_assert_eq!(i, range.start);
+                        break;
+                    }
+                }
             }
         };
 
@@ -1390,7 +1393,7 @@ fn layout_run_full(
                         if range.start > item.range.start {
                             tmp.glyphs.split_off_visual_start(range.start);
                             push_item(&ShapedItem {
-                                range: range.start..item.range.start,
+                                range: range.start..item.range.end,
                                 kind: ShapedItemKind::Text(tmp),
                                 padding: ShapedItemPadding::MAX,
                             })
@@ -1431,7 +1434,7 @@ fn layout_run_full(
             } else {
                 let end = match shaped.binary_search_by_key(&range.end, |r| r.range.end) {
                     Ok(i) => i + 1,
-                    Err(i) => i,
+                    Err(i) => i + 1,
                 };
 
                 for item in shaped[..end].iter().rev() {
@@ -1803,7 +1806,7 @@ fn layout_run_full(
                     //       (this is the same thing sans splitting glyphs)
                     let mut si =
                         match leaves.binary_search_by_key(&item.range.end, |l| l.range.start) {
-                            Ok(s) => s - 1,
+                            Ok(s) => s.saturating_sub(1),
                             Err(s) => s - 1,
                         };
 

@@ -302,7 +302,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
     fn fallback(
         &self,
         request: &FontFallbackRequest,
-    ) -> Result<Vec<FaceInfo>, super::FallbackError> {
+    ) -> Result<Option<FaceInfo>, super::FallbackError> {
         let mut pattern = Pattern::new();
 
         for family in &request.families {
@@ -351,7 +351,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
         };
         let result = unsafe { result.assume_init() };
         if result == FcResultNoMatch {
-            return Ok(Vec::new());
+            return Ok(None);
         } else if result != FcResultMatch {
             return Err(FallbackError::Sort.into());
         }
@@ -363,7 +363,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
             )
         };
 
-        let mut results = Vec::new();
+        let mut result = None;
 
         for font in fonts.iter().copied() {
             let font = PatternRef::from_raw(font);
@@ -382,14 +382,15 @@ impl PlatformFontProvider for FontconfigFontProvider {
                 continue;
             };
 
-            results.push(info);
+            result = Some(info);
+            break;
         }
 
         unsafe {
             FcFontSetDestroy(font_set);
         };
 
-        Ok(results)
+        Ok(result)
     }
 }
 

@@ -112,7 +112,7 @@ impl PlatformFontProvider for AndroidNdkFontProvider {
     fn fallback(
         &self,
         request: &FontFallbackRequest,
-    ) -> Result<Vec<FaceInfo>, super::FallbackError> {
+    ) -> Result<Option<FaceInfo>, super::FallbackError> {
         let matcher = AFontMatcher::create();
         matcher.set_style(
             request.style.weight.round_to_inner() as u16,
@@ -140,9 +140,9 @@ impl PlatformFontProvider for AndroidNdkFontProvider {
             .map(|x| x.encode_utf16(&mut buffer))
             .unwrap_or(&mut []);
         let font = matcher.match_(generic_family, text_utf16, None);
-        Ok(vec![
-            font_info_from_afont(&font).map_err(FallbackError::OpenError)?
-        ])
+        Ok(Some(
+            font_info_from_afont(&font).map_err(FallbackError::OpenError)?,
+        ))
     }
 }
 

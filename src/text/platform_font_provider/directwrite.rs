@@ -326,7 +326,7 @@ impl PlatformFontProvider for DirectWriteFontProvider {
     fn fallback(
         &self,
         request: &crate::text::FontFallbackRequest,
-    ) -> Result<Vec<crate::text::FaceInfo>, super::FallbackError> {
+    ) -> Result<Option<crate::text::FaceInfo>, super::FallbackError> {
         unsafe {
             let (utf16, len) = codepoint_to_utf16(request.codepoint);
             let source = TextAnalysisSource { text: utf16, len };
@@ -363,11 +363,8 @@ impl PlatformFontProvider for DirectWriteFontProvider {
             )?;
 
             Ok(match mapped_font {
-                Some(font) => match Self::info_from_font(font)? {
-                    Some(info) => vec![info],
-                    None => Vec::new(),
-                },
-                None => Vec::new(),
+                Some(font) => Self::info_from_font(font)?,
+                None => None,
             })
         }
     }

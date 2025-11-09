@@ -340,36 +340,37 @@ impl<'a> FontDb<'a> {
                 self.sbr,
                 "Querying font provider for font matching {request:?}"
             );
-            let mut choices = self
+
+            let mut choice = self
                 .provider
                 .read()
                 .unwrap()
                 .fallback(request)
                 .map_err(SelectError::Fallback)?;
 
-            choices.extend(
-                self.extra_faces
-                    .iter()
-                    .filter(|face| match &face.source {
-                        FontSource::Memory(face) => face.contains_codepoint(request.codepoint),
-                        _ => unreachable!(),
-                    })
-                    .cloned(),
-            );
+            if choice.is_none() {
+                choice = choose(
+                    &self
+                        .extra_faces
+                        .iter()
+                        .filter(|face| match &face.source {
+                            FontSource::Memory(face) => face.contains_codepoint(request.codepoint),
+                            _ => unreachable!(),
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    &request.style,
+                )
+                .cloned()
+            }
 
-            let mut result = choose(&choices, &request.style)
-                .map(|x| self.open(x))
-                .transpose()?;
+            let mut result = choice.map(|x| self.open(&x)).transpose()?;
 
             if let Some(ref mut face) = result {
                 set_weight_if_variable(face, request.style.weight);
             }
 
-            trace!(
-                self.sbr,
-                "Picked face {result:?} from {} choices",
-                choices.len()
-            );
+            trace!(self.sbr, "Picked face {result:?}");
             self.request_cache.insert(request.clone(), result.clone());
             result
         }

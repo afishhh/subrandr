@@ -71,7 +71,7 @@ pub trait PlatformFontProvider: Debug + Send + Sync {
 
     fn substitute(&self, sbr: &Subrandr, request: &mut FaceRequest) -> Result<(), SubstituteError>;
     fn fonts(&self) -> &[FaceInfo];
-    fn fallback(&self, request: &FontFallbackRequest) -> Result<Vec<FaceInfo>, FallbackError>;
+    fn fallback(&self, request: &FontFallbackRequest) -> Result<Option<FaceInfo>, FallbackError>;
 }
 
 #[cfg(font_provider = "fontconfig")]
@@ -137,8 +137,8 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
             fn fallback(
                 &self,
                 _request: &FontFallbackRequest,
-            ) -> Result<Vec<FaceInfo>, FallbackError> {
-                Ok(Vec::new())
+            ) -> Result<Option<FaceInfo>, FallbackError> {
+                Ok(None)
             }
         }
 

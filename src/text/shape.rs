@@ -343,15 +343,6 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             return Ok(());
         }
 
-        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {
-            Glyph::from_info_and_position(
-                info,
-                position,
-                self.cluster_map[info.cluster as usize].utf8_index,
-                font,
-            )
-        };
-
         let first_cluster = infos[0].cluster as usize;
         let is_reverse = first_cluster != cluster_range.start;
         // NOTE: `start_cluster` isn't always equal to `first_cluster`!
@@ -369,6 +360,20 @@ impl<'f> ShapingPass<'_, 'f, '_> {
         //
         // [1] Although this placeholder is effectively `-1` :)
         const END_CLUSTER_EXCLUDED: usize = usize::MAX;
+
+        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {
+            let cluster = &self.cluster_map[info.cluster as usize];
+            Glyph::from_info_and_position(
+                info,
+                position,
+                if !is_reverse {
+                    cluster.utf8_index
+                } else {
+                    cluster.utf8_index + cluster.codepoint.len_utf8() - 1
+                },
+                font,
+            )
+        };
 
         let is_cluster_initial = |cluster: u32| {
             // If `is_reverse` is true then HarfBuzz gave us final-cluster values in reverse order

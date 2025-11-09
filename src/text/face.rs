@@ -35,7 +35,8 @@ impl Axis {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[expect(dead_code)]
+// FIXME: This has unused fields but rustc doesn't see them anymore?
+#[allow(dead_code)]
 pub struct GlyphMetrics {
     pub width: I26Dot6,
     pub height: I26Dot6,
@@ -48,11 +49,12 @@ pub struct GlyphMetrics {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[expect(dead_code)]
 pub struct FontMetrics {
     pub ascender: I26Dot6,
     pub descender: I26Dot6,
     pub height: I26Dot6,
+    // FIXME: This is an unused field but rustc doesn't realise it anymore?
+    #[allow(dead_code)]
     pub max_advance: I26Dot6,
 
     pub underline_top_offset: I26Dot6,

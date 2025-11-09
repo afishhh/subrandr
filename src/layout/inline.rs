@@ -561,11 +561,11 @@ fn shape_run_initial<'a, 'f>(
                 buffer.clear();
 
                 result.push(ShapedItem {
-                    range,
+                    range: range.clone(),
                     kind: ShapedItemKind::Text(ShapedItemText {
                         font_matcher: self.matcher.clone(),
                         primary_font: self.matcher.primary(font_arena, lctx.fonts)?,
-                        glyphs: GlyphString::from_glyphs(text.clone(), glyphs, direction),
+                        glyphs: GlyphString::from_glyphs(text.clone(), range, glyphs, direction),
                         break_after,
                     }),
                     padding: ShapedItemPadding {
@@ -1111,6 +1111,29 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
 }
 
 impl<'f> ShapedItemText<'f> {
+    fn break_opportunity_to_range(&self, opportunity: usize) -> Range<usize> {
+        let text = self.glyphs.text();
+        let mut break_start_index = opportunity;
+        let mut break_end_index = opportunity;
+        loop {
+            let Some(prev) = break_start_index.checked_sub(1) else {
+                break;
+            };
+
+            if text.as_bytes()[prev] == b' ' {
+                break_start_index = prev;
+            } else {
+                break;
+            }
+        }
+
+        while text.as_bytes()[break_end_index] == b' ' {
+            break_end_index += 1;
+        }
+
+        break_start_index..break_end_index
+    }
+
     // TODO: I think this may still need to consider emitting a `BreakBefore` sometimes.
     fn line_break<'a>(
         &mut self,
@@ -1119,7 +1142,7 @@ impl<'f> ShapedItemText<'f> {
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
         padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
-        let mut glyph_it = self.glyphs.iter_glyphs().peekable();
+        let mut glyph_it = self.glyphs.iter_glyphs_logical().peekable();
         while let Some(glyph) = glyph_it.next() {
             *current_width += glyph.x_advance;
 
@@ -1147,9 +1170,12 @@ impl<'f> ShapedItemText<'f> {
                         return Ok(BreakOutcome::BreakAfter);
                     }
 
-                    ctx.break_buffer.set_direction(self.glyphs.direction());
-                    if let Some((broken, remaining)) = self.glyphs.break_at_if_less_or_eq(
-                        opportunity,
+                    // FIXME: This takes care of collapsing whitespace in text, but
+                    //        if text with a space at the end is followed by a ruby
+                    //        container then that space will remain after line-breaking.
+                    let break_range = self.break_opportunity_to_range(opportunity);
+                    if let Some((broken, remaining)) = self.glyphs.break_around(
+                        break_range,
                         ctx.constraints.size.x,
                         &mut ctx.break_buffer,
                         ctx.grapheme_cluster_boundaries,
@@ -1192,7 +1218,7 @@ fn shaped_item_width(result: &mut FixedL, item: &ShapedItem) {
     *result += item.padding.current_padding_right;
     match &item.kind {
         ShapedItemKind::Text(text) => {
-            for glyph in text.glyphs.iter_glyphs() {
+            for glyph in text.glyphs.iter_glyphs_visual() {
                 *result += glyph.x_advance;
             }
         }
@@ -1239,7 +1265,7 @@ fn layout_run_full(
         //       Maybe the LTR loop could be simplified though...
         //       kind of accidentally made this RTL optimised...
         // TODO!: This can be done now that the whole range is stored.
-        if !shaped.glyphs.direction().is_reverse() {
+        if !glyphs.direction().is_reverse() {
             let mut si = match leaves.binary_search_by_key(&range.start, |l| l.range.start) {
                 Ok(s) => s,
                 Err(s) => s - 1,
@@ -1260,7 +1286,7 @@ fn layout_run_full(
                     .map(|l| l.range.start.min(range.end))
                     .unwrap_or(range.end);
 
-                if let Some(section_glyphs) = glyphs.split_off_until_cluster(end) {
+                if let Some(section_glyphs) = glyphs.split_off_visual_start(end) {
                     push_section(&leaves[si], section_glyphs, i..end)?;
                 }
 
@@ -1286,7 +1312,7 @@ fn layout_run_full(
                 } = leaves[si];
                 let start = start.max(range.start);
 
-                if let Some(section_glyphs) = glyphs.split_off_until_cluster(start) {
+                if let Some(section_glyphs) = glyphs.split_off_visual_start(start) {
                     push_section(leaf, section_glyphs, start..i)?;
                 }
 
@@ -1362,7 +1388,7 @@ fn layout_run_full(
                             break_after: false,
                         };
                         if range.start > item.range.start {
-                            tmp.glyphs.split_off_until_cluster(range.start);
+                            tmp.glyphs.split_off_visual_start(range.start);
                             push_item(&ShapedItem {
                                 range: range.start..item.range.start,
                                 kind: ShapedItemKind::Text(tmp),
@@ -1370,7 +1396,7 @@ fn layout_run_full(
                             })
                         } else {
                             debug_assert!(range.end < item.range.end);
-                            if let Some(before) = tmp.glyphs.split_off_until_cluster(range.end) {
+                            if let Some(before) = tmp.glyphs.split_off_visual_start(range.end) {
                                 tmp.glyphs = before;
                                 push_item(&ShapedItem {
                                     range: item.range.start..range.end,
@@ -1488,7 +1514,7 @@ fn layout_run_full(
                             primary_metrics.descender - half_leading,
                         );
 
-                        for glyph in text.glyphs.iter_glyphs() {
+                        for glyph in text.glyphs.iter_glyphs_visual() {
                             self.expand_to(
                                 glyph.font.metrics().ascender + half_leading,
                                 glyph.font.metrics().descender - half_leading,
@@ -1619,7 +1645,8 @@ fn layout_run_full(
                     text,
                     text_leaf_items,
                     |leaf, glyphs, range| {
-                        let inner_width: FixedL = glyphs.iter_glyphs().map(|g| g.x_advance).sum();
+                        let inner_width: FixedL =
+                            glyphs.iter_glyphs_visual().map(|g| g.x_advance).sum();
                         let fragment = TextFragment {
                             style: leaf.style.clone(),
                             glyphs: unsafe {

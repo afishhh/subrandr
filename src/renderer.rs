@@ -246,7 +246,7 @@ impl FrameRenderPass<'_, '_> {
             x.fract(),
             y.fract(),
             0.0,
-            &mut glyphs.iter_glyphs(),
+            &mut glyphs.iter_glyphs_visual(),
         )?;
 
         // TODO: This should also draw an offset underline I think and possibly strike through?
@@ -267,7 +267,7 @@ impl FrameRenderPass<'_, '_> {
                         shadow_x.fract(),
                         shadow_y.fract(),
                         sigma.into_f32(),
-                        &mut glyphs.iter_glyphs(),
+                        &mut glyphs.iter_glyphs_visual(),
                     )?
                     .blit(
                         self.rasterizer,
@@ -293,7 +293,7 @@ impl FrameRenderPass<'_, '_> {
         let text_end_x = {
             let mut end_x = x;
 
-            for glyph in glyphs.iter_glyphs() {
+            for glyph in glyphs.iter_glyphs_visual() {
                 end_x += glyph.x_advance;
             }
 

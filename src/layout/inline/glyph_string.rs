@@ -1,11 +1,11 @@
 use std::{
     collections::LinkedList,
     fmt::Debug,
-    ops::{Add as _, Range},
+    ops::{Add as _, Deref, Range},
     rc::Rc,
 };
 
-use util::math::I26Dot6;
+use util::{math::I26Dot6, rev_if::RevIf};
 
 use crate::text::{
     Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
@@ -18,262 +18,407 @@ impl GlyphStringText for Rc<str> {}
 
 #[derive(Clone)]
 pub struct GlyphString<'f, T: GlyphStringText> {
-    segments: LinkedList<GlyphStringSegment<'f, T>>,
+    /// Always refers to the original string that contains the whole context
+    /// of this string.
+    text: T,
+    segments: LinkedList<GlyphStringSegment<'f>>,
     direction: Direction,
 }
 
 impl<T: GlyphStringText> Debug for GlyphString<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("GlyphString ")?;
-        f.debug_list().entries(self.iter_glyphs()).finish()
+        write!(f, "GlyphString(direction: {:?}) ", self.direction)?;
+        let mut list = f.debug_list();
+        for segment in &self.segments {
+            list.entry(&util::fmt_from_fn(|f| {
+                f.debug_struct("GlyphStringSegment")
+                    .field("text", &&self.text.as_ref()[segment.text_range.clone()])
+                    .field(
+                        "glyphs",
+                        &util::fmt_from_fn(|f| f.debug_list().finish_non_exhaustive()),
+                    )
+                    .finish()
+            }));
+        }
+        list.finish()
     }
 }
 
 #[derive(Debug, Clone)]
-struct GlyphStringSegment<'f, T: GlyphStringText> {
-    /// Always refers to the original string that contains the whole context
-    /// of this segment, not only the text of the glyphs themselves.
-    text: T,
+struct GlyphStringSegment<'f> {
     /// Some glyph slice which resulted from shaping the entirety or some subslice
     /// of the text in `text`. [`Glyph::cluster`] will be a valid index into `text`.
     storage: Rc<[Glyph<'f>]>,
     /// The subslice of `storage` this segment actually represents.
-    range: Range<usize>,
+    glyph_range: Range<usize>,
+    /// The subslice of [`GlyphString::text`] this segment was shaped from.
+    text_range: Range<usize>,
 }
 
-impl<'f, T: GlyphStringText> GlyphStringSegment<'f, T> {
-    fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>) -> Self {
+impl<'f> Deref for GlyphStringSegment<'f> {
+    type Target = [Glyph<'f>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.storage[self.glyph_range.clone()]
+    }
+}
+
+impl<'s, 'f> IntoIterator for &'s GlyphStringSegment<'f> {
+    type Item = &'s Glyph<'f>;
+    type IntoIter = std::slice::Iter<'s, Glyph<'f>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'f> GlyphStringSegment<'f> {
+    fn from_glyphs(text_range: Range<usize>, glyphs: Vec<Glyph<'f>>) -> Self {
         Self {
-            text,
-            range: 0..glyphs.len(),
+            glyph_range: 0..glyphs.len(),
+            text_range,
             storage: glyphs.into(),
         }
     }
 
-    fn glyphs(&self) -> &[Glyph<'f>] {
-        &self.storage[self.range.clone()]
-    }
+    fn subslice(&self, range: Range<usize>, direction: Direction) -> Self {
+        assert!(
+            range.start < range.end,
+            "Invalid glyph string segment subslice ({} > {})",
+            range.start,
+            range.end
+        );
 
-    fn break_unsafe_subslice(&self, range: Range<usize>) -> Self {
         Self {
-            text: self.text.clone(),
             storage: self.storage.clone(),
-            range: self.range.start + range.start..self.range.start + range.end,
+            glyph_range: self.glyph_range.start + range.start..self.glyph_range.start + range.end,
+            text_range: {
+                if !direction.is_reverse() {
+                    self[range.start].cluster
+                        ..self
+                            .get(range.end)
+                            .map_or(self.text_range.end, |g| g.cluster)
+                } else {
+                    self.get(range.end)
+                        .map_or(self.text_range.start, |g| g.cluster + 1)
+                        ..self[range.start].cluster + 1
+                }
+            },
         }
     }
 
-    fn split_off_start(&mut self, count: usize) -> Self {
-        let result = self.break_unsafe_subslice(0..count);
-        self.range.start += count;
+    // [`Self::subslice`] does not allow creating an empty subslice so that "no empty segments"
+    // can be an invariant upheld by [`GlyphString`].
+    // This function allows for empty subslices but returns them as an empty [`LinkedList`].
+    fn subslice_into_list(&self, range: Range<usize>, direction: Direction) -> LinkedList<Self> {
+        if range.start == range.end {
+            return LinkedList::new();
+        }
+
+        LinkedList::from([self.subslice(range, direction)])
+    }
+
+    fn split_off_visual_start(&mut self, pivot: usize, direction: Direction) -> Self {
+        let result = self.subslice(0..pivot, direction);
+        self.glyph_range.start += pivot;
+        if !direction.is_reverse() {
+            self.text_range.start = result.text_range.end;
+        } else {
+            self.text_range.end = result.text_range.start;
+        }
         result
     }
 
-    // These breaking functions *seem to* work, although I haven't tested them that extensively.
-    fn break_until(
+    fn first_byte_of_glyph(&self, index: usize, direction: Direction) -> usize {
+        self.get(index + usize::from(direction.is_reverse()))
+            .map_or(self.text_range.start, |g| {
+                g.cluster + usize::from(direction.is_reverse())
+            })
+    }
+
+    fn iter_indices_half_exclusive(
         &self,
-        glyph_index: usize,
-        cluster: usize,
-        buffer: &mut ShapingBuffer,
-        grapheme_cluster_boundaries: &[usize],
-        font_iterator: FontMatchIterator<'_, 'f>,
-        font_arena: &'f FontArena,
-        fonts: &mut FontDb,
-        direction: Direction,
-    ) -> Result<GlyphString<'f, T>, ShapingError> {
-        let split_glyph = self.glyphs()[glyph_index];
-        // If the break is within a glyph (like a long ligature), we must
-        // use the slow reshaping path.
-        let can_reuse_split_glyph = split_glyph.cluster == cluster;
-        if !split_glyph.unsafe_to_break() && can_reuse_split_glyph {
-            // Easy case, we can just split the glyph string right here
-            Ok(GlyphString::from_array(
-                [self.break_unsafe_subslice(0..glyph_index)],
-                direction,
-            ))
+        pivot: usize,
+        forward: bool,
+    ) -> impl Iterator<Item = usize> {
+        let mut i;
+        let end;
+        let step: isize;
+        if !forward {
+            end = 0;
+            i = pivot.saturating_sub(1);
+            step = -1;
         } else {
-            // Harder case, we have to find the closest glyph on the left which
-            // has the UNSAFE_TO_CONCAT flag unset, then try reshaping after such glyphs
-            // until the first glyph of the result also has the UNSAFE_TO_CONCAT flag unset.
-            let left = 'left: {
-                for i in (self.range.start + 1..glyph_index - 1).rev() {
-                    if !self.storage[i].unsafe_to_concat() {
-                        let concat_glyph = &self.storage[i];
-                        buffer.clear();
-                        super::set_buffer_content_from_range(
-                            buffer,
-                            self.text.as_ref(),
-                            if concat_glyph.cluster < cluster {
-                                // This is left-to-right text
-                                concat_glyph.cluster..cluster
-                            } else {
-                                // This is right-to-left text
-                                cluster..concat_glyph.cluster
-                            },
-                            grapheme_cluster_boundaries,
-                        );
-                        let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
-                        if glyphs.first().is_none_or(|first| !first.unsafe_to_concat()) {
-                            break 'left GlyphString::from_array(
-                                [
-                                    self.break_unsafe_subslice(0..i),
-                                    GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
-                                ],
-                                direction,
-                            );
-                        } else {
-                            // The result cannot be concatenated with the other part,
-                            // we have to try again in another position.
-                        }
-                    }
-                }
+            end = self.len() - 1;
+            i = (pivot + 1).min(end);
+            step = 1;
+        };
 
-                // We have to reshape the whole segment, there's no place where we can safely concat.
-                buffer.clear();
-                super::set_buffer_content_from_range(
-                    buffer,
-                    self.text.as_ref(),
-                    self.glyphs().first().unwrap().cluster..cluster,
-                    grapheme_cluster_boundaries,
-                );
-                GlyphString::from_glyphs(
-                    self.text.clone(),
-                    buffer.shape(font_iterator, font_arena, fonts)?,
-                    direction,
-                )
-            };
+        std::iter::from_fn(move || {
+            if i == end {
+                None
+            } else {
+                let value = i;
+                i = i.wrapping_add_signed(step);
+                Some(value)
+            }
+        })
+    }
 
-            Ok(left)
+    fn try_concat_with_half(
+        &self,
+        pivot: usize,
+        other: Self,
+        direction: Direction,
+        forward: bool,
+    ) -> Option<LinkedList<Self>> {
+        match direction.is_reverse() ^ forward {
+            false if other.first().is_none_or(|first| !first.unsafe_to_concat()) => {
+                Some(LinkedList::from([
+                    self.subslice(0..pivot + 1, direction),
+                    other,
+                ]))
+            }
+            true if other.last().is_none_or(|last| !last.unsafe_to_concat()) => {
+                Some(LinkedList::from([
+                    other,
+                    self.subslice(pivot..self.len(), direction),
+                ]))
+            }
+            _ => None,
         }
     }
 
-    fn break_after(
+    fn break_until<T: GlyphStringText>(
         &self,
+        text: T,
         glyph_index: usize,
-        cluster: usize,
+        break_index: usize,
         buffer: &mut ShapingBuffer,
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
         direction: Direction,
-    ) -> Result<GlyphString<'f, T>, ShapingError> {
-        let split_glyph = self.glyphs()[glyph_index];
-        let can_reuse_split_glyph = split_glyph.cluster == cluster;
-        if !split_glyph.unsafe_to_break() && can_reuse_split_glyph {
-            let right = Self {
-                text: self.text.clone(),
-                storage: self.storage.clone(),
-                range: self.range.start + glyph_index..self.range.end,
-            };
+    ) -> Result<LinkedList<Self>, ShapingError> {
+        // If the break is within a glyph (like a long ligature), we must
+        // use the slow reshaping path.
+        let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
+        if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
+            // Easy case, we can just split the glyph string right here
+            if !direction.is_reverse() {
+                return Ok(self.subslice_into_list(0..glyph_index, direction));
+            } else {
+                return Ok(self.subslice_into_list(glyph_index + 1..self.len(), direction));
+            }
+        } else if self.len() > 1 {
+            // The hard case, we have to find the closest glyph on the left which
+            // has the UNSAFE_TO_CONCAT flag unset, then try reshaping after such glyphs
+            // until the first glyph of the result also has the UNSAFE_TO_CONCAT flag unset.
+            for i in self.iter_indices_half_exclusive(glyph_index, direction.is_reverse()) {
+                if !self[i].unsafe_to_concat() {
+                    let reshape_cluster = self[i + usize::from(!direction.is_reverse())].cluster
+                        + usize::from(direction.is_reverse());
+                    let reshape_range = reshape_cluster..break_index;
 
-            Ok(GlyphString::from_array([right], direction))
-        } else {
-            // Analogous to the process in `split_until`, but performed on the right searching forward.
-            let right = 'right: {
-                for i in glyph_index + 1..self.range.end - 1 {
-                    if !self.storage[i].unsafe_to_concat() {
-                        let concat_glyph = &self.storage[i];
-                        buffer.clear();
-                        super::set_buffer_content_from_range(
-                            buffer,
-                            self.text.as_ref(),
-                            if concat_glyph.cluster > cluster {
-                                // This is left-to-right text
-                                cluster..concat_glyph.cluster
-                            } else {
-                                // This is right-to-left text
-                                concat_glyph.cluster..cluster
-                            },
-                            grapheme_cluster_boundaries,
-                        );
-                        let glyphs = buffer.shape(font_iterator.clone(), font_arena, fonts)?;
-                        if glyphs.last().is_none_or(|last| !last.unsafe_to_concat()) {
-                            break 'right GlyphString::from_array(
-                                [
-                                    GlyphStringSegment::from_glyphs(self.text.clone(), glyphs),
-                                    self.break_unsafe_subslice(i..self.range.len()),
-                                ],
-                                direction,
-                            );
-                        } else {
-                            // The result cannot be concatenated with the other part,
-                            // we have to try again in another position.
-                        }
+                    buffer.clear();
+                    buffer.set_direction(direction);
+                    super::set_buffer_content_from_range(
+                        buffer,
+                        text.as_ref(),
+                        reshape_range.clone(),
+                        grapheme_cluster_boundaries,
+                    );
+                    let other = GlyphStringSegment::from_glyphs(
+                        reshape_range,
+                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
+                    );
+
+                    if let Some(result) = self.try_concat_with_half(i, other, direction, false) {
+                        return Ok(result);
                     }
                 }
-
-                // We have to reshape the whole segment, there's no place where we can safely concat.
-                buffer.clear();
-                super::set_buffer_content_from_range(
-                    buffer,
-                    self.text.as_ref(),
-                    cluster..self.glyphs().last().unwrap().cluster,
-                    grapheme_cluster_boundaries,
-                );
-                GlyphString::from_glyphs(
-                    self.text.clone(),
-                    buffer.shape(font_iterator, font_arena, fonts)?,
-                    direction,
-                )
-            };
-
-            Ok(right)
+            }
         }
+
+        // We have to reshape the whole segment, there's no place where we can safely concat.
+        let reshape_range = self.text_range.start..break_index;
+        buffer.clear();
+        buffer.set_direction(direction);
+        super::set_buffer_content_from_range(
+            buffer,
+            text.as_ref(),
+            reshape_range.clone(),
+            grapheme_cluster_boundaries,
+        );
+        Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
+            reshape_range,
+            buffer.shape(font_iterator, font_arena, fonts)?,
+        )]))
+    }
+
+    // Analogous to `break_after` but returns the part logically after `break_index` (inclusive).
+    fn break_after<T: GlyphStringText>(
+        &self,
+        text: T,
+        glyph_index: usize,
+        break_index: usize,
+        buffer: &mut ShapingBuffer,
+        grapheme_cluster_boundaries: &[usize],
+        font_iterator: FontMatchIterator<'_, 'f>,
+        font_arena: &'f FontArena,
+        fonts: &mut FontDb,
+        direction: Direction,
+    ) -> Result<LinkedList<GlyphStringSegment<'f>>, ShapingError> {
+        let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
+        if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
+            if !direction.is_reverse() {
+                return Ok(self.subslice_into_list(glyph_index..self.len(), direction));
+            } else {
+                return Ok(self.subslice_into_list(0..glyph_index + 1, direction));
+            }
+        } else {
+            for i in self.iter_indices_half_exclusive(glyph_index, !direction.is_reverse()) {
+                if !self[i].unsafe_to_concat() {
+                    let reshape_cluster = self[i + usize::from(direction.is_reverse())].cluster
+                        + usize::from(direction.is_reverse());
+                    let reshape_range = break_index..reshape_cluster;
+
+                    buffer.clear();
+                    buffer.set_direction(direction);
+                    super::set_buffer_content_from_range(
+                        buffer,
+                        text.as_ref(),
+                        reshape_range.clone(),
+                        grapheme_cluster_boundaries,
+                    );
+                    let other = GlyphStringSegment::from_glyphs(
+                        reshape_range,
+                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
+                    );
+
+                    if let Some(result) = self.try_concat_with_half(i, other, direction, true) {
+                        return Ok(result);
+                    }
+                }
+            }
+        }
+
+        // We have to reshape the whole segment, there's no place where we can safely concat.
+        let reshape_range = break_index..self.text_range.end;
+        buffer.clear();
+        buffer.set_direction(direction);
+        super::set_buffer_content_from_range(
+            buffer,
+            text.as_ref(),
+            reshape_range.clone(),
+            grapheme_cluster_boundaries,
+        );
+        Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
+            reshape_range,
+            buffer.shape(font_iterator, font_arena, fonts)?,
+        )]))
+    }
+
+    fn glyph_at_utf8_index(&self, index: usize, direction: Direction) -> Option<usize> {
+        if !self.text_range.contains(&index) {
+            return None;
+        }
+
+        Some(if !direction.is_reverse() {
+            self.iter()
+                .enumerate()
+                .find_map(|(i, g)| match g.cluster.cmp(&index) {
+                    std::cmp::Ordering::Equal => Some(i),
+                    std::cmp::Ordering::Greater => i.checked_sub(1),
+                    std::cmp::Ordering::Less => None,
+                })
+                .unwrap_or(self.len() - 1)
+        } else {
+            self.iter()
+                .enumerate()
+                .find_map(|(i, g)| match g.cluster.cmp(&index) {
+                    std::cmp::Ordering::Equal => Some(i),
+                    std::cmp::Ordering::Less => i.checked_sub(1),
+                    std::cmp::Ordering::Greater => None,
+                })
+                .unwrap_or(self.len() - 1)
+        })
     }
 }
 
 // TODO: linked_list_cursors feature would improve some of this code significantly
 impl<'f, T: GlyphStringText> GlyphString<'f, T> {
-    pub fn from_glyphs(text: T, glyphs: Vec<Glyph<'f>>, direction: Direction) -> Self {
-        GlyphString {
-            segments: LinkedList::from([GlyphStringSegment::from_glyphs(text, glyphs)]),
+    pub fn from_glyphs(
+        text: T,
+        text_range: Range<usize>,
+        glyphs: Vec<Glyph<'f>>,
+        direction: Direction,
+    ) -> Self {
+        assert!(text_range.start <= text_range.end);
+        GlyphString::from_array(
+            text,
+            [GlyphStringSegment::from_glyphs(text_range, glyphs)],
             direction,
-        }
+        )
     }
 
     fn from_array<const N: usize>(
-        segments: [GlyphStringSegment<'f, T>; N],
+        text: T,
+        segments: [GlyphStringSegment<'f>; N],
         direction: Direction,
     ) -> GlyphString<'f, T> {
         GlyphString {
-            segments: LinkedList::from(segments),
+            text,
+            segments: LinkedList::from_iter(
+                segments.into_iter().filter(|segment| !segment.is_empty()),
+            ),
             direction,
         }
     }
 
-    pub fn iter_glyphs(&self) -> impl DoubleEndedIterator<Item = &Glyph<'f>> {
-        self.segments.iter().flat_map(|s| s.glyphs().iter())
+    pub fn iter_glyphs_visual(&self) -> impl DoubleEndedIterator<Item = &Glyph<'f>> {
+        self.segments.iter().flat_map(|s| s.iter())
+    }
+
+    pub fn iter_glyphs_logical(&self) -> impl DoubleEndedIterator<Item = &Glyph<'f>> {
+        RevIf::new(
+            self.segments.iter().flat_map(|s| s.iter()),
+            self.direction.is_reverse(),
+        )
     }
 
     pub fn is_empty(&self) -> bool {
-        // TODO: just make empty segments an invariant of `GlyphString`
-        self.segments.is_empty() || self.segments.iter().all(|s| s.glyphs().is_empty())
+        self.segments.is_empty()
+    }
+
+    pub fn text(&self) -> &T {
+        &self.text
     }
 
     pub fn direction(&self) -> Direction {
         self.direction
     }
 
-    // TODO: Maybe this could be gotten rid of by reworking how glyphs are styled?
-    //       Don't know whether that's a good idea
-    pub fn split_off_until_cluster(&mut self, cluster: usize) -> Option<Self> {
+    pub fn split_off_visual_start(&mut self, end_utf8_index: usize) -> Option<Self> {
         let mut result = LinkedList::new();
+        let target_utf8_index = match self.direction.is_reverse() {
+            false => end_utf8_index.checked_sub(1)?,
+            true => end_utf8_index,
+        };
 
         while let Some(mut segment) = self.segments.pop_front() {
-            // TODO: linked_list_cursors feature would avoid unnecessary re-allocations here
-            match segment.glyphs().iter().position(|glyph| {
-                if self.direction.is_reverse() {
-                    glyph.cluster <= cluster
-                } else {
-                    glyph.cluster >= cluster
-                }
-            }) {
-                Some(end) => {
-                    if end != 0 {
-                        result.push_back(segment.split_off_start(end));
+            match segment.glyph_at_utf8_index(target_utf8_index, self.direction) {
+                Some(last_glyph_index) => {
+                    result.push_back(
+                        segment.split_off_visual_start(last_glyph_index + 1, self.direction),
+                    );
+                    if !segment.is_empty() {
+                        self.segments.push_front(segment);
                     }
-                    self.segments.push_front(segment);
+
                     return Some(Self {
+                        text: self.text.clone(),
                         segments: result,
                         direction: self.direction,
                     });
@@ -282,20 +427,22 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
             }
         }
 
-        if result.is_empty() {
-            None
-        } else {
+        if !result.is_empty() {
             Some(GlyphString {
+                text: self.text.clone(),
                 segments: result,
                 direction: self.direction,
             })
+        } else {
+            None
         }
     }
 
-    // This also seems to work although it's a little bit arcane
-    pub fn break_at_if_less_or_eq(
+    // NOTE: Unlike [`Glyph::cluster`] the break range indices here always point to the first byte
+    //       of a codepoint so the segment breaking methods must take this into account.
+    pub fn break_around(
         &self,
-        cluster: usize,
+        break_range: Range<usize>,
         max_width: I26Dot6,
         buffer: &mut ShapingBuffer,
         grapheme_cluster_boundaries: &[usize],
@@ -303,16 +450,42 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
-        let mut left = LinkedList::new();
-        let mut it = self.segments.iter();
-        let mut x = I26Dot6::ZERO;
-        for segment in &mut it {
-            // TODO: if g.cluster > cluster then use previous glyph
-            //       ^^^^ RTL?
-            if let Some(split_at) = segment.glyphs().iter().position(|g| g.cluster == cluster) {
-                let mut left_suff = segment.break_until(
-                    split_at,
-                    cluster,
+        assert!(!self.is_empty());
+
+        let mut left_segments = LinkedList::new();
+        let mut current_x = I26Dot6::ZERO;
+        let mut it = RevIf::new(self.segments.iter(), self.direction.is_reverse());
+        let mut next = it.next();
+        let push = |list: &mut LinkedList<GlyphStringSegment<'f>>,
+                    segment: GlyphStringSegment<'f>| {
+            if self.direction.is_reverse() {
+                list.push_front(segment);
+            } else {
+                list.push_back(segment);
+            }
+        };
+        let append = |list: &mut LinkedList<GlyphStringSegment<'f>>,
+                      other: &mut LinkedList<GlyphStringSegment<'f>>| {
+            if !self.direction.is_reverse() {
+                list.append(other);
+            } else {
+                other.append(list);
+                std::mem::swap(list, other);
+            }
+        };
+
+        loop {
+            let Some(segment) = next else {
+                return Ok(None);
+            };
+
+            if let Some(left_candidate_glyph) =
+                segment.glyph_at_utf8_index(break_range.start, self.direction)
+            {
+                let mut left_candidate = segment.break_until(
+                    self.text.clone(),
+                    left_candidate_glyph,
+                    break_range.start,
                     buffer,
                     grapheme_cluster_boundaries,
                     font_iter.clone(),
@@ -321,43 +494,71 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
                     self.direction,
                 )?;
 
-                if left_suff
-                    .iter_glyphs()
+                if left_candidate
+                    .iter()
+                    .flat_map(|s| &s[..])
                     .map(|g| g.x_advance)
-                    .fold(x, I26Dot6::add)
+                    .fold(current_x, I26Dot6::add)
                     <= max_width
                 {
-                    left.append(&mut left_suff.segments);
-                    let mut right = segment.break_after(
-                        split_at,
-                        cluster,
-                        buffer,
-                        grapheme_cluster_boundaries,
-                        font_iter,
-                        font_arena,
-                        fonts,
-                        self.direction,
-                    )?;
-
-                    for segment in it {
-                        right.segments.push_back(segment.clone());
-                    }
-
-                    return Ok(Some((
-                        Self {
-                            segments: left,
-                            direction: self.direction,
-                        },
-                        right,
-                    )));
+                    append(&mut left_segments, &mut left_candidate);
+                    break;
+                } else {
+                    // This wasn't a valid break because the width ended up being too large.
+                    return Ok(None);
                 }
             }
 
-            for glyph in segment.glyphs() {
-                x += glyph.x_advance;
+            for glyph in segment {
+                current_x += glyph.x_advance;
             }
+            push(&mut left_segments, segment.clone());
+
+            next = it.next();
         }
 
-        Ok(None)
+        let left = Self {
+            text: self.text.clone(),
+            segments: left_segments,
+            direction: self.direction,
+        };
+        while let Some(segment) = next {
+            if let Some(right_candidate_glyph) =
+                segment.glyph_at_utf8_index(break_range.end, self.direction)
+            {
+                let mut right_segments = segment.break_after(
+                    self.text.clone(),
+                    right_candidate_glyph,
+                    break_range.end,
+                    buffer,
+                    grapheme_cluster_boundaries,
+                    font_iter,
+                    font_arena,
+                    fonts,
+                    self.direction,
+                )?;
+
+                append(
+                    &mut right_segments,
+                    &mut it.cloned().collect::<LinkedList<_>>(),
+                );
+
+                return Ok(Some((
+                    left,
+                    Self {
+                        text: self.text.clone(),
+                        segments: right_segments,
+                        direction: self.direction,
+                    },
+                )));
+            }
+
+            next = it.next();
+        }
+
+        Ok(Some((
+            left,
+            Self::from_array(self.text.clone(), [], self.direction),
+        )))
     }
 }

@@ -148,7 +148,9 @@ impl FontArena {
 #[derive(Debug, Clone, Copy)]
 pub struct Glyph<'f> {
     pub index: hb_codepoint_t,
-    /// Byte position where this glyph started in the original UTF-8 string
+    /// Position of the directionally-first byte where this glyph starts in the original UTF-8 string.
+    /// If left-to-right, this will be the first byte of the relevant codepoint.
+    /// If right-to-left, this will be the last byte of the relevant codepoint.
     pub cluster: usize,
     pub x_advance: I26Dot6,
     pub y_advance: I26Dot6,

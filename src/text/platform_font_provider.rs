@@ -98,7 +98,7 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
     }
     #[cfg(font_provider = "directwrite")]
     {
-        directwrite::DirectWriteFontProvider::new()
+        directwrite::DirectWriteFontProvider::new(sbr)
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }

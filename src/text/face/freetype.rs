@@ -739,18 +739,30 @@ impl FontImpl for Font {
         index: u32,
         offset: Vec2<I26Dot6>,
     ) -> Result<SingleGlyphBitmap, Self::RenderError> {
-        struct FtGlyph(FT_Glyph);
-        impl Drop for FtGlyph {
-            fn drop(&mut self) {
-                unsafe {
-                    FT_Done_Glyph(self.0);
-                }
-            }
-        }
-
         unsafe {
             let face = self.with_applied_size()?;
 
+            struct TransformGuard(FT_Face);
+            impl TransformGuard {
+                unsafe fn new(face: FT_Face, offset: Vec2<I26Dot6>) -> Self {
+                    FT_Set_Transform(
+                        face,
+                        std::ptr::null_mut(),
+                        &mut FT_Vector {
+                            x: offset.x.into_ft(),
+                            y: offset.y.into_ft(),
+                        },
+                    );
+                    Self(face)
+                }
+            }
+            impl Drop for TransformGuard {
+                fn drop(&mut self) {
+                    unsafe { FT_Set_Transform(self.0, std::ptr::null_mut(), std::ptr::null_mut()) };
+                }
+            }
+
+            let _guard = TransformGuard::new(face, offset);
             fttry!(FT_Load_Glyph(
                 face,
                 index,
@@ -759,27 +771,14 @@ impl FontImpl for Font {
             let is_bitmap;
             let glyph = {
                 let slot = (*face).glyph;
-                let mut glyph = {
-                    let mut glyph = MaybeUninit::uninit();
-                    fttry!(FT_Get_Glyph(slot, glyph.as_mut_ptr()))?;
-                    FtGlyph(glyph.assume_init())
-                };
 
-                is_bitmap = (*glyph.0).format == FT_GLYPH_FORMAT_BITMAP;
+                is_bitmap = (*slot).format == FT_GLYPH_FORMAT_BITMAP;
 
                 if !is_bitmap {
-                    fttry!(FT_Glyph_To_Bitmap(
-                        &mut glyph.0,
-                        FT_RENDER_MODE_NORMAL,
-                        &FT_Vector {
-                            x: offset.x.into_ft(),
-                            y: offset.y.into_ft()
-                        },
-                        1
-                    ))?;
+                    fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))?;
                 }
 
-                glyph
+                slot
             };
 
             let scale = if is_bitmap {
@@ -790,20 +789,16 @@ impl FontImpl for Font {
             let scale6 = scale.into_raw();
 
             // I don't think this can happen but let's be safe
-            if (*glyph.0).format != FT_GLYPH_FORMAT_BITMAP {
-                return Err(GlyphRenderError::ConversionToBitmapFailed(
-                    (*glyph.0).format,
-                ));
+            if (*glyph).format != FT_GLYPH_FORMAT_BITMAP {
+                return Err(GlyphRenderError::ConversionToBitmapFailed((*glyph).format));
             }
 
-            let bitmap_glyph = glyph.0.cast::<FT_BitmapGlyphRec>();
             let (ox, oy) = (
-                I26Dot6::from_raw((*bitmap_glyph).left * scale6),
-                I26Dot6::from_raw(-(*bitmap_glyph).top * scale6),
+                I26Dot6::from_raw((*glyph).bitmap_left * scale6),
+                I26Dot6::from_raw(-(*glyph).bitmap_top * scale6),
             );
 
-            let bitmap = &(*bitmap_glyph).bitmap;
-
+            let bitmap = &(*glyph).bitmap;
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
 

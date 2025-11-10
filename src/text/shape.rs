@@ -101,7 +101,10 @@ impl ShapingBuffer {
         self.set_pre_context("");
 
         let mut last = 0;
-        for next in icu_segmenter::GraphemeClusterSegmenter::new().segment_str(text) {
+        for next in icu_segmenter::GraphemeClusterSegmenter::new()
+            .segment_str(text)
+            .skip(1)
+        {
             self.add_grapheme(&text[last..next], last);
             last = next;
         }

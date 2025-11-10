@@ -13,7 +13,11 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 
 use super::PlatformFontProvider;
-use crate::text::{Face, FaceInfo, LoadError};
+use crate::{
+    log::warning,
+    text::{Face, FaceInfo, LoadError},
+    Subrandr,
+};
 
 pub type NewError = windows_core::Error;
 pub type UpdateError = windows_core::Error;
@@ -203,7 +207,7 @@ pub struct DirectWriteFontProvider {
 }
 
 impl DirectWriteFontProvider {
-    pub fn new() -> Result<Self, windows::core::Error> {
+    pub fn new(sbr: &Subrandr) -> Result<Self, windows::core::Error> {
         unsafe {
             let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED)?;
             let mut font_collection = None;
@@ -211,7 +215,7 @@ impl DirectWriteFontProvider {
             let font_collection = font_collection.unwrap();
 
             Ok(Self {
-                fonts: Self::collect_font_list(&font_collection)?,
+                fonts: Self::collect_font_list(sbr, &font_collection)?,
                 fallback: factory.cast::<IDWriteFactory2>()?.GetSystemFontFallback()?,
             })
         }
@@ -268,7 +272,10 @@ impl DirectWriteFontProvider {
         }
     }
 
-    fn collect_font_list(collection: &IDWriteFontCollection) -> Result<Vec<FaceInfo>, UpdateError> {
+    fn collect_font_list(
+        sbr: &Subrandr,
+        collection: &IDWriteFontCollection,
+    ) -> Result<Vec<FaceInfo>, UpdateError> {
         let mut result = Vec::new();
 
         unsafe {
@@ -277,8 +284,15 @@ impl DirectWriteFontProvider {
                 let family = collection.GetFontFamily(i)?;
                 let n_fonts = family.GetFontCount();
                 for j in 0..n_fonts {
-                    let font = family.GetFont(j)?;
-                    result.extend(Self::info_from_font(font)?);
+                    match family.GetFont(j).and_then(Self::info_from_font) {
+                        Ok(face) => result.extend(face),
+                        Err(err) => {
+                            warning!(
+                                sbr,
+                                "Failed to load font {j} from font family {i} in system font collection: {err}"
+                            );
+                        }
+                    }
                 }
             }
         }

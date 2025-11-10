@@ -619,7 +619,7 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(sbr: &'a Subrandr) -> Self {
+    pub fn new(sbr: &'a Subrandr) -> Result<Self, platform_font_provider::InitError> {
         if !sbr.did_log_version.get() {
             sbr.did_log_version.set(true);
             info!(
@@ -633,9 +633,9 @@ impl<'a> Renderer<'a> {
             );
         }
 
-        Self {
+        Ok(Self {
             sbr,
-            fonts: text::FontDb::new(sbr).unwrap(),
+            fonts: text::FontDb::new(sbr)?,
             glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
             unchanged_range: 0..0,
@@ -650,7 +650,7 @@ impl<'a> Renderer<'a> {
             },
             previous_output_size: (0, 0),
             layouter: None,
-        }
+        })
     }
 
     pub fn library(&self) -> &'a Subrandr {

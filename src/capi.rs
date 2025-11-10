@@ -370,7 +370,7 @@ unsafe extern "C" fn sbr_library_close_font(_sbr: *mut Subrandr, font: *mut Face
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut Renderer<'static> {
-    Box::into_raw(Box::new(Renderer::new(&*sbr)))
+    Box::into_raw(Box::new(ctry!(Renderer::new(&*sbr))))
 }
 
 #[unsafe(no_mangle)]

@@ -758,7 +758,7 @@ fn main() {
 
             args,
             subs,
-            renderer: Renderer::new(&sbr),
+            renderer: Renderer::new(&sbr).unwrap(),
             frame_valid_inside: 0..0,
             state: None,
         })

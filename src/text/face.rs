@@ -71,7 +71,7 @@ impl FontMetrics {
 
 #[derive(Clone)]
 pub struct SingleGlyphBitmap {
-    pub offset: Vec2<I26Dot6>,
+    pub offset: Vec2<i32>,
     pub texture: Texture,
 }
 
@@ -289,8 +289,7 @@ impl Font {
                 rasterizer.blur_buffer_blit(0, 0, &unblurred.texture);
                 let pad = rasterizer.blur_padding();
                 Ok(SingleGlyphBitmap {
-                    offset: unblurred.offset
-                        - Vec2::new(I26Dot6::from_f32(pad.x), I26Dot6::from_f32(pad.y)),
+                    offset: unblurred.offset - Vec2::new(pad.x as i32, pad.y as i32),
                     texture: rasterizer.blur_to_mono_texture(),
                 })
             })

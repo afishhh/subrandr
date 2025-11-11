@@ -788,11 +788,7 @@ impl FontImpl for Font {
                 return Err(GlyphRenderError::ConversionToBitmapFailed((*glyph).format));
             }
 
-            let (ox, oy) = (
-                I26Dot6::from_raw((*glyph).bitmap_left * scale6),
-                I26Dot6::from_raw(-(*glyph).bitmap_top * scale6),
-            );
-
+            let bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
             let bitmap = &(*glyph).bitmap;
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
@@ -836,7 +832,7 @@ impl FontImpl for Font {
             );
 
             Ok(SingleGlyphBitmap {
-                offset: Vec2::new(ox, oy),
+                offset: bitmap_offset,
                 texture,
             })
         }

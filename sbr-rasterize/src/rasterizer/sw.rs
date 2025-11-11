@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 
 use util::{
-    math::{Point2f, Rect2f, Vec2f},
+    math::{Point2f, Rect2f, Vec2},
     rc::{Arc, UniqueArc},
 };
 
@@ -11,8 +11,8 @@ use crate::color::{Premultiply, BGRA8};
 mod blit;
 pub(super) mod blur;
 use blur::gaussian_sigma_to_box_radius;
-mod glyph;
-pub use glyph::*;
+mod strip;
+pub use strip::*;
 
 #[derive(Debug, Clone)]
 struct Bresenham {
@@ -1072,8 +1072,8 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blur_padding(&mut self) -> Vec2f {
-        Vec2f::new(self.blurer.padding() as f32, self.blurer.padding() as f32)
+    fn blur_padding(&mut self) -> Vec2<u32> {
+        Vec2::splat(self.blurer.padding() as u32)
     }
 
     // PERF: Evaluate whether storing an f32 texture would be better

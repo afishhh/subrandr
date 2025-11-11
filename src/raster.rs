@@ -1,4 +1,4 @@
-use rasterize::{color::BGRA8, sw::GlyphRasterizer, Rasterizer, RenderTarget};
+use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
 use thiserror::Error;
 use util::math::{I16Dot16, Point2, Rect2, Vec2};
 
@@ -86,7 +86,6 @@ fn drawing_to_bitmap(
         (bbox.min.y + pos16.y).trunc_to_inner(),
     );
 
-    let mut glyph_rasterizer = GlyphRasterizer::new();
     let texture = unsafe {
         rasterizer.create_texture_mapped(
             texture_size.x,
@@ -95,16 +94,16 @@ fn drawing_to_bitmap(
             Box::new(|buffer, stride| {
                 buffer.fill(std::mem::MaybeUninit::zeroed());
 
+                let mut strip_rasterizer = rasterize::sw::StripRasterizer::new();
                 let n_pixels = buffer.len() / 4;
                 let pixel_stride = stride / 4;
                 let pixels: &mut [BGRA8] =
                     std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), n_pixels);
 
                 for node in &drawing.nodes {
-                    glyph_rasterizer.reset(texture_size);
                     let color = match node {
                         DrawingNode::StrokedPolyline(polyline) => {
-                            glyph_rasterizer.stroke_polyline(
+                            strip_rasterizer.stroke_polyline(
                                 polyline.polyline.iter().copied().map(|p| {
                                     Point2::new(
                                         p.x.into_f32() - bbox.min.x.into_f32().min(0.),
@@ -117,14 +116,14 @@ fn drawing_to_bitmap(
                         }
                     };
 
-                    glyph_rasterizer.rasterize(|y, xs, v| {
-                        let row_start = y as usize * pixel_stride;
-                        let start = row_start + xs.start as usize;
-                        let end = row_start + xs.end as usize;
-                        for pixel in pixels.get_unchecked_mut(start..end) {
-                            *pixel = color.mul_alpha((v >> 8) as u8).blend_over(*pixel).0;
-                        }
-                    });
+                    let strips = strip_rasterizer.rasterize();
+                    strips.blend_to(
+                        pixels,
+                        |out, value| *out = color.mul_alpha(value).blend_over(*out).0,
+                        texture_size.x as usize,
+                        texture_size.y as usize,
+                        pixel_stride,
+                    );
                 }
             }),
         )

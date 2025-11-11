@@ -1187,13 +1187,12 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    fn blur_padding(&mut self) -> Vec2f {
+    fn blur_padding(&mut self) -> Vec2<u32> {
         let state = self
             .blur_state
             .as_ref()
             .expect("Rasterizer::blur_padding called without an active blur pass");
-        let pad = (2 * state.radius) as f32;
-        Vec2::new(pad, pad)
+        Vec2::splat(2 * state.radius)
     }
 
     fn blur_to_mono_texture(&mut self) -> super::Texture {

@@ -1,6 +1,9 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
-use rasterize::{sw::GlyphRasterizer, PixelFormat, Rasterizer};
+use rasterize::{
+    sw::{StripRasterizer, Strips},
+    PixelFormat, Rasterizer,
+};
 use text_sys::*;
 use util::{
     make_static_outline,
@@ -287,6 +290,140 @@ impl Font {
     }
 }
 
+pub struct TofuGlyph {
+    texture_offset: Vec2<i32>,
+    texture_size: Vec2<u32>,
+    strips: Strips,
+}
+
+impl Font {
+    fn draw_glyph(&self, index: u32, offset: Vec2L, rasterizer: &mut StripRasterizer) -> TofuGlyph {
+        let shared = self.shared();
+        let pixel_height = shared.pixel_height;
+        let pixel_width = shared.pixel_width;
+        let outline_width = pixel_height / 40;
+        let base_spacing = pixel_height / 12;
+        let margin = base_spacing;
+        let inner_offset = offset + Vec2::new(margin, margin);
+        let fract_offset = Vec2::new(inner_offset.x.fract(), inner_offset.y.fract());
+
+        let outline_size = Vec2::new(pixel_width - margin * 2, pixel_height - margin * 2);
+        let texture_size = Vec2::new(
+            (outline_size.x + fract_offset.x).ceil_to_inner() as u32,
+            (outline_size.y + fract_offset.y).ceil_to_inner() as u32,
+        );
+
+        {
+            let outline_outer = Rect2::from_min_size(fract_offset.to_point(), outline_size);
+
+            rasterizer.add_polyline(&Rect2::to_float(outline_outer).to_points());
+
+            let mut outline_inner = outline_outer;
+            outline_inner.expand(-outline_width, -outline_width);
+            let mut inner_points = Rect2::to_float(outline_inner).to_points();
+            inner_points.reverse();
+
+            rasterizer.add_polyline(&inner_points);
+        }
+
+        let content_offset = fract_offset + Vec2::splat(outline_width);
+        let content_size = outline_size - Vec2::splat(outline_width * 2);
+        let min_cell_spacing_x = base_spacing / 2;
+        let min_cell_spacing_y = base_spacing;
+
+        let mut digits_buf = [0u8; 8];
+        let num_chars = {
+            let mut value = if index == u32::MAX { 0 } else { index };
+            let mut len = 0usize;
+            while value > 0 {
+                digits_buf[len] = (value % 16) as u8;
+                value /= 16;
+                len += 1;
+            }
+            if len == 0 {
+                len += 1;
+            }
+            digits_buf[..len].reverse();
+            len
+        };
+
+        let (cells_per_row, max_cols): (&[u8], u8) = match num_chars {
+            1 => (&[1], 1),
+            2 => (&[2], 2),
+            3 => (&[2, 2], 2),
+            4 => (&[2, 2], 2),
+            5 => (&[2, 2, 2], 3),
+            6 => (&[2, 2, 2], 3),
+            // These should not actually occur
+            7 => (&[3, 3, 3], 3),
+            8 => (&[3, 3, 3], 3),
+            0 | 9.. => unreachable!(),
+        };
+        let rows = cells_per_row.len() as u8;
+
+        let char_space_x = (content_size.x - (min_cell_spacing_x * i32::from(max_cols - 1)))
+            / i32::from(max_cols + 1);
+        let char_space_y =
+            (content_size.y - min_cell_spacing_y * (i32::from(rows - 1))) / i32::from(rows + 1);
+
+        let (cell_size_x, cell_size_y) = if char_space_x / 2 < char_space_y / 3 {
+            (char_space_x, char_space_x / 2 * 3)
+        } else {
+            (char_space_y * 2 / 3, char_space_y)
+        };
+
+        let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
+            rasterizer.add_outline(&mut GLYPHS[usize::from(digit)].iter().map_points(|p| {
+                Point2::new(
+                    offset.x.into_f32() + p.x * size.x.into_f32() / 200.,
+                    offset.y.into_f32() + p.y * size.y.into_f32() / 400.,
+                )
+            }));
+        };
+
+        // If we don't have at least 2.5x5 pixels per glyph then our digits
+        // aren't going to be readable anyway, just draw a question mark.
+        if cell_size_x < FixedL::from_quotient(5, 2) || cell_size_y < 5 {
+            draw_digit(
+                content_offset,
+                Vec2::new(content_size.x, content_size.y),
+                16,
+            );
+        } else {
+            let mut i = 0;
+            let justify_spacing_y =
+                (content_size.y - cell_size_y * i32::from(rows)) / i32::from(rows + 1);
+            let mut y = content_offset.y + justify_spacing_y.into_f32();
+            for &row in cells_per_row {
+                let justify_spacing_x =
+                    (content_size.x - cell_size_x * i32::from(row)) / i32::from(row + 1);
+
+                let mut x = content_offset.x + justify_spacing_x.into_f32();
+                for _ in 0..row {
+                    draw_digit(
+                        Vec2::new(x, y),
+                        Vec2::new(cell_size_x, cell_size_y),
+                        digits_buf[i],
+                    );
+                    x += cell_size_x.into_f32() + justify_spacing_x.into_f32();
+                    i += 1;
+                }
+
+                y += cell_size_y.into_f32() + justify_spacing_y.into_f32();
+            }
+        }
+
+        TofuGlyph {
+            texture_offset: Vec2::new(
+                inner_offset.x.floor_to_inner(),
+                inner_offset.y.floor_to_inner(),
+            ),
+            texture_size,
+            strips: rasterizer.rasterize(),
+        }
+    }
+}
+
 impl FontImpl for Font {
     type Face = Face;
 
@@ -322,26 +459,17 @@ impl FontImpl for Font {
     type RenderError = Infallible;
     fn render_glyph_uncached(
         &self,
-        parent_rasterizer: &mut dyn Rasterizer,
+        rasterizer: &mut dyn Rasterizer,
         index: u32,
         offset: Vec2L,
     ) -> Result<SingleGlyphBitmap, Self::RenderError> {
-        let shared = self.shared();
-        let pixel_height = shared.pixel_height;
-        let pixel_width = shared.pixel_width;
-        let outline_width = pixel_height / 40;
-        let base_spacing = pixel_height / 12;
-        let margin = base_spacing;
-        let inner_offset = offset + Vec2::new(margin, margin);
-        let fract_offset = Vec2::new(inner_offset.x.fract(), inner_offset.y.fract());
-
-        let outline_size = Vec2::new(pixel_width - margin * 2, pixel_height - margin * 2);
-        let texture_size = Vec2::new(
-            (outline_size.x + fract_offset.x).ceil_to_inner() as u32,
-            (outline_size.y + fract_offset.y).ceil_to_inner() as u32,
-        );
+        let TofuGlyph {
+            texture_offset,
+            texture_size,
+            strips,
+        } = self.draw_glyph(index, offset, &mut StripRasterizer::new());
         let texture = unsafe {
-            parent_rasterizer.create_packed_texture_mapped(
+            rasterizer.create_packed_texture_mapped(
                 texture_size.x,
                 texture_size.y,
                 PixelFormat::Mono,
@@ -349,148 +477,18 @@ impl FontImpl for Font {
                     texture.fill(MaybeUninit::new(0));
                     let texture = slice_assume_init_mut(texture);
 
-                    let mut rasterizer = GlyphRasterizer::new();
-                    rasterizer.reset(texture_size);
-
-                    rasterizer.add_polyline(
-                        &Rect2::to_float(Rect2 {
-                            min: Point2::new(FixedL::ZERO, outline_size.y - outline_width)
-                                + fract_offset,
-                            max: Point2::new(outline_size.x, outline_size.y) + fract_offset,
-                        })
-                        .to_points(),
+                    strips.paint_to(
+                        texture,
+                        texture_size.x as usize,
+                        texture_size.y as usize,
+                        stride,
                     );
-
-                    rasterizer.add_polyline(
-                        &Rect2::to_float(Rect2 {
-                            min: Point2::new(FixedL::ZERO, FixedL::ZERO) + fract_offset,
-                            max: Point2::new(outline_size.x, outline_width) + fract_offset,
-                        })
-                        .to_points(),
-                    );
-
-                    rasterizer.add_polyline(
-                        &Rect2::to_float(Rect2 {
-                            min: Point2::new(FixedL::ZERO, outline_width) + fract_offset,
-                            max: Point2::new(outline_width, outline_size.y - outline_width)
-                                + fract_offset,
-                        })
-                        .to_points(),
-                    );
-
-                    rasterizer.add_polyline(
-                        &Rect2::to_float(Rect2 {
-                            min: Point2::new(outline_size.x - outline_width, outline_width)
-                                + fract_offset,
-                            max: Point2::new(outline_size.x, outline_size.y - outline_width)
-                                + fract_offset,
-                        })
-                        .to_points(),
-                    );
-
-                    let content_offset = fract_offset + Vec2::splat(outline_width);
-                    let content_size = outline_size - Vec2::splat(outline_width * 2);
-                    let min_cell_spacing_x = base_spacing / 2;
-                    let min_cell_spacing_y = base_spacing;
-
-                    let mut digits_buf = [0u8; 8];
-                    let num_chars = {
-                        let mut value = if index == u32::MAX { 0 } else { index };
-                        let mut len = 0usize;
-                        while value > 0 {
-                            digits_buf[len] = (value % 16) as u8;
-                            value /= 16;
-                            len += 1;
-                        }
-                        if len == 0 {
-                            len += 1;
-                        }
-                        digits_buf[..len].reverse();
-                        len
-                    };
-
-                    let (cells_per_row, max_cols): (&[u8], u8) = match num_chars {
-                        1 => (&[1], 1),
-                        2 => (&[2], 2),
-                        3 => (&[2, 2], 2),
-                        4 => (&[2, 2], 2),
-                        5 => (&[2, 2, 2], 3),
-                        6 => (&[2, 2, 2], 3),
-                        // These should not actually occur
-                        7 => (&[3, 3, 3], 3),
-                        8 => (&[3, 3, 3], 3),
-                        0 | 9.. => unreachable!(),
-                    };
-                    let rows = cells_per_row.len() as u8;
-
-                    let char_space_x = (content_size.x
-                        - (min_cell_spacing_x * i32::from(max_cols - 1)))
-                        / i32::from(max_cols + 1);
-                    let char_space_y = (content_size.y
-                        - min_cell_spacing_y * (i32::from(rows - 1)))
-                        / i32::from(rows + 1);
-
-                    let (cell_size_x, cell_size_y) = if char_space_x / 2 < char_space_y / 3 {
-                        (char_space_x, char_space_x / 2 * 3)
-                    } else {
-                        (char_space_y * 2 / 3, char_space_y)
-                    };
-
-                    let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
-                        rasterizer.add_outline(&mut GLYPHS[usize::from(digit)].iter().map_points(
-                            |p| {
-                                Point2::new(
-                                    offset.x.into_f32() + p.x * size.x.into_f32() / 200.,
-                                    offset.y.into_f32() + p.y * size.y.into_f32() / 400.,
-                                )
-                            },
-                        ));
-                    };
-
-                    // If we don't have at least 2.5x5 pixels per glyph then our digits
-                    // aren't going to be readable anyway, just draw a question mark.
-                    if cell_size_x < FixedL::from_quotient(5, 2) || cell_size_y < 5 {
-                        draw_digit(
-                            content_offset,
-                            Vec2::new(content_size.x, content_size.y),
-                            16,
-                        );
-                    } else {
-                        let mut i = 0;
-                        let justify_spacing_y =
-                            (content_size.y - cell_size_y * i32::from(rows)) / i32::from(rows + 1);
-                        let mut y = content_offset.y + justify_spacing_y.into_f32();
-                        for &row in cells_per_row {
-                            let justify_spacing_x = (content_size.x - cell_size_x * i32::from(row))
-                                / i32::from(row + 1);
-
-                            let mut x = content_offset.x + justify_spacing_x.into_f32();
-                            for _ in 0..row {
-                                draw_digit(
-                                    Vec2::new(x, y),
-                                    Vec2::new(cell_size_x, cell_size_y),
-                                    digits_buf[i],
-                                );
-                                x += cell_size_x.into_f32() + justify_spacing_x.into_f32();
-                                i += 1;
-                            }
-
-                            y += cell_size_y.into_f32() + justify_spacing_y.into_f32();
-                        }
-                    }
-
-                    rasterizer.rasterize(|y, xs, cov| {
-                        let row = &mut texture[y as usize * stride..];
-                        for x in xs {
-                            row[x as usize] = (cov >> 8) as u8;
-                        }
-                    });
                 }),
             )
         };
 
         Ok(SingleGlyphBitmap {
-            offset: Vec2::new(inner_offset.x.floor(), inner_offset.y.floor()),
+            offset: texture_offset,
             texture,
         })
     }

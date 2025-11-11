@@ -3,6 +3,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     mem::{ManuallyDrop, MaybeUninit},
+    num::NonZeroU32,
     path::Path,
     rc::Rc,
     sync::Arc,
@@ -588,6 +589,22 @@ impl Font {
         &self,
     ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
         Ok((self.with_applied_size()?, self.hb_font))
+    }
+
+    pub fn glyph_index(&self, codepoint: u32) -> Result<Option<NonZeroU32>, FreeTypeError> {
+        let face = self.with_applied_size()?;
+        unsafe {
+            // According to FreeType documentation, bitmap-only fonts ignore
+            // FT_LOAD_NO_BITMAP.
+            if ((*face).face_flags & FT_FACE_FLAG_SCALABLE as FT_Long) == 0 {
+                return Ok(None);
+            }
+
+            #[allow(clippy::unnecessary_cast)]
+            let code = FT_Get_Char_Index(face, codepoint as u64);
+            // errors???
+            Ok(NonZeroU32::new(code))
+        }
     }
 
     /// Gets the [`Outline`] associated with the glyph at `index`.

@@ -13,6 +13,8 @@ pub(super) mod blur;
 use blur::gaussian_sigma_to_box_radius;
 mod glyph;
 pub use glyph::*;
+mod strip;
+pub use strip::*;
 
 #[derive(Debug, Clone)]
 struct Bresenham {

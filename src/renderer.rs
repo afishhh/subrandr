@@ -1,9 +1,14 @@
 use std::{borrow::Cow, collections::VecDeque, fmt::Debug, ops::Range};
 
-use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
+use rasterize::{
+    color::BGRA8,
+    sw::{StripCopyOp, StripFillOp, StripPaintOp},
+    Rasterizer, RenderTarget,
+};
 use thiserror::Error;
 use util::{
-    math::{I26Dot6, Point2, Point2f, Rect2, Vec2},
+    make_static_outline,
+    math::{FloatOutlineIterExt, I16Dot16, I26Dot6, Outline, Point2, Point2f, Rect2, Rect2f, Vec2},
     rc::Rc,
 };
 
@@ -775,6 +780,146 @@ impl Renderer<'_> {
                 FormatLayouter::Vtt(_) => "vtt",
             }
         });
+
+        const CP: char = '歳';
+        let arena = FontArena::new();
+        let mut matcher = text::FontMatcher::match_all(
+            ["Noto Sans CJK JP"],
+            text::FontStyle::default(),
+            I26Dot6::new(800),
+            72,
+            &arena,
+            &mut self.fonts,
+        )
+        .unwrap();
+        let font = matcher
+            .iterator()
+            .next_with_fallback(CP as u32, &arena, &mut self.fonts)
+            .unwrap()
+            .unwrap();
+        let outline = match font {
+            text::Font::FreeType(font) => font
+                .glyph_outline(font.glyph_index(CP as u32).unwrap().unwrap().get())
+                .unwrap()
+                .unwrap(),
+            text::Font::Tofu(font) => unimplemented!(),
+        };
+
+        // use util::math::I26Dot6;
+        // struct PrintVisitor;
+        // impl OutlineVisitor<I26Dot6> for PrintVisitor {
+        //     fn visit_contour_start(&mut self, point: Point2<I26Dot6>) {
+        //         println!("move_to {point:?};");
+        //     }
+
+        //     fn visit_line(&mut self, end: Point2<I26Dot6>) {
+        //         println!("line_to {end:?};");
+        //     }
+
+        //     fn visit_quadratic(&mut self, c0: Point2<I26Dot6>, end: Point2<I26Dot6>) {
+        //         println!("quad_to {c0:?}, {end:?};");
+        //     }
+
+        //     fn visit_cubic(
+        //         &mut self,
+        //         c0: Point2<I26Dot6>,
+        //         c1: Point2<I26Dot6>,
+        //         end: Point2<I26Dot6>,
+        //     ) {
+        //         println!("cubic_to {c0:?}, {c1:?}, {end:?};");
+        //     }
+        // }
+        // outline.visit(&mut PrintVisitor);
+        // panic!();
+
+        let mut strip_raster = rasterize::sw::StripRasterizer::new();
+
+        strip_raster.add_outline(
+            outline.events().map(|event| {
+                event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(800) - p.y).into()))
+            }),
+        );
+
+        // strip_raster.add_outline(
+        //     make_static_outline![
+        //         #move_to (296.5, 500);
+        //         line_to (0, 0.5);
+        //         line_to (500, 100.5);
+        //     ]
+        //     .events(),
+        // );
+
+        let strips = strip_raster.rasterize();
+
+        let base = Point2::new(100, 100);
+        for op in strips.paint_iter() {
+            let pos = {
+                let (StripPaintOp::Copy(StripCopyOp { pos, .. })
+                | StripPaintOp::Fill(StripFillOp { pos, .. })) = &op;
+                Point2::new(base.x + i32::from(pos.x) * 4, base.y + i32::from(pos.y) * 4)
+            };
+            match op {
+                StripPaintOp::Copy(op) => {
+                    // let posf = Point2f::new(pos.x as f32, pos.y as f32);
+                    // rasterizer.fill_axis_aligned_rect(
+                    //     target,
+                    //     Rect2f::new(posf, posf + Vec2::new(op.width() as f32, 4.0)),
+                    //     BGRA8::new(0, 0, 255, 255),
+                    // );
+                    let tex = unsafe {
+                        rasterizer.create_texture_mapped(
+                            op.width().into(),
+                            4,
+                            rasterize::PixelFormat::Mono,
+                            Box::new(|m, stride| {
+                                assert_eq!(stride, usize::from(op.width()));
+                                m.copy_from_slice(std::mem::transmute(op.buffer));
+                            }),
+                        )
+                    };
+                    rasterizer.blit(target, pos.x, pos.y, &tex, BGRA8::GREEN);
+                }
+                StripPaintOp::Fill(StripFillOp { pos: _, width }) => {
+                    let posf = Point2f::new(pos.x as f32, pos.y as f32);
+                    rasterizer.fill_axis_aligned_rect(
+                        target,
+                        Rect2f::new(posf, posf + Vec2::new(width as f32 * 4., 4.0)),
+                        BGRA8::new(255, 0, 0, 255),
+                    );
+                }
+            }
+        }
+
+        // let mut first = Point2::ZERO;
+        // let mut last = Point2::ZERO;
+        // let mut n_hor = 0;
+        // outline
+        //     .events()
+        //     .map(|event| event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(1000) - p.y).into())))
+        //     .visit_flattened_with(
+        //         |s, e| {
+        //             let color = if I16Dot16::from_f32(s.y) == I16Dot16::from_f32(e.y) {
+        //                 n_hor += 1;
+        //                 if s != e {
+        //                     dbg!(s, e);
+        //                 }
+        //                 BGRA8::WHITE
+        //             } else if s != last {
+        //                 first = s;
+        //                 BGRA8::YELLOW
+        //             } else if e == first {
+        //                 BGRA8::RED
+        //             } else {
+        //                 BGRA8::BLUE
+        //             };
+
+        //             rasterizer.line(target, s + Vec2::splat(100.), e + Vec2::splat(100.), color);
+        //             last = e;
+        //         },
+        //         0.1,
+        //         1.0,
+        //     );
+        // dbg!(n_hor);
 
         trace!(
             self.sbr,

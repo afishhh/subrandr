@@ -11,7 +11,7 @@
 //! performance reasonable.
 // TODO: Handle segments at x < 0 properly
 
-use std::{marker::PhantomData, num::NonZeroU32, ops::Range};
+use std::{num::NonZeroU32, ops::Range};
 
 use util::math::{CubicBezier, I16Dot16, Outline, Point2, Point2f, QuadraticBezier, Vec2, Vec2f};
 
@@ -22,128 +22,6 @@ const CUBIC_TO_QUADRATIC_TOLERANCE: f32 = 1.0;
 enum Winding {
     CounterClockwise = -1,
     Clockwise = 1,
-}
-
-#[derive(Debug, Clone)]
-struct Segment {
-    top: Point2<I16Dot16>,
-    bottom: Point2<I16Dot16>,
-    winding: Winding,
-    kind: SegmentKind,
-}
-
-#[derive(Debug, Clone)]
-enum SegmentKind {
-    Linear { dx: I16Dot16, dy: I16Dot16 },
-}
-
-impl Segment {
-    fn new_linear(mut start: Point2<I16Dot16>, mut end: Point2<I16Dot16>) -> Option<Self> {
-        let winding = if end.y > start.y {
-            std::mem::swap(&mut start, &mut end);
-            Winding::Clockwise
-        } else if end.y == start.y {
-            return None;
-        } else {
-            Winding::CounterClockwise
-        };
-
-        Some(Segment {
-            top: start,
-            bottom: end,
-            winding,
-            kind: SegmentKind::Linear {
-                dx: (start.x - end.x) / (start.y - end.y),
-                // horizontal stepping is skipped in this case so this can be anything
-                dy: if start.x == end.x {
-                    I16Dot16::ZERO
-                } else {
-                    (start.y - end.y) / (start.x - end.x)
-                },
-            },
-        })
-    }
-
-    fn y_stepper(&self, next_y: I16Dot16) -> SegmentStepper<StepAxisY> {
-        let kind = self.kind.clone();
-        SegmentStepper {
-            current_cross: self.bottom.x,
-            next_cross: match kind {
-                SegmentKind::Linear { dx, .. } => self.bottom.x + dx * (next_y - self.bottom.y),
-            },
-            kind,
-            _axis: PhantomData,
-        }
-    }
-}
-
-// TODO: It would be nice if this stuff was replaced by a const enum in the future :)
-trait StepAxis {
-    // True if we're stepping on the x axis, false if we're stepping on the y axis.
-    const IS_X_AXIS: bool;
-}
-
-struct StepAxisX;
-
-impl StepAxis for StepAxisX {
-    const IS_X_AXIS: bool = true;
-}
-
-struct StepAxisY;
-
-impl StepAxis for StepAxisY {
-    const IS_X_AXIS: bool = false;
-}
-
-// The necessity of this structure is questionable since it's really simple once you
-// remove the quadratic stepper that was originally here...
-#[derive(Debug)]
-struct SegmentStepper<A: StepAxis = StepAxisY> {
-    current_cross: I16Dot16,
-    next_cross: I16Dot16,
-    kind: SegmentKind,
-    _axis: PhantomData<A>,
-}
-
-impl SegmentStepper<StepAxisX> {
-    fn new_horizontal(
-        start: Point2<I16Dot16>,
-        current_y: I16Dot16,
-        next_x: I16Dot16,
-        kind: SegmentKind,
-    ) -> Self {
-        Self {
-            current_cross: current_y,
-            next_cross: {
-                match kind {
-                    SegmentKind::Linear { dy, .. } => start.y + dy * (next_x - start.x),
-                }
-            },
-            kind,
-            _axis: PhantomData,
-        }
-    }
-}
-
-impl<A: StepAxis> SegmentStepper<A> {
-    fn advance_current_to_next(&mut self) {
-        self.current_cross = self.next_cross;
-        match self.kind {
-            SegmentKind::Linear { .. } => (),
-        }
-    }
-
-    fn advance1_inside(&mut self) {
-        self.next_cross = match self.kind {
-            SegmentKind::Linear { dx, dy } => {
-                if A::IS_X_AXIS {
-                    self.current_cross + dy
-                } else {
-                    self.current_cross + dx
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -172,10 +50,17 @@ impl GlyphRasterizer {
         }
     }
 
-    fn process_line(&mut self, start: Point2<I16Dot16>, end: Point2<I16Dot16>) {
-        if let Some(segment) = Segment::new_linear(start, end) {
-            self.add_segment_cells(&segment);
-        }
+    pub fn process_line(&mut self, mut start: Point2<I16Dot16>, mut end: Point2<I16Dot16>) {
+        let winding = if end.y > start.y {
+            std::mem::swap(&mut start, &mut end);
+            Winding::Clockwise
+        } else if end.y == start.y {
+            return;
+        } else {
+            Winding::CounterClockwise
+        };
+
+        self.add_segment_cells(end, start, winding);
     }
 
     fn process_linef(&mut self, start: Point2f, end: Point2f) {
@@ -304,8 +189,7 @@ impl GlyphRasterizer {
         y: u32,
         bottom: Point2<I16Dot16>,
         top: Point2<I16Dot16>,
-        segment: &Segment,
-        stepper_kind: SegmentKind,
+        winding: Winding,
     ) {
         if bottom.x == top.x && bottom.x < self.size.x as i32 {
             self.add_line_to_cell(
@@ -313,39 +197,41 @@ impl GlyphRasterizer {
                 y,
                 Point2::new(bottom.x.fract(), bottom.y),
                 Point2::new(bottom.x.fract(), top.y),
-                segment.winding,
+                winding,
             );
             return;
         }
 
-        let (sleft, rleft, rright) = if segment.bottom.x > segment.top.x {
-            (segment.top, top, bottom)
+        let (left, right) = if bottom.x > top.x {
+            (top, bottom)
         } else {
-            (segment.bottom, bottom, top)
+            (bottom, top)
         };
 
-        let mut current_x = rleft.x;
+        let mut current_x = left.x;
         if current_x >= self.size.x as i32 {
             return;
         }
 
-        let mut next_x = rleft.x.floor() + 1;
-        if next_x >= rright.x {
+        let mut next_x = left.x.floor() + 1;
+        if next_x >= right.x {
             self.add_line_to_cell(
                 bottom.x.floor_to_inner() as u32,
                 y,
                 Point2::new(bottom.x.fract(), bottom.y),
                 Point2::new(top.x.fract(), top.y),
-                segment.winding,
+                winding,
             );
             return;
         }
 
-        let mut stepper = SegmentStepper::new_horizontal(sleft, rleft.y, next_x, stepper_kind);
+        let dy = (right.y - left.y) / (right.x - left.x);
+        let mut current_y = left.y;
+        let mut next_y = current_y + dy * (next_x - left.x);
 
         while current_x < self.size.x as i32 {
-            let mut pixel_bottom = Point2::new(current_x.fract(), stepper.current_cross);
-            let mut pixel_top = Point2::new(next_x - current_x.floor(), stepper.next_cross);
+            let mut pixel_bottom = Point2::new(current_x.fract(), current_y);
+            let mut pixel_top = Point2::new(next_x - current_x.floor(), next_y);
 
             if pixel_top.y < pixel_bottom.y {
                 std::mem::swap(&mut pixel_bottom, &mut pixel_top);
@@ -356,54 +242,60 @@ impl GlyphRasterizer {
                 y,
                 pixel_bottom,
                 pixel_top,
-                segment.winding,
+                winding,
             );
 
             current_x = next_x;
-            stepper.advance_current_to_next();
+            current_y = next_y;
             next_x += I16Dot16::ONE;
-            if next_x > rright.x {
-                if current_x == rright.x {
+            if next_x > right.x {
+                if current_x == right.x {
                     break;
                 }
 
-                stepper.next_cross = rright.y;
-                next_x = rright.x;
+                next_y = right.y;
+                next_x = right.x;
             } else {
-                stepper.advance1_inside();
+                next_y += dy;
             }
         }
     }
 
-    fn add_segment_cells(&mut self, segment: &Segment) {
-        let mut current_y = segment.bottom.y;
-        let mut next_y = (current_y.floor() + 1).min(segment.top.y);
-        let mut stepper = segment.y_stepper(next_y);
+    fn add_segment_cells(
+        &mut self,
+        bottom: Point2<I16Dot16>,
+        top: Point2<I16Dot16>,
+        winding: Winding,
+    ) {
+        let dx = (top.x - bottom.x) / (top.y - bottom.y);
+        let mut current_y = bottom.y;
+        let mut next_y = (current_y.floor() + 1).min(top.y);
+        let mut current_x = bottom.x;
+        let mut next_x = current_x + dx * (next_y - bottom.y);
 
         while current_y < self.size.y as i32 {
             // TODO: instead just skip straight to y=0 above
             if current_y >= 0 {
                 self.add_segment_cells_horizontal(
                     current_y.floor_to_inner() as u32,
-                    Point2::new(stepper.current_cross, current_y),
-                    Point2::new(stepper.next_cross, next_y),
-                    segment,
-                    stepper.kind.clone(),
+                    Point2::new(current_x, current_y),
+                    Point2::new(next_x, next_y),
+                    winding,
                 );
             }
 
             current_y = next_y;
-            stepper.advance_current_to_next();
+            current_x = next_x;
             next_y += I16Dot16::ONE;
-            if next_y > segment.top.y {
-                if current_y == segment.top.y {
+            if next_y > top.y {
+                if current_y == top.y {
                     break;
                 }
 
-                stepper.next_cross = segment.top.x;
-                next_y = segment.top.y;
+                next_x = top.x;
+                next_y = top.y;
             } else {
-                stepper.advance1_inside();
+                next_x += dx;
             }
         }
     }

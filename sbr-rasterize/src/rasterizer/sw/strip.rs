@@ -285,12 +285,37 @@ impl StripRasterizer {
 #[derive(Debug, Clone)]
 pub struct Strips {
     strips: Vec<Strip>,
-    coverage_buffer: Vec<AlignedU8>,
+    alpha_buffer: AlphaBuffer,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
-struct AlignedU8(u64);
+#[derive(Debug, Clone)]
+struct AlphaBuffer(Vec<u64>);
+
+impl AlphaBuffer {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn len8(&self) -> usize {
+        self.0.len()
+    }
+
+    fn resize(&mut self, len8: usize) {
+        self.0.resize(len8, 0);
+    }
+
+    fn as_u8(&self) -> &[u8] {
+        let len = self.0.len();
+        unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u8>(), len << 3) }
+    }
+
+    fn get_subslice_mut(&mut self, start8: usize, end8: usize) -> &mut [u8] {
+        let slice = &mut self.0[start8..end8];
+        unsafe {
+            std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<u8>(), (end8 - start8) << 3)
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct Strip {
@@ -304,12 +329,7 @@ impl Strips {
         StripPaintIter {
             iter: self.strips.iter(),
             last_x: u16::MAX,
-            coverage_buffer: unsafe {
-                std::slice::from_raw_parts(
-                    self.coverage_buffer.as_ptr() as *const u8,
-                    self.coverage_buffer.len(),
-                )
-            },
+            alpha_buffer: self.alpha_buffer.as_u8(),
         }
     }
 
@@ -357,7 +377,7 @@ impl Strips {
 pub struct StripPaintIter<'a> {
     iter: std::slice::Iter<'a, Strip>,
     last_x: u16,
-    coverage_buffer: &'a [u8],
+    alpha_buffer: &'a [u8],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -407,8 +427,8 @@ impl<'a> Iterator for StripPaintIter<'a> {
 
         let slice_len = 4 * 4 * usize::from(next.width);
         // TODO: `slice_take`, stabilized in 1.87 which is after our MSRV
-        let copy_buffer = &self.coverage_buffer[..slice_len];
-        self.coverage_buffer = &self.coverage_buffer[slice_len..];
+        let copy_buffer = &self.alpha_buffer[..slice_len];
+        self.alpha_buffer = &self.alpha_buffer[slice_len..];
         self.iter.next();
         Some(StripPaintOp::Copy(StripCopyOp {
             pos: next.pos,
@@ -421,7 +441,7 @@ impl StripRasterizer {
     pub fn rasterize(&mut self) -> Strips {
         let mut result = Strips {
             strips: Vec::new(),
-            coverage_buffer: Vec::new(),
+            alpha_buffer: AlphaBuffer::new(),
         };
 
         self.tiles
@@ -458,17 +478,12 @@ impl StripRasterizer {
                 width: strip_width,
                 fill_previous: strip_winding != 0,
             });
-            let strip_buffer_start = result.coverage_buffer.len();
-            let strip_buffer_end = strip_buffer_start + 4 * 4 * usize::from(strip_width);
-            result
-                .coverage_buffer
-                .resize(strip_buffer_end, AlignedU8(0));
-            let buffer = unsafe {
-                std::slice::from_raw_parts_mut(
-                    result.coverage_buffer.as_mut_ptr().add(strip_buffer_start) as *mut u8,
-                    strip_buffer_end - strip_buffer_start,
-                )
-            };
+            let strip_buffer_start8 = result.alpha_buffer.len8();
+            let strip_buffer_end8 = strip_buffer_start8 + 2 * usize::from(strip_width);
+            result.alpha_buffer.resize(strip_buffer_end8);
+            let buffer = result
+                .alpha_buffer
+                .get_subslice_mut(strip_buffer_start8, strip_buffer_end8);
 
             unsafe {
                 self.tile_rasterizer.rasterize(
@@ -2703,7 +2718,7 @@ mod test {
         std::hint::black_box(spans);
     }
 
-    const SCALE: f32 = 3.0;
+    const SCALE: f32 = 1.0;
 
     extern crate test;
     #[bench]

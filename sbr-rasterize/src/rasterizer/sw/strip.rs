@@ -428,7 +428,6 @@ impl StripRasterizer {
 
         let mut last_y = 0;
         let mut start = 0;
-        let mut strip_winding = [I16Dot16::ZERO; 4];
         while start < self.tiles.len() {
             let strip_pos = self.tiles[start].pos;
             let mut strip_end = strip_pos.x + self.tiles[start].width;
@@ -443,14 +442,14 @@ impl StripRasterizer {
             }
 
             if last_y != strip_pos.y {
-                strip_winding = [I16Dot16::ZERO; 4];
+                self.tile_rasterizer.reset();
             }
 
             let strip_width = strip_end - strip_pos.x;
             result.strips.push(Strip {
                 pos: strip_pos,
                 width: strip_width,
-                fill_previous: strip_winding.map(tile::coverage_to_alpha),
+                fill_previous: self.tile_rasterizer.fill_alpha(),
             });
 
             let strip_tiles = &self.tiles[start..end];
@@ -461,7 +460,6 @@ impl StripRasterizer {
                         self.tile_rasterizer.rasterize(
                             strip_pos.x,
                             strip_tiles,
-                            &mut strip_winding,
                             std::ptr::slice_from_raw_parts_mut(
                                 buffer,
                                 16 * usize::from(strip_width),

@@ -6,6 +6,7 @@ use super::{to_op_fixed, Tile};
 
 pub struct Avx2TileRasterizer {
     coverage_scratch_buffer: Vec<AlignedM256>,
+    current_winding: __m256i,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -13,22 +14,26 @@ pub struct Avx2TileRasterizer {
 struct AlignedM256(__m256i);
 
 impl Avx2TileRasterizer {
+    #[target_feature(enable = "avx2")]
     pub fn new() -> Self {
         Self {
             coverage_scratch_buffer: Vec::new(),
+            current_winding: _mm256_setzero_si256(),
         }
     }
 }
 
 impl super::TileRasterizer for Avx2TileRasterizer {
-    unsafe fn rasterize(
-        &mut self,
-        strip_x: u16,
-        tiles: &[Tile],
-        initial_winding: &mut [I16Dot16; 4],
-        buffer: *mut [MaybeUninit<u8>],
-    ) {
-        unsafe { self.rasterize_impl(strip_x, tiles, initial_winding, buffer) }
+    fn reset(&mut self) {
+        self.current_winding = unsafe { _mm256_setzero_si256() };
+    }
+
+    fn fill_alpha(&self) -> [u8; 4] {
+        unsafe { (mm256_coverage_to_alpha(self.current_winding) as u32).to_ne_bytes() }
+    }
+
+    unsafe fn rasterize(&mut self, strip_x: u16, tiles: &[Tile], buffer: *mut [MaybeUninit<u8>]) {
+        unsafe { self.rasterize_impl(strip_x, tiles, buffer) }
     }
 }
 
@@ -219,37 +224,19 @@ fn experiment() {
 impl Avx2TileRasterizer {
     #[target_feature(enable = "avx2")]
     #[inline(never)]
-    fn rasterize_impl(
-        &mut self,
-        strip_x: u16,
-        tiles: &[Tile],
-        initial_winding: &mut [I16Dot16; 4],
-        buffer: *mut [MaybeUninit<u8>],
-    ) {
+    fn rasterize_impl(&mut self, strip_x: u16, tiles: &[Tile], buffer: *mut [MaybeUninit<u8>]) {
         let width = buffer.len() / 4;
         unsafe { std::hint::assert_unchecked(width.is_multiple_of(4)) };
 
         self.coverage_scratch_buffer.clear();
-        self.coverage_scratch_buffer.resize(
-            width,
-            AlignedM256(_mm256_set_epi32(
-                initial_winding[3].into_raw(),
-                initial_winding[2].into_raw(),
-                initial_winding[1].into_raw(),
-                initial_winding[0].into_raw(),
-                initial_winding[3].into_raw(),
-                initial_winding[2].into_raw(),
-                initial_winding[1].into_raw(),
-                initial_winding[0].into_raw(),
-            )),
-        );
+        self.coverage_scratch_buffer
+            .resize(width, AlignedM256(self.current_winding));
 
         for tile in tiles {
             self.rasterize_line(
                 width,
                 I16Dot16::new(4 * i32::from(tile.pos.x - strip_x)),
                 tile,
-                initial_winding,
             );
 
             // let coverage = unsafe {
@@ -301,13 +288,8 @@ impl Avx2TileRasterizer {
     // FIXME: This is a giant mess.
     // FIXME: This still seems to have a tiny bit more innacuraccy than the generic one?
     #[target_feature(enable = "avx2")]
-    fn rasterize_line(
-        &mut self,
-        width: usize,
-        x: I16Dot16,
-        tile: &Tile,
-        initial_winding: &mut [I16Dot16; 4],
-    ) {
+    #[inline(never)]
+    fn rasterize_line(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
         if tile.line.bottom_y == tile.line.top_y {
             return;
         }
@@ -339,11 +321,6 @@ impl Avx2TileRasterizer {
 
             result
         };
-
-        initial_winding[3] += right_height[3] * sign;
-        initial_winding[2] += right_height[2] * sign;
-        initial_winding[1] += right_height[1] * sign;
-        initial_winding[0] += right_height[0] * sign;
 
         let v128signed_right_height = _mm_set_epi32(
             right_height[3].into_raw() * sign,
@@ -462,7 +439,7 @@ impl Avx2TileRasterizer {
             };
 
             let dhhalf = dh / 2;
-            let vzeroes = _mm256_set1_epi32(I16Dot16::ZERO.into_raw());
+            let vzeroes = _mm256_setzero_si256();
             let vfones = _mm256_set1_epi32(I16Dot16::ONE.into_raw());
             let vsign = _mm256_set1_epi32(tile.winding as i32);
             let vdhhalf = _mm256_set1_epi32(dhhalf.into_raw());
@@ -607,7 +584,15 @@ impl Avx2TileRasterizer {
             }
         }
 
-        Self::fill_tail(output, output_end, v128signed_right_height);
+        let vsigned_right_height =
+            _mm256_set_m128i(v128signed_right_height, v128signed_right_height);
+        self.current_winding = _mm256_add_epi32(self.current_winding, vsigned_right_height);
+        Self::fill_tail(
+            output,
+            output_end,
+            v128signed_right_height,
+            vsigned_right_height,
+        );
     }
 
     #[target_feature(enable = "avx2")]
@@ -615,11 +600,9 @@ impl Avx2TileRasterizer {
         mut output: *mut __m128i,
         output_end: *mut __m128i,
         v128signed_right_height: __m128i,
+        vsigned_right_height: __m256i,
     ) {
         if output < output_end {
-            let vsigned_right_height =
-                _mm256_set_m128i(v128signed_right_height, v128signed_right_height);
-
             if !output.cast::<__m256i>().is_aligned() {
                 unsafe {
                     _mm_store_si128(

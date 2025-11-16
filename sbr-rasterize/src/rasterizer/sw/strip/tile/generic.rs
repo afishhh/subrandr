@@ -6,22 +6,31 @@ use super::{coverage_to_alpha, to_op_fixed, Tile};
 
 pub struct GenericTileRasterizer {
     coverage_scratch_buffer: Vec<I16Dot16>,
+    current_winding: [I16Dot16; 4],
 }
 
 impl GenericTileRasterizer {
     pub fn new() -> Self {
         Self {
             coverage_scratch_buffer: Vec::new(),
+            current_winding: [I16Dot16::ZERO; 4],
         }
     }
 }
 
 impl super::TileRasterizer for GenericTileRasterizer {
+    fn reset(&mut self) {
+        self.current_winding = [I16Dot16::ZERO; 4]
+    }
+
+    fn fill_alpha(&self) -> [u8; 4] {
+        self.current_winding.map(super::coverage_to_alpha)
+    }
+
     unsafe fn rasterize(
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        initial_winding: &mut [I16Dot16; 4],
         alpha_output: *mut [MaybeUninit<u8>],
     ) {
         let width = alpha_output.len() / 4;
@@ -35,7 +44,7 @@ impl super::TileRasterizer for GenericTileRasterizer {
                     .cast::<[I16Dot16; 4]>(),
                 width,
             )
-            .fill(*initial_winding);
+            .fill(self.current_winding);
         }
         self.coverage_scratch_buffer.set_len(alpha_output.len());
 
@@ -44,7 +53,6 @@ impl super::TileRasterizer for GenericTileRasterizer {
                 width,
                 I16Dot16::new(4 * i32::from(tile.pos.x - strip_x)),
                 tile,
-                initial_winding,
             );
         }
 
@@ -64,13 +72,7 @@ impl super::TileRasterizer for GenericTileRasterizer {
 }
 
 impl GenericTileRasterizer {
-    fn rasterize_tile(
-        &mut self,
-        width: usize,
-        x: I16Dot16,
-        tile: &Tile,
-        initial_winding: &mut [I16Dot16; 4],
-    ) {
+    fn rasterize_tile(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
         if tile.line.bottom_y == tile.line.top_y {
             return;
         }
@@ -87,26 +89,26 @@ impl GenericTileRasterizer {
         if end_row == current_row {
             let h = top.y - bottom.y;
             self.rasterize_row(current_row, width, top.x, bottom.x, h, sign);
-            initial_winding[usize::from(current_row)] += h * sign;
+            self.current_winding[usize::from(current_row)] += h * sign;
         } else {
             let initial_height = I16Dot16::ONE - bottom.y.fract();
             let next_x = current_x + dx * initial_height;
             self.rasterize_row(current_row, width, next_x, current_x, initial_height, sign);
-            initial_winding[usize::from(current_row)] += initial_height * sign;
+            self.current_winding[usize::from(current_row)] += initial_height * sign;
             current_row += 1;
             current_x = next_x;
 
             while current_row < end_row {
                 let next_x = current_x + dx;
                 self.rasterize_row(current_row, width, next_x, current_x, I16Dot16::ONE, sign);
-                initial_winding[usize::from(current_row)] += sign;
+                self.current_winding[usize::from(current_row)] += sign;
                 current_row += 1;
                 current_x = next_x;
             }
 
             let final_height = top.y - I16Dot16::new(current_row.into());
             self.rasterize_row(current_row, width, top.x, current_x, final_height, sign);
-            initial_winding[usize::from(current_row)] += final_height * sign;
+            self.current_winding[usize::from(current_row)] += final_height * sign;
         }
     }
 

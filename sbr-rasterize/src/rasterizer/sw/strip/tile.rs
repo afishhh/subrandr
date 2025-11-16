@@ -5,6 +5,10 @@ use util::math::I16Dot16;
 use super::{Tile, U2Dot14};
 
 pub trait TileRasterizer {
+    fn reset(&mut self);
+
+    fn fill_alpha(&self) -> [u8; 4];
+
     /// # Safety
     ///
     /// `buffer` must be aligned to an 8-byte boundary and its length must be a multiple of 16.
@@ -15,12 +19,11 @@ pub trait TileRasterizer {
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        strip_winding: &mut [I16Dot16; 4],
         alpha_output: *mut [MaybeUninit<u8>],
     );
 }
 
-pub fn coverage_to_alpha(value: I16Dot16) -> u8 {
+fn coverage_to_alpha(value: I16Dot16) -> u8 {
     let value = value.unsigned_abs();
     if value >= 1 {
         u8::MAX
@@ -43,7 +46,7 @@ pub use generic::GenericTileRasterizer;
 pub fn init_tile_rasterizer() -> Box<dyn TileRasterizer> {
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("avx2") {
-        return Box::new(Avx2TileRasterizer::new());
+        return Box::new(unsafe { Avx2TileRasterizer::new() });
     }
 
     Box::new(GenericTileRasterizer::new())

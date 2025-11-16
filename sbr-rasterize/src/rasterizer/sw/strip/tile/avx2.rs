@@ -353,7 +353,7 @@ impl Avx2TileRasterizer {
         if top.x == bottom.x {
             let initial_width = I16Dot16::ONE - left.x.fract();
             if initial_width != I16Dot16::ONE {
-                let vresult = _mm_srli_epi32::<16>(_mm_mullo_epi32(
+                let vresult = _mm_srai_epi32::<16>(_mm_mullo_epi32(
                     _mm_set1_epi32(initial_width.into_raw()),
                     v128signed_right_height,
                 ));

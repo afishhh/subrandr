@@ -5,8 +5,12 @@ use util::math::{I16Dot16, Point2};
 use super::{coverage_to_alpha, to_op_fixed, Tile};
 
 pub struct Avx2TileRasterizer {
-    coverage_scratch_buffer: Vec<__m256i>,
+    coverage_scratch_buffer: Vec<AlignedM256>,
 }
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, align(32))]
+struct AlignedM256(__m256i);
 
 impl Avx2TileRasterizer {
     pub fn new() -> Self {
@@ -226,8 +230,10 @@ impl Avx2TileRasterizer {
         unsafe { std::hint::assert_unchecked(width.is_multiple_of(4)) };
 
         self.coverage_scratch_buffer.clear();
-        self.coverage_scratch_buffer
-            .resize(width / 2, _mm256_set1_epi32(initial_winding.into_raw()));
+        self.coverage_scratch_buffer.resize(
+            width,
+            AlignedM256(_mm256_set1_epi32(initial_winding.into_raw())),
+        );
 
         for tile in tiles {
             self.rasterize_line(
@@ -594,32 +600,7 @@ impl Avx2TileRasterizer {
             }
         }
 
-        if output < output_end {
-            Self::fill_tail(output, output_end, v128signed_right_height);
-            // let vsigned_right_height =
-            //     _mm256_set_m128i(v128signed_right_area, v128signed_right_area);
-
-            // if !output.cast::<__m256i>().is_aligned() {
-            //     unsafe {
-            //         _mm_store_si128(
-            //             output,
-            //             _mm_add_epi32(_mm_load_si128(output), v128signed_right_area),
-            //         )
-            //     };
-            //     output = unsafe { output.add(1) };
-            // }
-
-            // while output < output_end {
-            //     unsafe {
-            //         _mm256_storeu_si256(
-            //             output.cast(),
-            //             _mm256_add_epi32(_mm256_loadu_si256(output.cast()), vsigned_right_height),
-            //         )
-            //     };
-
-            //     output = unsafe { output.add(2) };
-            // }
-        }
+        Self::fill_tail(output, output_end, v128signed_right_height);
     }
 
     #[target_feature(enable = "avx2")]
@@ -628,28 +609,30 @@ impl Avx2TileRasterizer {
         output_end: *mut __m128i,
         v128signed_right_height: __m128i,
     ) {
-        let vsigned_right_height =
-            _mm256_set_m128i(v128signed_right_height, v128signed_right_height);
+        if output < output_end {
+            let vsigned_right_height =
+                _mm256_set_m128i(v128signed_right_height, v128signed_right_height);
 
-        if !output.cast::<__m256i>().is_aligned() {
-            unsafe {
-                _mm_store_si128(
-                    output,
-                    _mm_add_epi32(_mm_load_si128(output), v128signed_right_height),
-                )
-            };
-            output = unsafe { output.add(1) };
-        }
+            if !output.cast::<__m256i>().is_aligned() {
+                unsafe {
+                    _mm_store_si128(
+                        output,
+                        _mm_add_epi32(_mm_load_si128(output), v128signed_right_height),
+                    )
+                };
+                output = unsafe { output.add(1) };
+            }
 
-        while output < output_end {
-            unsafe {
-                _mm256_storeu_si256(
-                    output.cast(),
-                    _mm256_add_epi32(_mm256_loadu_si256(output.cast()), vsigned_right_height),
-                )
-            };
+            while output < output_end {
+                unsafe {
+                    _mm256_storeu_si256(
+                        output.cast(),
+                        _mm256_add_epi32(_mm256_loadu_si256(output.cast()), vsigned_right_height),
+                    )
+                };
 
-            output = unsafe { output.add(2) };
+                output = unsafe { output.add(2) };
+            }
         }
     }
 }

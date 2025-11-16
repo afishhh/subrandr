@@ -781,7 +781,7 @@ impl Renderer<'_> {
             }
         });
 
-        const CP: char = '歳';
+        const CP: char = 'A';
         let arena = FontArena::new();
         let mut matcher = text::FontMatcher::match_all(
             ["Noto Sans CJK JP"],

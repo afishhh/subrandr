@@ -146,6 +146,8 @@ impl StripRasterizer {
             (end_tile_x, tile_x - end_tile_x + 1)
         };
 
+        eprintln!("y={tile_y} x={pos_x} width={width} {bottom_inner_x},{bottom_inner_y} -- {top_inner_x},{top_inner_y} {winding:?}");
+
         self.tiles.push(Tile {
             pos: Point2::new(pos_x, tile_y),
             width,
@@ -191,7 +193,7 @@ impl StripRasterizer {
                 top.x - tile_to_coord(tile_x),
                 end_inner_y,
                 winding,
-                false,
+                end_inner_y16 == 4,
             );
             return;
         } else {
@@ -305,8 +307,8 @@ impl AlphaBuffer {
     }
 
     fn as_u8(&self) -> &[u8] {
-        let len = self.0.len();
-        unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u8>(), len << 3) }
+        let len8 = self.0.len();
+        unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u8>(), len8 << 3) }
     }
 
     fn get_subslice_mut(&mut self, start8: usize, end8: usize) -> &mut [u8] {
@@ -333,23 +335,24 @@ impl Strips {
         }
     }
 
-    pub fn paint_to(&self, buffer: &mut [u8], stride: usize) {
+    pub fn paint_to(&self, buffer: &mut [u8], width: usize, height: usize, stride: usize) {
         for op in self.paint_iter() {
+            let pos = op.pos();
+            let out_pos = Point2::new(usize::from(pos.x) * 4, usize::from(pos.y) * 4);
+            if out_pos.y >= height || out_pos.x >= width {
+                continue;
+            }
+
             match op {
                 StripPaintOp::Copy(op) => {
-                    let pos = op.pos;
-                    let width = usize::from(op.width());
+                    let op_width = usize::from(op.width());
+                    let copy_width = op_width.min(width - out_pos.x);
+
                     let mut src = op.buffer;
-                    let mut rows = match buffer
-                        .get_mut(usize::from(pos.y) * 4 * stride + usize::from(pos.x) * 4..)
-                    {
-                        Some(rows) => rows,
-                        None => continue,
-                    };
+                    let mut rows = &mut buffer[out_pos.y * stride + out_pos.x..];
                     while !rows.is_empty() && !src.is_empty() {
-                        let chunk = rows.len().min(width);
-                        rows[..chunk].copy_from_slice(&src[..chunk]);
-                        src = &src[width..];
+                        rows[..copy_width].copy_from_slice(&src[..copy_width]);
+                        src = &src[op_width..];
                         rows = match rows.get_mut(stride..) {
                             Some(next_row) => next_row,
                             None => break,
@@ -357,15 +360,13 @@ impl Strips {
                     }
                 }
                 StripPaintOp::Fill(op) => {
-                    let pos = op.pos;
-                    let mut rows =
-                        &mut buffer[usize::from(pos.y) * 4 * stride + usize::from(pos.x) * 4..];
-                    for _ in 0..4 {
-                        rows[..usize::from(op.width) * 4].fill(u8::MAX);
-                        rows = match rows.get_mut(stride..) {
-                            Some(next_row) => next_row,
-                            None => break,
-                        }
+                    let fill_height = 4.min(height - out_pos.y);
+                    let fill_width = (usize::from(op.width) * 4).min(width - out_pos.x);
+
+                    let mut rows = &mut buffer[out_pos.y * stride + out_pos.x..];
+                    for _ in 0..fill_height {
+                        rows[..fill_width].fill(u8::MAX);
+                        rows = &mut rows[stride..]
                     }
                 }
             }
@@ -384,6 +385,16 @@ pub struct StripPaintIter<'a> {
 pub enum StripPaintOp<'a> {
     Copy(StripCopyOp<'a>),
     Fill(StripFillOp),
+}
+
+impl StripPaintOp<'_> {
+    #[inline]
+    fn pos(&self) -> Point2<u16> {
+        match self {
+            Self::Copy(x) => x.pos,
+            Self::Fill(x) => x.pos,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -471,13 +482,9 @@ impl StripRasterizer {
                 //       construction.
                 strip_winding = 0;
             }
+
             let strip_tiles = &self.tiles[start..end];
             let strip_width = strip_end - strip_pos.x;
-            result.strips.push(Strip {
-                pos: strip_pos,
-                width: strip_width,
-                fill_previous: strip_winding != 0,
-            });
             let strip_buffer_start8 = result.alpha_buffer.len8();
             let strip_buffer_end8 = strip_buffer_start8 + 2 * usize::from(strip_width);
             result.alpha_buffer.resize(strip_buffer_end8);
@@ -493,6 +500,12 @@ impl StripRasterizer {
                     buffer,
                 );
             }
+
+            result.strips.push(Strip {
+                pos: strip_pos,
+                width: strip_width,
+                fill_previous: strip_winding != 0,
+            });
 
             for tile in strip_tiles {
                 if tile.intersects_top {
@@ -594,7 +607,12 @@ mod test {
 
         let strips = rasterizer.rasterize();
         let mut coverage = vec![0; size.x as usize * size.y as usize];
-        strips.paint_to(&mut coverage, size.x as usize);
+        strips.paint_to(
+            &mut coverage,
+            size.x as usize,
+            size.y as usize,
+            size.x as usize,
+        );
 
         compare(size, &coverage, expected);
     }
@@ -861,6 +879,28 @@ mod test {
                 #move_to (8.0, 16.0);
                 line_to (16.0, 0.0);
                 line_to (0.0, 4.0);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn half_capital_a() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (4.0, 14.0);
+                line_to (20.0, 14.0);
+                line_to (20.0, 6.0);
+                line_to (4.0, 6.0);
+
+                // #move_to (0.0, 0.0);
+                // line_to (8, 20);
+                // line_to (12, 20);
+                // line_to (4, 0);
             ],
             EXPECTED,
         );

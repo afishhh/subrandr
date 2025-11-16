@@ -38,6 +38,13 @@ impl super::TileRasterizer for GenericTileRasterizer {
         for (&a, b) in std::iter::zip(self.coverage_scratch_buffer.iter(), buffer.iter_mut()) {
             *b = coverage_to_alpha(a);
         }
+
+        for y in (0..4).rev() {
+            for x in 0..width {
+                eprint!("{:02X} ", buffer[y * width + x]);
+            }
+            eprintln!();
+        }
     }
 }
 
@@ -49,6 +56,7 @@ impl GenericTileRasterizer {
 
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
+        eprintln!("{bottom:?} -> {top:?} {:?}", tile.winding);
 
         let sign = I16Dot16::new(tile.winding as i32);
         let dx = (top.x - bottom.x) / (top.y - bottom.y);
@@ -92,7 +100,7 @@ impl GenericTileRasterizer {
         height: I16Dot16,
         sign: I16Dot16,
     ) {
-        let row = &mut self.coverage_scratch_buffer[usize::from(y) * width..];
+        let row = &mut self.coverage_scratch_buffer[usize::from(y) * width..][..width];
         let (lx, rx) = if bx < tx { (bx, tx) } else { (tx, bx) };
         let mut current_xi = lx.floor_to_inner() as usize;
         let mut current_x = lx.floor();

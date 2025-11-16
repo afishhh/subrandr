@@ -18,7 +18,6 @@ struct Tile {
     width: u16,
     line: TileLine,
     winding: Winding,
-    intersects_top: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,8 +72,6 @@ impl StripRasterizer {
             };
 
             self.add_tiles(end, start, winding);
-        } else if start != end {
-            self.add_horizontal_tiles(start.x, end.x, end.y)
         }
     }
 
@@ -133,7 +130,6 @@ impl StripRasterizer {
         mut top_inner_x: I16Dot16,
         top_inner_y: U2Dot14,
         winding: Winding,
-        intersects_top: bool,
     ) {
         debug_assert!(bottom_inner_y <= top_inner_y);
 
@@ -158,7 +154,6 @@ impl StripRasterizer {
                 top_y: top_inner_y,
             },
             winding,
-            intersects_top,
         });
     }
 
@@ -193,7 +188,6 @@ impl StripRasterizer {
                 top.x - tile_to_coord(tile_x),
                 end_inner_y,
                 winding,
-                end_inner_y16 == 4,
             );
             return;
         } else {
@@ -209,7 +203,6 @@ impl StripRasterizer {
                 next_x,
                 U2Dot14::MAX,
                 winding,
-                true,
             );
             tile_x = next_tile_x;
             current_inner_x = next_inner_x;
@@ -230,7 +223,6 @@ impl StripRasterizer {
                 next_x,
                 U2Dot14::MAX,
                 winding,
-                true,
             );
 
             tile_x = next_tile_x;
@@ -248,38 +240,6 @@ impl StripRasterizer {
             top.x - tile_to_coord(tile_x),
             end_inner_y,
             winding,
-            end_inner_y16 == 4,
-        );
-    }
-
-    fn add_horizontal_tiles(&mut self, mut start_x: I16Dot16, mut end_x: I16Dot16, y: I16Dot16) {
-        if y < 0 || y.fract() == 0 {
-            return;
-        }
-        if start_x > end_x {
-            std::mem::swap(&mut start_x, &mut end_x)
-        }
-        if start_x < 0 {
-            start_x = I16Dot16::ZERO;
-        }
-        if start_x > end_x {
-            return;
-        }
-
-        let tile_y = (y.floor_to_inner() as u32 >> 2) as u16;
-        let tile_x = (start_x.floor_to_inner() as u32 >> 2) as u16;
-        let end_tile_x = (end_x.floor_to_inner() as u32 >> 2) as u16;
-
-        self.add_tile(
-            tile_x,
-            end_tile_x,
-            tile_y,
-            I16Dot16::ZERO,
-            U2Dot14::ZERO,
-            I16Dot16::ZERO,
-            U2Dot14::ZERO,
-            Winding::Clockwise,
-            false,
         );
     }
 }
@@ -324,7 +284,7 @@ impl AlphaBuffer {
 struct Strip {
     pos: Point2<u16>,
     width: u16,
-    fill_previous: bool,
+    fill_previous: [u8; 4],
 }
 
 impl Strips {
@@ -365,8 +325,8 @@ impl Strips {
                     let fill_width = (usize::from(op.width) * 4).min(width - out_pos.x);
 
                     let mut rows = &mut buffer[out_pos.y * stride + out_pos.x..];
-                    for _ in 0..fill_height {
-                        rows[..fill_width].fill(u8::MAX);
+                    for y in 0..fill_height {
+                        rows[..fill_width].fill(op.alpha[y]);
                         rows = match rows.get_mut(stride..) {
                             Some(next_row) => next_row,
                             None => break,
@@ -423,6 +383,7 @@ impl StripCopyOp<'_> {
 pub struct StripFillOp {
     pub pos: Point2<u16>,
     pub width: u16,
+    pub alpha: [u8; 4],
 }
 
 impl<'a> Iterator for StripPaintIter<'a> {
@@ -433,10 +394,11 @@ impl<'a> Iterator for StripPaintIter<'a> {
 
         let last_x = self.last_x;
         self.last_x = next.pos.x + next.width;
-        if last_x < next.pos.x && next.fill_previous {
+        if last_x < next.pos.x && next.fill_previous != [0; 4] {
             return Some(StripPaintOp::Fill(StripFillOp {
                 pos: Point2::new(last_x, next.pos.y),
                 width: next.pos.x - last_x,
+                alpha: next.fill_previous,
             }));
         }
 
@@ -466,7 +428,7 @@ impl StripRasterizer {
 
         let mut last_y = 0;
         let mut start = 0;
-        let mut strip_winding = 0;
+        let mut strip_winding = [I16Dot16::ZERO; 4];
         while start < self.tiles.len() {
             let strip_pos = self.tiles[start].pos;
             let mut strip_end = strip_pos.x + self.tiles[start].width;
@@ -481,17 +443,14 @@ impl StripRasterizer {
             }
 
             if last_y != strip_pos.y {
-                // NOTE: This should only happen if an invalid outline is provided,
-                //       but let's safeguard ourselves from a panic in paint op
-                //       construction.
-                strip_winding = 0;
+                strip_winding = [I16Dot16::ZERO; 4];
             }
 
             let strip_width = strip_end - strip_pos.x;
             result.strips.push(Strip {
                 pos: strip_pos,
                 width: strip_width,
-                fill_previous: strip_winding != 0,
+                fill_previous: strip_winding.map(tile::coverage_to_alpha),
             });
 
             let strip_tiles = &self.tiles[start..end];
@@ -502,19 +461,13 @@ impl StripRasterizer {
                         self.tile_rasterizer.rasterize(
                             strip_pos.x,
                             strip_tiles,
-                            I16Dot16::new(strip_winding),
+                            &mut strip_winding,
                             std::ptr::slice_from_raw_parts_mut(
                                 buffer,
                                 16 * usize::from(strip_width),
                             ),
                         );
                     });
-            }
-
-            for tile in strip_tiles {
-                if tile.intersects_top {
-                    strip_winding += tile.winding as i32;
-                }
             }
 
             last_y = strip_pos.y;
@@ -2800,27 +2753,27 @@ mod test {
         std::hint::black_box(spans);
     }
 
-    const SCALE: f32 = 1.0;
+    const SCALE: f32 = 100.0;
 
     extern crate test;
     #[bench]
     fn xda(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_glyph(&SAI2, SCALE);
+            bench_outline_glyph(&SAI, SCALE);
         });
     }
 
     #[bench]
     fn xds_native(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_strip(&SAI2, SCALE);
+            bench_outline_strip(&SAI, SCALE);
         });
     }
 
     #[bench]
     fn xds_generic(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_strip2(&SAI2, SCALE);
+            bench_outline_strip2(&SAI, SCALE);
         });
     }
 }

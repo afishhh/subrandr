@@ -21,19 +21,30 @@ impl super::TileRasterizer for GenericTileRasterizer {
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        initial_winding: I16Dot16,
+        initial_winding: &mut [I16Dot16; 4],
         alpha_output: *mut [MaybeUninit<u8>],
     ) {
         let width = alpha_output.len() / 4;
         self.coverage_scratch_buffer.clear();
         self.coverage_scratch_buffer
-            .resize(alpha_output.len(), initial_winding);
+            .reserve_exact(alpha_output.len());
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.coverage_scratch_buffer
+                    .as_mut_ptr()
+                    .cast::<[I16Dot16; 4]>(),
+                width,
+            )
+            .fill(*initial_winding);
+        }
+        self.coverage_scratch_buffer.set_len(alpha_output.len());
 
         for tile in tiles {
             self.rasterize_tile(
                 width,
                 I16Dot16::new(4 * i32::from(tile.pos.x - strip_x)),
                 tile,
+                initial_winding,
             );
         }
 
@@ -53,7 +64,13 @@ impl super::TileRasterizer for GenericTileRasterizer {
 }
 
 impl GenericTileRasterizer {
-    fn rasterize_tile(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
+    fn rasterize_tile(
+        &mut self,
+        width: usize,
+        x: I16Dot16,
+        tile: &Tile,
+        initial_winding: &mut [I16Dot16; 4],
+    ) {
         if tile.line.bottom_y == tile.line.top_y {
             return;
         }
@@ -61,36 +78,35 @@ impl GenericTileRasterizer {
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
 
-        let sign = I16Dot16::new(tile.winding as i32);
+        let sign = tile.winding as i32;
         let dx = (top.x - bottom.x) / (top.y - bottom.y);
         let end_row = tile.line.top_y.floor_to_inner();
         let mut current_row = tile.line.bottom_y.floor_to_inner();
         let mut current_x = bottom.x;
 
         if end_row == current_row {
-            self.rasterize_row(current_row, width, top.x, bottom.x, top.y - bottom.y, sign);
+            let h = top.y - bottom.y;
+            self.rasterize_row(current_row, width, top.x, bottom.x, h, sign);
+            initial_winding[usize::from(current_row)] += h * sign;
         } else {
             let initial_height = I16Dot16::ONE - bottom.y.fract();
             let next_x = current_x + dx * initial_height;
             self.rasterize_row(current_row, width, next_x, current_x, initial_height, sign);
+            initial_winding[usize::from(current_row)] += initial_height * sign;
             current_row += 1;
             current_x = next_x;
 
             while current_row < end_row {
                 let next_x = current_x + dx;
                 self.rasterize_row(current_row, width, next_x, current_x, I16Dot16::ONE, sign);
+                initial_winding[usize::from(current_row)] += sign;
                 current_row += 1;
                 current_x = next_x;
             }
 
-            self.rasterize_row(
-                current_row,
-                width,
-                top.x,
-                current_x,
-                top.y - I16Dot16::new(current_row.into()),
-                sign,
-            );
+            let final_height = top.y - I16Dot16::new(current_row.into());
+            self.rasterize_row(current_row, width, top.x, current_x, final_height, sign);
+            initial_winding[usize::from(current_row)] += final_height * sign;
         }
     }
 
@@ -101,7 +117,7 @@ impl GenericTileRasterizer {
         tx: I16Dot16,
         bx: I16Dot16,
         height: I16Dot16,
-        sign: I16Dot16,
+        sign: i32,
     ) {
         let row = &mut self.coverage_scratch_buffer[usize::from(y) * width..][..width];
         let (lx, rx) = if bx < tx { (bx, tx) } else { (tx, bx) };

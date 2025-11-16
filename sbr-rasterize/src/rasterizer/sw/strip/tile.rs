@@ -15,12 +15,12 @@ pub trait TileRasterizer {
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        initial_winding: I16Dot16,
+        strip_winding: &mut [I16Dot16; 4],
         alpha_output: *mut [MaybeUninit<u8>],
     );
 }
 
-fn coverage_to_alpha(value: I16Dot16) -> u8 {
+pub fn coverage_to_alpha(value: I16Dot16) -> u8 {
     let value = value.unsigned_abs();
     if value >= 1 {
         u8::MAX

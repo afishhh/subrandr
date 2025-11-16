@@ -26,6 +26,9 @@ macro_rules! define_simple_fixed_operator {
                     [$ftype [] [] Self::new],
                     $($tt)*
                 );
+                define_simple_fixed_operator!($ftype, @f32_conversion $($tt)*);
+            };
+            ($ftype: ty, @f32_conversion $($tt: tt)*) => {
                 define_simple_fixed_operator!(
                     $ftype,
                     [f32 [] [] Self::from_f32],
@@ -153,6 +156,20 @@ macro_rules! define_fixed_for_type {
             }
         }
 
+        impl<const P: u32> Mul<$type> for Fixed<P, $type> {
+            type Output = Self;
+
+            fn mul(self, rhs: $type) -> Self::Output {
+                Self(self.0 * rhs)
+            }
+        }
+
+        impl<const P: u32> MulAssign<$type> for Fixed<P, $type> {
+            fn mul_assign(&mut self, rhs: $type) {
+                *self = *self * rhs;
+            }
+        }
+
         impl<const P: u32> Div for Fixed<P, $type> {
             type Output = Self;
 
@@ -215,7 +232,7 @@ macro_rules! define_fixed_for_type {
         );
 
         define_simple_fixed_operator!(
-            $type, @conversions Mul, mul, *, MulAssign, mul_assign, *=
+            $type, @f32_conversion Mul, mul, *, MulAssign, mul_assign, *=
         );
 
         impl<const P: u32> PartialOrd<$type> for Fixed<P, $type> {

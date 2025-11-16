@@ -25,7 +25,7 @@ impl super::TileRasterizer for Avx2TileRasterizer {
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        initial_winding: I16Dot16,
+        initial_winding: &mut [I16Dot16; 4],
         buffer: *mut [MaybeUninit<u8>],
     ) {
         unsafe { self.rasterize_impl(strip_x, tiles, initial_winding, buffer) }
@@ -223,7 +223,7 @@ impl Avx2TileRasterizer {
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
-        initial_winding: I16Dot16,
+        initial_winding: &mut [I16Dot16; 4],
         buffer: *mut [MaybeUninit<u8>],
     ) {
         let width = buffer.len() / 4;
@@ -232,7 +232,16 @@ impl Avx2TileRasterizer {
         self.coverage_scratch_buffer.clear();
         self.coverage_scratch_buffer.resize(
             width,
-            AlignedM256(_mm256_set1_epi32(initial_winding.into_raw())),
+            AlignedM256(_mm256_set_epi32(
+                initial_winding[3].into_raw(),
+                initial_winding[2].into_raw(),
+                initial_winding[1].into_raw(),
+                initial_winding[0].into_raw(),
+                initial_winding[3].into_raw(),
+                initial_winding[2].into_raw(),
+                initial_winding[1].into_raw(),
+                initial_winding[0].into_raw(),
+            )),
         );
 
         for tile in tiles {
@@ -240,14 +249,15 @@ impl Avx2TileRasterizer {
                 width,
                 I16Dot16::new(4 * i32::from(tile.pos.x - strip_x)),
                 tile,
+                initial_winding,
             );
 
-            let coverage = unsafe {
-                std::slice::from_raw_parts(
-                    self.coverage_scratch_buffer.as_ptr().cast::<I16Dot16>(),
-                    buffer.len(),
-                )
-            };
+            // let coverage = unsafe {
+            //     std::slice::from_raw_parts(
+            //         self.coverage_scratch_buffer.as_ptr().cast::<I16Dot16>(),
+            //         buffer.len(),
+            //     )
+            // };
 
             // for y in (0..4).rev() {
             //     for x in 0..width {
@@ -291,7 +301,13 @@ impl Avx2TileRasterizer {
     // FIXME: This is a giant mess.
     // FIXME: This still seems to have a tiny bit more innacuraccy than the generic one?
     #[target_feature(enable = "avx2")]
-    fn rasterize_line(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
+    fn rasterize_line(
+        &mut self,
+        width: usize,
+        x: I16Dot16,
+        tile: &Tile,
+        initial_winding: &mut [I16Dot16; 4],
+    ) {
         if tile.line.bottom_y == tile.line.top_y {
             return;
         }
@@ -323,6 +339,11 @@ impl Avx2TileRasterizer {
 
             result
         };
+
+        initial_winding[3] += right_height[3] * sign;
+        initial_winding[2] += right_height[2] * sign;
+        initial_winding[1] += right_height[1] * sign;
+        initial_winding[0] += right_height[0] * sign;
 
         let v128signed_right_height = _mm_set_epi32(
             right_height[3].into_raw() * sign,

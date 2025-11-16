@@ -887,13 +887,22 @@ impl Renderer<'_> {
                     };
                     rasterizer.blit(target, pos.x, pos.y, &tex, BGRA8::GREEN);
                 }
-                StripPaintOp::Fill(StripFillOp { pos: _, width }) => {
+                StripPaintOp::Fill(StripFillOp {
+                    pos: _,
+                    width,
+                    alpha,
+                }) => {
                     let posf = Point2f::new(pos.x as f32, pos.y as f32);
-                    rasterizer.fill_axis_aligned_rect(
-                        target,
-                        Rect2f::new(posf, posf + Vec2::new(width as f32 * 4., 4.0)),
-                        BGRA8::new(255, 0, 0, 255),
-                    );
+                    for y in 0..4 {
+                        rasterizer.fill_axis_aligned_rect(
+                            target,
+                            Rect2f::new(
+                                posf + Vec2::new(0.0, y as f32),
+                                posf + Vec2::new(width as f32 * 4., y as f32 + 1.0),
+                            ),
+                            BGRA8::new(255, 0, 0, alpha[y]),
+                        );
+                    }
                 }
             }
         }

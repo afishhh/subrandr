@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use util::math::{I16Dot16, Point2};
 
 use super::{coverage_to_alpha, to_op_fixed, Tile};
@@ -20,12 +22,12 @@ impl super::TileRasterizer for GenericTileRasterizer {
         strip_x: u16,
         tiles: &[Tile],
         initial_winding: I16Dot16,
-        buffer: &mut [u8],
+        alpha_output: *mut [MaybeUninit<u8>],
     ) {
-        let width = buffer.len() / 4;
+        let width = alpha_output.len() / 4;
         self.coverage_scratch_buffer.clear();
         self.coverage_scratch_buffer
-            .resize(buffer.len(), initial_winding);
+            .resize(alpha_output.len(), initial_winding);
 
         for tile in tiles {
             self.rasterize_tile(
@@ -35,13 +37,15 @@ impl super::TileRasterizer for GenericTileRasterizer {
             );
         }
 
-        for (&a, b) in std::iter::zip(self.coverage_scratch_buffer.iter(), buffer.iter_mut()) {
-            *b = coverage_to_alpha(a);
+        for (&a, b) in std::iter::zip(self.coverage_scratch_buffer.iter(), &mut *alpha_output) {
+            b.write(coverage_to_alpha(a));
         }
 
         // for y in (0..4).rev() {
         //     for x in 0..width {
-        //         eprint!("{:02X} ", buffer[y * width + x]);
+        //         eprint!("{:02X} ", unsafe {
+        //             (&*alpha_output)[y * width + x].assume_init()
+        //         });
         //     }
         //     eprintln!();
         // }

@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use util::math::{Fixed, FloatOutlineIterExt, I16Dot16, OutlineEvent, Point2, Point2f};
 
 mod tile;
@@ -296,23 +298,24 @@ impl AlphaBuffer {
         Self(Vec::new())
     }
 
-    fn len8(&self) -> usize {
-        self.0.len()
-    }
-
-    fn resize(&mut self, len8: usize) {
-        self.0.resize(len8, 0);
-    }
-
     fn as_u8(&self) -> &[u8] {
         let len8 = self.0.len();
         unsafe { std::slice::from_raw_parts(self.0.as_ptr().cast::<u8>(), len8 << 3) }
     }
 
-    fn get_subslice_mut(&mut self, start8: usize, end8: usize) -> &mut [u8] {
-        let slice = &mut self.0[start8..end8];
+    unsafe fn push_strip(&mut self, strip_width: usize, init: impl FnOnce(*mut MaybeUninit<u8>)) {
+        let start = self.0.len();
+        let len = 2 * strip_width;
+        let end = start + len;
+        // We allocate a bit more than necessary here so that `TileRasterizer` implementations
+        // don't have to worry about out-of-bounds writes into the buffer.
+        // For example this allows the AVX2 implementation run the transpose using exclusively
+        // AVX 256-bit operations.
+        self.0.reserve(len.next_multiple_of(2));
         unsafe {
-            std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<u8>(), (end8 - start8) << 3)
+            let ptr = self.0.spare_capacity_mut().as_mut_ptr();
+            init(ptr.cast());
+            self.0.set_len(end);
         }
     }
 }
@@ -364,7 +367,10 @@ impl Strips {
                     let mut rows = &mut buffer[out_pos.y * stride + out_pos.x..];
                     for _ in 0..fill_height {
                         rows[..fill_width].fill(u8::MAX);
-                        rows = &mut rows[stride..]
+                        rows = match rows.get_mut(stride..) {
+                            Some(next_row) => next_row,
+                            None => break,
+                        }
                     }
                 }
             }
@@ -481,29 +487,29 @@ impl StripRasterizer {
                 strip_winding = 0;
             }
 
-            let strip_tiles = &self.tiles[start..end];
             let strip_width = strip_end - strip_pos.x;
-            let strip_buffer_start8 = result.alpha_buffer.len8();
-            let strip_buffer_end8 = strip_buffer_start8 + 2 * usize::from(strip_width);
-            result.alpha_buffer.resize(strip_buffer_end8);
-            let buffer = result
-                .alpha_buffer
-                .get_subslice_mut(strip_buffer_start8, strip_buffer_end8);
-
-            unsafe {
-                self.tile_rasterizer.rasterize(
-                    strip_pos.x,
-                    strip_tiles,
-                    I16Dot16::new(strip_winding),
-                    buffer,
-                );
-            }
-
             result.strips.push(Strip {
                 pos: strip_pos,
                 width: strip_width,
                 fill_previous: strip_winding != 0,
             });
+
+            let strip_tiles = &self.tiles[start..end];
+            unsafe {
+                result
+                    .alpha_buffer
+                    .push_strip(usize::from(strip_width), |buffer| {
+                        self.tile_rasterizer.rasterize(
+                            strip_pos.x,
+                            strip_tiles,
+                            I16Dot16::new(strip_winding),
+                            std::ptr::slice_from_raw_parts_mut(
+                                buffer,
+                                16 * usize::from(strip_width),
+                            ),
+                        );
+                    });
+            }
 
             for tile in strip_tiles {
                 if tile.intersects_top {

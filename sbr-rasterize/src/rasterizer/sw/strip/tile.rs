@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use util::math::I16Dot16;
 
 use super::{Tile, U2Dot14};
@@ -6,12 +8,15 @@ pub trait TileRasterizer {
     /// # Safety
     ///
     /// `buffer` must be aligned to an 8-byte boundary and its length must be a multiple of 16.
+    /// Additionally, if `buffer`'s length is not a multiple of 32, then at least 16 extra byte
+    /// must be allocated and writeable after it ends.
+    // TODO: ^ reword
     unsafe fn rasterize(
         &mut self,
         strip_x: u16,
         tiles: &[Tile],
         initial_winding: I16Dot16,
-        buffer: &mut [u8],
+        alpha_output: *mut [MaybeUninit<u8>],
     );
 }
 

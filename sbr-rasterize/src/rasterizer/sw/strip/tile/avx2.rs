@@ -1,8 +1,8 @@
-use std::arch::x86_64::*;
+use std::{arch::x86_64::*, mem::MaybeUninit};
 
 use util::math::{I16Dot16, Point2};
 
-use super::{coverage_to_alpha, to_op_fixed, Tile};
+use super::{to_op_fixed, Tile};
 
 pub struct Avx2TileRasterizer {
     coverage_scratch_buffer: Vec<AlignedM256>,
@@ -26,7 +26,7 @@ impl super::TileRasterizer for Avx2TileRasterizer {
         strip_x: u16,
         tiles: &[Tile],
         initial_winding: I16Dot16,
-        buffer: &mut [u8],
+        buffer: *mut [MaybeUninit<u8>],
     ) {
         unsafe { self.rasterize_impl(strip_x, tiles, initial_winding, buffer) }
     }
@@ -224,7 +224,7 @@ impl Avx2TileRasterizer {
         strip_x: u16,
         tiles: &[Tile],
         initial_winding: I16Dot16,
-        buffer: &mut [u8],
+        buffer: *mut [MaybeUninit<u8>],
     ) {
         let width = buffer.len() / 4;
         unsafe { std::hint::assert_unchecked(width.is_multiple_of(4)) };
@@ -266,30 +266,16 @@ impl Avx2TileRasterizer {
 
         let input = coverage.as_ptr().cast::<i32>();
         let offsets = _mm256_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28);
-        if width >= 8 {
-            for y in 0..4 {
-                unsafe {
-                    let mut input = input.add(y);
-                    let mut output = buffer.as_mut_ptr().add(y * width).cast::<u64>();
-                    for _ in 0..width / 8 {
-                        output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
-                            input, offsets,
-                        )));
-                        input = input.add(32);
-                        output = output.add(1);
-                    }
-                }
-            }
-        }
-
-        if width & 7 != 0 {
-            for y in 0..4 {
-                for x in width & !7..width {
-                    let bi = y * width + x;
-                    unsafe {
-                        *buffer.get_unchecked_mut(bi) =
-                            coverage_to_alpha(*coverage.get_unchecked(x * 4 + y));
-                    }
+        for y in 0..4 {
+            unsafe {
+                let mut input = input.add(y);
+                let mut output = buffer.cast::<u8>().add(y * width).cast::<u64>();
+                for _ in 0..width.div_ceil(8) {
+                    output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
+                        input, offsets,
+                    )));
+                    input = input.add(32);
+                    output = output.add(1);
                 }
             }
         }

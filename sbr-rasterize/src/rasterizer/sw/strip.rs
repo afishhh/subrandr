@@ -146,8 +146,6 @@ impl StripRasterizer {
             (end_tile_x, tile_x - end_tile_x + 1)
         };
 
-        eprintln!("y={tile_y} x={pos_x} width={width} {bottom_inner_x},{bottom_inner_y} -- {top_inner_x},{top_inner_y} {winding:?}");
-
         self.tiles.push(Tile {
             pos: Point2::new(pos_x, tile_y),
             width,

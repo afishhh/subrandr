@@ -36,10 +36,10 @@ mod generic;
 pub use generic::GenericTileRasterizer;
 
 pub fn init_tile_rasterizer() -> Box<dyn TileRasterizer> {
-    // #[cfg(target_arch = "x86_64")]
-    // if is_x86_feature_detected!("avx2") {
-    //     return Box::new(Avx2TileRasterizer::new());
-    // }
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("avx2") {
+        return Box::new(Avx2TileRasterizer::new());
+    }
 
     Box::new(GenericTileRasterizer::new())
 }

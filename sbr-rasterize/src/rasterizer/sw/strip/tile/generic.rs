@@ -39,12 +39,12 @@ impl super::TileRasterizer for GenericTileRasterizer {
             *b = coverage_to_alpha(a);
         }
 
-        for y in (0..4).rev() {
-            for x in 0..width {
-                eprint!("{:02X} ", buffer[y * width + x]);
-            }
-            eprintln!();
-        }
+        // for y in (0..4).rev() {
+        //     for x in 0..width {
+        //         eprint!("{:02X} ", buffer[y * width + x]);
+        //     }
+        //     eprintln!();
+        // }
     }
 }
 
@@ -56,7 +56,6 @@ impl GenericTileRasterizer {
 
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
-        eprintln!("{bottom:?} -> {top:?} {:?}", tile.winding);
 
         let sign = I16Dot16::new(tile.winding as i32);
         let dx = (top.x - bottom.x) / (top.y - bottom.y);

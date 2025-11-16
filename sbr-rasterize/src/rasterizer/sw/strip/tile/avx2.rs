@@ -249,12 +249,12 @@ impl Avx2TileRasterizer {
                 )
             };
 
-            for y in (0..4).rev() {
-                for x in 0..width {
-                    eprint!("{:>6.2} ", coverage[x * 4 + y]);
-                }
-                eprintln!();
-            }
+            // for y in (0..4).rev() {
+            //     for x in 0..width {
+            //         eprint!("{:>6.2} ", coverage[x * 4 + y]);
+            //     }
+            //     eprintln!();
+            // }
         }
 
         let coverage = unsafe {
@@ -294,12 +294,12 @@ impl Avx2TileRasterizer {
             }
         }
 
-        for y in (0..4).rev() {
-            for x in 0..width {
-                eprint!("{:02X} ", buffer[y * width + x]);
-            }
-            eprintln!();
-        }
+        // for y in (0..4).rev() {
+        //     for x in 0..width {
+        //         eprint!("{:02X} ", buffer[y * width + x]);
+        //     }
+        //     eprintln!();
+        // }
     }
 
     // FIXME: This is a giant mess.
@@ -313,7 +313,7 @@ impl Avx2TileRasterizer {
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
         let sign = tile.winding as i32;
-        eprintln!("{bottom:?} -> {top:?} {:?}", tile.winding);
+        // eprintln!("{bottom:?} -> {top:?} {:?}", tile.winding);
 
         let start_row = tile.line.bottom_y.floor_to_inner();
         let end_row = (top.y.ceil_to_inner() - 1) as u16;
@@ -531,12 +531,12 @@ impl Avx2TileRasterizer {
             //       ^^^ what the fuck did I mean in this comment?
             // TODO: This still seems to have a tiny bit more innacuraccy than the generic one?
 
-            eprintln!("vbottom_y={:?}", DebugCells(vbottom_y));
-            eprintln!("vtop_y={:?}", DebugCells(vtop_y));
-            eprintln!("vleft_x={:?}", DebugCells(vleft_x));
-            eprintln!("vright_x={:?}", DebugCells(vright_x));
+            // eprintln!("vbottom_y={:?}", DebugCells(vbottom_y));
+            // eprintln!("vtop_y={:?}", DebugCells(vtop_y));
+            // eprintln!("vleft_x={:?}", DebugCells(vleft_x));
+            // eprintln!("vright_x={:?}", DebugCells(vright_x));
 
-            eprintln!();
+            // eprintln!();
 
             let mut current_px = start_px;
             while current_px < end_px {
@@ -549,9 +549,9 @@ impl Avx2TileRasterizer {
                     ),
                     vzeroes,
                 );
-                eprintln!("vwidth={:?}", DebugCells(vwidth));
-                eprintln!("vcurrent_y={:?}", DebugCells(vcurrent_y));
-                eprintln!("vnext_y={:?}", DebugCells(vnext_y));
+                // eprintln!("vwidth={:?}", DebugCells(vwidth));
+                // eprintln!("vcurrent_y={:?}", DebugCells(vcurrent_y));
+                // eprintln!("vnext_y={:?}", DebugCells(vnext_y));
 
                 let vinner_bottom = _mm256_max_epi32(vcurrent_y, vbottom_y);
                 let vtriangle_height = {
@@ -560,8 +560,8 @@ impl Avx2TileRasterizer {
                     _mm256_max_epi32(h, vzeroes)
                 };
                 let vbottom_height = _mm256_sub_epi32(vinner_bottom, vbottom_y);
-                eprintln!("vtriangle_height={:?}", DebugCells(vtriangle_height));
-                eprintln!("vbottom_height={:?}", DebugCells(vbottom_height));
+                // eprintln!("vtriangle_height={:?}", DebugCells(vtriangle_height));
+                // eprintln!("vbottom_height={:?}", DebugCells(vbottom_height));
                 let vleft_area = mm256_mul_16dot16(
                     _mm256_add_epi32(
                         vtriangle_height,
@@ -569,7 +569,7 @@ impl Avx2TileRasterizer {
                     ),
                     vwidth,
                 );
-                eprintln!("vleft_area={:?}", DebugCells(vleft_area));
+                // eprintln!("vleft_area={:?}", DebugCells(vleft_area));
 
                 let vright_area = {
                     let vright_width = _mm256_max_epi32(
@@ -578,10 +578,10 @@ impl Avx2TileRasterizer {
                     );
                     mm256_mul_16dot16(vright_width, vright_height)
                 };
-                eprintln!("vright_area={:?}", DebugCells(vright_area));
+                // eprintln!("vright_area={:?}", DebugCells(vright_area));
 
                 let vresult = _mm256_mullo_epi32(_mm256_add_epi32(vleft_area, vright_area), vsign);
-                eprintln!("vresult={:?}", DebugCells(vresult));
+                // eprintln!("vresult={:?}", DebugCells(vresult));
 
                 unsafe {
                     _mm256_storeu_si256(
@@ -596,7 +596,7 @@ impl Avx2TileRasterizer {
                 current_px += 2;
                 output = unsafe { output.add(2) };
 
-                eprintln!();
+                // eprintln!();
             }
         }
 

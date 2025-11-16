@@ -334,7 +334,7 @@ impl Avx2TileRasterizer {
         } else {
             (top, bottom)
         };
-        let start_px = left.x.floor_to_inner() as u16;
+        let mut start_px = left.x.floor_to_inner() as u16;
         let end_px = right.x.ceil_to_inner() as u16;
         let coverage_buffer = self.coverage_scratch_buffer.as_mut_ptr().cast::<__m128i>();
         let output_end = unsafe { coverage_buffer.add(width) };
@@ -444,6 +444,16 @@ impl Avx2TileRasterizer {
             let vsign = _mm256_set1_epi32(tile.winding as i32);
             let vdhhalf = _mm256_set1_epi32(dhhalf.into_raw());
 
+            let first_y = if start_px & 1 != 0 {
+                start_px -= 1;
+                output = unsafe { output.sub(1) };
+                bottom.y / 2 - dhhalf
+            } else {
+                bottom.y / 2
+            };
+            let second_y = first_y + (I16Dot16::ONE - left.x.fract()) * dhhalf;
+            let third_y = second_y + dhhalf;
+
             let mut vcurrent_px = _mm256_set_epi32(
                 i32::from(start_px + 1) << 16,
                 i32::from(start_px + 1) << 16,
@@ -454,9 +464,6 @@ impl Avx2TileRasterizer {
                 i32::from(start_px) << 16,
                 i32::from(start_px) << 16,
             );
-            let first_y = bottom.y / 2;
-            let second_y = first_y + (I16Dot16::ONE - left.x.fract()) * dhhalf;
-            let third_y = second_y + dhhalf;
             let mut vcurrent_y = _mm256_set_epi32(
                 second_y.into_raw(),
                 second_y.into_raw(),
@@ -568,9 +575,9 @@ impl Avx2TileRasterizer {
                 // eprintln!("vresult={:?}", DebugCells(vresult));
 
                 unsafe {
-                    _mm256_storeu_si256(
+                    _mm256_store_si256(
                         output.cast(),
-                        _mm256_add_epi32(_mm256_loadu_si256(output.cast()), vresult),
+                        _mm256_add_epi32(_mm256_load_si256(output.cast()), vresult),
                     )
                 };
 
@@ -615,9 +622,9 @@ impl Avx2TileRasterizer {
 
             while output < output_end {
                 unsafe {
-                    _mm256_storeu_si256(
+                    _mm256_store_si256(
                         output.cast(),
-                        _mm256_add_epi32(_mm256_loadu_si256(output.cast()), vsigned_right_height),
+                        _mm256_add_epi32(_mm256_load_si256(output.cast()), vsigned_right_height),
                     )
                 };
 

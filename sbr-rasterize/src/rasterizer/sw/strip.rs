@@ -2751,27 +2751,27 @@ mod test {
         std::hint::black_box(spans);
     }
 
-    const SCALE: f32 = 1.0;
+    const SCALE: f32 = 10.0;
 
     extern crate test;
     #[bench]
     fn xda(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_glyph(&SAI2, SCALE);
+            bench_outline_glyph(&SAI, SCALE);
         });
     }
 
     #[bench]
     fn xds_native(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_strip(&SAI2, SCALE);
+            bench_outline_strip(&SAI, SCALE);
         });
     }
 
     #[bench]
     fn xds_generic(bencher: &mut test::Bencher) {
         bencher.iter(|| {
-            bench_outline_strip2(&SAI2, SCALE);
+            bench_outline_strip2(&SAI, SCALE);
         });
     }
 }

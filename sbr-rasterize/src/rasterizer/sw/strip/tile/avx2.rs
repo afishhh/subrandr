@@ -153,53 +153,6 @@ fn mm256_coverage_to_alpha(coverage: __m256i) -> u64 {
     lo | (hi << 32)
 }
 
-// TODO: This function is only used on values in the range [0, 1].
-//       Can this operation be sped up? (or surrounding code
-//       changed to allow using mulhi_epu16?)
-#[target_feature(enable = "avx2")]
-#[inline]
-fn mm256_mul_16dot16(a: __m256i, b: __m256i) -> __m256i {
-    let lomul = _mm256_srli_epi64::<16>(_mm256_mul_epi32(a, b));
-    let himul = _mm256_slli_epi64::<16>(_mm256_mul_epi32(
-        _mm256_srli_epi64::<32>(a),
-        _mm256_srli_epi64::<32>(b),
-    ));
-    _mm256_blend_epi32::<0b10101010>(lomul, himul)
-}
-
-#[test]
-fn experiment2() {
-    unsafe {
-        eprintln!(
-            "{:?}",
-            DebugCells(mm256_mul_16dot16(
-                _mm256_setr_epi32(
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(0.5).into_raw(),
-                    I16Dot16::from_f32(0.25).into_raw(),
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(0.5).into_raw(),
-                    I16Dot16::from_f32(0.0).into_raw(),
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(0.33).into_raw(),
-                ),
-                _mm256_setr_epi32(
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(0.5).into_raw(),
-                    I16Dot16::from_f32(0.75).into_raw(),
-                    I16Dot16::from_f32(0.5).into_raw(),
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(1.0).into_raw(),
-                    I16Dot16::from_f32(0.0).into_raw(),
-                    I16Dot16::from_f32(0.33).into_raw(),
-                ),
-            ))
-        );
-
-        panic!();
-    }
-}
-
 #[test]
 fn experiment() {
     unsafe {
@@ -288,7 +241,6 @@ impl Avx2TileRasterizer {
     // FIXME: This is a giant mess.
     // FIXME: This still seems to have a tiny bit more innacuraccy than the generic one?
     #[target_feature(enable = "avx2")]
-    #[inline(never)]
     fn rasterize_line(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
         if tile.line.bottom_y == tile.line.top_y {
             return;
@@ -322,25 +274,24 @@ impl Avx2TileRasterizer {
             result
         };
 
-        let v128signed_right_height = _mm_set_epi32(
-            right_height[3].into_raw() * sign,
-            right_height[2].into_raw() * sign,
-            right_height[1].into_raw() * sign,
-            right_height[0].into_raw() * sign,
-        );
-
         let (left, right) = if bottom.x < top.x {
             (bottom, top)
         } else {
             (top, bottom)
         };
         let mut start_px = left.x.floor_to_inner() as u16;
-        let end_px = right.x.ceil_to_inner() as u16;
         let coverage_buffer = self.coverage_scratch_buffer.as_mut_ptr().cast::<__m128i>();
         let output_end = unsafe { coverage_buffer.add(width) };
         let mut output = unsafe { coverage_buffer.add(usize::from(start_px)) };
+        let vsigned_right_height;
 
         if top.x == bottom.x {
+            let v128signed_right_height = _mm_set_epi32(
+                right_height[3].into_raw() * sign,
+                right_height[2].into_raw() * sign,
+                right_height[1].into_raw() * sign,
+                right_height[0].into_raw() * sign,
+            );
             let initial_width = I16Dot16::ONE - left.x.fract();
             if initial_width != I16Dot16::ONE {
                 let vresult = _mm_srai_epi32::<16>(_mm_mullo_epi32(
@@ -353,6 +304,18 @@ impl Avx2TileRasterizer {
                     output = output.add(1);
                 }
             }
+
+            if !output.cast::<__m256i>().is_aligned() {
+                unsafe {
+                    _mm_store_si128(
+                        output,
+                        _mm_add_epi32(_mm_load_si128(output), v128signed_right_height),
+                    )
+                };
+                output = unsafe { output.add(1) };
+            }
+
+            vsigned_right_height = _mm256_broadcastsi128_si256(v128signed_right_height);
         } else {
             let dy = (right.y - left.y) / (right.x - left.x);
             let dh = dy.abs();
@@ -439,7 +402,6 @@ impl Avx2TileRasterizer {
             };
 
             let dhhalf = dh / 2;
-            let vzeroes = _mm256_setzero_si256();
             let vfones = _mm256_set1_epi32(I16Dot16::ONE.into_raw());
             let vsign = _mm256_set1_epi32(tile.winding as i32);
             let vdhhalf = _mm256_set1_epi32(dhhalf.into_raw());
@@ -518,8 +480,6 @@ impl Avx2TileRasterizer {
                 right_height[0].into_raw(),
             );
 
-            // TODO: single pass here
-            //       ^^^ what the fuck did I mean in this comment?
             // TODO: This still seems to have a tiny bit more innacuraccy than the generic one?
 
             // eprintln!("vbottom_y={:?}", DebugCells(vbottom_y));
@@ -529,107 +489,135 @@ impl Avx2TileRasterizer {
 
             // eprintln!();
 
-            let mut current_px = start_px;
-            while current_px < end_px {
-                let vnext_px = _mm256_add_epi32(vcurrent_px, vfones);
-
-                let vwidth = _mm256_max_epi32(
-                    _mm256_sub_epi32(
-                        _mm256_min_epi32(vnext_px, vright_x),
-                        _mm256_max_epi32(vcurrent_px, vleft_x),
-                    ),
-                    vzeroes,
-                );
-                // eprintln!("vwidth={:?}", DebugCells(vwidth));
-                // eprintln!("vcurrent_y={:?}", DebugCells(vcurrent_y));
-                // eprintln!("vnext_y={:?}", DebugCells(vnext_y));
-
-                let vinner_bottom = _mm256_max_epi32(vcurrent_y, vbottom_y);
-                let vtriangle_height = {
-                    let t = _mm256_min_epi32(vnext_y, vtop_y);
-                    let h = _mm256_sub_epi32(t, vinner_bottom);
-                    _mm256_max_epi32(h, vzeroes)
-                };
-                let vbottom_height = _mm256_sub_epi32(vinner_bottom, vbottom_y);
-                // eprintln!("vtriangle_height={:?}", DebugCells(vtriangle_height));
-                // eprintln!("vbottom_height={:?}", DebugCells(vbottom_height));
-                let vleft_area = mm256_mul_16dot16(
-                    _mm256_add_epi32(
-                        vtriangle_height,
-                        _mm256_min_epi32(_mm256_slli_epi32::<1>(vbottom_height), vfones),
-                    ),
-                    vwidth,
-                );
-                // eprintln!("vleft_area={:?}", DebugCells(vleft_area));
-
-                let vright_area = {
-                    let vright_width = _mm256_max_epi32(
-                        _mm256_min_epi32(_mm256_sub_epi32(vnext_px, vright_x), vfones),
-                        vzeroes,
-                    );
-                    mm256_mul_16dot16(vright_width, vright_height)
-                };
-                // eprintln!("vright_area={:?}", DebugCells(vright_area));
-
-                let vresult = _mm256_mullo_epi32(_mm256_add_epi32(vleft_area, vright_area), vsign);
-                // eprintln!("vresult={:?}", DebugCells(vresult));
-
-                unsafe {
-                    _mm256_store_si256(
-                        output.cast(),
-                        _mm256_add_epi32(_mm256_load_si256(output.cast()), vresult),
-                    )
-                };
-
-                vcurrent_y = _mm256_add_epi32(vnext_y, vdhhalf);
-                vnext_y = _mm256_add_epi32(vcurrent_y, vdhhalf);
-                vcurrent_px = _mm256_add_epi32(vnext_px, vfones);
-                current_px += 2;
-                output = unsafe { output.add(2) };
-
-                // eprintln!();
-            }
-        }
-
-        let vsigned_right_height =
-            _mm256_set_m128i(v128signed_right_height, v128signed_right_height);
-        self.current_winding = _mm256_add_epi32(self.current_winding, vsigned_right_height);
-        Self::fill_tail(
-            output,
-            output_end,
-            v128signed_right_height,
-            vsigned_right_height,
-        );
-    }
-
-    #[target_feature(enable = "avx2")]
-    fn fill_tail(
-        mut output: *mut __m128i,
-        output_end: *mut __m128i,
-        v128signed_right_height: __m128i,
-        vsigned_right_height: __m256i,
-    ) {
-        if output < output_end {
-            if !output.cast::<__m256i>().is_aligned() {
-                unsafe {
-                    _mm_store_si128(
-                        output,
-                        _mm_add_epi32(_mm_load_si128(output), v128signed_right_height),
-                    )
-                };
-                output = unsafe { output.add(1) };
-            }
-
             while output < output_end {
                 unsafe {
-                    _mm256_store_si256(
-                        output.cast(),
-                        _mm256_add_epi32(_mm256_load_si256(output.cast()), vsigned_right_height),
-                    )
-                };
+                    // ymm0 - vcurrent_px
+                    // ymm2 - vcurrent_y
+                    // ymm3 - vnext_y
+                    //
+                    // ymm15 - vfones
+                    // ymm14 - vdhhalf
+                    // ymm8 - vsign
+                    //
+                    // ymm13 - vright_x
+                    // ymm12 - vleft_x
+                    // ymm11 - vtop_y
+                    // ymm10 - vbottom_y
+                    // ymm9 - vright_height
+                    std::arch::asm! {
+                        "vpaddd ymm1, ymm0, ymm15",
+                        // ymm1 - vnext_px
 
-                output = unsafe { output.add(2) };
+                        "vpminsd ymm6, ymm1, ymm13",
+                        // ymm6 = min(vnext_px, vright_x)
+                        "vpmaxsd ymm7, ymm0, ymm12",
+                        // ymm7 = max(vcurrent_px, vleft_x)
+                        "vpsubd ymm5, ymm6, ymm7",
+
+                        "vpxor ymm0, ymm0, ymm0",
+                        // ymm0 = vzeroes
+                        "vpmaxsd ymm5, ymm5, ymm0",
+                        // ymm5 = vwidth
+
+                        "vpmaxsd ymm4, ymm2, ymm10",
+                        // ymm4 = vinner_bottom
+
+                        "vpminsd ymm6, ymm3, ymm11",
+                        "vpsubd ymm6, ymm6, ymm4",
+                        "vpmaxsd ymm7, ymm6, ymm0",
+                        // ymm7 = vtriangle_height
+
+                        "vpsubd ymm2, ymm4, ymm10",
+                        // ymm2 = vbottom_height
+
+                        // loaded here so the CPU has time to finish loading
+                        // it before the end of the loop
+                        "vmovdqa ymm4, [{output}]",
+                        // ymm4 = *output
+
+                        "vpslld ymm2, ymm2, 1",
+                        // TODO: swap these two instructions?
+                        "vpminsd ymm2, ymm2, ymm15",
+                        "vpaddd ymm7, ymm7, ymm2",
+                        // ymm7 = vleft_height
+
+                        "vpsrlq ymm6, ymm7, 32",
+                        "vpmuldq ymm7, ymm7, ymm5",
+                        "vpsrlq ymm5, ymm5, 32",
+                        "vpsrlq ymm7, ymm7, 16",
+                        // ymm7 = vleft_area lomul
+                        "vpmuldq ymm6, ymm6, ymm5",
+                        "vpsllq ymm6, ymm6, 16",
+                        // ymm6 = vleft_area himul
+                        "vpblendd ymm6, ymm7, ymm6, 0xAA",
+                        // ymm6 = vleft_area
+
+                        // ymm2 = scratch 3
+                        "vpsubd ymm2, ymm1, ymm13",
+                        "vpminsd ymm2, ymm2, ymm15",
+                        "vpmaxsd ymm2, ymm2, ymm0",
+                        // ymm2 = vright_width
+
+                        "vpmuldq ymm5, ymm2, ymm9",
+                        "vpsrlq ymm2, ymm2, 32",
+                        "vpsrlq ymm7, ymm9, 32",
+                        "vpmuldq ymm7, ymm7, ymm2",
+                        "vpsrlq ymm5, ymm5, 16",
+                        // ymm5 = vright_area lomul
+                        "vpsllq ymm7, ymm7, 16",
+                        // ymm7 = vright_area himul
+                        "vpblendd ymm5, ymm5, ymm7, 0xAA",
+                        // ymm5 = vright_area
+
+                        "vpaddd ymm6, ymm6, ymm5",
+                        "vpmulld ymm6, ymm6, ymm8",
+
+                        "vpaddd ymm7, ymm6, ymm4",
+                        "vmovdqa [{output}], ymm7",
+
+                        "vpaddd ymm2, ymm3, ymm14",
+                        "vpaddd ymm3, ymm2, ymm14",
+                        "vpaddd ymm0, ymm1, ymm15",
+                        "add {output}, 32",
+                        output = inout(reg) output,
+                        inout("ymm0") vcurrent_px,
+                        inout("ymm2") vcurrent_y,
+                        inout("ymm3") vnext_y,
+
+                        in("ymm15") vfones,
+                        in("ymm14") vdhhalf,
+                        in("ymm8") vsign,
+
+                        in("ymm13") vright_x,
+                        in("ymm12") vleft_x,
+                        in("ymm11") vtop_y,
+                        in("ymm10") vbottom_y,
+                        in("ymm9") vright_height,
+
+                        out("ymm1") _,
+                        out("ymm4") _,
+                        out("ymm5") _,
+                        out("ymm6") _,
+                        out("ymm7") _,
+
+                        options(nostack)
+                    }
+                }
             }
+
+            vsigned_right_height = _mm256_mul_epi32(vright_height, vsign)
         }
+
+        while output < output_end {
+            unsafe {
+                _mm256_store_si256(
+                    output.cast(),
+                    _mm256_add_epi32(_mm256_load_si256(output.cast()), vsigned_right_height),
+                )
+            };
+
+            output = unsafe { output.add(2) };
+        }
+        self.current_winding = _mm256_add_epi32(self.current_winding, vsigned_right_height);
     }
 }

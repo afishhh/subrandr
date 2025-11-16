@@ -832,9 +832,18 @@ impl Renderer<'_> {
         // outline.visit(&mut PrintVisitor);
         // panic!();
 
+        // let mut strip_raster = rasterize::sw::StripRasterizer::new();
         let mut strip_raster = rasterize::sw::StripRasterizer::new();
 
         strip_raster.add_outline(
+            outline.events().map(|event| {
+                event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(800) - p.y).into()))
+            }),
+        );
+
+        let mut cell_raster = rasterize::sw::GlyphRasterizer::new();
+        cell_raster.reset(Vec2::new(1000, 1000));
+        cell_raster.add_outline(
             outline.events().map(|event| {
                 event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(800) - p.y).into()))
             }),
@@ -850,7 +859,6 @@ impl Renderer<'_> {
         // );
 
         let strips = strip_raster.rasterize();
-
         let base = Point2::new(100, 100);
         for op in strips.paint_iter() {
             let pos = {
@@ -889,6 +897,22 @@ impl Renderer<'_> {
                 }
             }
         }
+
+        let tex = unsafe {
+            rasterizer.create_texture_mapped(
+                1000,
+                1000,
+                rasterize::PixelFormat::Mono,
+                Box::new(|m, stride| {
+                    cell_raster.rasterize(|y, xs, v| {
+                        let row = &mut m[y as usize * stride..];
+                        row[xs.start as usize..xs.end as usize]
+                            .fill(std::mem::MaybeUninit::new((v >> 8) as u8))
+                    });
+                }),
+            )
+        };
+        rasterizer.blit(target, 1000, 100, &tex, BGRA8::GREEN);
 
         // let mut first = Point2::ZERO;
         // let mut last = Point2::ZERO;

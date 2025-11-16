@@ -586,8 +586,8 @@ mod test {
 
     fn test_outline(outline: &StaticOutline<f32>, expected: &[u8]) {
         let size = Vec2::new(
-            outline.control_box().max.x as u32,
-            outline.control_box().max.y as u32,
+            outline.control_box().max.x.ceil() as u32,
+            outline.control_box().max.y.ceil() as u32,
         );
         let mut rasterizer = StripRasterizer::new();
         rasterizer.add_outline(outline.events());
@@ -761,6 +761,44 @@ mod test {
                 #move_to (0.0, 0.0);
                 line_to (2.0, 8.0);
                 line_to (2.0, 0.0);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn wide_triangle() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x60, 0x20,
+            0xFF, 0xFF, 0xDF, 0x9F, 0x60, 0x20, 0x00, 0x00,
+            0x60, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (8.0, 2.5);
+                line_to (0.0, 0.5);
+                line_to (0.0, 2.5);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn wide_quad_triangle() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+            0x40, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x6A, 0x40, 0x15,
+            0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xE9, 0xBE, 0x94, 0x6A, 0x3F, 0x15, 0x00, 0x00, 0x00,
+            0x3F, 0x7B, 0x76, 0x68, 0x3F, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (0.5, 0.5);
+                quad_to (2.0, 0.0), (15.0, 2.5);
+                line_to (0.5, 2.5);
             ],
             EXPECTED,
         );

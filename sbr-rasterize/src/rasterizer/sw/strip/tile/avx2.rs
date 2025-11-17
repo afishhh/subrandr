@@ -2,6 +2,8 @@ use std::{arch::x86_64::*, mem::MaybeUninit};
 
 use util::math::{I16Dot16, Point2};
 
+use crate::sw::tile::TileRasterizer;
+
 use super::{to_op_fixed, Tile};
 
 pub struct Avx2TileRasterizer {
@@ -29,7 +31,7 @@ impl super::TileRasterizer for Avx2TileRasterizer {
     }
 
     fn fill_alpha(&self) -> [u8; 4] {
-        unsafe { (mm256_coverage_to_alpha(self.current_winding) as u32).to_ne_bytes() }
+        (unsafe { mm256_coverage_to_alpha(self.current_winding) } as u32).to_ne_bytes()
     }
 
     unsafe fn rasterize(&mut self, strip_x: u16, tiles: &[Tile], buffer: *mut [MaybeUninit<u8>]) {
@@ -153,27 +155,6 @@ fn mm256_coverage_to_alpha(coverage: __m256i) -> u64 {
     lo | (hi << 32)
 }
 
-#[test]
-fn experiment() {
-    unsafe {
-        eprintln!(
-            "result={:08X?}",
-            mm256_coverage_to_alpha(_mm256_set_epi32(
-                I16Dot16::from_f32(0.5).into_raw(),
-                I16Dot16::from_f32(0.75).into_raw(),
-                I16Dot16::from_f32(12.0).into_raw(),
-                I16Dot16::from_f32(0.1).into_raw(),
-                I16Dot16::from_f32(0.8).into_raw(),
-                I16Dot16::from_f32(0.3).into_raw(),
-                I16Dot16::from_f32(11.0).into_raw(),
-                I16Dot16::from_f32(-15.0).into_raw(),
-            ))
-        );
-
-        panic!()
-    }
-}
-
 impl Avx2TileRasterizer {
     #[target_feature(enable = "avx2")]
     #[inline(never)]
@@ -215,37 +196,52 @@ impl Avx2TileRasterizer {
         };
 
         let input = coverage.as_ptr().cast::<i32>();
-        let offsets = _mm256_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28);
-        for y in 0..4 {
+        if width == 4 {
+            let mut input = input;
+            let mut output = buffer.cast::<u64>();
+            let offsets = _mm256_setr_epi32(0, 4, 8, 12, 1, 5, 9, 13);
             unsafe {
-                let mut input = input.add(y);
-                let mut output = buffer.cast::<u8>().add(y * width).cast::<u64>();
-                for _ in 0..width.div_ceil(8) {
-                    output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
-                        input, offsets,
-                    )));
-                    input = input.add(32);
-                    output = output.add(1);
+                output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
+                    input, offsets,
+                )));
+                input = input.add(2);
+                output = output.add(1);
+                output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
+                    input, offsets,
+                )));
+            }
+        } else {
+            let offsets = _mm256_setr_epi32(0, 4, 8, 12, 16, 20, 24, 28);
+            for y in 0..4 {
+                unsafe {
+                    let mut input = input.add(y);
+                    let mut output = buffer.cast::<u8>().add(y * width).cast::<u64>();
+                    for _ in 0..width.div_ceil(8) {
+                        output.write(mm256_coverage_to_alpha(_mm256_i32gather_epi32::<4>(
+                            input, offsets,
+                        )));
+                        input = input.add(32);
+                        output = output.add(1);
+                    }
                 }
             }
         }
 
-        // for y in (0..4).rev() {
-        //     for x in 0..width {
-        //         eprint!("{:02X} ", buffer[y * width + x]);
+        // unsafe {
+        //     for y in (0..4).rev() {
+        //         for x in 0..width {
+        //             eprint!("{:02X} ", (&*buffer)[y * width + x].assume_init());
+        //         }
+        //         eprintln!();
         //     }
-        //     eprintln!();
         // }
     }
 
     // FIXME: This is a giant mess.
     // FIXME: This still seems to have a tiny bit more innacuraccy than the generic one?
     #[target_feature(enable = "avx2")]
+    #[inline(never)]
     fn rasterize_line(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
-        if tile.line.bottom_y == tile.line.top_y {
-            return;
-        }
-
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
         let sign = tile.winding as i32;
@@ -331,10 +327,8 @@ impl Avx2TileRasterizer {
                 if dy > 0 {
                     bottom_y[usize::from(current_row)] = bottom.y / 2;
                     top_y[usize::from(end_row)] = top.y / 2;
-                    if current_row != end_row {
-                        for i in current_row + 1..end_row + 1 {
-                            bottom_y[usize::from(i)] = I16Dot16::new(i32::from(i)) / 2;
-                        }
+                    for i in current_row + 1..end_row + 1 {
+                        bottom_y[usize::from(i)] = I16Dot16::new(i32::from(i)) / 2;
                     }
                     for i in current_row..end_row {
                         top_y[usize::from(i)] = I16Dot16::new(i32::from(i + 1)) / 2;
@@ -348,11 +342,9 @@ impl Avx2TileRasterizer {
                         bottom_y[usize::from(i)] =
                             I16Dot16::new(i32::from(end_row + start_row - i)) / 2;
                     }
-                    if current_row != end_row {
-                        for i in current_row..end_row + 1 {
-                            top_y[usize::from(i)] =
-                                I16Dot16::new(i32::from(end_row + start_row - i + 1)) / 2;
-                        }
+                    for i in current_row + 1..end_row + 1 {
+                        top_y[usize::from(i)] =
+                            I16Dot16::new(i32::from(end_row + start_row - i + 1)) / 2;
                     }
                 }
 
@@ -505,6 +497,8 @@ impl Avx2TileRasterizer {
                     // ymm10 - vbottom_y
                     // ymm9 - vright_height
                     std::arch::asm! {
+                        "vmovdqa ymm4, [{output}]",
+
                         "vpaddd ymm1, ymm0, ymm15",
                         // ymm1 - vnext_px
 
@@ -519,24 +513,18 @@ impl Avx2TileRasterizer {
                         "vpmaxsd ymm5, ymm5, ymm0",
                         // ymm5 = vwidth
 
-                        "vpmaxsd ymm4, ymm2, ymm10",
-                        // ymm4 = vinner_bottom
+                        "vpmaxsd ymm2, ymm2, ymm10",
+                        // ymm2 = vinner_bottom
 
                         "vpminsd ymm6, ymm3, ymm11",
-                        "vpsubd ymm6, ymm6, ymm4",
+                        "vpsubd ymm6, ymm6, ymm2",
                         "vpmaxsd ymm7, ymm6, ymm0",
                         // ymm7 = vtriangle_height
 
-                        "vpsubd ymm2, ymm4, ymm10",
+                        "vpsubd ymm2, ymm2, ymm10",
                         // ymm2 = vbottom_height
 
-                        // loaded here so the CPU has time to finish loading
-                        // it before the end of the loop
-                        "vmovdqa ymm4, [{output}]",
-                        // ymm4 = *output
-
                         "vpslld ymm2, ymm2, 1",
-                        // TODO: swap these two instructions?
                         "vpminsd ymm2, ymm2, ymm15",
                         "vpaddd ymm7, ymm7, ymm2",
                         // ymm7 = vleft_height
@@ -561,7 +549,7 @@ impl Avx2TileRasterizer {
                         "vpmuldq ymm5, ymm2, ymm9",
                         "vpsrlq ymm2, ymm2, 32",
                         "vpsrlq ymm7, ymm9, 32",
-                        "vpmuldq ymm7, ymm7, ymm2",
+                        "vpmuldq ymm7, ymm2, ymm7",
                         "vpsrlq ymm5, ymm5, 16",
                         // ymm5 = vright_area lomul
                         "vpsllq ymm7, ymm7, 16",
@@ -569,15 +557,17 @@ impl Avx2TileRasterizer {
                         "vpblendd ymm5, ymm5, ymm7, 0xAA",
                         // ymm5 = vright_area
 
+                        "vmovdqa ymm7, ymm6",
+
                         "vpaddd ymm6, ymm6, ymm5",
                         "vpmulld ymm6, ymm6, ymm8",
-
-                        "vpaddd ymm7, ymm6, ymm4",
-                        "vmovdqa [{output}], ymm7",
+                        "vpaddd ymm4, ymm6, ymm4",
+                        "vmovdqa [{output}], ymm4",
 
                         "vpaddd ymm2, ymm3, ymm14",
                         "vpaddd ymm3, ymm2, ymm14",
                         "vpaddd ymm0, ymm1, ymm15",
+
                         "add {output}, 32",
                         output = inout(reg) output,
                         inout("ymm0") vcurrent_px,
@@ -605,7 +595,7 @@ impl Avx2TileRasterizer {
                 }
             }
 
-            vsigned_right_height = _mm256_mul_epi32(vright_height, vsign)
+            vsigned_right_height = _mm256_mullo_epi32(vright_height, vsign);
         }
 
         while output < output_end {

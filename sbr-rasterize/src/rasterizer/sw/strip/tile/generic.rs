@@ -37,16 +37,14 @@ impl super::TileRasterizer for GenericTileRasterizer {
         self.coverage_scratch_buffer.clear();
         self.coverage_scratch_buffer
             .reserve_exact(alpha_output.len());
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                self.coverage_scratch_buffer
-                    .as_mut_ptr()
-                    .cast::<[I16Dot16; 4]>(),
-                width,
-            )
-            .fill(self.current_winding);
-        }
-        self.coverage_scratch_buffer.set_len(alpha_output.len());
+        self.coverage_scratch_buffer
+            .resize(width, self.current_winding[0]);
+        self.coverage_scratch_buffer
+            .resize(2 * width, self.current_winding[1]);
+        self.coverage_scratch_buffer
+            .resize(3 * width, self.current_winding[2]);
+        self.coverage_scratch_buffer
+            .resize(4 * width, self.current_winding[3]);
 
         for tile in tiles {
             self.rasterize_tile(
@@ -73,10 +71,6 @@ impl super::TileRasterizer for GenericTileRasterizer {
 
 impl GenericTileRasterizer {
     fn rasterize_tile(&mut self, width: usize, x: I16Dot16, tile: &Tile) {
-        if tile.line.bottom_y == tile.line.top_y {
-            return;
-        }
-
         let top = Point2::new(tile.line.top_x + x, to_op_fixed(tile.line.top_y));
         let bottom = Point2::new(tile.line.bottom_x + x, to_op_fixed(tile.line.bottom_y));
 

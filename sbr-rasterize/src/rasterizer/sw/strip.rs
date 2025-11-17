@@ -131,7 +131,11 @@ impl StripRasterizer {
         top_inner_y: U2Dot14,
         winding: Winding,
     ) {
-        debug_assert!(bottom_inner_y <= top_inner_y);
+        if bottom_inner_y == top_inner_y {
+            return;
+        }
+
+        debug_assert!(bottom_inner_y < top_inner_y);
 
         let (pos_x, width) = if tile_x <= end_tile_x {
             debug_assert!(top_inner_x >= 0);
@@ -426,7 +430,7 @@ impl StripRasterizer {
                 a.y.cmp(&b.y).then(a.x.cmp(&b.x))
             });
 
-        let mut last_y = 0;
+        let mut last_y = u16::MAX;
         let mut start = 0;
         while start < self.tiles.len() {
             let strip_pos = self.tiles[start].pos;

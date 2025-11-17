@@ -120,7 +120,7 @@ impl<N: Number> Outline<N> for StaticOutline<N> {
 #[macro_export]
 macro_rules! make_static_outline {
     {
-        $(# $($command: ident $(($x: literal, $y: literal)),+;)*)*
+        $(# $($command: ident $(($x: expr, $y: expr)),+;)*)*
     } => {{
         $crate::math::StaticOutline::<f32> {
             _control_box: const {

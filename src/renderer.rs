@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::VecDeque, fmt::Debug, ops::Range};
+use std::{borrow::Cow, collections::VecDeque, fmt::Debug, mem::MaybeUninit, ops::Range};
 
 use rasterize::{
     color::BGRA8,
@@ -781,12 +781,12 @@ impl Renderer<'_> {
             }
         });
 
-        const CP: char = 'A';
+        const CP: char = '歳';
         let arena = FontArena::new();
         let mut matcher = text::FontMatcher::match_all(
             ["Noto Sans CJK JP"],
             text::FontStyle::default(),
-            I26Dot6::new(800),
+            I26Dot6::new(1000),
             72,
             &arena,
             &mut self.fonts,
@@ -835,19 +835,15 @@ impl Renderer<'_> {
         // let mut strip_raster = rasterize::sw::StripRasterizer::new();
         let mut strip_raster = rasterize::sw::StripRasterizer::new();
 
-        strip_raster.add_outline(
-            outline.events().map(|event| {
-                event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(800) - p.y).into()))
-            }),
-        );
+        strip_raster.add_outline(outline.events().map(|event| {
+            event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(1000) - p.y).into()))
+        }));
 
         let mut cell_raster = rasterize::sw::GlyphRasterizer::new();
-        cell_raster.reset(Vec2::new(1000, 1000));
-        cell_raster.add_outline(
-            outline.events().map(|event| {
-                event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(800) - p.y).into()))
-            }),
-        );
+        cell_raster.reset(Vec2::new(1200, 1200));
+        cell_raster.add_outline(outline.events().map(|event| {
+            event.map(|p| Point2::new(p.x.into(), (I26Dot6::new(1000) - p.y).into()))
+        }));
 
         // strip_raster.add_outline(
         //     make_static_outline![
@@ -909,10 +905,11 @@ impl Renderer<'_> {
 
         let tex = unsafe {
             rasterizer.create_texture_mapped(
-                1000,
-                1000,
+                1200,
+                1200,
                 rasterize::PixelFormat::Mono,
                 Box::new(|m, stride| {
+                    m.fill(MaybeUninit::zeroed());
                     cell_raster.rasterize(|y, xs, v| {
                         let row = &mut m[y as usize * stride..];
                         row[xs.start as usize..xs.end as usize]

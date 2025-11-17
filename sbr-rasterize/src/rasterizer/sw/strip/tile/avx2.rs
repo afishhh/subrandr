@@ -2,8 +2,6 @@ use std::{arch::x86_64::*, mem::MaybeUninit};
 
 use util::math::{I16Dot16, Point2};
 
-use crate::sw::tile::TileRasterizer;
-
 use super::{to_op_fixed, Tile};
 
 pub struct Avx2TileRasterizer {
@@ -338,7 +336,7 @@ impl Avx2TileRasterizer {
                     //       ^^^ seems like it
                     bottom_y[usize::from(end_row)] = bottom.y / 2;
                     top_y[usize::from(current_row)] = top.y / 2;
-                    for i in current_row..end_row + 1 {
+                    for i in current_row..end_row {
                         bottom_y[usize::from(i)] =
                             I16Dot16::new(i32::from(end_row + start_row - i)) / 2;
                     }
@@ -482,6 +480,9 @@ impl Avx2TileRasterizer {
             // eprintln!();
 
             while output < output_end {
+                let vresult: __m256i;
+                let vleft_area: __m256i;
+                let vright_area: __m256i;
                 unsafe {
                     // ymm0 - vcurrent_px
                     // ymm2 - vcurrent_y
@@ -586,13 +587,16 @@ impl Avx2TileRasterizer {
 
                         out("ymm1") _,
                         out("ymm4") _,
-                        out("ymm5") _,
-                        out("ymm6") _,
-                        out("ymm7") _,
+                        out("ymm5") vright_area,
+                        out("ymm6") vresult,
+                        out("ymm7") vleft_area,
 
                         options(nostack)
                     }
                 }
+                // eprintln!("vright_area: {:?}", DebugCells(vright_area));
+                // eprintln!("vleft_area: {:?}", DebugCells(vleft_area));
+                // eprintln!("vresult: {:?}", DebugCells(vresult));
             }
 
             vsigned_right_height = _mm256_mullo_epi32(vright_height, vsign);

@@ -10,5 +10,12 @@ wgpu = ["dep:wgpu"]
 util = { workspace = true }
 wgpu = { workspace = true, optional = true }
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "sai"
+harness = false
+
 [lints]
 workspace = true

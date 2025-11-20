@@ -3,23 +3,17 @@ use std::{borrow::Cow, collections::VecDeque, fmt::Debug, ops::Range};
 use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
 use thiserror::Error;
 use util::{
-    math::{I26Dot6, Point2, Point2f, Rect2, Vec2},
+    math::{I26Dot6, Point2f, Vec2},
     rc::Rc,
 };
 
 use crate::{
-    layout::{
-        self,
-        inline::{GlyphString, InlineContentFragment, InlineItemFragment, SpanFragment},
-        FixedL, FragmentBox, LayoutContext, Point2L, Vec2L,
-    },
+    layout::{self, inline::InlineContentFragment, FixedL, LayoutContext, Point2L},
     log::{info, trace},
+    render::{self, RenderPass},
     srv3,
-    style::{
-        computed::{Alignment, HorizontalAlignment, TextShadow, VerticalAlignment},
-        ComputedStyle,
-    },
-    text::{self, platform_font_provider, FontArena, FreeTypeError, GlyphRenderError, TextMetrics},
+    style::computed::{Alignment, HorizontalAlignment, VerticalAlignment},
+    text::{self, platform_font_provider},
     vtt, Subrandr,
 };
 
@@ -110,396 +104,6 @@ impl FrameLayoutPass<'_, '_> {
 
     pub fn emit_fragment(&mut self, pos: Point2L, block: InlineContentFragment) {
         self.fragments.push((pos, block));
-    }
-}
-
-pub struct FrameRenderPass<'s, 'frame> {
-    sctx: &'frame SubtitleContext,
-    glyph_cache: &'frame text::GlyphCache,
-    fonts: &'frame mut text::FontDb<'s>,
-    rasterizer: &'frame mut dyn Rasterizer,
-}
-
-struct LineDecoration {
-    baseline_offset: FixedL,
-    thickness: FixedL,
-    color: BGRA8,
-    /// Used to determine paint order: https://drafts.csswg.org/css-text-decor/#painting-order.
-    kind: LineDecorationKind,
-}
-
-enum LineDecorationKind {
-    Underline,
-    LineThrough,
-}
-
-impl FrameRenderPass<'_, '_> {
-    fn debug_text(
-        &mut self,
-        target: &mut RenderTarget,
-        pos: Point2L,
-        text: &str,
-        alignment: Alignment,
-        size: I26Dot6,
-        color: BGRA8,
-    ) -> Result<(), RenderError> {
-        let font_arena = FontArena::new();
-        let matches = text::FontMatcher::match_all(
-            ["monospace"],
-            text::FontStyle::default(),
-            size,
-            self.sctx.dpi,
-            &font_arena,
-            self.fonts,
-        )?;
-        let glyphs = text::simple_shape_text(matches.iterator(), &font_arena, text, self.fonts)?;
-        let final_pos = pos
-            + Self::translate_for_aligned_text(
-                matches.primary(&font_arena, self.fonts)?,
-                &text::compute_extents_ex(self.glyph_cache, true, &glyphs)?,
-                alignment,
-            );
-
-        let image = text::render(
-            self.glyph_cache,
-            self.rasterizer,
-            I26Dot6::ZERO,
-            I26Dot6::ZERO,
-            0.0,
-            &mut glyphs.iter(),
-        )?;
-        image.blit(
-            self.rasterizer,
-            target,
-            final_pos.x.round_to_inner(),
-            final_pos.y.round_to_inner(),
-            color,
-        );
-
-        Ok(())
-    }
-
-    fn translate_for_aligned_text(
-        font: &text::Font,
-        extents: &TextMetrics,
-        alignment: Alignment,
-    ) -> Vec2L {
-        let Alignment(horizontal, vertical) = alignment;
-
-        let width = extents.paint_size.x + extents.trailing_advance;
-        let ox = match horizontal {
-            HorizontalAlignment::Left => FixedL::ZERO,
-            HorizontalAlignment::Center => -width / 2,
-            HorizontalAlignment::Right => -width,
-        };
-
-        let oy = match vertical {
-            VerticalAlignment::Top => font.metrics().ascender / 64,
-            VerticalAlignment::Center => FixedL::ZERO,
-            VerticalAlignment::Bottom => font.metrics().descender / 64,
-        };
-
-        Vec2L::new(ox, oy)
-    }
-
-    fn draw_line_decoration(
-        &mut self,
-        target: &mut RenderTarget,
-        x0: FixedL,
-        x1: FixedL,
-        baseline_y: I26Dot6,
-        decoration: &LineDecoration,
-    ) {
-        let decoration_y = baseline_y + decoration.baseline_offset;
-
-        self.rasterizer.fill_axis_aligned_antialias_rect(
-            target,
-            Rect2::new(
-                Point2::new(x0.into_f32(), decoration_y.into_f32()),
-                Point2::new(
-                    x1.into_f32(),
-                    (decoration_y + decoration.thickness).into_f32(),
-                ),
-            ),
-            decoration.color,
-        );
-    }
-
-    fn draw_text_full(
-        &mut self,
-        target: &mut RenderTarget,
-        x: I26Dot6,
-        y: I26Dot6,
-        glyphs: &GlyphString<'_, std::rc::Rc<str>>,
-        color: BGRA8,
-        decorations: &[LineDecoration],
-        shadows: &[TextShadow],
-    ) -> Result<(), RenderError> {
-        if glyphs.is_empty() {
-            // TODO: Maybe instead ensure empty segments aren't emitted during layout?
-            return Ok(());
-        }
-
-        let image = text::render(
-            self.glyph_cache,
-            self.rasterizer,
-            x.fract(),
-            y.fract(),
-            0.0,
-            &mut glyphs.iter_glyphs_visual(),
-        )?;
-
-        // TODO: This should also draw an offset underline I think and possibly strike through?
-        for shadow in shadows.iter().rev() {
-            if shadow.color.a > 0 {
-                if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
-                    // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
-                    // A non-zero blur radius indicates that the resulting shadow should be blurred,
-                    // ... by applying to the shadow a Gaussian blur with a standard deviation
-                    // equal to half the blur radius.
-                    let sigma = shadow.blur_radius / 2;
-                    let shadow_x = x + shadow.offset.x;
-                    let shadow_y = y + shadow.offset.y;
-
-                    text::render(
-                        self.glyph_cache,
-                        self.rasterizer,
-                        shadow_x.fract(),
-                        shadow_y.fract(),
-                        sigma.into_f32(),
-                        &mut glyphs.iter_glyphs_visual(),
-                    )?
-                    .blit(
-                        self.rasterizer,
-                        target,
-                        shadow_x.trunc_to_inner(),
-                        shadow_y.trunc_to_inner(),
-                        shadow.color,
-                    );
-                } else {
-                    // TODO: Re-render for correct fractional position
-                    let monochrome = image.monochrome(self.rasterizer);
-                    monochrome.blit(
-                        self.rasterizer,
-                        target,
-                        (x + monochrome.offset.x + shadow.offset.x).trunc_to_inner(),
-                        (y + monochrome.offset.y + shadow.offset.y).trunc_to_inner(),
-                        shadow.color,
-                    );
-                }
-            }
-        }
-
-        let text_end_x = {
-            let mut end_x = x;
-
-            for glyph in glyphs.iter_glyphs_visual() {
-                end_x += glyph.x_advance;
-            }
-
-            end_x
-        };
-
-        for decoration in decorations
-            .iter()
-            .filter(|x| matches!(x.kind, LineDecorationKind::Underline))
-        {
-            self.draw_line_decoration(target, x, text_end_x, y, decoration);
-        }
-
-        if color.a > 0 {
-            image.blit(
-                self.rasterizer,
-                target,
-                x.trunc_to_inner(),
-                y.trunc_to_inner(),
-                color,
-            );
-        }
-
-        for decoration in decorations
-            .iter()
-            .filter(|x| matches!(x.kind, LineDecorationKind::LineThrough))
-        {
-            let decoration_y = y + decoration.baseline_offset;
-
-            self.rasterizer.fill_axis_aligned_antialias_rect(
-                target,
-                Rect2::new(
-                    Point2::new(x.into_f32(), decoration_y.into_f32()),
-                    Point2::new(
-                        text_end_x.into_f32(),
-                        (decoration_y + decoration.thickness).into_f32(),
-                    ),
-                ),
-                decoration.color,
-            );
-        }
-
-        Ok(())
-    }
-
-    fn draw_background(
-        &mut self,
-        target: &mut RenderTarget,
-        pos: Point2L,
-        style: &ComputedStyle,
-        fragment_box: &FragmentBox,
-    ) {
-        let background = style.background_color();
-        if background.a != 0 {
-            self.rasterizer.fill_axis_aligned_rect(
-                target,
-                Rect2::to_float(fragment_box.padding_box().translate(pos.to_vec())),
-                background,
-            );
-        }
-    }
-
-    fn draw_inline_item_fragment_background(
-        &mut self,
-        target: &mut RenderTarget,
-        pos: Point2L,
-        fragment: &InlineItemFragment,
-    ) {
-        match fragment {
-            InlineItemFragment::Span(span) => {
-                self.draw_background(target, pos, &span.style, &span.fbox);
-
-                for &(offset, ref child) in &span.content {
-                    let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.draw_inline_item_fragment_background(target, child_pos, child);
-                }
-            }
-            InlineItemFragment::Text(_) => {}
-            InlineItemFragment::Ruby(ruby) => {
-                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    self.draw_background(target, base_pos, &base.style, &base.fbox);
-                    for &(base_item_offset, ref base_item) in &base.children {
-                        self.draw_inline_item_fragment_background(
-                            target,
-                            base_pos + base.fbox.content_offset() + base_item_offset,
-                            base_item,
-                        );
-                    }
-
-                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    self.draw_background(
-                        target,
-                        annotation_pos,
-                        &annotation.style,
-                        &annotation.fbox,
-                    );
-                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
-                        self.draw_inline_item_fragment_background(
-                            target,
-                            annotation_pos
-                                + annotation.fbox.content_offset()
-                                + annotation_item_offset,
-                            annotation_item,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn draw_inline_item_fragment_content(
-        &mut self,
-        target: &mut RenderTarget,
-        pos: Point2L,
-        fragment: &InlineItemFragment,
-        current_decorations: &mut Vec<LineDecoration>,
-    ) -> Result<(), RenderError> {
-        let previous_decoration_count = current_decorations.len();
-        match fragment {
-            InlineItemFragment::Span(SpanFragment {
-                style,
-                primary_font,
-                ..
-            }) => {
-                let font_metrics = primary_font.metrics();
-                let decoration = style.text_decoration();
-
-                if decoration.underline {
-                    current_decorations.push(LineDecoration {
-                        baseline_offset: font_metrics.underline_top_offset,
-                        thickness: font_metrics.underline_thickness,
-                        color: decoration.underline_color,
-                        kind: LineDecorationKind::Underline,
-                    });
-                }
-
-                if decoration.line_through {
-                    current_decorations.push(LineDecoration {
-                        baseline_offset: font_metrics.strikeout_top_offset,
-                        thickness: font_metrics.strikeout_thickness,
-                        color: decoration.line_through_color,
-                        kind: LineDecorationKind::LineThrough,
-                    });
-                }
-            }
-            // TODO: Technically ruby containers can also have decorations but we don't make
-            //       use of that right now, and don't store font metrics in the fragment anyway.
-            //       Decorations on ruby bases and annotations probably have the same problem.
-            InlineItemFragment::Ruby(_) => (),
-            InlineItemFragment::Text(_) => (),
-        }
-
-        match fragment {
-            InlineItemFragment::Span(span) => {
-                for &(offset, ref child) in &span.content {
-                    let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.draw_inline_item_fragment_content(
-                        target,
-                        child_pos,
-                        child,
-                        current_decorations,
-                    )?;
-                }
-            }
-            InlineItemFragment::Text(text) => {
-                self.draw_text_full(
-                    target,
-                    pos.x + text.baseline_offset.x,
-                    (pos.y + text.baseline_offset.y).round(),
-                    text.glyphs(),
-                    text.style.color(),
-                    current_decorations,
-                    text.style.text_shadows(),
-                )?;
-            }
-            InlineItemFragment::Ruby(ruby) => {
-                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    for &(base_item_offset, ref base_item) in &base.children {
-                        self.draw_inline_item_fragment_content(
-                            target,
-                            base_pos + base.fbox.content_offset() + base_item_offset,
-                            base_item,
-                            current_decorations,
-                        )?;
-                    }
-
-                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
-                        self.draw_inline_item_fragment_content(
-                            target,
-                            annotation_pos
-                                + annotation.fbox.content_offset()
-                                + annotation_item_offset,
-                            annotation_item,
-                            &mut Vec::new(),
-                        )?;
-                    }
-                }
-            }
-        }
-
-        current_decorations.truncate(previous_decoration_count);
-
-        Ok(())
     }
 }
 
@@ -694,17 +298,11 @@ impl<'a> Renderer<'a> {
 
 #[derive(Debug, Error)]
 pub enum RenderError {
-    #[error(transparent)]
+    #[error("Failed to refresh system fonts")]
     FontProviderUpdate(#[from] platform_font_provider::UpdateError),
-    #[error(transparent)]
-    FreeType(#[from] FreeTypeError),
-    #[error(transparent)]
-    GlyphRender(#[from] GlyphRenderError),
-    #[error(transparent)]
-    FontSelect(#[from] text::font_db::SelectError),
-    #[error(transparent)]
-    SimpleShaping(#[from] text::ShapingError),
-    #[error(transparent)]
+    #[error("Failed to render output")]
+    Render(#[from] render::RenderError),
+    #[error("Failed to layout inline content")]
     Layout(#[from] layout::InlineLayoutError),
 }
 
@@ -806,22 +404,24 @@ impl Renderer<'_> {
         self.perf.end_layout();
 
         {
-            let mut pass = FrameRenderPass {
-                sctx: &ctx,
-                glyph_cache: &self.glyph_cache,
-                fonts: &mut self.fonts,
-                rasterizer,
-            };
-
             // FIXME: Currently mpv does not seem to have a way to pass the correct DPI
             //        to a subtitle renderer so this doesn't work.
             let debug_font_size = I26Dot6::new(16);
             let debug_line_height = FixedL::new(20) * ctx.pixel_scale();
 
+            let mut pass = RenderPass {
+                dpi: ctx.dpi,
+                glyph_cache: &self.glyph_cache,
+                fonts: &mut self.fonts,
+                rasterizer,
+                target,
+                debug_flags: &self.sbr.debug,
+                debug_text_font_size: debug_font_size,
+            };
+
             if self.sbr.debug.draw_version_string {
                 let mut y = debug_line_height;
-                pass.debug_text(
-                    target,
+                pass.draw_debug_text(
                     Point2L::new(FixedL::ZERO, y),
                     concat!(
                         "subrandr ",
@@ -829,28 +429,23 @@ impl Renderer<'_> {
                         env!("BUILD_REV_SUFFIX"),
                     ),
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    debug_font_size,
                     BGRA8::WHITE,
                 )?;
                 y += debug_line_height;
 
-                pass.debug_text(
-                    target,
+                pass.draw_debug_text(
                     Point2L::new(FixedL::ZERO, y),
                     &format!("subtitle class: {subtitle_class_name}"),
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    debug_font_size,
                     BGRA8::WHITE,
                 )?;
                 y += debug_line_height;
 
                 let rasterizer_line = format!("=== rasterizer: {} ===", pass.rasterizer.name());
-                pass.debug_text(
-                    target,
+                pass.draw_debug_text(
                     Point2L::new(FixedL::ZERO, y),
                     &rasterizer_line,
                     Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                    debug_font_size,
                     BGRA8::WHITE,
                 )?;
                 y += debug_line_height;
@@ -860,12 +455,10 @@ impl Renderer<'_> {
                     _ = pass.rasterizer.write_debug_info(&mut rasterizer_debug_info);
 
                     for line in rasterizer_debug_info.lines() {
-                        pass.debug_text(
-                            target,
+                        pass.draw_debug_text(
                             Point2L::new(FixedL::ZERO, y),
                             line,
                             Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                            debug_font_size,
                             BGRA8::WHITE,
                         )?;
                         y += debug_line_height;
@@ -886,15 +479,13 @@ impl Renderer<'_> {
                         format_args!("total entries: {}", stats.total_entries),
                         format_args!("current generation: {}", stats.generation),
                     ] {
-                        pass.debug_text(
-                            target,
+                        pass.draw_debug_text(
                             Point2L::new(FixedL::ZERO, y),
                             &match line.as_str() {
                                 Some(value) => Cow::Borrowed(value),
                                 None => Cow::Owned(line.to_string()),
                             },
                             Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-                            debug_font_size,
                             BGRA8::WHITE,
                         )?;
                         y += debug_line_height;
@@ -904,28 +495,24 @@ impl Renderer<'_> {
 
             if self.sbr.debug.draw_perf_info {
                 let mut y = debug_line_height;
-                pass.debug_text(
-                    target,
+                pass.draw_debug_text(
                     Point2L::new(ctx.padding_left + ctx.video_width, y),
                     &format!(
                         "{:.2}x{:.2} dpi:{}",
                         ctx.video_width, ctx.video_height, ctx.dpi
                     ),
                     Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                    debug_font_size,
                     BGRA8::WHITE,
                 )?;
                 y += debug_line_height;
 
-                pass.debug_text(
-                    target,
+                pass.draw_debug_text(
                     Point2L::new(ctx.padding_left + ctx.video_width, y),
                     &format!(
                         "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                         ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
                     ),
                     Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                    debug_font_size,
                     BGRA8::WHITE,
                 )?;
                 y += debug_line_height;
@@ -935,20 +522,19 @@ impl Renderer<'_> {
                         |name: &str, times: &PerfTimes| -> Result<(), RenderError> {
                             let (min, max) = times.minmax_frame_times();
                             let avg = times.avg_frame_time();
-
-                            pass.debug_text(
-                                target,
-                                Point2L::new(ctx.padding_left + ctx.video_width, y),
-                                &format!(
+                            let text = format!(
                                 "{name} min={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
                                 min,
                                 avg,
                                 1000.0 / avg,
                                 max,
                                 1000.0 / max
-                            ),
+                            );
+
+                            pass.draw_debug_text(
+                                Point2L::new(ctx.padding_left + ctx.video_width, y),
+                                &text,
                                 Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                                debug_font_size,
                                 BGRA8::WHITE,
                             )?;
                             y += debug_line_height;
@@ -962,12 +548,10 @@ impl Renderer<'_> {
                     draw_times("draster", &self.perf.debug_raster)?;
 
                     if let Some(last) = self.perf.whole.last() {
-                        pass.debug_text(
-                            target,
+                        pass.draw_debug_text(
                             Point2L::new(ctx.padding_left + ctx.video_width, y),
                             &format!("last={:.1}ms ({:.1}/s)", last, 1000.0 / last),
                             Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-                            debug_font_size,
                             BGRA8::WHITE,
                         )?;
                     }
@@ -991,7 +575,7 @@ impl Renderer<'_> {
                         }
 
                         pass.rasterizer.stroke_polyline(
-                            target,
+                            pass.target,
                             Vec2::new(offx.into_f32(), (y + graph_height).into_f32()),
                             &polyline,
                             color,
@@ -1004,95 +588,17 @@ impl Renderer<'_> {
                     y += graph_height;
                 }
 
-                pass.rasterizer.flush(target);
+                pass.rasterizer.flush(pass.target);
             }
             self.perf.end_debug_raster();
 
             for &(pos, ref fragment) in &fragments {
-                let final_total_rect = fragment.fbox.margin_box().translate(pos.to_vec());
-
-                if self.sbr.debug.draw_layout_info {
-                    pass.rasterizer.stroke_axis_aligned_rect(
-                        target,
-                        Rect2::new(
-                            Point2::new(
-                                final_total_rect.min.x.into_f32() - 1.,
-                                final_total_rect.min.y.into_f32() - 1.,
-                            ),
-                            Point2::new(
-                                final_total_rect.max.x.into_f32() + 2.,
-                                final_total_rect.max.y.into_f32() + 2.,
-                            ),
-                        ),
-                        BGRA8::MAGENTA,
-                    );
-                }
-
-                let total_position_debug_pos = match VerticalAlignment::Top {
-                    VerticalAlignment::Top => (
-                        final_total_rect.max.y + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::Center => (
-                        final_total_rect.max.y + 20,
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Top),
-                    ),
-                    VerticalAlignment::Bottom => (
-                        I26Dot6::new(-24),
-                        Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom),
-                    ),
-                };
-
-                if self.sbr.debug.draw_layout_info {
-                    pass.debug_text(
-                        target,
-                        Point2L::new(
-                            final_total_rect.min.x + final_total_rect.width() / 2,
-                            total_position_debug_pos.0,
-                        ),
-                        &format!(
-                            "x:{:.1} y:{:.1} w:{:.1} h:{:.1}",
-                            final_total_rect.x(),
-                            final_total_rect.y(),
-                            final_total_rect.width(),
-                            final_total_rect.height()
-                        ),
-                        total_position_debug_pos.1,
-                        debug_font_size,
-                        BGRA8::MAGENTA,
-                    )?;
-                }
-
-                for &(offset, ref line) in &fragment.lines {
-                    let current = pos + offset;
-
-                    for &(offset, ref item) in &line.children {
-                        let current = current + offset;
-
-                        pass.draw_inline_item_fragment_background(target, current, item);
-                    }
-                }
-
-                let mut decoration_stack = Vec::new();
-                for &(offset, ref line) in &fragment.lines {
-                    let current = pos + offset;
-
-                    for &(offset, ref item) in &line.children {
-                        let current = current + offset;
-
-                        pass.draw_inline_item_fragment_content(
-                            target,
-                            current,
-                            item,
-                            &mut decoration_stack,
-                        )?;
-                    }
-                }
+                pass.draw_inline_content_fragment(pos, fragment)?;
             }
 
             // Make sure all batched draws are flushed, although currently this is not
             // necessary because the wgpu rasterizer flushes automatically on `submit_render`.
-            pass.rasterizer.flush(target);
+            pass.rasterizer.flush(pass.target);
         }
 
         let time = self.perf.end_frame();

@@ -16,6 +16,7 @@ mod capi;
 mod html;
 mod layout;
 mod log;
+mod render;
 mod style;
 mod text;
 

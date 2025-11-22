@@ -8,16 +8,17 @@ on:
 
 jobs:
   run-tests:
-    name: Run unit tests
+    name: Run tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: cargo xxtask ptr pull tests/assets/*.ptr
       - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
       - name: Install nextest
         uses: taiki-e/install-action@nextest
-      - run: cargo nextest r --workspace --exclude sbr-overlay --no-fail-fast
+      - run: cargo nextest r -F _layout_tests --workspace --exclude sbr-overlay --no-fail-fast
 
   nix-build:
     name: Build nix flake

@@ -61,17 +61,42 @@ impl MessageKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum TermColorSetting {
+    Auto,
+    Always,
+    Never,
+}
+
+impl TermColorSetting {
+    fn resolve(self) -> bool {
+        match self {
+            TermColorSetting::Auto => std::io::stderr().is_terminal(),
+            TermColorSetting::Always => true,
+            TermColorSetting::Never => false,
+        }
+    }
+}
+
 #[derive(Parser)]
 pub struct GlobalArgs {
     #[clap(global = true, short = 'q', long = "quiet")]
     quiet: bool,
     #[clap(global = true, short = 'v', long = "verbose", conflicts_with = "quiet")]
     verbose: bool,
+    #[clap(
+        global = true,
+        long = "color",
+        env = "CARGO_TERM_COLOR",
+        default_value = "auto"
+    )]
+    color: TermColorSetting,
 }
 
 pub struct CommandContext {
     manifest_dir: PathBuf,
     verbosity: Verbosity,
+    use_ansi_colors: bool,
     cargo_metadata: OnceCell<CargoMetadata>,
 }
 
@@ -88,6 +113,7 @@ impl CommandContext {
                     Verbosity::Normal
                 }
             },
+            use_ansi_colors: args.color.resolve(),
             cargo_metadata: OnceCell::new(),
         }
     }
@@ -126,18 +152,18 @@ impl CommandContext {
             .context("Failed to parse `cargo metadata` output")?;
         Ok(self.cargo_metadata.get_or_init(|| meta))
     }
-}
 
-#[doc(hidden)]
-pub fn _statusln(title: &str, color: TermColor, args: &std::fmt::Arguments) {
-    assert!(title.len() <= 12);
+    #[doc(hidden)]
+    pub fn _statusln(&self, title: &str, color: TermColor, args: &std::fmt::Arguments) {
+        assert!(title.len() <= 12);
 
-    if std::io::stderr().is_terminal() {
-        eprint!("{}{title: >12}\x1b[0m ", color.bold_ansi_str());
-    } else {
-        eprint!("{title: >12} ");
+        if self.use_ansi_colors {
+            eprint!("{}{title: >12}\x1b[0m ", color.bold_ansi_str());
+        } else {
+            eprint!("{title: >12} ");
+        }
+        eprintln!("{args}");
     }
-    eprintln!("{args}");
 }
 
 macro_rules! statusln {
@@ -150,7 +176,7 @@ macro_rules! statusln {
         }
         let ctx: &$crate::command_context::CommandContext = &$ctx;
         if ctx.verbosity() >= $crate::command_context::Verbosity::$verbosity {
-            crate::command_context::_statusln(
+            ctx._statusln(
                 $title,
                 $crate::command_context::TermColor::$color,
                 &format_args!($($fmt)*)
@@ -159,26 +185,28 @@ macro_rules! statusln {
     }};
 }
 
-#[doc(hidden)]
-pub fn _messageln(kind: MessageKind, args: &std::fmt::Arguments) {
-    if std::io::stderr().is_terminal() {
-        eprint!(
-            "{}{}\x1b[39m:\x1b[0m ",
-            kind.color().bold_ansi_str(),
-            kind.as_str()
-        );
-    } else {
-        eprint!("{}: ", kind.as_str());
-    }
+impl CommandContext {
+    #[doc(hidden)]
+    pub fn _messageln(&self, kind: MessageKind, args: &std::fmt::Arguments) {
+        if self.use_ansi_colors {
+            eprint!(
+                "{}{}\x1b[39m:\x1b[0m ",
+                kind.color().bold_ansi_str(),
+                kind.as_str()
+            );
+        } else {
+            eprint!("{}: ", kind.as_str());
+        }
 
-    eprintln!("{args}");
+        eprintln!("{args}");
+    }
 }
 
 macro_rules! messageln {
     ($ctx: expr, $verbosity: ident, $kind: ident, $($fmt: tt)*) => {{
         let ctx: &$crate::command_context::CommandContext = &$ctx;
         if ctx.verbosity() >= $crate::command_context::Verbosity::$verbosity {
-            crate::command_context::_messageln(
+            ctx._messageln(
                 $crate::command_context::MessageKind::$kind,
                 &format_args!($($fmt)*)
             )

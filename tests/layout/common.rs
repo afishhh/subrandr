@@ -28,6 +28,7 @@ macro_rules! make_tree {
         let mut builder = crate::layout::inline::InlineContentBuilder::new();
         {
             let mut root = builder.root();
+            #[allow(unused)] // this is unused if the inline is empty
             let mut root = root.push_span($style.clone());
             make_tree!(@build_all inline [$style; inline=root]; $($content)*);
         }
@@ -120,7 +121,7 @@ macro_rules! make_tree {
             ),
         ]; $($rest)*)
     };
-    (@build_all_rec $mapper: ident $context: tt $result: tt;) => { $result };
+    (@build_all_rec $mapper: ident $context: tt $result: tt;) => { $result as [(); _] };
     (@map_child $from: ident->$to: ident $value: expr) => {
         compile_error!(concat!(
             stringify!($from),

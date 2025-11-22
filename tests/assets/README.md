@@ -6,3 +6,4 @@ Some of these assets have a license different from this repository's default lic
 - `Ahem.ttf`, from https://www.w3.org/Style/CSS/Test/Fonts/, in the public domain or under a CC0 declaration (see https://www.w3.org/Style/CSS/Test/Fonts/Ahem/COPYING for details)
 - `NotoSansArabic-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Sans+Arabic, under the SIL Open Font License (see `OFL.txt` for details)
 - `NotoSerif-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Serif, under the SIL Open Font License (see `OFL.txt` for details)
+- `NotoSansJP-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Sans+JP, under the SIL Open Font License (see `OFL.txt` for details)

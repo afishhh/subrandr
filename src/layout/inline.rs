@@ -1084,6 +1084,10 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
         *current_width += self.padding.current_padding_left;
 
+        if *current_width >= ctx.constraints.size.x {
+            return Ok(BreakOutcome::BreakBefore);
+        }
+
         match &mut self.kind {
             ShapedItemKind::Text(text) => {
                 text.line_break(&mut self.range, current_width, ctx, &mut self.padding)
@@ -1134,7 +1138,6 @@ impl<'f> ShapedItemText<'f> {
         break_start_index..break_end_index
     }
 
-    // TODO: I think this may still need to consider emitting a `BreakBefore` sometimes.
     fn line_break<'a>(
         &mut self,
         range: &mut Range<usize>,
@@ -1142,6 +1145,7 @@ impl<'f> ShapedItemText<'f> {
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
         padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
+        let initial_x = *current_width;
         let mut glyph_it = self.glyphs.iter_glyphs_logical().peekable();
         while let Some(glyph) = glyph_it.next() {
             *current_width += glyph.x_advance;
@@ -1183,7 +1187,7 @@ impl<'f> ShapedItemText<'f> {
                     let break_range = self.break_opportunity_to_range(opportunity);
                     if let Some((broken, remaining)) = self.glyphs.break_around(
                         break_range,
-                        ctx.constraints.size.x,
+                        ctx.constraints.size.x - initial_x,
                         &mut ctx.break_buffer,
                         ctx.grapheme_cluster_boundaries,
                         self.font_matcher.iterator(),

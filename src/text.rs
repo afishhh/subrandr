@@ -50,7 +50,9 @@ impl OpenTypeTag {
     }
 
     pub const AXIS_WEIGHT: OpenTypeTag = OpenTypeTag::from_bytes(*b"wght");
-    #[expect(dead_code)]
+    // FIXME: Hello? rustc? This is still dead code but rustc doesn't realise it anymore?
+    //        This is happening way too often now...
+    #[allow(dead_code)]
     pub const AXIS_WIDTH: OpenTypeTag = OpenTypeTag::from_bytes(*b"wdth");
     pub const AXIS_ITALIC: OpenTypeTag = OpenTypeTag::from_bytes(*b"ital");
 

@@ -16,6 +16,7 @@ mod capi;
 mod html;
 mod layout;
 mod log;
+mod render;
 mod style;
 mod text;
 
@@ -80,3 +81,7 @@ impl log::AsLogger for Subrandr {
 
 mod renderer;
 pub use renderer::{Renderer, SubtitleContext, Subtitles};
+
+#[cfg(all(test, feature = "_layout_tests"))]
+#[path = "../tests/layout/mod.rs"]
+mod layout_tests;

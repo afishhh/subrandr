@@ -73,7 +73,7 @@ pub struct Length(FixedL);
 impl Length {
     pub const ZERO: Self = Self(FixedL::ZERO);
 
-    #[expect(dead_code)]
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
     pub const fn from_pixels(pixels: FixedL) -> Self {
         Self(pixels)
     }

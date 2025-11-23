@@ -83,6 +83,40 @@ pub mod directwrite;
 #[cfg(font_provider = "android-ndk")]
 pub mod ndk;
 
+// This is only used on certain configurations and the `cfg()` for that would be very long.
+#[allow(dead_code)]
+pub mod null {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct NullFontProvider;
+
+    impl PlatformFontProvider for NullFontProvider {
+        fn update_if_changed(&mut self, _sbr: &Subrandr) -> Result<bool, UpdateError> {
+            Ok(false)
+        }
+
+        fn substitute(
+            &self,
+            _sbr: &Subrandr,
+            _request: &mut FaceRequest,
+        ) -> Result<(), SubstituteError> {
+            Ok(())
+        }
+
+        fn fonts(&self) -> &[FaceInfo] {
+            &[]
+        }
+
+        fn fallback(
+            &self,
+            _request: &FontFallbackRequest,
+        ) -> Result<Option<FaceInfo>, FallbackError> {
+            Ok(None)
+        }
+    }
+}
+
 pub type LockedPlatformFontProvider = RwLock<dyn PlatformFontProvider>;
 
 static PLATFORM_FONT_SOURCE: OnceLock<Box<LockedPlatformFontProvider>> = OnceLock::new();
@@ -114,34 +148,6 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
         font_provider = "android-ndk"
     )))]
     {
-        #[derive(Debug)]
-        struct NullFontProvider;
-
-        impl PlatformFontProvider for NullFontProvider {
-            fn update_if_changed(&mut self, _sbr: &Subrandr) -> Result<bool, UpdateError> {
-                Ok(false)
-            }
-
-            fn substitute(
-                &self,
-                _sbr: &Subrandr,
-                _request: &mut FaceRequest,
-            ) -> Result<(), SubstituteError> {
-                Ok(())
-            }
-
-            fn fonts(&self) -> &[FaceInfo] {
-                &[]
-            }
-
-            fn fallback(
-                &self,
-                _request: &FontFallbackRequest,
-            ) -> Result<Option<FaceInfo>, FallbackError> {
-                Ok(None)
-            }
-        }
-
         static LOGGED_UNAVAILABLE: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
 
@@ -152,7 +158,7 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
             );
         }
 
-        Ok(Box::new(RwLock::new(NullFontProvider)) as Box<LockedPlatformFontProvider>)
+        Ok(Box::new(RwLock::new(null::NullFontProvider)) as Box<LockedPlatformFontProvider>)
     }
 }
 

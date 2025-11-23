@@ -626,7 +626,6 @@ fn shape_run_initial<'a, 'f>(
     struct SpanStackEntry<'a> {
         parent_style: &'a ComputedStyle,
         span_content_start: usize,
-        first_shaped_item_index: usize,
         remaining_children: usize,
     }
 
@@ -740,9 +739,7 @@ fn shape_run_initial<'a, 'f>(
                 (self.total_content_bytes_added - entry.span_content_start) as u32;
             self.current_span_id = state.parent;
 
-            if self.shaped.get_mut(entry.first_shaped_item_index).is_some() {
-                debug_assert_eq!(self.queued_padding, FixedL::ZERO);
-            } else if state.remaining_content_bytes == 0 {
+            if state.remaining_content_bytes == 0 {
                 // FIXME: Padding for spans that have no leaf items is currently ignored.
                 //        Some experimentation suggests that browsers tie such spans to the
                 //        character immediately preceeding them, thus it should be possible
@@ -807,7 +804,6 @@ fn shape_run_initial<'a, 'f>(
                             span_stack.push(SpanStackEntry {
                                 parent_style: current_style,
                                 span_content_start: self.total_content_bytes_added,
-                                first_shaped_item_index: self.shaped.len(),
                                 remaining_children: span_left,
                             });
                             current_style = &span.style;

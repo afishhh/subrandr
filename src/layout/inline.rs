@@ -1078,6 +1078,7 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
         current_width: &mut FixedL,
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
+        let can_break_before = *current_width != FixedL::ZERO;
         *current_width += self.padding.current_padding_left;
 
         if *current_width >= ctx.constraints.size.x {
@@ -1085,9 +1086,13 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
         }
 
         match &mut self.kind {
-            ShapedItemKind::Text(text) => {
-                text.line_break(&mut self.range, current_width, ctx, &mut self.padding)
-            }
+            ShapedItemKind::Text(text) => text.line_break(
+                &mut self.range,
+                current_width,
+                can_break_before,
+                ctx,
+                &mut self.padding,
+            ),
             ShapedItemKind::Ruby(_) => {
                 // TODO: Implement proper ruby line breaking
                 //       It should only allow breaking between distinct base-annotation pairs.
@@ -1138,6 +1143,7 @@ impl<'f> ShapedItemText<'f> {
         &mut self,
         range: &mut Range<usize>,
         current_width: &mut FixedL,
+        can_break_before: bool,
         ctx: &mut BreakingContext<'f, '_, '_, '_>,
         padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
@@ -1207,6 +1213,12 @@ impl<'f> ShapedItemText<'f> {
                             padding: padding.fragment_break(),
                         }));
                     }
+                }
+
+                // We failed to break inside the string and we're *not* the first item on the line,
+                // so we can try breaking before the whole text run instead.
+                if can_break_before {
+                    return Ok(BreakOutcome::BreakBefore);
                 }
             }
         }

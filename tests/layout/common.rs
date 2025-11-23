@@ -48,6 +48,7 @@ macro_rules! make_tree {
         $builder.push_text($value)
     };
     (@build span [$style: expr; inline=$builder: ident]; { $($content: tt)* }) => {{
+        #[allow(unused)] // this is unused if the span is empty
         let mut builder = $builder.push_span($style.clone());
         make_tree!(@build_all inline [$style; inline=builder]; $($content)*);
     }};

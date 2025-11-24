@@ -7,6 +7,7 @@ use std::{
 
 use util::{math::I26Dot6, rev_if::RevIf};
 
+use super::FontFeatureEvent;
 use crate::text::{
     Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
 };
@@ -190,6 +191,7 @@ impl<'f> GlyphStringSegment<'f> {
         glyph_index: usize,
         break_index: usize,
         buffer: &mut ShapingBuffer,
+        font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
@@ -222,6 +224,7 @@ impl<'f> GlyphStringSegment<'f> {
                         buffer,
                         text.as_ref(),
                         reshape_range.clone(),
+                        font_feature_events,
                         grapheme_cluster_boundaries,
                     );
                     let other = GlyphStringSegment::from_glyphs(
@@ -244,6 +247,7 @@ impl<'f> GlyphStringSegment<'f> {
             buffer,
             text.as_ref(),
             reshape_range.clone(),
+            font_feature_events,
             grapheme_cluster_boundaries,
         );
         Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
@@ -259,6 +263,7 @@ impl<'f> GlyphStringSegment<'f> {
         glyph_index: usize,
         break_index: usize,
         buffer: &mut ShapingBuffer,
+        font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
@@ -285,6 +290,7 @@ impl<'f> GlyphStringSegment<'f> {
                         buffer,
                         text.as_ref(),
                         reshape_range.clone(),
+                        font_feature_events,
                         grapheme_cluster_boundaries,
                     );
                     let other = GlyphStringSegment::from_glyphs(
@@ -307,6 +313,7 @@ impl<'f> GlyphStringSegment<'f> {
             buffer,
             text.as_ref(),
             reshape_range.clone(),
+            font_feature_events,
             grapheme_cluster_boundaries,
         );
         Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
@@ -395,7 +402,7 @@ impl<'f> GlyphString<'f> {
         self.direction
     }
 
-    pub fn split_off_visual_start(&mut self, end_utf8_index: usize) -> Option<Self> {
+    pub(super) fn split_off_visual_start(&mut self, end_utf8_index: usize) -> Option<Self> {
         let mut result = LinkedList::new();
         let target_utf8_index = match self.direction.is_reverse() {
             false => end_utf8_index.checked_sub(1)?,
@@ -447,11 +454,12 @@ impl<'f> GlyphString<'f> {
 
     // NOTE: Unlike [`Glyph::cluster`] the break range indices here always point to the first byte
     //       of a codepoint so the segment breaking methods must take this into account.
-    pub fn break_around(
+    pub(super) fn break_around(
         &self,
         break_range: Range<usize>,
         max_width: I26Dot6,
         buffer: &mut ShapingBuffer,
+        font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iter: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
@@ -494,6 +502,7 @@ impl<'f> GlyphString<'f> {
                     left_candidate_glyph,
                     break_range.start,
                     buffer,
+                    font_feature_events,
                     grapheme_cluster_boundaries,
                     font_iter.clone(),
                     font_arena,
@@ -538,6 +547,7 @@ impl<'f> GlyphString<'f> {
                     right_candidate_glyph,
                     break_range.end,
                     buffer,
+                    font_feature_events,
                     grapheme_cluster_boundaries,
                     font_iter,
                     font_arena,

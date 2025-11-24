@@ -25,7 +25,7 @@ pub mod platform_font_provider;
 mod shape;
 pub use shape::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct OpenTypeTag(u32);
 

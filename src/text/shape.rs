@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
     ops::Range,
 };
@@ -69,11 +70,29 @@ pub struct ClusterEntry {
     is_grapheme_start: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FeatureState {
+    start_cluster: u32,
+    value: u32,
+}
+
+impl FeatureState {
+    fn flush(self, tag: OpenTypeTag, end_cluster: u32) -> hb_feature_t {
+        hb_feature_t {
+            tag: tag.0,
+            value: self.value,
+            start: self.start_cluster,
+            end: end_cluster,
+        }
+    }
+}
+
 pub struct ShapingBuffer {
+    active_features: HashMap<OpenTypeTag, FeatureState>,
     raw: RawShapingBuffer,
+    features: Vec<hb_feature_t>,
     cluster_map: Vec<ClusterEntry>,
     glyph_scratch_buffer_parts: (*mut Glyph<'static>, usize),
-    features: Vec<hb_feature_t>,
 }
 
 #[derive(Debug, Error)]
@@ -87,13 +106,14 @@ pub enum ShapingError {
 impl ShapingBuffer {
     pub fn new() -> Self {
         Self {
+            active_features: HashMap::new(),
             raw: RawShapingBuffer::new(),
+            features: Vec::new(),
             cluster_map: Vec::new(),
             glyph_scratch_buffer_parts: {
                 let (ptr, _, cap) = vec_into_parts(Vec::new());
                 (ptr, cap)
             },
-            features: Vec::new(),
         }
     }
 
@@ -141,13 +161,31 @@ impl ShapingBuffer {
         }
     }
 
-    pub fn set_feature(&mut self, tag: OpenTypeTag, value: u32, range: Range<usize>) {
-        self.features.push(hb_feature_t {
-            tag: tag.0,
+    pub fn set_feature(&mut self, tag: OpenTypeTag, value: u32) {
+        let new_state = FeatureState {
+            start_cluster: self.cluster_map.len() as u32,
             value,
-            start: range.start as u32,
-            end: range.end as u32,
-        });
+        };
+
+        match self.active_features.entry(tag) {
+            std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                self.features
+                    .push(occupied.get().flush(tag, new_state.start_cluster));
+                *occupied.get_mut() = new_state;
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(new_state);
+            }
+        }
+    }
+
+    pub fn reset_features(&mut self) {
+        for (tag, state) in self.active_features.drain() {
+            if state.start_cluster != self.cluster_map.len() as u32 {
+                self.features
+                    .push(state.flush(tag, self.cluster_map.len() as u32))
+            }
+        }
     }
 
     pub fn direction(&self) -> Option<Direction> {
@@ -168,6 +206,7 @@ impl ShapingBuffer {
     }
 
     pub fn clear(&mut self) {
+        self.active_features.clear();
         self.raw.clear();
         self.features.clear();
         self.cluster_map.clear();
@@ -179,21 +218,7 @@ impl ShapingBuffer {
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Vec<Glyph<'f>>, ShapingError> {
-        for feature in self.features.iter_mut() {
-            feature.start = match self
-                .cluster_map
-                .binary_search_by_key(&feature.start, |x| x.utf8_index as u32)
-            {
-                Ok(i) => i,
-                Err(i) => i.saturating_sub(1),
-            } as u32;
-            feature.end = match self
-                .cluster_map
-                .binary_search_by_key(&feature.end, |x| x.utf8_index as u32)
-            {
-                Ok(i) | Err(i) => i,
-            } as u32;
-        }
+        self.reset_features();
 
         let properties = unsafe {
             let mut buf = MaybeUninit::uninit();

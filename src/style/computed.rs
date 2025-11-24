@@ -92,6 +92,10 @@ impl Length {
 pub struct FontFeatureSettings(BTreeMap<OpenTypeTag, u32>);
 
 impl FontFeatureSettings {
+    pub const fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+
     pub fn set(&mut self, tag: OpenTypeTag, value: u32) {
         self.0.insert(tag, value);
     }
@@ -100,8 +104,8 @@ impl FontFeatureSettings {
         self.0.iter().map(|(&t, &v)| (t, v))
     }
 
-    pub const fn empty() -> Self {
-        Self(BTreeMap::new())
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

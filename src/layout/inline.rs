@@ -11,7 +11,9 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment, InlineSizing},
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontArena, FontMatcher, FontMetrics, ShapingBuffer},
+    text::{
+        self, Direction, Font, FontArena, FontMatcher, FontMetrics, OpenTypeTag, ShapingBuffer,
+    },
 };
 
 mod glyph_string;
@@ -348,6 +350,7 @@ struct InitialShapingResult<'a, 'f> {
     break_opportunities: Vec<usize>,
     text_leaf_items: Vec<LeafItemRange<'a>>,
     bidi: unicode_bidi::BidiInfo<'a>,
+    font_feature_events: Vec<FontFeatureEvent>,
     grapheme_cluster_boundaries: Vec<usize>,
 }
 
@@ -358,6 +361,7 @@ impl InitialShapingResult<'_, '_> {
             break_opportunities: Vec::new(),
             text_leaf_items: Vec::new(),
             bidi: unicode_bidi::BidiInfo::new("", None),
+            font_feature_events: Vec::new(),
             grapheme_cluster_boundaries: Vec::new(),
         }
     }
@@ -499,10 +503,23 @@ fn font_matcher_from_style<'f>(
     .map_err(Into::into)
 }
 
+#[derive(Debug)]
+struct FontFeatureEvent {
+    utf8_index: usize,
+    kind: FontFeatureEventKind,
+}
+
+#[derive(Debug)]
+enum FontFeatureEventKind {
+    Set(OpenTypeTag, u32),
+    Reset,
+}
+
 fn set_buffer_content_from_range(
     buffer: &mut ShapingBuffer,
     text: &str,
     range: Range<usize>,
+    font_feature_events: &[FontFeatureEvent],
     grapheme_cluster_boundaries: &[usize],
 ) {
     buffer.set_pre_context(&text[..range.start]);
@@ -515,8 +532,48 @@ fn set_buffer_content_from_range(
         .iter()
         .copied();
 
+    let mut next_feature_ev_idx = 'feature_idx: {
+        let mut idx = match font_feature_events.binary_search_by_key(&range.start, |f| f.utf8_index)
+        {
+            Ok(i) => i,
+            Err(i) => match i.checked_sub(1) {
+                Some(prev) => prev,
+                None => break 'feature_idx i,
+            },
+        };
+
+        let initial_cluster_utf8_index = font_feature_events[idx].utf8_index;
+        loop {
+            let Some(prev_idx) = idx.checked_sub(1) else {
+                break;
+            };
+
+            if font_feature_events[prev_idx].utf8_index != initial_cluster_utf8_index {
+                break;
+            }
+
+            idx = prev_idx;
+        }
+
+        idx
+    };
+
     let mut current = range.start;
     while current != range.end {
+        loop {
+            match font_feature_events.get(next_feature_ev_idx) {
+                Some(event) if event.utf8_index <= current => {
+                    match event.kind {
+                        FontFeatureEventKind::Set(tag, value) => buffer.set_feature(tag, value),
+                        FontFeatureEventKind::Reset => buffer.reset_features(),
+                    }
+
+                    next_feature_ev_idx += 1;
+                }
+                _ => break,
+            }
+        }
+
         let end = next_grapheme_boundary_it
             .next()
             .map_or(range.end, |end| end.min(range.end));
@@ -550,6 +607,7 @@ fn shape_run_initial<'a, 'f>(
             font_arena: &'f FontArena,
             lctx: &mut LayoutContext,
             result: &mut Vec<ShapedItem<'_, 'f>>,
+            font_features_events: &[FontFeatureEvent],
             left_padding: &mut FixedL,
             buffer: &mut ShapingBuffer,
             grapheme_cluster_boundaries: &[usize],
@@ -579,6 +637,7 @@ fn shape_run_initial<'a, 'f>(
                         buffer,
                         &text,
                         range.clone(),
+                        font_features_events,
                         grapheme_cluster_boundaries,
                     );
                     buffer.shape(self.matcher.iterator(), font_arena, lctx.fonts)?
@@ -643,6 +702,7 @@ fn shape_run_initial<'a, 'f>(
         span_state: &'s mut Vec<SpanState<'a, 'f>>,
         shaping_buffer: ShapingBuffer,
         queued_text: Option<QueuedText<'f>>,
+        font_feature_events: Vec<FontFeatureEvent>,
         queued_padding: FixedL,
         current_span_id: usize,
         total_content_bytes_added: usize,
@@ -737,6 +797,7 @@ fn shape_run_initial<'a, 'f>(
                         self.font_arena,
                         self.lctx,
                         &mut self.shaped,
+                        &self.font_feature_events,
                         &mut self.queued_padding,
                         &mut self.shaping_buffer,
                         &self.grapheme_cluster_boundaries,
@@ -789,6 +850,7 @@ fn shape_run_initial<'a, 'f>(
                         self.font_arena,
                         self.lctx,
                         &mut self.shaped,
+                        &self.font_feature_events,
                         &mut self.queued_padding,
                         &mut self.shaping_buffer,
                         &self.grapheme_cluster_boundaries,
@@ -846,6 +908,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.font_arena,
                                     self.lctx,
                                     &mut self.shaped,
+                                    &self.font_feature_events,
                                     &mut self.queued_padding,
                                     &mut self.shaping_buffer,
                                     &self.grapheme_cluster_boundaries,
@@ -978,6 +1041,7 @@ fn shape_run_initial<'a, 'f>(
                                     self.font_arena,
                                     self.lctx,
                                     &mut self.shaped,
+                                    &self.font_feature_events,
                                     &mut self.queued_padding,
                                     &mut self.shaping_buffer,
                                     &self.grapheme_cluster_boundaries,
@@ -995,9 +1059,19 @@ fn shape_run_initial<'a, 'f>(
                             }
                         }
 
-                        for (tag, value) in current_style.font_feature_settings().iter() {
-                            self.shaping_buffer
-                                .set_feature(tag, value, text.content_range.clone());
+                        let font_feature_settings = current_style.font_feature_settings();
+                        for (tag, value) in font_feature_settings.iter() {
+                            self.font_feature_events.push(FontFeatureEvent {
+                                utf8_index: text.content_range.start,
+                                kind: FontFeatureEventKind::Set(tag, value),
+                            });
+                        }
+
+                        if !font_feature_settings.is_empty() {
+                            self.font_feature_events.push(FontFeatureEvent {
+                                utf8_index: text.content_range.end,
+                                kind: FontFeatureEventKind::Reset,
+                            });
                         }
 
                         text_leaf_items.push(LeafItemRange {
@@ -1037,6 +1111,7 @@ fn shape_run_initial<'a, 'f>(
                     self.font_arena,
                     self.lctx,
                     &mut self.shaped,
+                    &self.font_feature_events,
                     &mut self.queued_padding,
                     &mut self.shaping_buffer,
                     &self.grapheme_cluster_boundaries,
@@ -1050,6 +1125,7 @@ fn shape_run_initial<'a, 'f>(
                 break_opportunities: self.break_opportunities,
                 text_leaf_items,
                 bidi: self.bidi,
+                font_feature_events: self.font_feature_events,
                 grapheme_cluster_boundaries: self.grapheme_cluster_boundaries,
             })
         }
@@ -1077,6 +1153,7 @@ fn shape_run_initial<'a, 'f>(
         span_state,
         shaping_buffer: ShapingBuffer::new(),
         queued_text: None,
+        font_feature_events: Vec::new(),
         queued_padding: FixedL::ZERO,
         current_span_id: usize::MAX,
         total_content_bytes_added: 0,
@@ -1090,6 +1167,7 @@ struct BreakingContext<'f, 'l, 'a, 'b> {
     font_arena: &'f FontArena,
     break_opportunities: &'a [usize],
     break_buffer: text::ShapingBuffer,
+    font_feature_events: &'a [FontFeatureEvent],
     grapheme_cluster_boundaries: &'a [usize],
 }
 
@@ -1220,6 +1298,7 @@ impl<'f> ShapedItemText<'f> {
                         break_range,
                         ctx.constraints.size.x - initial_x,
                         &mut ctx.break_buffer,
+                        ctx.font_feature_events,
                         ctx.grapheme_cluster_boundaries,
                         self.font_matcher.iterator(),
                         ctx.font_arena,
@@ -2069,6 +2148,7 @@ fn layout_run_full(
         break_opportunities,
         ref text_leaf_items,
         bidi,
+        font_feature_events,
         grapheme_cluster_boundaries,
     } = shape_run_initial(
         content,
@@ -2099,6 +2179,7 @@ fn layout_run_full(
             font_arena: &font_arena,
             break_opportunities: &break_opportunities,
             break_buffer: text::ShapingBuffer::new(),
+            font_feature_events: &font_feature_events,
             grapheme_cluster_boundaries: &grapheme_cluster_boundaries,
         };
 

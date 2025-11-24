@@ -297,14 +297,12 @@ impl MonochromeImage {
         let mut target = rasterizer.create_mono_texture_rendered(width, height);
 
         for glyph in &image.glyphs {
-            unsafe {
-                rasterizer.blit_to_mono_texture_unchecked(
-                    &mut target,
-                    glyph.offset.0 - offset.x,
-                    glyph.offset.1 - offset.y,
-                    &glyph.texture,
-                );
-            }
+            rasterizer.blit_to_mono_texture(
+                &mut target,
+                glyph.offset.0 - offset.x,
+                glyph.offset.1 - offset.y,
+                &glyph.texture,
+            );
         }
 
         MonochromeImage {

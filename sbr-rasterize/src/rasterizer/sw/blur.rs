@@ -1,6 +1,4 @@
-use std::{f32::consts::PI, mem::MaybeUninit, ops::Range};
-
-use crate::color::BGRA8;
+use std::{f32::consts::PI, mem::MaybeUninit};
 
 pub fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
     // https://drafts.fxtf.org/filter-effects/#funcdef-filter-blur
@@ -82,48 +80,6 @@ impl Blurer {
         self.iextent = ((radius * 2 + 1) as f32).recip();
     }
 
-    pub unsafe fn buffer_blit_bgra8_unchecked(
-        &mut self,
-        dx: i32,
-        dy: i32,
-        source: &[BGRA8],
-        xs: Range<usize>,
-        ys: Range<usize>,
-        stride: usize,
-    ) {
-        for sy in ys {
-            let mut di = (self.width as i32 * (dy + sy as i32) + dx) as usize;
-            for sx in xs.clone() {
-                let si = sy * stride + sx;
-                unsafe {
-                    *self.front.get_unchecked_mut(di) = source.get_unchecked(si).a as f32 / 255.0;
-                }
-                di += 1;
-            }
-        }
-    }
-
-    pub unsafe fn buffer_blit_mono8_unchecked(
-        &mut self,
-        dx: i32,
-        dy: i32,
-        source: &[u8],
-        xs: Range<usize>,
-        ys: Range<usize>,
-        stride: usize,
-    ) {
-        for sy in ys {
-            let mut di = (self.width as i32 * (dy + sy as i32) + dx) as usize;
-            for sx in xs.clone() {
-                let si = sy * stride + sx;
-                unsafe {
-                    *self.front.get_unchecked_mut(di) = *source.get_unchecked(si) as f32 / 255.0;
-                }
-                di += 1;
-            }
-        }
-    }
-
     unsafe fn swap_buffers(&mut self) {
         let (front_ptr, front_len, front_capacity) = util::vec_parts(&mut self.front);
         let (back_ptr, back_len, back_capacity) = util::vec_parts(&mut self.back);
@@ -177,6 +133,10 @@ impl Blurer {
 
     pub fn front(&self) -> &[f32] {
         &self.front
+    }
+
+    pub fn front_mut(&mut self) -> &mut [f32] {
+        &mut self.front
     }
 
     pub fn padding(&self) -> usize {

@@ -235,12 +235,7 @@ pub trait Rasterizer {
     /// Blits `texture` onto `target` at (`dx`, `dy`).
     ///
     /// `target` must be a monochrome render texture and `texture` must be a monochrome texture.
-    ///
-    /// # Safety
-    ///
-    /// Blitting `texture` onto `target` at the specified coordinates (`dx`, `dy`) must not
-    /// result in out-of-bounds accesses on either `texture` or `target`.
-    unsafe fn blit_to_mono_texture_unchecked(
+    fn blit_to_mono_texture(
         &mut self,
         target: &mut RenderTarget,
         dx: i32,

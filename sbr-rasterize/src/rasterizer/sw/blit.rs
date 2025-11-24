@@ -4,36 +4,30 @@ use crate::color::{Premultiplied, BGRA8};
 
 #[inline(always)]
 unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
-    dst: &mut [D],
+    mut dst: *mut D,
     dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    ys: Range<usize>,
-    xs: Range<usize>,
-    src: &[S],
+    mut src: *const S,
     src_stride: usize,
+    width: usize,
+    height: usize,
     process: impl Fn(S, &mut D),
 ) {
-    let width = xs.end - xs.start;
-    let mut si = ys.start * src_stride + xs.start;
-    let src_row_step = src_stride - width;
-    let mut di = (xs.start as isize
-        + dx as isize
-        + (ys.start as isize + dy as isize) * dst_stride as isize) as usize;
+    let src_end = src.add(src_stride * height);
     let dst_row_step = dst_stride - width;
+    let src_row_step = src_stride - width;
 
-    for _ in ys {
+    while src < src_end {
         for _ in 0..width {
-            let s = *unsafe { src.get_unchecked(si) };
-            let d = unsafe { dst.get_unchecked_mut(di) };
+            let s = unsafe { *src };
+            let d = unsafe { &mut *dst };
 
             process(s, d);
 
-            si += 1;
-            di += 1;
+            src = src.add(1);
+            dst = dst.add(1);
         }
-        si += src_row_step;
-        di += dst_row_step;
+        src = src.add(src_row_step);
+        dst = dst.add(dst_row_step);
     }
 }
 
@@ -44,46 +38,41 @@ unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
 // To avoid situations like this let's never inline these core blitting functions, we want
 // them to be big blocks of high performance code.
 #[inline(never)]
-unsafe fn blit_monochrome_unchecked(
-    dst: &mut [BGRA8],
+unsafe fn blit_mono_unchecked(
+    dst: *mut BGRA8,
     dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    ys: Range<usize>,
-    xs: Range<usize>,
-    src: &[u8],
+    src: *const u8,
     src_stride: usize,
+    width: usize,
+    height: usize,
     color: BGRA8,
 ) {
-    blit_generic_unchecked(dst, dst_stride, dx, dy, ys, xs, src, src_stride, |s, d| {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
         *d = color.mul_alpha(s).blend_over(*d).0;
     });
 }
 
 #[inline(never)]
 unsafe fn blit_bgra_unchecked(
-    dst: &mut [BGRA8],
+    dst: *mut BGRA8,
     dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    ys: Range<usize>,
-    xs: Range<usize>,
-    src: &[BGRA8],
+    src: *const BGRA8,
     src_stride: usize,
+    width: usize,
+    height: usize,
     alpha: u8,
 ) {
-    blit_generic_unchecked(dst, dst_stride, dx, dy, ys, xs, src, src_stride, |s, d| {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
         // NOTE: This is actually pre-multiplied in linear space...
-        //       But I think libass ignores this too.
         //       See note in color.rs
         let n = Premultiplied(s);
         *d = n.mul_alpha(alpha).blend_over(*d).0;
     });
 }
 
-pub fn calculate_blit_rectangle(
-    x: i32,
-    y: i32,
+fn calculate_blit_rectangle(
+    x: isize,
+    y: isize,
     target_width: usize,
     target_height: usize,
     source_width: usize,
@@ -91,8 +80,8 @@ pub fn calculate_blit_rectangle(
 ) -> Option<(Range<usize>, Range<usize>)> {
     let isx = if x < 0 { (-x) as usize } else { 0 };
     let isy = if y < 0 { (-y) as usize } else { 0 };
-    let msx = (source_width as i32).min(target_width as i32 - x);
-    let msy = (source_height as i32).min(target_height as i32 - y);
+    let msx = (source_width as isize).min(target_width as isize - x);
+    let msy = (source_height as isize).min(target_height as isize - y);
     if msx <= 0 || msy <= 0 {
         return None;
     }
@@ -105,10 +94,80 @@ pub fn calculate_blit_rectangle(
     Some((isx..msx, isy..msy))
 }
 
-macro_rules! make_blitter {
+#[inline(never)]
+pub unsafe fn blit_bgra_to_mono_unchecked(
+    dst: *mut u8,
+    dst_stride: usize,
+    src: *const BGRA8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = s.a;
+    });
+}
+
+#[inline(never)]
+pub unsafe fn blit_mono_to_mono_unchecked(
+    dst: *mut u8,
+    dst_stride: usize,
+    src: *const u8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = s;
+    });
+}
+
+#[inline(never)]
+pub unsafe fn copy_mono_to_float_unchecked(
+    dst: *mut f32,
+    dst_stride: usize,
+    src: *const u8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = s as f32 / 255.;
+    });
+}
+
+#[inline(never)]
+pub unsafe fn copy_bgra_to_float_unchecked(
+    dst: *mut f32,
+    dst_stride: usize,
+    src: *const BGRA8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = s.a as f32 / 255.;
+    });
+}
+
+#[inline(never)]
+pub unsafe fn copy_float_to_mono_unchecked(
+    dst: *mut u8,
+    dst_stride: usize,
+    src: *const f32,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = (s * 255.0) as u8;
+    });
+}
+
+macro_rules! make_checked_blitter {
     (
-        $name: ident via $unsafe: ident,
-        $src_type: ty [over] $dst_type: ty, $($extra_name: ident: $extra_ty: ty),*
+        $name: ident via $unchecked_name: ident,
+        $src_type: ty [over] $dst_type: ty $(, $extra_name: ident: $extra_ty: ty)*
      ) => {
         pub fn $name(
             dst: &mut [$dst_type],
@@ -119,10 +178,13 @@ macro_rules! make_blitter {
             src_stride: usize,
             src_width: usize,
             src_height: usize,
-            dx: i32,
-            dy: i32,
+            dx: isize,
+            dy: isize,
             $($extra_name: $extra_ty),*
         ) {
+            assert!(dst_stride * dst_height <= dst.len());
+            assert!(src_stride * src_height <= src.len());
+
             let Some((xs, ys)) = calculate_blit_rectangle(
                 dx, dy,
                 dst_width, dst_height,
@@ -131,9 +193,24 @@ macro_rules! make_blitter {
                 return;
             };
 
+            let width = xs.len();
+            assert!(width <= dst_width);
+            assert!(width <= src_width);
+
             unsafe {
-                $unsafe(
-                    dst, dst_stride, dx, dy, ys, xs, src, src_stride,
+                let dst_ptr = dst.as_mut_ptr().add(
+                    ys.start.wrapping_add_signed(dy) * dst_stride
+                    + xs.start.wrapping_add_signed(dx)
+                );
+                let src_ptr = src.as_ptr().add(ys.start * src_stride + xs.start);
+
+                $unchecked_name(
+                    dst_ptr,
+                    dst_stride,
+                    src_ptr,
+                    src_stride,
+                    width,
+                    ys.len(),
                     $($extra_name),*
                 );
             }
@@ -141,78 +218,26 @@ macro_rules! make_blitter {
     };
 }
 
-make_blitter!(
-    blit_monochrome via blit_monochrome_unchecked,
+make_checked_blitter!(
+    blit_mono via blit_mono_unchecked,
     u8 [over] BGRA8, color: BGRA8
 );
 
-make_blitter!(
+make_checked_blitter!(
     blit_bgra via blit_bgra_unchecked,
     BGRA8 [over] BGRA8, alpha: u8
 );
 
-#[inline(never)]
-pub unsafe fn copy_monochrome_float_to_mono_u8_unchecked(
-    dst: &mut [u8],
-    dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    xs: Range<usize>,
-    ys: Range<usize>,
-    src: &[f32],
-    src_stride: usize,
-) {
-    blit_generic_unchecked(dst, dst_stride, dx, dy, ys, xs, src, src_stride, |s, d| {
-        *d = (s * 255.0) as u8;
-    });
-}
+make_checked_blitter!(
+    blit_mono_to_mono via blit_mono_to_mono_unchecked,
+    u8 [over] u8
+);
 
-#[inline(never)]
-pub unsafe fn blit_bgra_to_mono_unchecked(
-    dst: &mut [u8],
-    dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    src: &[BGRA8],
-    src_width: usize,
-    src_height: usize,
-) {
-    blit_generic_unchecked(
-        dst,
-        dst_stride,
-        dx,
-        dy,
-        0..src_height,
-        0..src_width,
-        src,
-        src_width,
-        |s, d| {
-            *d = s.a;
-        },
-    );
-}
+make_checked_blitter!(
+    blit_bgra_to_mono via blit_bgra_to_mono_unchecked,
+    BGRA8 [over] u8
+);
 
-#[inline(never)]
-pub unsafe fn blit_mono_to_mono_unchecked(
-    dst: &mut [u8],
-    dst_stride: usize,
-    dx: i32,
-    dy: i32,
-    src: &[u8],
-    src_width: usize,
-    src_height: usize,
-) {
-    blit_generic_unchecked(
-        dst,
-        dst_stride,
-        dx,
-        dy,
-        0..src_height,
-        0..src_width,
-        src,
-        src_width,
-        |s, d| {
-            *d = s;
-        },
-    );
-}
+make_checked_blitter!(copy_mono_to_float via copy_mono_to_float_unchecked, u8 [over] f32);
+make_checked_blitter!(copy_bgra_to_float via copy_bgra_to_float_unchecked, BGRA8 [over] f32);
+make_checked_blitter!(copy_float_to_mono via copy_float_to_mono_unchecked, f32 [over] u8);

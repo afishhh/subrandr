@@ -1002,7 +1002,7 @@ impl super::Rasterizer for Rasterizer {
         }
     }
 
-    unsafe fn blit_to_mono_texture_unchecked(
+    fn blit_to_mono_texture(
         &mut self,
         target: &mut super::RenderTarget,
         dx: i32,

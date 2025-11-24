@@ -996,7 +996,7 @@ impl super::Rasterizer for Rasterizer {
 
         match texture.data {
             UnwrappedTextureData::Mono(source) => {
-                blit::blit_monochrome(
+                blit::blit_mono(
                     target.buffer.unwrap_for::<BGRA8>(),
                     target.stride as usize,
                     target.width as usize,
@@ -1005,8 +1005,8 @@ impl super::Rasterizer for Rasterizer {
                     texture.width as usize,
                     texture.width as usize,
                     texture.height as usize,
-                    dx,
-                    dy,
+                    dx as isize,
+                    dy as isize,
                     color,
                 );
             }
@@ -1020,15 +1020,15 @@ impl super::Rasterizer for Rasterizer {
                     texture.width as usize,
                     texture.width as usize,
                     texture.height as usize,
-                    dx,
-                    dy,
+                    dx as isize,
+                    dy as isize,
                     color.a,
                 );
             }
         }
     }
 
-    unsafe fn blit_to_mono_texture_unchecked(
+    fn blit_to_mono_texture(
         &mut self,
         target: &mut super::RenderTarget,
         dx: i32,
@@ -1039,28 +1039,30 @@ impl super::Rasterizer for Rasterizer {
         let texture = unwrap_sw_texture(texture);
 
         match texture.data {
-            UnwrappedTextureData::Mono(source) => unsafe {
-                blit::blit_mono_to_mono_unchecked(
-                    target.buffer.unwrap_for::<u8>(),
-                    target.width as usize,
-                    dx,
-                    dy,
-                    source,
-                    texture.width as usize,
-                    texture.height as usize,
-                );
-            },
-            UnwrappedTextureData::Bgra(source) => unsafe {
-                blit::blit_bgra_to_mono_unchecked(
-                    target.buffer.unwrap_for::<u8>(),
-                    target.width as usize,
-                    dx,
-                    dy,
-                    source,
-                    texture.width as usize,
-                    texture.height as usize,
-                );
-            },
+            UnwrappedTextureData::Mono(source) => blit::blit_mono_to_mono(
+                target.buffer.unwrap_for::<u8>(),
+                target.stride as usize,
+                target.width as usize,
+                target.height as usize,
+                source,
+                texture.width as usize,
+                texture.width as usize,
+                texture.height as usize,
+                dx as isize,
+                dy as isize,
+            ),
+            UnwrappedTextureData::Bgra(source) => blit::blit_bgra_to_mono(
+                target.buffer.unwrap_for::<u8>(),
+                target.stride as usize,
+                target.width as usize,
+                target.height as usize,
+                source,
+                texture.width as usize,
+                texture.width as usize,
+                texture.height as usize,
+                dx as isize,
+                dy as isize,
+            ),
         }
     }
 
@@ -1074,41 +1076,36 @@ impl super::Rasterizer for Rasterizer {
 
     fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &super::Texture) {
         let texture = unwrap_sw_texture(texture);
+
         let dx = dx + self.blurer.padding() as i32;
         let dy = dy + self.blurer.padding() as i32;
-
-        let Some((xs, ys)) = blit::calculate_blit_rectangle(
-            dx,
-            dy,
-            self.blurer.width(),
-            self.blurer.height(),
-            texture.width as usize,
-            texture.height as usize,
-        ) else {
-            return;
-        };
-
+        let width = self.blurer.width();
+        let height = self.blurer.height();
         match texture.data {
-            UnwrappedTextureData::Mono(source) => unsafe {
-                self.blurer.buffer_blit_mono8_unchecked(
-                    dx,
-                    dy,
-                    source,
-                    xs,
-                    ys,
-                    texture.width as usize,
-                );
-            },
-            UnwrappedTextureData::Bgra(source) => unsafe {
-                self.blurer.buffer_blit_bgra8_unchecked(
-                    dx,
-                    dy,
-                    source,
-                    xs,
-                    ys,
-                    texture.width as usize,
-                );
-            },
+            UnwrappedTextureData::Mono(source) => blit::copy_mono_to_float(
+                self.blurer.front_mut(),
+                width,
+                width,
+                height,
+                source,
+                texture.width as usize,
+                texture.width as usize,
+                texture.height as usize,
+                dx as isize,
+                dy as isize,
+            ),
+            UnwrappedTextureData::Bgra(source) => blit::copy_bgra_to_float(
+                self.blurer.front_mut(),
+                width,
+                width,
+                height,
+                source,
+                texture.width as usize,
+                texture.width as usize,
+                texture.height as usize,
+                dx as isize,
+                dy as isize,
+            ),
         }
     }
 
@@ -1130,18 +1127,20 @@ impl super::Rasterizer for Rasterizer {
         let mut target = self
             .create_mono_texture_rendered(self.blurer.width() as u32, self.blurer.height() as u32);
 
-        unsafe {
-            blit::copy_monochrome_float_to_mono_u8_unchecked(
-                unwrap_sw_render_target(&mut target)
-                    .buffer
-                    .unwrap_for::<u8>(),
-                self.blurer.width(),
-                0,
-                0,
-                0..self.blurer.width(),
-                0..self.blurer.height(),
+        {
+            let target = unwrap_sw_render_target(&mut target);
+
+            blit::copy_float_to_mono(
+                target.buffer.unwrap_for::<u8>(),
+                target.stride as usize,
+                target.width as usize,
+                target.height as usize,
                 self.blurer.front(),
                 self.blurer.width(),
+                self.blurer.width(),
+                self.blurer.height(),
+                0,
+                0,
             );
         }
 

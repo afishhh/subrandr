@@ -271,13 +271,13 @@ pub struct SpanFragment {
 pub struct TextFragment {
     pub style: ComputedStyle,
     // self-referential
-    glyphs: GlyphString<'static, std::rc::Rc<str>>,
+    glyphs: GlyphString<'static>,
     _font_arena: util::rc::Rc<FontArena>,
     pub baseline_offset: Vec2L,
 }
 
 impl TextFragment {
-    pub fn glyphs(&self) -> &GlyphString<'_, std::rc::Rc<str>> {
+    pub fn glyphs(&self) -> &GlyphString<'_> {
         &self.glyphs
     }
 }
@@ -453,7 +453,7 @@ enum ShapedItemKind<'a, 'f> {
 struct ShapedItemText<'f> {
     font_matcher: FontMatcher<'f>,
     primary_font: &'f Font,
-    glyphs: GlyphString<'f, Rc<str>>,
+    glyphs: GlyphString<'f>,
     break_after: bool,
 }
 
@@ -1303,7 +1303,7 @@ fn layout_run_full(
         leaves: &[LeafItemRange<'s>],
         mut push_section: impl FnMut(
             &LeafItemRange<'s>,
-            GlyphString<'f, Rc<str>>,
+            GlyphString<'f>,
             Range<usize>,
         ) -> Result<(), InlineLayoutError>,
     ) -> Result<(), InlineLayoutError> {
@@ -1701,9 +1701,7 @@ fn layout_run_full(
                         let fragment = TextFragment {
                             style: leaf.style.clone(),
                             glyphs: unsafe {
-                                std::mem::transmute::<GlyphString<'_, _>, GlyphString<'static, _>>(
-                                    glyphs,
-                                )
+                                std::mem::transmute::<GlyphString<'_>, GlyphString<'static>>(glyphs)
                             },
                             _font_arena: font_arena.clone(),
                             baseline_offset: Vec2::new(FixedL::ZERO, self.line_ascender),

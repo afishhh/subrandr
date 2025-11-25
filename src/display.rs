@@ -51,7 +51,7 @@ impl<'p> DisplayPass<'_, 'p> {
     fn display_text_full(
         &mut self,
         pos: Point2L,
-        glyphs: &GlyphString<'p, std::rc::Rc<str>>,
+        glyphs: &GlyphString<'p>,
         color: BGRA8,
         decorations: &[LineDecoration],
         shadows: &[TextShadow],

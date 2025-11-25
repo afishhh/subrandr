@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use rasterize::color::BGRA8;
 use util::math::{I16Dot16, I26Dot6, Point2};
 
@@ -32,7 +30,7 @@ pub enum PaintOp<'d> {
 #[derive(Debug, Clone)]
 pub struct Text<'d> {
     pub pos: Point2L,
-    pub glyphs: GlyphString<'d, Rc<str>>,
+    pub glyphs: GlyphString<'d>,
     pub kind: TextKind,
 }
 

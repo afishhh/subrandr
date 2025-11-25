@@ -11,28 +11,23 @@ use crate::text::{
     Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
 };
 
-pub trait GlyphStringText: AsRef<str> + Clone {}
-
-impl GlyphStringText for &str {}
-impl GlyphStringText for Rc<str> {}
-
 #[derive(Clone)]
-pub struct GlyphString<'f, T: GlyphStringText> {
+pub struct GlyphString<'f> {
     /// Always refers to the original string that contains the whole context
     /// of this string.
-    text: T,
+    text: Rc<str>,
     segments: LinkedList<GlyphStringSegment<'f>>,
     direction: Direction,
 }
 
-impl<T: GlyphStringText> Debug for GlyphString<'_, T> {
+impl Debug for GlyphString<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "GlyphString(direction: {:?}) ", self.direction)?;
         let mut list = f.debug_list();
         for segment in &self.segments {
             list.entry(&util::fmt_from_fn(|f| {
                 f.debug_struct("GlyphStringSegment")
-                    .field("text", &&self.text.as_ref()[segment.text_range.clone()])
+                    .field("text", &&self.text[segment.text_range.clone()])
                     .field(
                         "glyphs",
                         &util::fmt_from_fn(|f| f.debug_list().finish_non_exhaustive()),
@@ -189,9 +184,9 @@ impl<'f> GlyphStringSegment<'f> {
         }
     }
 
-    fn break_until<T: GlyphStringText>(
+    fn break_until(
         &self,
-        text: T,
+        text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
         buffer: &mut ShapingBuffer,
@@ -258,9 +253,9 @@ impl<'f> GlyphStringSegment<'f> {
     }
 
     // Analogous to `break_after` but returns the part logically after `break_index` (inclusive).
-    fn break_after<T: GlyphStringText>(
+    fn break_after(
         &self,
-        text: T,
+        text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
         buffer: &mut ShapingBuffer,
@@ -348,9 +343,9 @@ impl<'f> GlyphStringSegment<'f> {
 }
 
 // TODO: linked_list_cursors feature would improve some of this code significantly
-impl<'f, T: GlyphStringText> GlyphString<'f, T> {
+impl<'f> GlyphString<'f> {
     pub fn from_glyphs(
-        text: T,
+        text: Rc<str>,
         text_range: Range<usize>,
         glyphs: Vec<Glyph<'f>>,
         direction: Direction,
@@ -364,10 +359,10 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
     }
 
     fn from_array<const N: usize>(
-        text: T,
+        text: Rc<str>,
         segments: [GlyphStringSegment<'f>; N],
         direction: Direction,
-    ) -> GlyphString<'f, T> {
+    ) -> GlyphString<'f> {
         GlyphString {
             text,
             segments: LinkedList::from_iter(
@@ -392,7 +387,7 @@ impl<'f, T: GlyphStringText> GlyphString<'f, T> {
         self.segments.is_empty()
     }
 
-    pub fn text(&self) -> &T {
+    pub fn text(&self) -> &Rc<str> {
         &self.text
     }
 

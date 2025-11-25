@@ -2093,6 +2093,10 @@ pub fn layout<'l, 'a, 'b, 'c>(
     content: &'c InlineContent,
     align: HorizontalAlignment,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
+    if content.text_runs.is_empty() {
+        return Ok(InlineContentFragment::EMPTY);
+    }
+
     layout_run_full(
         content,
         0,

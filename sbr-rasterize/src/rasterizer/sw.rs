@@ -328,35 +328,6 @@ macro_rules! check_buffer {
     };
 }
 
-fn fill_axis_aligned_rect<P: DrawPixel>(
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    buffer: &mut [P],
-    width: u32,
-    height: u32,
-    stride: u32,
-    color: P,
-) {
-    check_buffer!("fill_axis_aligned_rect", buffer, stride, height);
-
-    debug_assert!(x0 <= x1);
-    debug_assert!(y0 <= y1);
-
-    for y in y0.clamp(0, height as i32)..y1.clamp(0, height as i32) {
-        unsafe {
-            horizontal_line_unchecked(
-                x0,
-                x1,
-                &mut buffer[y as usize * stride as usize..],
-                width as i32,
-                color,
-            );
-        }
-    }
-}
-
 // Scuffed Anti-Aliasing™ (SAA)
 fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
     x0: f32,
@@ -735,6 +706,13 @@ impl TextureImpl {
             TextureData::OwnedBgra(bgra) => bgra.len() * 4,
         }
     }
+
+    pub(super) fn is_mono(&self) -> bool {
+        match &self.data {
+            TextureData::OwnedMono(_) => true,
+            TextureData::OwnedBgra(_) => false,
+        }
+    }
 }
 
 enum UnwrappedTextureData<'a> {
@@ -942,27 +920,6 @@ impl super::Rasterizer for Rasterizer {
     }
 
     fn fill_axis_aligned_rect(
-        &mut self,
-        target: &mut super::RenderTarget,
-        rect: Rect2f,
-        color: BGRA8,
-    ) {
-        let target = unwrap_sw_render_target(target);
-
-        fill_axis_aligned_rect(
-            rect.min.x as i32,
-            rect.min.y as i32,
-            rect.max.x as i32,
-            rect.max.y as i32,
-            target.buffer.unwrap_for::<BGRA8>(),
-            target.width,
-            target.height,
-            target.stride,
-            color,
-        );
-    }
-
-    fn fill_axis_aligned_antialias_rect(
         &mut self,
         target: &mut super::RenderTarget,
         rect: Rect2f,

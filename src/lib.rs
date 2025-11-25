@@ -13,10 +13,11 @@ pub mod srv3;
 pub mod vtt;
 
 mod capi;
+mod display;
 mod html;
 mod layout;
 mod log;
-mod render;
+mod raster;
 mod style;
 mod text;
 

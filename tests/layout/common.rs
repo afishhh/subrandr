@@ -8,8 +8,9 @@ use sha2::Digest;
 use util::rc::{rc_static, Rc};
 
 use crate::{
+    display::{DisplayPass, PaintOpBuilder},
     layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
-    render::RenderPass,
+    raster::RasterContext,
     style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
     Subrandr,
@@ -255,16 +256,26 @@ pub fn check_inline(
         .expect("Inline layout failed");
 
         let mut pixels = vec![BGRA8::ZERO; width as usize * height as usize];
+        let glyph_cache = GlyphCache::new();
+        let mut paint_list = Vec::new();
+
+        DisplayPass {
+            output: PaintOpBuilder(&mut paint_list),
+        }
+        .display_inline_content_fragment(pos, &fragment);
+
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
             rasterize::sw::create_render_target(&mut pixels, width, height, width);
 
-        RenderPass {
-            glyph_cache: &GlyphCache::new(),
-            rasterizer: &mut rasterizer,
-            target: &mut render_target,
-        }
-        .draw_inline_content_fragment(pos, &fragment)
+        crate::raster::rasterize_to_target(
+            &mut RasterContext {
+                rasterizer: &mut rasterizer,
+                glyph_cache: &glyph_cache,
+            },
+            &mut render_target,
+            &paint_list,
+        )
         .expect("Fragment rasterization failed");
 
         pixels

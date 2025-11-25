@@ -1,10 +1,10 @@
 use std::{
-    cell::{OnceCell, UnsafeCell},
+    cell::UnsafeCell,
     collections::HashSet,
     fmt::{Debug, Display},
 };
 
-use rasterize::{color::BGRA8, Rasterizer, RenderTarget, Texture};
+use rasterize::{Rasterizer, Texture};
 use text_sys::*;
 use util::{
     math::{I26Dot6, Vec2},
@@ -193,178 +193,9 @@ impl<'f> Glyph<'f> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct TextMetrics {
-    pub paint_size: Vec2<I26Dot6>,
-    pub trailing_advance: I26Dot6,
-    pub max_bearing_y: I26Dot6,
-    pub max_ascender: I26Dot6,
-    pub min_descender: I26Dot6,
-    pub max_lineskip_descent: I26Dot6,
-}
-
-impl TextMetrics {
-    pub fn extend_by_font(&mut self, font: &Font) {
-        let metrics = font.metrics();
-        self.max_ascender = self.max_ascender.max(metrics.ascender);
-        self.min_descender = self.min_descender.min(metrics.descender);
-        self.max_lineskip_descent = self
-            .max_lineskip_descent
-            .max(metrics.height - metrics.ascender);
-    }
-}
-
-pub fn compute_extents_ex<'a, 'f: 'a, I>(
-    cache: &GlyphCache,
-    horizontal: bool,
-    glyphs: I,
-) -> Result<TextMetrics, FreeTypeError>
-where
-    I: IntoIterator + 'a,
-    I::IntoIter: DoubleEndedIterator<Item = &'a Glyph<'f>>,
-{
-    let mut results = TextMetrics {
-        paint_size: Vec2::ZERO,
-        trailing_advance: I26Dot6::ZERO,
-        max_bearing_y: I26Dot6::ZERO,
-        max_ascender: I26Dot6::ZERO,
-        min_descender: I26Dot6::ZERO,
-        max_lineskip_descent: I26Dot6::ZERO,
-    };
-
-    let mut glyphs = glyphs.into_iter();
-
-    if let Some(glyph) = glyphs.next_back() {
-        let extents = glyph.font.glyph_extents(cache, glyph.index)?;
-        results.paint_size.y += extents.height.abs();
-        results.paint_size.x += extents.width;
-        if horizontal {
-            results.trailing_advance = glyph.x_advance - extents.width;
-            results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
-        } else {
-            results.trailing_advance = glyph.y_advance - extents.height;
-            results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
-        }
-        results.extend_by_font(glyph.font);
-    }
-
-    for glyph in glyphs {
-        let extents = glyph.font.glyph_extents(cache, glyph.index)?;
-        if horizontal {
-            results.paint_size.y = results.paint_size.y.max(extents.height.abs());
-            results.paint_size.x += glyph.x_advance;
-            results.max_bearing_y = results.max_bearing_y.max(extents.hori_bearing_y);
-        } else {
-            results.paint_size.x = results.paint_size.x.max(extents.width.abs());
-            results.paint_size.y += glyph.y_advance;
-            results.max_bearing_y = results.max_bearing_y.max(extents.vert_bearing_y);
-        }
-        results.extend_by_font(glyph.font);
-    }
-
-    Ok(results)
-}
-
-struct GlyphBitmap {
-    offset: (i32, i32),
-    texture: Texture,
-}
-
-/// Merged monochrome bitmap of the whole text string, useful for shadows.
-pub struct MonochromeImage {
+pub struct GlyphBitmap {
     pub offset: Vec2<i32>,
     pub texture: Texture,
-}
-
-impl MonochromeImage {
-    // TODO: Remove the need for this via a blit with monochrome filter operation
-    //       or at least use a per-glyph monochrome cache.
-    //       Non-monochrome glyphs are rare so maybe the second option will be just fine.
-    pub fn from_image(rasterizer: &mut dyn Rasterizer, image: &Image) -> Self {
-        let mut offset = Vec2::<i32>::ZERO;
-        let (mut width, mut height) = (0, 0);
-        for glyph in &image.glyphs {
-            offset.x = offset.x.min(glyph.offset.0);
-            offset.y = offset.y.min(glyph.offset.1);
-
-            width = width.max(glyph.offset.0.max(0) as u32 + glyph.texture.width());
-            height = height.max(glyph.offset.1.max(0) as u32 + glyph.texture.height());
-        }
-
-        width += (-offset.x).max(0) as u32;
-        height += (-offset.y).max(0) as u32;
-
-        let mut target = rasterizer.create_mono_texture_rendered(width, height);
-
-        for glyph in &image.glyphs {
-            rasterizer.blit_to_mono_texture(
-                &mut target,
-                glyph.offset.0 - offset.x,
-                glyph.offset.1 - offset.y,
-                &glyph.texture,
-            );
-        }
-
-        MonochromeImage {
-            offset,
-            texture: rasterizer.finalize_texture_render(target),
-        }
-    }
-
-    pub fn blit(
-        &self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget<'_>,
-        dx: i32,
-        dy: i32,
-        color: BGRA8,
-    ) {
-        rasterizer.blit(target, dx, dy, &self.texture, color);
-    }
-}
-
-pub struct Image {
-    glyphs: Vec<GlyphBitmap>,
-    monochrome: OnceCell<MonochromeImage>,
-}
-
-impl GlyphBitmap {
-    fn blit(
-        &self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        dx: i32,
-        dy: i32,
-        color: BGRA8,
-    ) {
-        rasterizer.blit(
-            target,
-            dx + self.offset.0,
-            dy + self.offset.1,
-            &self.texture,
-            color,
-        );
-    }
-}
-
-impl Image {
-    pub fn monochrome(&self, rasterizer: &mut dyn Rasterizer) -> &MonochromeImage {
-        self.monochrome
-            .get_or_init(|| MonochromeImage::from_image(rasterizer, self))
-    }
-
-    pub fn blit(
-        &self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
-        dx: i32,
-        dy: i32,
-        color: BGRA8,
-    ) {
-        for glyph in &self.glyphs {
-            glyph.blit(rasterizer, target, dx, dy, color);
-        }
-    }
 }
 
 pub fn render<'g, 'f: 'g>(
@@ -374,11 +205,8 @@ pub fn render<'g, 'f: 'g>(
     yf: I26Dot6,
     blur_sigma: f32,
     glyphs: &mut dyn Iterator<Item = &'g Glyph<'f>>,
-) -> Result<Image, GlyphRenderError> {
-    let mut result = Image {
-        glyphs: Vec::new(),
-        monochrome: OnceCell::new(),
-    };
+) -> Result<Vec<GlyphBitmap>, GlyphRenderError> {
+    let mut result = Vec::new();
 
     assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&xf));
     assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&yf));
@@ -403,8 +231,8 @@ pub fn render<'g, 'f: 'g>(
             false,
         )?;
 
-        result.glyphs.push(GlyphBitmap {
-            offset: (
+        result.push(GlyphBitmap {
+            offset: Vec2::new(
                 (x + bitmap.offset.x + shaped_glyph.x_offset).floor_to_inner(),
                 (y + bitmap.offset.y + shaped_glyph.y_offset).floor_to_inner(),
             ),

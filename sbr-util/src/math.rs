@@ -349,6 +349,13 @@ impl<N: Number> Rect2<N> {
         self.max.y = self.max.y.max(rect.max.y);
     }
 
+    pub fn expand(&mut self, x: N, y: N) {
+        self.min.x -= x;
+        self.min.y -= y;
+        self.max.x += x;
+        self.max.y += y;
+    }
+
     pub fn bounding_box_of_points(points: impl IntoIterator<Item = Point2<N>>) -> Self {
         let mut result = Rect2::NOTHING;
         for point in points {

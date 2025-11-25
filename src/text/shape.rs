@@ -97,21 +97,6 @@ impl ShapingBuffer {
         }
     }
 
-    pub fn add_text_simple(&mut self, text: &str) {
-        self.set_pre_context("");
-
-        let mut last = 0;
-        for next in icu_segmenter::GraphemeClusterSegmenter::new()
-            .segment_str(text)
-            .skip(1)
-        {
-            self.add_grapheme(&text[last..next], last);
-            last = next;
-        }
-
-        self.set_post_context("");
-    }
-
     pub fn set_pre_context(&mut self, context: &str) {
         unsafe {
             hb_buffer_add_utf8(
@@ -498,15 +483,4 @@ impl Drop for ShapingPass<'_, '_, '_> {
             (ptr.cast(), cap)
         };
     }
-}
-
-pub fn simple_shape_text<'f>(
-    font_iterator: FontMatchIterator<'_, 'f>,
-    font_arena: &'f FontArena,
-    text: &str,
-    fonts: &mut FontDb,
-) -> Result<Vec<Glyph<'f>>, ShapingError> {
-    let mut buffer = ShapingBuffer::new();
-    buffer.add_text_simple(text);
-    buffer.shape(font_iterator, font_arena, fonts)
 }

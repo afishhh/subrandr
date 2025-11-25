@@ -112,6 +112,14 @@ impl Texture {
             TextureInner::Wgpu(wgpu) => wgpu.height(),
         }
     }
+
+    pub fn is_mono(&self) -> bool {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.is_mono(),
+            #[cfg(feature = "wgpu")]
+            TextureInner::Wgpu(wgpu) => wgpu.is_mono(),
+        }
+    }
 }
 
 pub trait Rasterizer {
@@ -200,28 +208,7 @@ pub trait Rasterizer {
         }
     }
 
-    fn stroke_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8) {
-        self.stroke_polygon(
-            target,
-            Vec2f::ZERO,
-            &[
-                rect.min,
-                Point2f::new(rect.max.x, rect.min.y),
-                rect.max,
-                Point2f::new(rect.min.x, rect.max.y),
-            ],
-            color,
-        )
-    }
     fn fill_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8);
-    fn fill_axis_aligned_antialias_rect(
-        &mut self,
-        target: &mut RenderTarget,
-        rect: Rect2f,
-        color: BGRA8,
-    ) {
-        self.fill_axis_aligned_rect(target, rect, color);
-    }
 
     fn blit(
         &mut self,

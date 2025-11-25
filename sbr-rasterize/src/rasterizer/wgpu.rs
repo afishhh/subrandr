@@ -330,6 +330,22 @@ impl TextureImpl {
             TextureImpl::Empty => 0,
         }
     }
+
+    pub fn is_mono(&self) -> bool {
+        match self {
+            TextureImpl::Full(texture) => match texture.format() {
+                wgpu::TextureFormat::Bgra8Unorm => false,
+                wgpu::TextureFormat::R8Unorm => true,
+                wgpu::TextureFormat::R32Float => true,
+                _ => unreachable!(),
+            },
+            TextureImpl::Packed(_, pixel_format) => match pixel_format {
+                PixelFormat::Mono => true,
+                PixelFormat::Bgra => false,
+            },
+            TextureImpl::Empty => true,
+        }
+    }
 }
 
 struct UnwrappedTexture<'a> {

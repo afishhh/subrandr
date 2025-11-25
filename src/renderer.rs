@@ -564,27 +564,72 @@ impl Renderer<'_> {
 
                     let graph_width = I26Dot6::new(400) * ctx.pixel_scale();
                     let graph_height = I26Dot6::new(50) * ctx.pixel_scale();
-                    let offx = ctx.padding_left + ctx.video_width - graph_width;
+                    let texture_size = Vec2::new(
+                        graph_width.ceil_to_inner() as u32,
+                        graph_height.ceil_to_inner() as u32,
+                    );
 
-                    let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
-                        let mut polyline = vec![];
-                        for (i, time) in times.frames.iter().copied().enumerate() {
-                            let x = (graph_width * i as i32 / times.frames.len() as i32).into_f32();
-                            let y = -(graph_height * time / gmax).into_f32();
-                            polyline.push(Point2f::new(x, y));
-                        }
+                    let graph_texture = unsafe {
+                        pass.rasterizer.create_texture_mapped(
+                            texture_size.x,
+                            texture_size.y,
+                            rasterize::PixelFormat::Bgra,
+                            Box::new(|buffer, stride| {
+                                buffer.fill(std::mem::MaybeUninit::zeroed());
 
-                        pass.rasterizer.stroke_polyline(
-                            pass.target,
-                            Vec2::new(offx.into_f32(), (y + graph_height).into_f32()),
-                            &polyline,
-                            color,
-                        );
+                                let n_pixels = buffer.len() / 4;
+                                let pixel_stride = stride / 4;
+                                let pixels: &mut [BGRA8] = std::slice::from_raw_parts_mut(
+                                    buffer.as_mut_ptr().cast(),
+                                    n_pixels,
+                                );
+
+                                let mut glyph_rasterizer = rasterize::sw::GlyphRasterizer::new();
+                                let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
+                                    let points = times.frames.iter().copied().enumerate().map(
+                                        |(i, time)| {
+                                            let x = (graph_width * i as i32
+                                                / times.frames.len() as i32)
+                                                .into_f32();
+                                            let y = -(graph_height * time / gmax).into_f32();
+                                            Point2f::new(x, y + graph_height.into_f32())
+                                        },
+                                    );
+
+                                    glyph_rasterizer.reset(texture_size);
+                                    glyph_rasterizer.stroke_polyline(points, ctx.pixel_scale());
+                                    glyph_rasterizer.rasterize(|y, xs, v| {
+                                        let row = match pixels.get_mut(
+                                            y as usize * pixel_stride + xs.start as usize..,
+                                        ) {
+                                            Some(row) => row,
+                                            None => return,
+                                        };
+                                        let width = row.len().min((xs.end - xs.start) as usize);
+                                        for pixel in &mut row[..width] {
+                                            *pixel = color
+                                                .mul_alpha((v >> 8) as u8)
+                                                .blend_over(*pixel)
+                                                .0;
+                                        }
+                                    });
+                                };
+
+                                draw_polyline(&self.perf.whole, BGRA8::YELLOW);
+                                draw_polyline(&self.perf.layout, BGRA8::CYAN);
+                                draw_polyline(&self.perf.raster, BGRA8::ORANGERED);
+                            }),
+                        )
                     };
 
-                    draw_polyline(&self.perf.whole, BGRA8::YELLOW);
-                    draw_polyline(&self.perf.layout, BGRA8::CYAN);
-                    draw_polyline(&self.perf.raster, BGRA8::ORANGERED);
+                    pass.rasterizer.blit(
+                        pass.target,
+                        (ctx.padding_left + ctx.video_width - graph_width).floor_to_inner(),
+                        y.floor_to_inner(),
+                        &graph_texture,
+                        BGRA8::WHITE,
+                    );
+
                     y += graph_height;
                 }
 

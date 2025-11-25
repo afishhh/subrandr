@@ -9,7 +9,6 @@
 //! In the future I may investigate addressing the "overlapping areas" part of
 //! the problem, I have some ideas for how to do that while maybe keeping
 //! performance reasonable.
-// TODO: Handle segments at x < 0 properly
 
 use std::{num::NonZeroU32, ops::Range};
 
@@ -87,6 +86,42 @@ impl GlyphRasterizer {
         }
     }
 
+    pub fn stroke_polyline(&mut self, mut points: impl Iterator<Item = Point2f>, half_width: f32) {
+        let Some(mut current) = points.next() else {
+            return;
+        };
+
+        let Some(mut next) = points.next() else {
+            return;
+        };
+
+        let mut prev_offset = None;
+        loop {
+            let normal = (next - current).normal().normalize();
+            let offset = normal * half_width;
+
+            if let Some(prev_offset) = prev_offset {
+                self.process_linef(current - prev_offset, current - offset);
+                self.process_linef(current + offset, current + prev_offset);
+            } else {
+                self.process_linef(current + offset, current - offset);
+            }
+
+            self.process_linef(current - offset, next - offset);
+            self.process_linef(next + offset, current + offset);
+
+            current = next;
+            next = match points.next() {
+                Some(next_next) => next_next,
+                None => {
+                    self.process_linef(next - offset, next + offset);
+                    break;
+                }
+            };
+            prev_offset = Some(offset);
+        }
+    }
+
     pub fn add_outline(&mut self, iter: impl Iterator<Item = OutlineEvent<f32>>) {
         iter.visit_flattened_with(
             |p0, p1| self.process_linef(p0, p1),
@@ -142,20 +177,25 @@ impl GlyphRasterizer {
 
     fn add_line_to_cell(
         &mut self,
-        x: u32,
+        x: i32,
         y: u32,
         bottom: Point2<I16Dot16>,
         top: Point2<I16Dot16>,
         winding: Winding,
     ) {
-        let idx = self.insert_cell(x, y);
+        let idx = self.insert_cell(x.max(0) as u32, y);
         let cell = &mut self.cells[idx.get() as usize];
 
         let height = top.y - bottom.y;
         debug_assert!(height >= 0);
         let signed_height = height * (winding as i32);
-        cell.winding += signed_height;
-        cell.rcoverage += signed_height * (I16Dot16::new(2) - (top.x + bottom.x)) / 2;
+        if x < 0 {
+            cell.winding += signed_height;
+            cell.rcoverage += signed_height;
+        } else {
+            cell.winding += signed_height;
+            cell.rcoverage += signed_height * (I16Dot16::new(2) - (top.x + bottom.x)) / 2;
+        }
     }
 
     fn add_segment_cells_horizontal(
@@ -167,7 +207,7 @@ impl GlyphRasterizer {
     ) {
         if bottom.x == top.x && bottom.x < self.size.x as i32 {
             self.add_line_to_cell(
-                bottom.x.floor_to_inner() as u32,
+                bottom.x.floor_to_inner(),
                 y,
                 Point2::new(bottom.x.fract(), bottom.y),
                 Point2::new(bottom.x.fract(), top.y),
@@ -190,7 +230,7 @@ impl GlyphRasterizer {
         let mut next_x = left.x.floor() + 1;
         if next_x >= right.x {
             self.add_line_to_cell(
-                bottom.x.floor_to_inner() as u32,
+                bottom.x.floor_to_inner(),
                 y,
                 Point2::new(bottom.x.fract(), bottom.y),
                 Point2::new(top.x.fract(), top.y),
@@ -212,7 +252,7 @@ impl GlyphRasterizer {
             }
 
             self.add_line_to_cell(
-                current_x.floor_to_inner() as u32,
+                current_x.floor_to_inner(),
                 y,
                 pixel_bottom,
                 pixel_top,

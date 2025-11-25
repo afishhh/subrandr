@@ -5,17 +5,14 @@ use std::{
 
 use rasterize::color::{Premultiplied, BGRA8};
 use sha2::Digest;
-use util::{
-    math::I26Dot6,
-    rc::{rc_static, Rc},
-};
+use util::rc::{rc_static, Rc};
 
 use crate::{
     layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
     render::RenderPass,
     style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
-    DebugFlags, Subrandr,
+    Subrandr,
 };
 
 macro_rules! make_tree {
@@ -263,13 +260,9 @@ pub fn check_inline(
             rasterize::sw::create_render_target(&mut pixels, width, height, width);
 
         RenderPass {
-            dpi,
             glyph_cache: &GlyphCache::new(),
-            fonts: &mut fonts,
             rasterizer: &mut rasterizer,
             target: &mut render_target,
-            debug_flags: &DebugFlags::default(),
-            debug_text_font_size: I26Dot6::new(16),
         }
         .draw_inline_content_fragment(pos, &fragment)
         .expect("Fragment rasterization failed");

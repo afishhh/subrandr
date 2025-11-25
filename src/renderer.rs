@@ -659,13 +659,9 @@ impl Renderer<'_> {
 
         {
             let mut pass = RenderPass {
-                dpi: ctx.dpi,
                 glyph_cache: &self.glyph_cache,
-                fonts: &mut self.fonts,
                 rasterizer,
                 target,
-                debug_flags: &self.sbr.debug,
-                debug_text_font_size: Self::DEBUG_FONT_SIZE,
             };
 
             for &(pos, ref fragment) in &fragments {

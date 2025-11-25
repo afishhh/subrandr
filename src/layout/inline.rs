@@ -69,6 +69,7 @@ impl InlineContentBuilder {
             parent: self,
             run_index: 0,
             span_index: usize::MAX,
+            last_item_is_text: false,
             length: 0,
         }
     }
@@ -86,6 +87,7 @@ pub struct InlineSpanBuilder<'a> {
     span_index: usize,
     run_index: usize,
     length: usize,
+    last_item_is_text: bool,
 }
 
 impl<'a> InlineSpanBuilder<'a> {
@@ -111,9 +113,19 @@ impl<'a> InlineSpanBuilder<'a> {
         let text_run = &mut self.parent.text_runs[self.run_index];
         let start = text_run.len();
         text_run.push_str(content);
-        let content_range = start..text_run.len();
 
-        self.push_child(InlineItem::Text(InlineText { content_range }));
+        if self.last_item_is_text {
+            let Some(InlineItem::Text(text)) = self.parent.items.last_mut() else {
+                unreachable!();
+            };
+            assert_eq!(text.content_range.end, start);
+            text.content_range.end = text_run.len();
+        } else {
+            let content_range = start..text_run.len();
+
+            self.push_child(InlineItem::Text(InlineText { content_range }));
+            self.last_item_is_text = true;
+        }
     }
 
     fn push_object_replacement(&mut self) -> usize {
@@ -141,11 +153,13 @@ impl<'a> InlineSpanBuilder<'a> {
             length: 0,
             kind,
         }));
+        self.last_item_is_text = false;
 
         InlineSpanBuilder {
             parent: self.parent,
             run_index,
             span_index,
+            last_item_is_text: false,
             length: 0,
         }
     }

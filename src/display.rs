@@ -113,18 +113,26 @@ impl<'p> DisplayPass<'_, 'p> {
         }
     }
 
-    fn display_background(
+    fn display_inline_background(
         &mut self,
-        pos: Point2L,
+        mut pos: Point2L,
         style: &ComputedStyle,
         fragment_box: &FragmentBox,
     ) {
         let background = style.background_color();
         if background.a > 0 {
-            self.output.push_rect_fill(
-                fragment_box.padding_box().translate(pos.to_vec()),
-                background,
-            );
+            // This seems like reasonable rounding for inline backgrounds because:
+            // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.
+            // 2. It rounds the background box to whole integers avoiding conflation artifacts.
+            // Not sure what browsers do here though maybe that's worthwhile to investigate.
+            let mut fbox = *fragment_box;
+            fbox.content_size.x = (fbox.content_size.x + pos.x.fract()).floor();
+            fbox.content_size.y = (fbox.content_size.y + pos.y.fract()).round();
+            pos.x = pos.x.floor();
+            pos.y = pos.y.round();
+
+            self.output
+                .push_rect_fill(fbox.padding_box().translate(pos.to_vec()), background);
         }
     }
 
@@ -135,7 +143,7 @@ impl<'p> DisplayPass<'_, 'p> {
     ) {
         match fragment {
             InlineItemFragment::Span(span) => {
-                self.display_background(pos, &span.style, &span.fbox);
+                self.display_inline_background(pos, &span.style, &span.fbox);
 
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
@@ -146,7 +154,7 @@ impl<'p> DisplayPass<'_, 'p> {
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
                     let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    self.display_background(base_pos, &base.style, &base.fbox);
+                    self.display_inline_background(base_pos, &base.style, &base.fbox);
                     for &(base_item_offset, ref base_item) in &base.children {
                         self.display_inline_item_fragment_background(
                             base_pos + base.fbox.content_offset() + base_item_offset,
@@ -155,7 +163,11 @@ impl<'p> DisplayPass<'_, 'p> {
                     }
 
                     let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    self.display_background(annotation_pos, &annotation.style, &annotation.fbox);
+                    self.display_inline_background(
+                        annotation_pos,
+                        &annotation.style,
+                        &annotation.fbox,
+                    );
                     for &(annotation_item_offset, ref annotation_item) in &annotation.children {
                         self.display_inline_item_fragment_background(
                             annotation_pos

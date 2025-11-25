@@ -347,69 +347,71 @@ fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
 
     const AA_THRESHOLD: f32 = 1. / 256.;
 
-    let (x0aa, x0i) = if (x0 - x0.round()).abs() > AA_THRESHOLD {
+    let (left_aa, full_left) = if (x0 - x0.round()).abs() > AA_THRESHOLD {
         (true, x0.ceil() as i32)
     } else {
         (false, x0.round() as i32)
     };
 
-    let (x1aa, x1i) = if (x1 - x1.round()).abs() > AA_THRESHOLD {
-        (true, x1.ceil() as i32)
+    let (right_aa, full_right) = if (x1 - x1.round()).abs() > AA_THRESHOLD {
+        (true, x1.floor() as i32)
     } else {
         (false, x1.round() as i32)
     };
 
-    let (y0aa_fill, y0i) = if (y0 - y0.round()).abs() > AA_THRESHOLD {
-        let top_fill = 1.0 - y0.fract();
+    let (top_aa_width, full_top) = if (y0 - y0.round()).abs() > AA_THRESHOLD {
+        let top_width = 1.0 - y0.fract();
+        let top_fill = top_width * 255.;
         let top_y = y0.floor() as i32;
         if top_y >= 0 && top_y < height as i32 {
             unsafe {
                 horizontal_line_unchecked(
-                    x0i,
-                    x1i,
+                    full_left,
+                    full_right,
                     &mut buffer[top_y as usize * stride as usize..],
                     width as i32,
-                    color.scale_alpha((top_fill * 255.) as u8),
+                    color.scale_alpha(top_fill as u8),
                 );
             }
         }
-        (top_fill, y0.ceil() as i32)
+        (top_width, top_y + 1)
     } else {
         (1.0, y0.round() as i32)
     };
 
-    let (y1aa_fill, y1i) = if (y1 - y1.round()).abs() > AA_THRESHOLD {
-        let bottom_fill = y1.fract();
-        let bottom_y = y1.ceil() as i32;
+    let (bottom_aa_width, full_bottom) = if (y1 - y1.round()).abs() > AA_THRESHOLD {
+        let bottom_width = y1.fract();
+        let bottom_fill = bottom_width * 255.;
+        let bottom_y = y1.floor() as i32;
         if bottom_y >= 0 && bottom_y < height as i32 {
             unsafe {
                 horizontal_line_unchecked(
-                    x0i,
-                    x1i,
+                    full_left,
+                    full_right,
                     &mut buffer[bottom_y as usize * stride as usize..],
                     width as i32,
-                    color.scale_alpha((bottom_fill * 255.) as u8),
+                    color.scale_alpha(bottom_fill as u8),
                 );
             }
         }
-        (bottom_fill, y1.ceil() as i32)
+        (bottom_width, bottom_y)
     } else {
         (1.0, y1.round() as i32)
     };
 
-    if x0aa {
+    if left_aa {
         let left_fill = (1.0 - x0.fract()) * 255.;
-        let left_x = x0.floor() as i32;
+        let left_x = full_left - 1;
         if left_x >= 0 && left_x < width as i32 {
-            if y0aa_fill < 1.0 && y0i > 0 && y0i < height as i32 {
-                buffer[(y0i - 1) as usize * stride as usize + left_x as usize]
-                    .put(color.scale_alpha((left_fill * y0aa_fill) as u8));
+            if top_aa_width < 1.0 && full_top > 0 && full_top < height as i32 {
+                buffer[(full_top - 1) as usize * stride as usize + left_x as usize]
+                    .put(color.scale_alpha((left_fill * top_aa_width) as u8));
             }
 
             unsafe {
                 vertical_line_unchecked(
-                    y0i,
-                    y1i,
+                    full_top,
+                    full_bottom,
                     &mut buffer[left_x as usize..],
                     height as i32,
                     stride as i32,
@@ -417,26 +419,26 @@ fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
                 );
             }
 
-            if y1aa_fill < 1.0 && y1i >= 0 && y1i < height as i32 {
-                buffer[y1i as usize * stride as usize + left_x as usize]
-                    .put(color.scale_alpha((left_fill * y1aa_fill) as u8));
+            if bottom_aa_width < 1.0 && full_bottom >= 0 && full_bottom < height as i32 {
+                buffer[full_bottom as usize * stride as usize + left_x as usize]
+                    .put(color.scale_alpha((left_fill * bottom_aa_width) as u8));
             }
         }
     }
 
-    if x1aa {
+    if right_aa {
         let right_fill = x1.fract() * 255.;
-        let right_x = x1.ceil() as i32;
+        let right_x = full_right;
         if right_x >= 0 && right_x < width as i32 {
-            if y0aa_fill < 1.0 && y0i > 0 && y0i < height as i32 {
-                buffer[(y0i - 1) as usize * stride as usize + right_x as usize]
-                    .put(color.scale_alpha((right_fill * y0aa_fill) as u8));
+            if top_aa_width < 1.0 && full_top > 0 && full_top < height as i32 {
+                buffer[(full_top - 1) as usize * stride as usize + right_x as usize]
+                    .put(color.scale_alpha((right_fill * top_aa_width) as u8));
             }
 
             unsafe {
                 vertical_line_unchecked(
-                    y0i,
-                    y1i,
+                    full_top,
+                    full_bottom,
                     &mut buffer[right_x as usize..],
                     height as i32,
                     stride as i32,
@@ -444,18 +446,18 @@ fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
                 );
             }
 
-            if y1aa_fill < 1.0 && y1i >= 0 && y1i < height as i32 {
-                buffer[y1i as usize * stride as usize + right_x as usize]
-                    .put(color.scale_alpha((right_fill * y1aa_fill) as u8));
+            if bottom_aa_width < 1.0 && full_bottom >= 0 && full_bottom < height as i32 {
+                buffer[full_bottom as usize * stride as usize + right_x as usize]
+                    .put(color.scale_alpha((right_fill * bottom_aa_width) as u8));
             }
         }
-    };
+    }
 
-    for y in y0i.clamp(0, height as i32)..y1i.clamp(0, height as i32) {
+    for y in full_top.clamp(0, height as i32)..full_bottom.clamp(0, height as i32) {
         unsafe {
             horizontal_line_unchecked(
-                x0i,
-                x1i,
+                full_left,
+                full_right,
                 &mut buffer[y as usize * stride as usize..],
                 width as i32,
                 color,
@@ -925,6 +927,10 @@ impl super::Rasterizer for Rasterizer {
         rect: Rect2f,
         color: BGRA8,
     ) {
+        if rect.is_empty() {
+            return;
+        }
+
         let target = unwrap_sw_render_target(target);
 
         fill_axis_aligned_antialias_rect(
@@ -1102,29 +1108,5 @@ impl super::Rasterizer for Rasterizer {
         }
 
         self.finalize_texture_render(target)
-    }
-}
-
-impl Rasterizer {
-    /// Fills a rectangular area in a monochrome render target without blending.
-    pub fn fill_axis_aligned_antialias_mono_rect_set(
-        &mut self,
-        target: &mut super::RenderTarget,
-        rect: Rect2f,
-        value: u8,
-    ) {
-        let target = unwrap_sw_render_target(target);
-
-        fill_axis_aligned_antialias_rect(
-            rect.min.x,
-            rect.min.y,
-            rect.max.x,
-            rect.max.y,
-            target.buffer.unwrap_for::<u8>(),
-            target.width,
-            target.height,
-            target.stride,
-            value,
-        );
     }
 }

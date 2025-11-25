@@ -306,6 +306,10 @@ impl<N: Number> Rect2<N> {
             && self.max.y >= other.max.y
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.min.x >= self.max.x || self.min.y >= self.max.y
+    }
+
     pub fn size(&self) -> Vec2<N> {
         self.max - self.min
     }

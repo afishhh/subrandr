@@ -103,6 +103,10 @@ impl<'a> InlineSpanBuilder<'a> {
         self.length += 1;
     }
 
+    pub fn current_run_text(&self) -> &str {
+        &self.parent.text_runs[self.run_index]
+    }
+
     pub fn push_text(&mut self, content: &str) {
         // `shape_run_initial` assumes `QueuedText` will never end up with an empty range,
         // so make sure we don't emit empty inline text items which could cause exactly that.
@@ -175,6 +179,13 @@ impl<'a> InlineSpanBuilder<'a> {
             InlineSpanKind::Ruby { content_index },
             self.run_index,
         ))
+    }
+}
+
+impl<'a> std::fmt::Write for InlineSpanBuilder<'a> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.push_text(s);
+        Ok(())
     }
 }
 

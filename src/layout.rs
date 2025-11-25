@@ -190,5 +190,11 @@ pub struct LayoutConstraints {
     pub size: Vec2L,
 }
 
+impl LayoutConstraints {
+    pub const NONE: Self = Self {
+        size: Vec2L::splat(FixedL::MAX),
+    };
+}
+
 pub mod inline;
 pub use inline::InlineLayoutError;

@@ -2068,16 +2068,19 @@ fn layout_run_full(
             break;
         }
     } else {
-        'break_loop: for i in 0..shaped.len() {
-            if shaped[i].forces_line_break_after() {
-                unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
-                shaped.drain(..=i);
-                continue 'break_loop;
+        'break_loop: loop {
+            for i in 0..shaped.len() {
+                if shaped[i].forces_line_break_after() {
+                    unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
+                    shaped.drain(..=i);
+                    continue 'break_loop;
+                }
             }
-        }
 
-        if !shaped.is_empty() {
-            unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+            if !shaped.is_empty() {
+                unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+            }
+            break;
         }
     }
 

@@ -29,6 +29,11 @@ enum LineDecorationKind {
     LineThrough,
 }
 
+fn round_y(mut p: Point2L) -> Point2L {
+    p.y = p.y.round();
+    p
+}
+
 impl<'p> DisplayPass<'_, 'p> {
     fn display_line_decoration(
         &mut self,
@@ -70,7 +75,7 @@ impl<'p> DisplayPass<'_, 'p> {
                 };
 
                 self.output.push_text(Text {
-                    pos: pos + shadow.offset,
+                    pos: round_y(pos + shadow.offset),
                     glyphs: glyphs.clone(),
                     kind: TextKind::Shadow {
                         blur_stddev: stddev,
@@ -234,10 +239,8 @@ impl<'p> DisplayPass<'_, 'p> {
                 }
             }
             InlineItemFragment::Text(text) => {
-                let mut text_pos = pos + text.baseline_offset;
-                text_pos.y = text_pos.y.round();
                 self.display_text_full(
-                    text_pos,
+                    round_y(pos + text.baseline_offset),
                     text.glyphs(),
                     text.style.color(),
                     current_decorations,

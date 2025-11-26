@@ -24,10 +24,12 @@ extern "C" {
 #endif
 #endif
 
+typedef int32_t sbr_26dot6;
+typedef uint32_t sbr_bgra8;
+
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
 typedef struct sbr_renderer sbr_renderer;
-typedef int32_t sbr_26dot6;
 typedef struct sbr_subtitle_context {
   uint32_t dpi;
   sbr_26dot6 video_width, video_height;
@@ -95,7 +97,7 @@ bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
 // parameters should be used for *layout*. This is strictly different from the
 // dimensions of the pixel buffer itself which only affect rasterization.
 int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
-                        uint32_t t, uint32_t *buffer, uint32_t width,
+                        uint32_t t, sbr_bgra8 *buffer, uint32_t width,
                         uint32_t height, uint32_t stride);
 
 void sbr_renderer_destroy(sbr_renderer *);

@@ -604,14 +604,13 @@ pub(super) struct RenderTargetImpl<'a> {
 enum RenderTargetBuffer<'a> {
     OwnedMono(UniqueArc<[u8]>),
     BorrowedBgra(&'a mut [BGRA8]),
-    BorrowedMono(&'a mut [u8]),
 }
 
 impl RenderTargetBuffer<'_> {
     fn pixel_format(&self) -> PixelFormat {
         match self {
             Self::BorrowedBgra(_) => PixelFormat::Bgra,
-            Self::OwnedMono(_) | Self::BorrowedMono(_) => PixelFormat::Mono,
+            Self::OwnedMono(_) => PixelFormat::Mono,
         }
     }
 }
@@ -639,24 +638,6 @@ pub fn create_render_target(
     }))
 }
 
-pub fn create_render_target_mono(
-    buffer: &mut [u8],
-    width: u32,
-    height: u32,
-    stride: u32,
-) -> super::RenderTarget<'_> {
-    assert!(
-        buffer.len() >= height as usize * stride as usize,
-        "Buffer passed to rasterize::sw::create_render_target is too small!"
-    );
-    super::RenderTarget(super::RenderTargetInner::Software(RenderTargetImpl {
-        buffer: RenderTargetBuffer::BorrowedMono(buffer),
-        width,
-        height,
-        stride,
-    }))
-}
-
 fn unwrap_sw_render_target<'a, 'b>(
     target: &'a mut super::RenderTarget<'b>,
 ) -> &'a mut RenderTargetImpl<'b> {
@@ -675,7 +656,6 @@ impl RenderTargetBuffer<'_> {
         match self {
             RenderTargetBuffer::OwnedMono(mono) => RenderTargetBufferMut::Mono(mono),
             RenderTargetBuffer::BorrowedBgra(bgra) => RenderTargetBufferMut::Bgra(bgra),
-            RenderTargetBuffer::BorrowedMono(mono) => RenderTargetBufferMut::Mono(mono),
         }
     }
 
@@ -689,19 +669,33 @@ impl RenderTargetBuffer<'_> {
 }
 
 #[derive(Clone)]
-pub(super) enum TextureData {
+enum TextureData {
     OwnedMono(Arc<[u8]>),
     OwnedBgra(Arc<[BGRA8]>),
 }
 
-#[derive(Clone)]
-pub(super) struct TextureImpl {
-    pub width: u32,
-    pub height: u32,
-    pub data: TextureData,
+pub enum TextureDataRef<'a> {
+    Mono(&'a [u8]),
+    Bgra(&'a [BGRA8]),
 }
 
-impl TextureImpl {
+impl TextureData {
+    fn as_ref(&self) -> TextureDataRef<'_> {
+        match self {
+            Self::OwnedMono(mono) => TextureDataRef::Mono(mono),
+            Self::OwnedBgra(bgra) => TextureDataRef::Bgra(bgra),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Texture {
+    width: u32,
+    height: u32,
+    data: TextureData,
+}
+
+impl Texture {
     pub(super) fn memory_footprint(&self) -> usize {
         match &self.data {
             TextureData::OwnedMono(mono) => mono.len(),
@@ -715,17 +709,35 @@ impl TextureImpl {
             TextureData::OwnedBgra(_) => false,
         }
     }
-}
 
-enum UnwrappedTextureData<'a> {
-    Mono(&'a [u8]),
-    Bgra(&'a [BGRA8]),
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn stride(&self) -> u32 {
+        self.width
+    }
+
+    pub fn data(&self) -> TextureDataRef<'_> {
+        self.data.as_ref()
+    }
+
+    pub fn data_ptr(&self) -> *const () {
+        match &self.data {
+            TextureData::OwnedMono(mono) => Arc::as_ptr(mono).cast(),
+            TextureData::OwnedBgra(bgra) => Arc::as_ptr(bgra).cast(),
+        }
+    }
 }
 
 struct UnwrappedTexture<'a> {
     width: u32,
     height: u32,
-    data: UnwrappedTextureData<'a>,
+    data: TextureDataRef<'a>,
 }
 
 fn unwrap_sw_texture(texture: &super::Texture) -> UnwrappedTexture<'_> {
@@ -734,10 +746,7 @@ fn unwrap_sw_texture(texture: &super::Texture) -> UnwrappedTexture<'_> {
         super::TextureInner::Software(texture) => UnwrappedTexture {
             width: texture.width,
             height: texture.height,
-            data: match &texture.data {
-                TextureData::OwnedMono(mono) => UnwrappedTextureData::Mono(mono),
-                TextureData::OwnedBgra(bgra) => UnwrappedTextureData::Bgra(bgra),
-            },
+            data: texture.data(),
         },
         target => panic!(
             "Incompatible texture {:?} passed to software rasterizer",
@@ -778,7 +787,7 @@ impl super::Rasterizer for Rasterizer {
                 callback(&mut data, width as usize);
                 let init = UniqueArc::assume_init(data);
 
-                super::Texture(super::TextureInner::Software(TextureImpl {
+                super::Texture(super::TextureInner::Software(Texture {
                     width,
                     height,
                     data: TextureData::OwnedMono(UniqueArc::into_shared(init)),
@@ -796,7 +805,7 @@ impl super::Rasterizer for Rasterizer {
                 callback(slice, width as usize * 4);
                 let init = UniqueArc::assume_init(data);
 
-                super::Texture(super::TextureInner::Software(TextureImpl {
+                super::Texture(super::TextureInner::Software(Texture {
                     width,
                     height,
                     data: TextureData::OwnedBgra(UniqueArc::into_shared(init)),
@@ -834,7 +843,7 @@ impl super::Rasterizer for Rasterizer {
                 stride,
             }) => {
                 assert_eq!(stride, width);
-                super::Texture(super::TextureInner::Software(TextureImpl {
+                super::Texture(super::TextureInner::Software(Texture {
                     width,
                     height,
                     data: match buffer {
@@ -958,7 +967,7 @@ impl super::Rasterizer for Rasterizer {
         let texture = unwrap_sw_texture(texture);
 
         match texture.data {
-            UnwrappedTextureData::Mono(source) => {
+            TextureDataRef::Mono(source) => {
                 blit::blit_mono(
                     target.buffer.unwrap_for::<BGRA8>(),
                     target.stride as usize,
@@ -973,7 +982,7 @@ impl super::Rasterizer for Rasterizer {
                     color,
                 );
             }
-            UnwrappedTextureData::Bgra(source) => {
+            TextureDataRef::Bgra(source) => {
                 blit::blit_bgra(
                     target.buffer.unwrap_for::<BGRA8>(),
                     target.stride as usize,
@@ -1002,7 +1011,7 @@ impl super::Rasterizer for Rasterizer {
         let texture = unwrap_sw_texture(texture);
 
         match texture.data {
-            UnwrappedTextureData::Mono(source) => blit::blit_mono_to_mono(
+            TextureDataRef::Mono(source) => blit::blit_mono_to_mono(
                 target.buffer.unwrap_for::<u8>(),
                 target.stride as usize,
                 target.width as usize,
@@ -1014,7 +1023,7 @@ impl super::Rasterizer for Rasterizer {
                 dx as isize,
                 dy as isize,
             ),
-            UnwrappedTextureData::Bgra(source) => blit::blit_bgra_to_mono(
+            TextureDataRef::Bgra(source) => blit::blit_bgra_to_mono(
                 target.buffer.unwrap_for::<u8>(),
                 target.stride as usize,
                 target.width as usize,
@@ -1045,7 +1054,7 @@ impl super::Rasterizer for Rasterizer {
         let width = self.blurer.width();
         let height = self.blurer.height();
         match texture.data {
-            UnwrappedTextureData::Mono(source) => blit::copy_mono_to_float(
+            TextureDataRef::Mono(source) => blit::copy_mono_to_float(
                 self.blurer.front_mut(),
                 width,
                 width,
@@ -1057,7 +1066,7 @@ impl super::Rasterizer for Rasterizer {
                 dx as isize,
                 dy as isize,
             ),
-            UnwrappedTextureData::Bgra(source) => blit::copy_bgra_to_float(
+            TextureDataRef::Bgra(source) => blit::copy_bgra_to_float(
                 self.blurer.front_mut(),
                 width,
                 width,

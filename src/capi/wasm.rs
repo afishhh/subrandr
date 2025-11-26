@@ -3,9 +3,10 @@ use std::{alloc::Layout, sync::Arc};
 use rasterize::color::BGRA8;
 use util::math::I16Dot16;
 
+use super::renderer::CRenderer;
 use crate::{
     text::{Face, FaceInfo, FontAxisValues, OpenTypeTag},
-    Renderer, Subrandr,
+    Subrandr,
 };
 
 #[no_mangle]
@@ -63,7 +64,7 @@ pub unsafe extern "C" fn sbr_wasm_library_create_font(
 
 #[no_mangle]
 pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
-    renderer: *mut Renderer,
+    renderer: *mut CRenderer,
     name_ptr: *const u8,
     name_len: usize,
     weight0: i32,
@@ -73,7 +74,7 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
 ) {
     let name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len)).unwrap();
 
-    let renderer = unsafe { &mut *renderer };
+    let renderer = unsafe { &mut (*renderer).inner };
     renderer.fonts.add_extra(FaceInfo {
         family_names: Arc::new([name.into()]),
         width: FontAxisValues::Fixed(I16Dot16::new(100)),

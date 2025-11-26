@@ -307,6 +307,10 @@ impl<R: Refcount, T: ?Sized> RcBase<R, T> {
         unsafe { self.ptr.as_ref() }
     }
 
+    pub fn as_ptr(this: &Self) -> *const T {
+        unsafe { &raw const (*this.ptr.as_ptr()).value }
+    }
+
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
         this.inner().refs.get()

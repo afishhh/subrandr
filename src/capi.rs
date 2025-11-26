@@ -1,19 +1,18 @@
 use std::{
     borrow::Cow,
     cell::UnsafeCell,
-    ffi::{c_char, c_int, c_void, CStr, CString},
+    ffi::{c_char, c_void, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
     sync::Arc,
 };
 
-use rasterize::color::BGRA8;
-use util::{math::I16Dot16, rc::Rc};
+use util::rc::Rc;
 
 use crate::{
     log::{CLogCallback, Logger},
-    text::{Face, FontAxisValues, OpenTypeTag},
-    Renderer, Subrandr, SubtitleContext, Subtitles,
+    text::Face,
+    Subrandr, Subtitles,
 };
 
 macro_rules! c_enum {
@@ -222,8 +221,8 @@ macro_rules! ctrywrap {
     ($error_type: ident($message: literal), $value: expr) => {
         match $value {
             Ok(value) => value,
-            Err(error) => cthrow!(CError::with_context(
-                ErrorKind::$error_type,
+            Err(error) => cthrow!(crate::capi::CError::with_context(
+                crate::capi::ErrorKind::$error_type,
                 $message,
                 Box::new(error)
             )),
@@ -231,6 +230,7 @@ macro_rules! ctrywrap {
     };
 }
 
+mod renderer;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
@@ -366,87 +366,4 @@ unsafe extern "C" fn sbr_library_open_font_from_memory(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_close_font(_sbr: *mut Subrandr, font: *mut Face) {
     std::mem::forget((*font).clone());
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut Renderer<'static> {
-    Box::into_raw(Box::new(ctry!(Renderer::new(&*sbr))))
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_set_subtitles(
-    renderer: *mut Renderer<'static>,
-    subtitles: *const Subtitles,
-) {
-    (*renderer).set_subtitles(subtitles.as_ref());
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_did_change(
-    renderer: *mut Renderer<'static>,
-    ctx: *const SubtitleContext,
-    t: u32,
-) -> bool {
-    (*renderer).did_change(&*ctx, t)
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_render(
-    renderer: *mut Renderer<'static>,
-    ctx: *const SubtitleContext,
-    t: u32,
-    buffer: *mut BGRA8,
-    width: u32,
-    height: u32,
-    stride: u32,
-) -> c_int {
-    let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
-    ctry!((*renderer).render(&*ctx, t, buffer, width, height, stride));
-    0
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_clear_fonts(renderer: *mut Renderer<'static>) {
-    (*renderer).fonts.clear_extra();
-}
-
-// This is very unstable: the variable font handling will probably have to change in the future
-// to hold a supported weight range
-// TODO: add to header and test
-// TODO: add width
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_add_font(
-    renderer: *mut Renderer<'static>,
-    family: *const c_char,
-    weight: f32,
-    italic: bool,
-    font: *mut Face,
-) -> i32 {
-    let family = ctrywrap!(
-        InvalidArgument("Path is not valid UTF-8"),
-        CStr::from_ptr(family).to_str()
-    );
-    (*renderer).fonts.add_extra(crate::text::FaceInfo {
-        family_names: Arc::new([family.into()]),
-        width: FontAxisValues::Fixed(I16Dot16::new(100)),
-        weight: match weight {
-            f if f.is_nan() => (*font).axis(OpenTypeTag::AXIS_WEIGHT).map_or_else(
-                || FontAxisValues::Fixed((*font).weight()),
-                |axis| FontAxisValues::Range(axis.minimum, axis.maximum),
-            ),
-            f if (0.0..1000.0).contains(&f) => {
-                crate::text::FontAxisValues::Fixed(I16Dot16::from_f32(f))
-            }
-            _ => cthrow!(InvalidArgument, "Font weight out of range"),
-        },
-        italic,
-        source: crate::text::FontSource::Memory((*font).clone()),
-    });
-
-    0
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_destroy(renderer: *mut Renderer<'static>) {
-    drop(Box::from_raw(renderer));
 }

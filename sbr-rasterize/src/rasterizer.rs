@@ -70,7 +70,7 @@ impl RenderTarget<'_> {
 
 #[derive(Clone)]
 enum TextureInner {
-    Software(sw::TextureImpl),
+    Software(sw::Texture),
     #[cfg(feature = "wgpu")]
     Wgpu(wgpu::TextureImpl),
 }
@@ -99,7 +99,7 @@ impl Texture {
 
     pub fn width(&self) -> u32 {
         match &self.0 {
-            TextureInner::Software(sw) => sw.width,
+            TextureInner::Software(sw) => sw.width(),
             #[cfg(feature = "wgpu")]
             TextureInner::Wgpu(wgpu) => wgpu.width(),
         }
@@ -107,9 +107,17 @@ impl Texture {
 
     pub fn height(&self) -> u32 {
         match &self.0 {
-            TextureInner::Software(sw) => sw.height,
+            TextureInner::Software(sw) => sw.height(),
             #[cfg(feature = "wgpu")]
             TextureInner::Wgpu(wgpu) => wgpu.height(),
+        }
+    }
+
+    pub fn try_into_software(self) -> Result<sw::Texture, Self> {
+        match self.0 {
+            TextureInner::Software(texture) => Ok(texture),
+            #[cfg(feature = "wgpu")]
+            _ => Err(self),
         }
     }
 

@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, fmt::Debug, fmt::Write as _, ops::Range};
 
-use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
+use rasterize::{color::BGRA8, Rasterizer};
 use thiserror::Error;
 use util::{
     math::{I16Dot16, I26Dot6, Point2},
@@ -16,7 +16,10 @@ use crate::{
         FixedL, LayoutConstraints, LayoutContext, Point2L,
     },
     log::{info, trace},
-    raster::{self, RasterContext, RasterError},
+    raster::{
+        PieceCollector, RasterContext, RasterError, RasterPass, SoftwareFragmentedRasterPass,
+        TargetRasterPass,
+    },
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},
@@ -241,6 +244,8 @@ impl PerfStats {
     }
 }
 
+// TODO: This type has blatantly become a "mainly C API abstraction".
+//       Move it into the capi?
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     pub(crate) fonts: text::FontDb<'a>,
@@ -352,6 +357,7 @@ enum DebugContentFragment {
 }
 
 impl Renderer<'_> {
+    // TODO: inline into callers?
     pub fn render(
         &mut self,
         ctx: &SubtitleContext,
@@ -362,17 +368,16 @@ impl Renderer<'_> {
         stride: u32,
     ) -> Result<(), RenderError> {
         buffer.fill(BGRA8::ZERO);
-        self.render_to(
-            &mut rasterize::sw::Rasterizer::new(),
-            &mut rasterize::sw::create_render_target(buffer, width, height, stride),
+        self.render_with(
+            &mut TargetRasterPass {
+                rasterizer: &mut rasterize::sw::Rasterizer::new(),
+                target: &mut rasterize::sw::create_render_target(buffer, width, height, stride),
+            },
             ctx,
             t,
         )
     }
 
-    // FIXME: This is kinda ugly but `render_to` cannot be public without
-    //        exposing the Rasterizer trait.
-    //        Maybe just do it and mark it #[doc(hidden)]?
     #[cfg(feature = "wgpu")]
     pub fn render_to_wgpu(
         &mut self,
@@ -381,9 +386,32 @@ impl Renderer<'_> {
         ctx: &SubtitleContext,
         t: u32,
     ) -> Result<(), RenderError> {
-        self.render_to(rasterizer, &mut target, ctx, t)?;
+        self.render_with(
+            &mut TargetRasterPass {
+                rasterizer,
+                target: &mut target,
+            },
+            ctx,
+            t,
+        )?;
         rasterizer.submit_render(target);
         Ok(())
+    }
+
+    pub fn render_pieces(
+        &mut self,
+        ctx: &SubtitleContext,
+        t: u32,
+        collector: &mut dyn PieceCollector,
+    ) -> Result<(), RenderError> {
+        self.render_with(
+            &mut SoftwareFragmentedRasterPass {
+                rasterizer: &mut rasterize::sw::Rasterizer::new(),
+                collector,
+            },
+            ctx,
+            t,
+        )
     }
 
     fn layout_debug_overlay(
@@ -392,7 +420,7 @@ impl Renderer<'_> {
         lctx: &mut LayoutContext,
         ctx: &SubtitleContext,
         glyph_cache: &text::GlyphCache,
-        rasterizer: &mut dyn Rasterizer,
+        rasterizer: &dyn Rasterizer,
         subtitle_class_name: &str,
         fragments: &mut Vec<(Point2L, DebugContentFragment)>,
     ) -> Result<(), DebugLayoutError> {
@@ -575,18 +603,16 @@ impl Renderer<'_> {
         Ok(())
     }
 
-    fn render_to(
+    fn render_with(
         &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
+        raster_pass: &mut dyn RasterPass,
         ctx: &SubtitleContext,
         t: u32,
     ) -> Result<(), RenderError> {
-        let (target_width, target_height) = (target.width(), target.width());
-
         self.previous_context = *ctx;
-        self.previous_output_size = (target_width, target_height);
 
+        let (target_width, target_height) = raster_pass.output_size();
+        self.previous_output_size = (target_width, target_height);
         if target_width == 0 || target_height == 0 {
             return Ok(());
         }
@@ -646,7 +672,7 @@ impl Renderer<'_> {
                 pass.lctx,
                 &ctx,
                 &self.glyph_cache,
-                rasterizer,
+                raster_pass.rasterizer(),
                 subtitle_class_name,
                 &mut debug_overlay_fragments,
             )?;
@@ -680,28 +706,13 @@ impl Renderer<'_> {
         self.perf.end_display();
 
         {
-            let mut paint_context = RasterContext {
-                rasterizer: &mut *rasterizer,
+            let mut raster_ctx = RasterContext {
                 glyph_cache: &self.glyph_cache,
             };
 
-            raster::rasterize_to_target(
-                &mut paint_context,
-                target,
-                &paint_list[..debug_paint_ops_start],
-            )?;
-
+            raster_pass.rasterize(&mut raster_ctx, &paint_list[..debug_paint_ops_start])?;
             self.perf.end_nondebug_raster();
-
-            raster::rasterize_to_target(
-                &mut paint_context,
-                target,
-                &paint_list[debug_paint_ops_start..],
-            )?;
-
-            // Make sure all batched draws are flushed, although currently this is not
-            // necessary because the wgpu rasterizer flushes automatically on `submit_render`.
-            rasterizer.flush(target);
+            raster_pass.rasterize(&mut raster_ctx, &paint_list[debug_paint_ops_start..])?;
         }
 
         let time = self.perf.end_frame();

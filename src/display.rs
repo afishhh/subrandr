@@ -3,17 +3,17 @@ use util::math::{I26Dot6, Point2, Rect2};
 
 use crate::{
     layout::{
-        inline::{GlyphString, InlineContentFragment, InlineItemFragment, SpanFragment},
+        inline::{InlineContentFragment, InlineItemFragment, SpanFragment, TextFragment},
         FixedL, FragmentBox, Point2L,
     },
-    style::{computed::TextShadow, ComputedStyle},
+    style::ComputedStyle,
 };
 
 mod paint_op;
 pub use paint_op::*;
 
-pub struct DisplayPass<'r, 'p> {
-    pub output: PaintOpBuilder<'r, 'p>,
+pub struct DisplayPass<'r> {
+    pub output: PaintOpBuilder<'r>,
 }
 
 struct LineDecoration {
@@ -34,7 +34,7 @@ fn round_y(mut p: Point2L) -> Point2L {
     p
 }
 
-impl<'p> DisplayPass<'_, 'p> {
+impl DisplayPass<'_> {
     fn display_line_decoration(
         &mut self,
         x0: FixedL,
@@ -53,16 +53,14 @@ impl<'p> DisplayPass<'_, 'p> {
         );
     }
 
-    fn display_text_full(
+    fn display_text(
         &mut self,
         pos: Point2L,
-        glyphs: &GlyphString<'p>,
-        color: BGRA8,
+        fragment: &TextFragment,
         decorations: &[LineDecoration],
-        shadows: &[TextShadow],
     ) {
         // TODO: This should also draw an offset underline I think and possibly strike through?
-        for shadow in shadows.iter().rev() {
+        for shadow in fragment.style.text_shadows().iter().rev() {
             if shadow.color.a > 0 {
                 let stddev = if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
                     // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
@@ -74,21 +72,21 @@ impl<'p> DisplayPass<'_, 'p> {
                     FixedL::ZERO
                 };
 
-                self.output.push_text(Text {
-                    pos: round_y(pos + shadow.offset),
-                    glyphs: glyphs.clone(),
-                    kind: TextKind::Shadow {
+                self.output.push_text(Text::from_fragment(
+                    round_y(pos + shadow.offset),
+                    fragment,
+                    TextKind::Shadow {
                         blur_stddev: stddev,
                         color: shadow.color,
                     },
-                });
+                ));
             }
         }
 
         let text_end_x = {
             let mut end_x = pos.x;
 
-            for glyph in glyphs.iter_glyphs_visual() {
+            for glyph in fragment.glyphs().iter_glyphs_visual() {
                 end_x += glyph.x_advance;
             }
 
@@ -102,12 +100,13 @@ impl<'p> DisplayPass<'_, 'p> {
             self.display_line_decoration(pos.x, text_end_x, pos.y, decoration);
         }
 
+        let color = fragment.style.color();
         if color.a > 0 {
-            self.output.push_text(Text {
+            self.output.push_text(Text::from_fragment(
                 pos,
-                glyphs: glyphs.clone(),
-                kind: TextKind::Normal { mono_color: color },
-            });
+                fragment,
+                TextKind::Normal { mono_color: color },
+            ));
         }
 
         for decoration in decorations
@@ -189,7 +188,7 @@ impl<'p> DisplayPass<'_, 'p> {
     fn display_inline_item_fragment_content(
         &mut self,
         pos: Point2L,
-        fragment: &'p InlineItemFragment,
+        fragment: &InlineItemFragment,
         current_decorations: &mut Vec<LineDecoration>,
     ) {
         let previous_decoration_count = current_decorations.len();
@@ -239,12 +238,10 @@ impl<'p> DisplayPass<'_, 'p> {
                 }
             }
             InlineItemFragment::Text(text) => {
-                self.display_text_full(
+                self.display_text(
                     round_y(pos + text.baseline_offset),
-                    text.glyphs(),
-                    text.style.color(),
+                    text,
                     current_decorations,
-                    text.style.text_shadows(),
                 );
             }
             InlineItemFragment::Ruby(ruby) => {
@@ -278,7 +275,7 @@ impl<'p> DisplayPass<'_, 'p> {
     pub fn display_inline_content_fragment(
         &mut self,
         pos: Point2L,
-        fragment: &'p InlineContentFragment,
+        fragment: &InlineContentFragment,
     ) {
         for &(offset, ref line) in &fragment.lines {
             let current = pos + offset;

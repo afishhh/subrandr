@@ -1,22 +1,22 @@
 use std::{collections::VecDeque, fmt::Debug, fmt::Write as _, ops::Range};
 
-use rasterize::{color::BGRA8, Rasterizer, RenderTarget};
+use rasterize::{color::BGRA8, Rasterizer};
 use thiserror::Error;
 use util::{
-    math::{I16Dot16, I26Dot6, Point2},
+    math::{I16Dot16, I26Dot6, Point2, Vec2},
     rc::Rc,
     rc_static,
 };
 
 use crate::{
-    display::{DisplayPass, Drawing, DrawingNode, PaintOpBuilder, StrokedPolyline},
+    display::{DisplayPass, Drawing, DrawingNode, PaintOp, PaintOpBuilder, StrokedPolyline},
     layout::{
         self,
         inline::{InlineContentBuilder, InlineContentFragment},
         FixedL, LayoutConstraints, LayoutContext, Point2L,
     },
     log::{info, trace},
-    raster::{self, RasterContext, RasterError},
+    raster::{rasterize_to_target, RasterContext, RasterError},
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},
@@ -164,14 +164,12 @@ struct PerfStats {
     nondebug_layout_end: std::time::Instant,
     debug_layout_end: std::time::Instant,
     display_end: std::time::Instant,
-    nondebug_raster_end: std::time::Instant,
 
     whole: PerfTimes,
     nondebug_layout: PerfTimes,
     debug_layout: PerfTimes,
     display: PerfTimes,
-    nondebug_raster: PerfTimes,
-    debug_raster: PerfTimes,
+    raster: PerfTimes,
 }
 
 impl PerfStats {
@@ -184,14 +182,12 @@ impl PerfStats {
             nondebug_layout_end: now,
             debug_layout_end: now,
             display_end: now,
-            nondebug_raster_end: now,
 
             whole: PerfTimes::new(),
             nondebug_layout: PerfTimes::new(),
             debug_layout: PerfTimes::new(),
             display: PerfTimes::new(),
-            nondebug_raster: PerfTimes::new(),
-            debug_raster: PerfTimes::new(),
+            raster: PerfTimes::new(),
         }
     }
 
@@ -215,10 +211,6 @@ impl PerfStats {
         self.display_end = std::time::Instant::now();
     }
 
-    fn end_nondebug_raster(&mut self) {
-        self.nondebug_raster_end = std::time::Instant::now();
-    }
-
     fn end_frame(&mut self) -> f32 {
         let end = std::time::Instant::now();
 
@@ -229,9 +221,7 @@ impl PerfStats {
 
         self.display.add(self.display_end - self.debug_layout_end);
 
-        self.nondebug_raster
-            .add(self.nondebug_raster_end - self.display_end);
-        self.debug_raster.add(end - self.nondebug_raster_end);
+        self.raster.add(end - self.display_end);
 
         self.whole.add(end - self.start)
     }
@@ -239,17 +229,68 @@ impl PerfStats {
     fn is_empty(&self) -> bool {
         self.whole.frames.is_empty()
     }
+
+    fn make_frame_time_graph(&self, pixel_scale: I16Dot16) -> Option<(Vec2<I16Dot16>, Drawing)> {
+        if self.whole.frames.len() <= 1 {
+            return None;
+        }
+
+        let wmax = self.whole.minmax_frame_times().1;
+        let lmax = self.nondebug_layout.minmax_frame_times().1;
+        let dlmax = self.debug_layout.minmax_frame_times().1;
+        let dmax = self.display.minmax_frame_times().1;
+        let rmax = self.raster.minmax_frame_times().1;
+        let gmax = wmax.max(lmax).max(dlmax).max(dmax).max(rmax);
+
+        let graph_width = I16Dot16::new(500) * pixel_scale;
+        let graph_height = I16Dot16::new(80) * pixel_scale;
+        let mut graph_drawing = Drawing { nodes: Vec::new() };
+
+        let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
+            let polyline = times
+                .frames
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(i, time)| {
+                    Point2::new(
+                        graph_width
+                            * I16Dot16::from_quotient(i as i32, times.frames.len() as i32 - 1),
+                        graph_height - (graph_height * time / gmax),
+                    )
+                })
+                .collect();
+
+            graph_drawing
+                .nodes
+                .push(DrawingNode::StrokedPolyline(StrokedPolyline {
+                    polyline,
+                    width: pixel_scale,
+                    color,
+                }));
+        };
+
+        draw_polyline(&self.whole, BGRA8::YELLOW);
+        draw_polyline(&self.nondebug_layout, BGRA8::CYAN);
+        draw_polyline(&self.debug_layout, BGRA8::BLUE);
+        draw_polyline(&self.display, BGRA8::LIME);
+        draw_polyline(&self.raster, BGRA8::ORANGERED);
+
+        Some((Vec2::new(graph_width, graph_height), graph_drawing))
+    }
 }
 
+// TODO: This type has kind of become a "mainly C API abstraction".
+//       Move it into the capi?
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
     pub(crate) fonts: text::FontDb<'a>,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
+    paint_ops: Vec<PaintOp>,
 
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
-    previous_output_size: (u32, u32),
 
     layouter: Option<FormatLayouter>,
 }
@@ -284,7 +325,7 @@ impl<'a> Renderer<'a> {
                 padding_top: I26Dot6::ZERO,
                 padding_bottom: I26Dot6::ZERO,
             },
-            previous_output_size: (0, 0),
+            paint_ops: Vec::new(),
             layouter: None,
         })
     }
@@ -352,6 +393,7 @@ enum DebugContentFragment {
 }
 
 impl Renderer<'_> {
+    // TODO: inline into callers?
     pub fn render(
         &mut self,
         ctx: &SubtitleContext,
@@ -361,28 +403,42 @@ impl Renderer<'_> {
         height: u32,
         stride: u32,
     ) -> Result<(), RenderError> {
+        let mut rasterizer = rasterize::sw::Rasterizer::new();
+        self.render_to_ops(ctx, t, &rasterizer)?;
+
         buffer.fill(BGRA8::ZERO);
-        self.render_to(
-            &mut rasterize::sw::Rasterizer::new(),
+        rasterize_to_target(
+            &mut rasterizer,
             &mut rasterize::sw::create_render_target(buffer, width, height, stride),
-            ctx,
-            t,
-        )
+            &mut RasterContext {
+                glyph_cache: &self.glyph_cache,
+            },
+            &self.paint_ops,
+        )?;
+        self.end_raster();
+        Ok(())
     }
 
-    // FIXME: This is kinda ugly but `render_to` cannot be public without
-    //        exposing the Rasterizer trait.
-    //        Maybe just do it and mark it #[doc(hidden)]?
     #[cfg(feature = "wgpu")]
     pub fn render_to_wgpu(
         &mut self,
         rasterizer: &mut rasterize::wgpu::Rasterizer,
-        mut target: RenderTarget,
+        mut target: rasterize::RenderTarget,
         ctx: &SubtitleContext,
         t: u32,
     ) -> Result<(), RenderError> {
-        self.render_to(rasterizer, &mut target, ctx, t)?;
+        self.render_to_ops(ctx, t, rasterizer)?;
+
+        rasterize_to_target(
+            rasterizer,
+            &mut target,
+            &mut RasterContext {
+                glyph_cache: &self.glyph_cache,
+            },
+            &self.paint_ops,
+        )?;
         rasterizer.submit_render(target);
+        self.end_raster();
         Ok(())
     }
 
@@ -392,7 +448,7 @@ impl Renderer<'_> {
         lctx: &mut LayoutContext,
         ctx: &SubtitleContext,
         glyph_cache: &text::GlyphCache,
-        rasterizer: &mut dyn Rasterizer,
+        rasterizer: &dyn Rasterizer,
         subtitle_class_name: &str,
         fragments: &mut Vec<(Point2L, DebugContentFragment)>,
     ) -> Result<(), DebugLayoutError> {
@@ -477,12 +533,13 @@ impl Renderer<'_> {
                     })
                     .push_text(name);
 
-                    let (min, max) = times.minmax_frame_times();
+                    let (_, max) = times.minmax_frame_times();
+                    let last = times.last().unwrap();
                     let avg = times.avg_frame_time();
                     _ = writeln!(
                         main,
-                        " min={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
-                        min,
+                        " last={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
+                        last,
                         avg,
                         1000.0 / avg,
                         max,
@@ -494,12 +551,7 @@ impl Renderer<'_> {
                 draw_times("layout", &perf.nondebug_layout, BGRA8::CYAN);
                 draw_times("debug_layout", &perf.debug_layout, BGRA8::BLUE);
                 draw_times("display", &perf.display, BGRA8::LIME);
-                draw_times("raster", &perf.nondebug_raster, BGRA8::ORANGERED);
-                draw_times("debug_raster", &perf.debug_raster, BGRA8::RED);
-
-                if let Some(last) = perf.whole.last() {
-                    _ = writeln!(main, "last={:.1}ms ({:.1}/s)", last, 1000.0 / last);
-                }
+                draw_times("raster", &perf.raster, BGRA8::ORANGERED);
 
                 drop(main);
                 drop(root);
@@ -519,94 +571,49 @@ impl Renderer<'_> {
                     DebugContentFragment::Inline(perf_text_fragment),
                 ));
 
-                let wmax = perf.whole.minmax_frame_times().1;
-                let lmax = perf.nondebug_layout.minmax_frame_times().1;
-                let dlmax = perf.debug_layout.minmax_frame_times().1;
-                let dmax = perf.display.minmax_frame_times().1;
-                let rmax = perf.nondebug_raster.minmax_frame_times().1;
-                let gmax = wmax.max(lmax).max(dlmax).max(dmax).max(rmax);
-
-                let graph_width = I16Dot16::new(500) * ctx.pixel_scale();
-                let graph_height = I16Dot16::new(80) * ctx.pixel_scale();
-                let mut graph_drawing = Drawing { nodes: Vec::new() };
-
-                let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
-                    let polyline = times
-                        .frames
-                        .iter()
-                        .copied()
-                        .enumerate()
-                        .map(|(i, time)| {
-                            Point2::new(
-                                graph_width
-                                    * I16Dot16::from_quotient(i as i32, times.frames.len() as i32),
-                                graph_height - (graph_height * time / gmax),
-                            )
-                        })
-                        .collect();
-
-                    graph_drawing
-                        .nodes
-                        .push(DrawingNode::StrokedPolyline(StrokedPolyline {
-                            polyline,
-                            width: I16Dot16::from_quotient(lctx.dpi as i32, 72),
-                            color,
-                        }));
-                };
-
-                draw_polyline(&perf.whole, BGRA8::YELLOW);
-                draw_polyline(&perf.nondebug_layout, BGRA8::CYAN);
-                draw_polyline(&perf.debug_layout, BGRA8::BLUE);
-                draw_polyline(&perf.display, BGRA8::LIME);
-                draw_polyline(&perf.nondebug_raster, BGRA8::ORANGERED);
-                draw_polyline(&perf.debug_raster, BGRA8::RED);
-
-                fragments.push((
-                    Point2L::new(
-                        ctx.padding_left + ctx.video_width
-                            - FixedL::from_raw(graph_width.into_raw() >> 10),
-                        graph_y,
-                    ),
-                    DebugContentFragment::Drawing(graph_drawing),
-                ));
+                if let Some((graph_size, graph_drawing)) =
+                    perf.make_frame_time_graph(I16Dot16::from_quotient(ctx.dpi as i32, 72))
+                {
+                    fragments.push((
+                        Point2L::new(
+                            ctx.padding_left + ctx.video_width
+                                - FixedL::from_raw(graph_size.x.into_raw() >> 10),
+                            graph_y,
+                        ),
+                        DebugContentFragment::Drawing(graph_drawing),
+                    ));
+                }
             }
         }
 
         Ok(())
     }
 
-    fn render_to(
+    pub(crate) fn render_to_ops(
         &mut self,
-        rasterizer: &mut dyn Rasterizer,
-        target: &mut RenderTarget,
         ctx: &SubtitleContext,
         t: u32,
+        rasterizer: &dyn Rasterizer,
     ) -> Result<(), RenderError> {
-        let (target_width, target_height) = (target.width(), target.width());
-
         self.previous_context = *ctx;
-        self.previous_output_size = (target_width, target_height);
-
-        if target_width == 0 || target_height == 0 {
-            return Ok(());
-        }
 
         self.perf.start_frame();
         self.fonts.update_platform_font_list()?;
         self.glyph_cache.advance_generation();
+        self.paint_ops.clear();
 
         let ctx = SubtitleContext {
             dpi: self.sbr.debug.dpi_override.unwrap_or(ctx.dpi),
             ..*ctx
         };
 
-        let subtitle_class_name = self.layouter.as_ref().map_or("none", |layouter| {
-            let this = &layouter;
-            match this {
-                FormatLayouter::Srv3(_) => "srv3",
-                FormatLayouter::Vtt(_) => "vtt",
-            }
-        });
+        let subtitle_class_name =
+            self.layouter
+                .as_ref()
+                .map_or("none", |layouter| match &layouter {
+                    FormatLayouter::Srv3(_) => "srv3",
+                    FormatLayouter::Vtt(_) => "vtt",
+                });
 
         trace!(
             self.sbr,
@@ -653,18 +660,15 @@ impl Renderer<'_> {
             self.perf.end_debug_layout();
         }
 
-        let mut paint_list = Vec::new();
-        let debug_paint_ops_start;
         {
             let mut pass = DisplayPass {
-                output: PaintOpBuilder(&mut paint_list),
+                output: PaintOpBuilder(&mut self.paint_ops),
             };
 
             for &(pos, ref fragment) in &fragments {
                 pass.display_inline_content_fragment(pos, fragment);
             }
 
-            debug_paint_ops_start = pass.output.0.len();
             for &(pos, ref fragment) in &debug_overlay_fragments {
                 match fragment {
                     DebugContentFragment::Inline(inline) => {
@@ -679,34 +683,15 @@ impl Renderer<'_> {
         }
         self.perf.end_display();
 
-        {
-            let mut paint_context = RasterContext {
-                rasterizer: &mut *rasterizer,
-                glyph_cache: &self.glyph_cache,
-            };
+        Ok(())
+    }
 
-            raster::rasterize_to_target(
-                &mut paint_context,
-                target,
-                &paint_list[..debug_paint_ops_start],
-            )?;
+    pub(crate) fn paint_ops(&self) -> &[PaintOp] {
+        &self.paint_ops
+    }
 
-            self.perf.end_nondebug_raster();
-
-            raster::rasterize_to_target(
-                &mut paint_context,
-                target,
-                &paint_list[debug_paint_ops_start..],
-            )?;
-
-            // Make sure all batched draws are flushed, although currently this is not
-            // necessary because the wgpu rasterizer flushes automatically on `submit_render`.
-            rasterizer.flush(target);
-        }
-
+    pub fn end_raster(&mut self) {
         let time = self.perf.end_frame();
         trace!(self.sbr, "frame took {time:.2}ms to render");
-
-        Ok(())
     }
 }

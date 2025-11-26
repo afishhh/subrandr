@@ -24,10 +24,12 @@ extern "C" {
 #endif
 #endif
 
+typedef int32_t sbr_26dot6;
+typedef uint32_t sbr_bgra8;
+
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
 typedef struct sbr_renderer sbr_renderer;
-typedef int32_t sbr_26dot6;
 typedef struct sbr_subtitle_context {
   uint32_t dpi;
   sbr_26dot6 video_width, video_height;
@@ -95,8 +97,58 @@ bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
 // parameters should be used for *layout*. This is strictly different from the
 // dimensions of the pixel buffer itself which only affect rasterization.
 int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
-                        uint32_t t, uint32_t *buffer, uint32_t width,
+                        uint32_t t, sbr_bgra8 *buffer, uint32_t width,
                         uint32_t height, uint32_t stride);
+
+// Structure representing a single output piece that resulted from
+// fragmented rendering of a subtitle frame.
+//
+// Pieces are output primitives that may not be fully rasterized yet,
+// but whose bounding box is known and can be used for packing purposes.
+//
+// The size of this struct is not part of the public ABI,
+// new fields may be added in ABI-compatible releases.
+typedef struct sbr_output_piece {
+  int32_t x, y;
+  uint32_t width, height;
+  struct sbr_output_piece *next;
+} sbr_output_piece;
+
+typedef struct sbr_piece_raster_pass sbr_piece_raster_pass;
+
+// Renders a single subtitle frame to output pieces and immediately
+// begins a piece raster pass which it returns a handle to.
+//
+// See `sbr_renderer_render` for details on parameters.
+sbr_piece_raster_pass *sbr_renderer_render_pieces(sbr_renderer *,
+                                                  sbr_subtitle_context const *,
+                                                  uint32_t t);
+
+// Returns the first element of the internal list of output pieces
+// that are to be drawn during this raster pass.
+sbr_output_piece const *
+sbr_piece_raster_pass_get_pieces(sbr_piece_raster_pass *);
+
+// Rasterizes the provided output piece into the provided pixel buffer at
+// a specified offset.
+//
+// `off_x` and `off_y` specify the offset at which to draw the piece.
+// These values may be negative or otherwise out of bounds of the
+// output buffer and the result will be appropriately clipped.
+//
+// The pixel buffer is provided in `buffer`, `width`, `height`, and `stride`
+// same as in `sbr_renderer_render`.
+int sbr_piece_raster_pass_draw_piece(sbr_piece_raster_pass *,
+                                     sbr_output_piece const *piece,
+                                     int32_t off_x, int32_t off_y,
+                                     sbr_bgra8 *buffer, uint32_t width,
+                                     uint32_t height, uint32_t stride);
+
+// Marks the provided raster pass as finished.
+//
+// Note that calling this function after a raster pass is *mandatory*,
+// currently failing to do so will be met with an assertion failure.
+void sbr_piece_raster_pass_finish(sbr_piece_raster_pass *);
 
 void sbr_renderer_destroy(sbr_renderer *);
 

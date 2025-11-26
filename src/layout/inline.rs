@@ -280,6 +280,12 @@ impl TextFragment {
     pub fn glyphs(&self) -> &GlyphString<'_> {
         &self.glyphs
     }
+
+    pub unsafe fn glyphs_and_font_arena(
+        &self,
+    ) -> (&GlyphString<'static>, &util::rc::Rc<FontArena>) {
+        (&self.glyphs, &self._font_arena)
+    }
 }
 
 #[derive(Debug)]
@@ -335,7 +341,7 @@ impl InlineContentFragment {
 #[derive(Debug, Error)]
 pub enum InlineLayoutError {
     #[error(transparent)]
-    FontSelect(#[from] text::font_db::SelectError),
+    FontSelect(#[from] text::SelectError),
     #[error(transparent)]
     Shaping(#[from] text::ShapingError),
     #[error(transparent)]

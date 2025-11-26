@@ -1,7 +1,13 @@
 use rasterize::color::BGRA8;
 use util::math::{I16Dot16, I26Dot6, Point2};
 
-use crate::layout::{inline::GlyphString, Point2L, Rect2L};
+use crate::{
+    layout::{
+        inline::{GlyphString, TextFragment},
+        Point2L, Rect2L,
+    },
+    text::FontArena,
+};
 
 #[derive(Debug, Clone)]
 pub struct Drawing {
@@ -21,17 +27,34 @@ pub struct StrokedPolyline {
 }
 
 #[derive(Debug, Clone)]
-pub enum PaintOp<'d> {
-    Text(Text<'d>),
+pub enum PaintOp {
+    Text(Text),
     Drawing(PositionedDrawing),
     Rect(RectFill),
 }
 
 #[derive(Debug, Clone)]
-pub struct Text<'d> {
+pub struct Text {
     pub pos: Point2L,
-    pub glyphs: GlyphString<'d>,
+    glyphs: GlyphString<'static>,
+    _font_arena: util::rc::Rc<FontArena>,
     pub kind: TextKind,
+}
+
+impl Text {
+    pub fn from_fragment(pos: Point2L, fragment: &TextFragment, kind: TextKind) -> Self {
+        let (glyphs, font_arena) = unsafe { fragment.glyphs_and_font_arena() };
+        Self {
+            pos,
+            glyphs: glyphs.clone(),
+            _font_arena: font_arena.clone(),
+            kind,
+        }
+    }
+
+    pub fn glyphs(&self) -> &GlyphString<'_> {
+        &self.glyphs
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -52,10 +75,10 @@ pub struct RectFill {
     pub color: BGRA8,
 }
 
-pub struct PaintOpBuilder<'b, 'p>(pub &'b mut Vec<PaintOp<'p>>);
+pub struct PaintOpBuilder<'b>(pub &'b mut Vec<PaintOp>);
 
-impl<'p> PaintOpBuilder<'_, 'p> {
-    pub fn push_text(&mut self, text: Text<'p>) {
+impl PaintOpBuilder<'_> {
+    pub fn push_text(&mut self, text: Text) {
         self.0.push(PaintOp::Text(text));
     }
 

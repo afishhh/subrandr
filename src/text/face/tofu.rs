@@ -291,8 +291,8 @@ pub struct TofuGlyph {
 impl Font {
     fn draw_glyph(&self, index: u32, offset: Vec2L, rasterizer: &mut StripRasterizer) -> TofuGlyph {
         let shared = self.shared();
-        let pixel_height = shared.glyph_metrics.height;
         let pixel_width = shared.glyph_metrics.width;
+        let pixel_height = shared.glyph_metrics.height;
         let outline_width = pixel_height / 40;
         let base_spacing = pixel_height / 12;
         let margin = base_spacing;

@@ -269,11 +269,11 @@ pub fn check_inline(
             rasterize::sw::create_render_target(&mut pixels, width, height, width);
 
         crate::raster::rasterize_to_target(
+            &mut rasterizer,
+            &mut render_target,
             &mut RasterContext {
-                rasterizer: &mut rasterizer,
                 glyph_cache: &glyph_cache,
             },
-            &mut render_target,
             &paint_list,
         )
         .expect("Fragment rasterization failed");

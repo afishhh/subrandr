@@ -8,6 +8,10 @@ use crate::{
     text::{self, GlyphBitmap, GlyphRenderError},
 };
 
+pub struct RasterContext<'r> {
+    pub glyph_cache: &'r text::GlyphCache,
+}
+
 #[derive(Debug, Error)]
 pub enum RasterError {
     #[error("Failed to render glyph")]
@@ -17,8 +21,8 @@ pub enum RasterError {
 fn text_to_bitmaps(
     rasterizer: &mut dyn Rasterizer,
     glyph_cache: &text::GlyphCache,
-    text: &Text<'_>,
-) -> Result<Vec<GlyphBitmap>, GlyphRenderError> {
+    text: &Text,
+) -> Result<(Vec<GlyphBitmap>, BGRA8), GlyphRenderError> {
     let blur_stddev = match text.kind {
         crate::display::TextKind::Normal { .. } => FixedL::ZERO,
         crate::display::TextKind::Shadow { blur_stddev, .. } => blur_stddev,
@@ -30,7 +34,7 @@ fn text_to_bitmaps(
         text.pos.x.fract(),
         text.pos.y.fract(),
         blur_stddev.into_f32(),
-        &mut text.glyphs.iter_glyphs_visual(),
+        &mut text.glyphs().iter_glyphs_visual(),
     )?;
 
     for glyph in &mut glyphs {
@@ -45,7 +49,12 @@ fn text_to_bitmaps(
         }
     }
 
-    Ok(glyphs)
+    let mono_color = match text.kind {
+        TextKind::Normal { mono_color } => mono_color,
+        TextKind::Shadow { color, .. } => color,
+    };
+
+    Ok((glyphs, mono_color))
 }
 
 pub struct DrawingBitmap {
@@ -135,28 +144,20 @@ fn drawing_to_bitmap(
     }
 }
 
-pub struct RasterContext<'r, R: Rasterizer + ?Sized> {
-    pub rasterizer: &'r mut R,
-    pub glyph_cache: &'r text::GlyphCache,
-}
-
 pub fn rasterize_to_target(
-    ctx: &mut RasterContext<'_, dyn Rasterizer + '_>,
+    rasterizer: &mut dyn Rasterizer,
     target: &mut RenderTarget,
+    ctx: &mut RasterContext,
     ops: &[PaintOp],
 ) -> Result<(), RasterError> {
     for op in ops {
         match op {
             PaintOp::Text(text) => {
-                let bitmaps = text_to_bitmaps(ctx.rasterizer, ctx.glyph_cache, text)?;
-                let color = match text.kind {
-                    TextKind::Normal { mono_color } => mono_color,
-                    TextKind::Shadow { color, .. } => color,
-                };
+                let (bitmaps, color) = text_to_bitmaps(rasterizer, ctx.glyph_cache, text)?;
 
                 let ipos = Point2::new(text.pos.x.floor_to_inner(), text.pos.y.floor_to_inner());
                 for bitmap in bitmaps {
-                    ctx.rasterizer.blit(
+                    rasterizer.blit(
                         target,
                         ipos.x + bitmap.offset.x,
                         ipos.y + bitmap.offset.y,
@@ -166,16 +167,12 @@ pub fn rasterize_to_target(
                 }
             }
             PaintOp::Rect(fill) => {
-                ctx.rasterizer.fill_axis_aligned_rect(
-                    target,
-                    Rect2L::to_float(fill.rect),
-                    fill.color,
-                );
+                rasterizer.fill_axis_aligned_rect(target, Rect2L::to_float(fill.rect), fill.color);
             }
             &PaintOp::Drawing(PositionedDrawing { pos, ref drawing }) => {
-                let bitmap = drawing_to_bitmap(ctx.rasterizer, pos, drawing);
+                let bitmap = drawing_to_bitmap(rasterizer, pos, drawing);
 
-                ctx.rasterizer.blit(
+                rasterizer.blit(
                     target,
                     bitmap.offset.x,
                     bitmap.offset.y,
@@ -186,5 +183,116 @@ pub fn rasterize_to_target(
         }
     }
 
+    rasterizer.flush(target);
+
     Ok(())
+}
+
+pub struct OutputTexture {
+    pub texture: rasterize::Texture,
+    pub color: BGRA8,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OutputRect {
+    pub rect: Rect2L,
+    pub color: BGRA8,
+}
+
+pub struct OutputPiece {
+    pub pos: Point2<i32>,
+    pub size: Vec2<u32>,
+    pub content: OutputPieceContent,
+}
+
+pub enum OutputPieceContent {
+    Texture(OutputTexture),
+    Rect(OutputRect),
+}
+
+pub fn rasterize_to_pieces(
+    rasterizer: &mut dyn Rasterizer,
+    ctx: &mut RasterContext<'_>,
+    ops: &[PaintOp],
+    on_piece: &mut dyn FnMut(OutputPiece),
+) -> Result<(), RasterError> {
+    for op in ops {
+        match op {
+            PaintOp::Text(text) => {
+                let (bitmaps, color) = text_to_bitmaps(rasterizer, ctx.glyph_cache, text)?;
+
+                let ipos = Point2::new(text.pos.x.floor_to_inner(), text.pos.y.floor_to_inner());
+                for bitmap in bitmaps {
+                    on_piece(OutputPiece {
+                        pos: ipos + bitmap.offset,
+                        size: Vec2::new(bitmap.texture.width(), bitmap.texture.height()),
+                        content: {
+                            OutputPieceContent::Texture(OutputTexture {
+                                texture: bitmap.texture,
+                                color,
+                            })
+                        },
+                    });
+                }
+            }
+            PaintOp::Rect(fill) => {
+                on_piece(OutputPiece {
+                    pos: Point2::new(
+                        fill.rect.min.x.floor_to_inner(),
+                        fill.rect.min.y.floor_to_inner(),
+                    ),
+                    size: Vec2::new(
+                        (fill.rect.max.x - fill.rect.min.x.floor()).ceil_to_inner() as u32,
+                        (fill.rect.max.y - fill.rect.min.y.floor()).ceil_to_inner() as u32,
+                    ),
+                    content: OutputPieceContent::Rect(OutputRect {
+                        rect: Rect2 {
+                            min: Point2::new(fill.rect.min.x.fract(), fill.rect.min.y.fract()),
+                            max: Point2::new(
+                                fill.rect.max.x - fill.rect.min.x.floor(),
+                                fill.rect.max.y - fill.rect.min.y.floor(),
+                            ),
+                        },
+                        color: fill.color,
+                    }),
+                });
+            }
+            &PaintOp::Drawing(PositionedDrawing { pos, ref drawing }) => {
+                let bitmap = drawing_to_bitmap(rasterizer, pos, drawing);
+
+                on_piece(OutputPiece {
+                    pos: bitmap.offset,
+                    size: Vec2::new(bitmap.texture.width(), bitmap.texture.height()),
+                    content: OutputPieceContent::Texture(OutputTexture {
+                        texture: bitmap.texture,
+                        color: BGRA8::WHITE,
+                    }),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+impl OutputPieceContent {
+    pub fn rasterize_to(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+        target: &mut RenderTarget,
+        pos: Point2<i32>,
+    ) {
+        match self {
+            OutputPieceContent::Texture(image) => {
+                rasterizer.blit(target, pos.x, pos.y, &image.texture, image.color);
+            }
+            &OutputPieceContent::Rect(OutputRect { rect, color }) => {
+                rasterizer.fill_axis_aligned_rect(
+                    target,
+                    Rect2::to_float(rect).translate(Vec2::new(pos.x as f32, pos.y as f32)),
+                    color,
+                );
+            }
+        }
+    }
 }

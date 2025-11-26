@@ -122,10 +122,11 @@ pub enum FontSource {
         not(any(font_provider = "fontconfig", font_provider = "android-ndk")),
         expect(dead_code)
     )]
-    File {
-        path: PathBuf,
-        index: i32,
-    },
+    File { path: PathBuf, index: i32 },
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", all(test, feature = "_layout_tests"))),
+        expect(dead_code)
+    )]
     Memory(text::Face),
     #[cfg(target_os = "windows")]
     DirectWrite(platform_font_provider::directwrite::Source),
@@ -261,10 +262,7 @@ impl<'a> FontDb<'a> {
         result
     }
 
-    pub fn clear_extra(&mut self) {
-        self.extra_faces.clear();
-    }
-
+    #[cfg_attr(not(target_arch = "wasm32"), expect(dead_code))]
     pub fn add_extra(&mut self, font: FaceInfo) {
         Self::add_to_family_lookup_cache(&mut self.family_lookup_cache, &font);
         self.extra_faces.push(font);

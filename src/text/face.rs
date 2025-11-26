@@ -54,8 +54,7 @@ pub struct FontMetrics {
     pub ascender: I26Dot6,
     pub descender: I26Dot6,
     pub height: I26Dot6,
-    // FIXME: This is an unused field but rustc doesn't realise it anymore?
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub max_advance: I26Dot6,
 
     pub underline_top_offset: I26Dot6,

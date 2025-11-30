@@ -11,7 +11,7 @@ use crate::text::Face;
 const CACHE_CONFIGURATION: CacheConfiguration = CacheConfiguration {
     // Trim the cache once it reaches 8MiB approximate memory footprint.
     trim_memory_threshold: 8 * 1024 * 1024,
-    // Keep the last two cache generations while trimming.
+    // Keep the last three cache generations while trimming.
     trim_kept_generations: 3,
 };
 

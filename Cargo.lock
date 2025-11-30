@@ -1792,6 +1792,9 @@ dependencies = [
 [[package]]
 name = "sbr-util"
 version = "0.2.2"
+dependencies = [
+ "hashbrown",
+]
 
 [[package]]
 name = "scopeguard"

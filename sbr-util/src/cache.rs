@@ -1,34 +1,23 @@
 use std::{
-    alloc::Layout,
-    any::{Any, TypeId},
-    cell::{Cell, RefCell},
-    collections::{hash_map::Entry, HashMap},
+    any::Any,
+    cell::{Cell, RefCell, UnsafeCell},
     convert::Infallible,
     fmt::Debug,
-    hash::Hash,
-    mem::{offset_of, ManuallyDrop},
+    hash::{BuildHasher, Hash, Hasher, RandomState},
+    mem::{ManuallyDrop, MaybeUninit},
     ptr::NonNull,
 };
+
+use hashbrown::{hash_table::Entry, HashTable};
+
+use crate::ReadonlyAliasableBox;
 
 #[derive(Debug)]
 pub struct CacheConfiguration {
     /// Trim the cache once it reaches the specified approximate memory footprint.
     pub trim_memory_threshold: usize,
-    /// Keep the last `n-1` generations while trimming the cache.
+    /// Keep this many most recent generations while trimming the cache.
     pub trim_kept_generations: u32,
-}
-
-#[derive(Debug)]
-struct CacheSlotHeader {
-    generation: Cell<u32>,
-    state: Cell<CacheSlotState>,
-    // FIXME: Workaround for the absence of `#![feature(layout_for_ptr)]`.
-    //        (https://github.com/rust-lang/rust/issues/69835)
-    //        Since without the above feature we cannot get the layout from
-    //        behind the vtable we have to store another copy of the allocated
-    //        `Layout` here. Once that feature is stabilized this can be removed.
-    //        For now we'll have to live with these extra 16-bytes (+ padding).
-    layout: Layout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,104 +30,82 @@ enum CacheSlotState {
     Failed,
 }
 
-// Caution! This structure must be used *very* carefully.
-// The `value` field may actually be in an uninitialized state if
-// `header.state` is not `Init`. If that is the case creating a
-// reference to this struct is immediate UB.
-struct CacheSlot<V: ?Sized + 'static> {
-    header: CacheSlotHeader,
-    value: V,
+trait ErasedCacheSlotValue: Any + 'static {
+    unsafe fn assume_init_ref(&self) -> &dyn CacheValue;
+    unsafe fn assume_init_drop(&mut self);
 }
 
-impl<V: 'static> CacheSlot<V> {
-    unsafe fn init<'a>(this: NonNull<Self>, value: V) -> &'a V {
-        let value_ptr = this.byte_add(offset_of!(Self, value)).cast::<V>();
-        value_ptr.write(value);
-        Self::set_state(this, CacheSlotState::Init);
-        value_ptr.as_ref()
+#[repr(C)]
+struct CacheSlotValue<V> {
+    value: UnsafeCell<MaybeUninit<V>>,
+}
+
+impl<V: CacheValue> ErasedCacheSlotValue for CacheSlotValue<V> {
+    unsafe fn assume_init_ref(&self) -> &dyn CacheValue {
+        unsafe { (&*self.value.get()).assume_init_ref() }
     }
 
-    unsafe fn set_state(this: NonNull<Self>, state: CacheSlotState) {
-        Self::header(this).state.set(state);
+    unsafe fn assume_init_drop(&mut self) {
+        unsafe { self.value.get_mut().assume_init_drop() }
     }
 }
 
-impl<V: ?Sized + 'static> CacheSlot<V> {
-    fn header_ptr(this: NonNull<Self>) -> NonNull<CacheSlotHeader> {
-        unsafe {
-            this
-                // In practice this is always zero but technically not guaranteed?
-                .byte_add(offset_of!(CacheSlot<V>, header))
-                .cast::<CacheSlotHeader>()
+struct CacheSlot<V: ErasedCacheSlotValue + ?Sized + 'static> {
+    generation: Cell<u32>,
+    state: Cell<CacheSlotState>,
+    data: V,
+}
+
+impl<V: CacheValue + 'static> CacheSlot<CacheSlotValue<V>> {
+    fn new(generation: u32) -> Self {
+        Self {
+            generation: Cell::new(generation),
+            state: Cell::new(CacheSlotState::Uninit),
+            data: CacheSlotValue {
+                value: UnsafeCell::new(MaybeUninit::uninit()),
+            },
         }
     }
 
-    unsafe fn header<'a>(this: NonNull<Self>) -> &'a CacheSlotHeader {
-        unsafe { Self::header_ptr(this).as_ref() }
+    unsafe fn init(&self, value: V) -> &V {
+        (*self.data.value.get()).write(value);
+        self.state.set(CacheSlotState::Init);
+        (*self.data.value.get()).assume_init_ref()
     }
 }
 
-struct CacheBox<V: ?Sized + 'static>(NonNull<CacheSlot<V>>);
-
-impl<V: 'static> CacheBox<V> {
-    fn new(generation: u32) -> Self {
-        Self(unsafe {
-            let layout = Layout::new::<CacheSlot<V>>();
-            let ptr = std::alloc::alloc(layout).cast();
-            let Some(ptr) = NonNull::new(ptr) else {
-                std::alloc::handle_alloc_error(layout)
-            };
-
-            CacheSlot::header_ptr(ptr).write(CacheSlotHeader {
-                generation: Cell::new(generation),
-                state: Cell::new(CacheSlotState::Uninit),
-                layout,
-            });
-
-            ptr
-        })
-    }
-}
-
-impl<V: ?Sized + 'static> CacheBox<V> {
-    fn header(&self) -> &CacheSlotHeader {
-        unsafe { CacheSlot::header(self.0) }
-    }
-
-    fn value(&self) -> Option<&V> {
-        if self.header().state.get() == CacheSlotState::Init {
-            Some(unsafe { self.value_assume_init_ref() })
+impl<V: ErasedCacheSlotValue + ?Sized> CacheSlot<V> {
+    fn value(&self) -> Option<&dyn CacheValue> {
+        if self.state.get() == CacheSlotState::Init {
+            Some(unsafe { self.data.assume_init_ref() })
         } else {
             None
         }
     }
+}
 
-    unsafe fn value_assume_init_ref(&self) -> &V {
-        &unsafe { &*self.0.as_ptr() }.value
+impl<V: ErasedCacheSlotValue + ?Sized> Drop for CacheSlot<V> {
+    fn drop(&mut self) {
+        if self.state.get() == CacheSlotState::Init {
+            unsafe { self.data.assume_init_drop() };
+        }
     }
 }
 
-impl<V: ?Sized + 'static> Drop for CacheBox<V> {
-    fn drop(&mut self) {
-        if self.header().state.get() == CacheSlotState::Init {
-            unsafe { std::ptr::drop_in_place(self.0.as_ptr()) };
-        }
+struct CacheEntry<K, V: ErasedCacheSlotValue + ?Sized + 'static> {
+    key: K,
+    slot: ReadonlyAliasableBox<CacheSlot<V>>,
+}
 
-        let layout = self.header().layout;
-        unsafe {
-            std::alloc::dealloc(self.0.as_ptr() as *mut u8, layout);
-        }
+impl<K: Hash, V: ErasedCacheSlotValue + ?Sized + 'static> Hash for CacheEntry<K, V> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+        self.slot.data.type_id().hash(state);
     }
 }
 
 pub trait CacheValue: Any + 'static {
     fn memory_footprint(&self) -> usize;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ErasedKey<K: PartialEq + Eq + Hash> {
-    data: K,
-    value_type: TypeId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,32 +115,36 @@ pub struct CacheStats {
     pub generation: u32,
 }
 
-// TODO: Also erase keys, but maybe do it in a smart way?
-//       Maybe that's overkill though
-pub struct Cache<K: PartialEq + Eq + Hash> {
+pub struct Cache<K: 'static> {
     generation: Cell<u32>,
     total_memory_footprint: Cell<usize>,
     config: CacheConfiguration,
-    glyphs: RefCell<HashMap<ErasedKey<K>, CacheBox<dyn CacheValue>>>,
+    entries: RefCell<HashTable<CacheEntry<K, dyn ErasedCacheSlotValue>>>,
+    hasher: std::hash::RandomState,
 }
 
-impl<K: PartialEq + Eq + Hash> Debug for Cache<K> {
+impl<K> Debug for Cache<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GlyphCache")
             .field("generation", &self.generation.get())
             .field("total_memory_footprint", &self.total_memory_footprint.get())
             .field("config", &self.config)
+            .field(
+                "entries",
+                &crate::fmt_from_fn(|f| f.debug_list().finish_non_exhaustive()),
+            )
             .finish_non_exhaustive()
     }
 }
 
-impl<K: PartialEq + Eq + Hash> Cache<K> {
+impl<K: Hash + PartialEq + Eq + 'static> Cache<K> {
     pub fn new(config: CacheConfiguration) -> Self {
         Self {
             generation: Cell::new(0),
             total_memory_footprint: Cell::new(0),
             config,
-            glyphs: RefCell::new(HashMap::new()),
+            entries: RefCell::new(HashTable::new()),
+            hasher: RandomState::new(),
         }
     }
 
@@ -182,9 +153,9 @@ impl<K: PartialEq + Eq + Hash> Cache<K> {
         let keep_after = last_generation.saturating_sub(self.config.trim_kept_generations);
         if self.total_memory_footprint.get() >= self.config.trim_memory_threshold {
             let mut new_footprint = 0;
-            self.glyphs.get_mut().retain(|_, slot| {
-                let slot_generation = slot.header().generation.get();
-                let Some(value) = slot.value() else {
+            self.entries.get_mut().retain(|entry| {
+                let slot_generation = entry.slot.generation.get();
+                let Some(value) = entry.slot.value() else {
                     return false;
                 };
                 // The extra `slot <= last` check ensures that if the generation wraps
@@ -204,29 +175,26 @@ impl<K: PartialEq + Eq + Hash> Cache<K> {
     pub fn stats(&self) -> CacheStats {
         CacheStats {
             total_memory_footprint: self.total_memory_footprint.get(),
-            total_entries: self.glyphs.borrow().len(),
+            total_entries: self.entries.borrow().len(),
             generation: self.generation.get(),
         }
     }
 
-    unsafe fn try_init_slot<V: CacheValue, E>(
+    unsafe fn try_init_slot<'s, V: CacheValue, E>(
         &self,
-        slot_ptr: NonNull<CacheSlot<V>>,
+        slot: &'s CacheSlot<CacheSlotValue<V>>,
         insert: impl FnOnce() -> Result<V, E>,
-    ) -> Result<&'static V, E> {
-        debug_assert_eq!(
-            CacheSlot::header(slot_ptr).state.get(),
-            CacheSlotState::Uninit
-        );
+    ) -> Result<&'s V, E> {
+        debug_assert_eq!(slot.state.get(), CacheSlotState::Uninit);
 
         match insert() {
             Ok(new_value) => {
                 self.total_memory_footprint
                     .set(self.total_memory_footprint.get() + new_value.memory_footprint());
-                Ok(unsafe { CacheSlot::init(slot_ptr, new_value) })
+                Ok(unsafe { slot.init(new_value) })
             }
             Err(err) => {
-                unsafe { CacheSlot::set_state(slot_ptr, CacheSlotState::Failed) };
+                slot.state.set(CacheSlotState::Failed);
                 Err(err)
             }
         }
@@ -237,17 +205,36 @@ impl<K: PartialEq + Eq + Hash> Cache<K> {
         key: K,
         insert: impl FnOnce() -> Result<V, E>,
     ) -> Result<&V, E> {
-        let mut glyphs = self.glyphs.borrow_mut();
+        let mut entries = self.entries.borrow_mut();
 
-        // TODO: This could be partially monomorphised
-        let slot = match glyphs.entry(ErasedKey {
-            data: key,
-            value_type: TypeId::of::<V>(),
-        }) {
+        let key_hash = {
+            // NOTE: This has to be the same as `CacheEntry::hash`
+            let mut hasher = self.hasher.build_hasher();
+            key.hash(&mut hasher);
+            std::any::TypeId::of::<CacheSlotValue<V>>().hash(&mut hasher);
+            hasher.finish()
+        };
+        let value = match entries.entry(
+            key_hash,
+            |entry| {
+                entry.key == key
+                    && entry.slot.data.type_id() == std::any::TypeId::of::<CacheSlotValue<V>>()
+            },
+            |entry| self.hasher.hash_one(entry),
+        ) {
             Entry::Occupied(occupied) => {
-                let slot = occupied.get();
-                slot.header().generation.set(self.generation.get());
-                let value = match slot.header().state.get() {
+                // SAFETY: The `TypeId` of the slot's value has just been checked above.
+                //         This also implicitly casts the lifetime of the reference to
+                //         the lifetime of &self, this is safe because we know the slot
+                //         isn't going to be moved (it's behind a pointer) and it's not
+                //         going to be removed without a &mut self reference invalidating
+                //         the returned one.
+                let slot = unsafe {
+                    &*(occupied.get().slot.0.as_ptr() as *const _
+                        as *const CacheSlot<CacheSlotValue<V>>)
+                };
+                slot.generation.set(self.generation.get());
+                let value = match slot.state.get() {
                     CacheSlotState::Uninit => {
                         panic!(
                             concat!(
@@ -257,52 +244,44 @@ impl<K: PartialEq + Eq + Hash> Cache<K> {
                             std::any::type_name::<V>()
                         );
                     }
-                    CacheSlotState::Init => {
-                        let value = unsafe { slot.value_assume_init_ref() };
-                        debug_assert_eq!(value.type_id(), std::any::TypeId::of::<V>());
-                        value
-                    }
+                    CacheSlotState::Init => unsafe { (*slot.data.value.get()).assume_init_ref() },
                     CacheSlotState::Failed => {
-                        let slot_ptr =
-                            unsafe { NonNull::new_unchecked(slot.0.as_ptr() as *mut CacheSlot<V>) };
-                        drop(glyphs);
+                        drop(entries);
 
                         unsafe {
-                            CacheSlot::set_state(slot_ptr, CacheSlotState::Uninit);
-                            self.try_init_slot(slot_ptr, insert)?
+                            slot.state.set(CacheSlotState::Uninit);
+                            self.try_init_slot(slot, insert)?
                         }
                     }
                 };
 
-                // SAFETY: This reference is behind an allocation which won't be removed from the map
-                //         without a &mut reference and is only ever accessed immutably for the
-                //         remainder of its lifetime.
-                unsafe { std::mem::transmute::<&dyn CacheValue, &'static dyn CacheValue>(value) }
+                value
             }
             Entry::Vacant(vacant) => {
-                let uninit_box = CacheBox::<V>::new(self.generation.get());
-                let slot_ptr = uninit_box.0;
-                let erased_box = {
-                    unsafe {
-                        CacheBox(NonNull::new_unchecked(
-                            ManuallyDrop::new(uninit_box).0.as_ptr()
-                                as *mut CacheSlot<dyn CacheValue>,
-                        ))
-                    }
+                let uninit_slot =
+                    ManuallyDrop::new(ReadonlyAliasableBox::new(
+                        CacheSlot::<CacheSlotValue<V>>::new(self.generation.get()),
+                    ));
+                // SAFETY: This is just an unsizing cast
+                let erased_slot = unsafe {
+                    ReadonlyAliasableBox(NonNull::new_unchecked(
+                        uninit_slot.0.as_ptr() as *mut CacheSlot<dyn ErasedCacheSlotValue>
+                    ))
                 };
                 // Insert the still uninitialized box into the map (we'll initialize it later).
-                vacant.insert(erased_box);
+                vacant.insert(CacheEntry {
+                    key,
+                    slot: erased_slot,
+                });
                 // Drop the borrow on the map so we don't panic on reentrancy.
-                drop(glyphs);
+                drop(entries);
 
-                unsafe { self.try_init_slot(slot_ptr, insert)? }
+                // SAFETY: This forges a lifetime, see explanation in the `Entry::Occupied` case.
+                unsafe { self.try_init_slot(uninit_slot.0.as_ref(), insert)? }
             }
         };
 
-        // SAFETY: Either this value has just been inserted into the map so we
-        //         know its type or the `TypeId` has already been checked since
-        //         it's part of the key.
-        Ok(unsafe { &*(slot as *const dyn CacheValue as *const () as *const V) })
+        Ok(value)
     }
 
     #[inline]
@@ -315,7 +294,7 @@ impl<K: PartialEq + Eq + Hash> Cache<K> {
 
 #[cfg(test)]
 mod test {
-    use std::{convert::Infallible, ops::Range};
+    use std::{convert::Infallible, ops::Range, rc::Rc};
 
     use super::*;
 
@@ -413,5 +392,31 @@ mod test {
                 .get_or_try_insert_with(0, || Ok(CachedInt(0)))
                 .cloned()
         })
+    }
+
+    #[test]
+    fn drops_values() {
+        #[derive(Clone)]
+        struct Dropped(Rc<Cell<bool>>);
+
+        impl CacheValue for Dropped {
+            fn memory_footprint(&self) -> usize {
+                TEST_CONFIGURATION.trim_memory_threshold
+            }
+        }
+
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let dropped = Dropped(Rc::new(Cell::new(false)));
+
+        let mut cache = Cache::<u32>::new(TEST_CONFIGURATION);
+        cache.get_or_insert_with(1, || dropped.clone());
+        cache.advance_generation();
+
+        assert!(dropped.0.get());
     }
 }

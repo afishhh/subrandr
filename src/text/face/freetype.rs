@@ -788,10 +788,19 @@ impl FontImpl for Font {
                 return Err(GlyphRenderError::ConversionToBitmapFailed((*glyph).format));
             }
 
-            let bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
+            let mut bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
             let bitmap = &(*glyph).bitmap;
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
+
+            // FIXME: This isn't really fully accurate since we don't adjust
+            //        our billinear scaling for the lost fractional part here.
+            if scale6 != 64 {
+                bitmap_offset.x *= scale6;
+                bitmap_offset.x /= 64;
+                bitmap_offset.y *= scale6;
+                bitmap_offset.y /= 64;
+            }
 
             let pixel_mode = match bitmap.pixel_mode.into() {
                 FT_PIXEL_MODE_GRAY => CopyPixelMode::Mono8,

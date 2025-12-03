@@ -148,7 +148,8 @@ impl FontArena {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Glyph<'f> {
+// FIXME: If this isn't `(crate)` pub then a bunch of stuff is considered public, why?
+pub(crate) struct Glyph<'f> {
     pub index: hb_codepoint_t,
     /// Position of the directionally-first byte where this glyph starts in the original UTF-8 string.
     /// If left-to-right, this will be the first byte of the relevant codepoint.

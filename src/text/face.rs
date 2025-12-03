@@ -35,16 +35,17 @@ impl Axis {
 }
 
 #[derive(Debug, Clone, Copy)]
-// FIXME: This has unused fields but rustc doesn't see them anymore?
-#[allow(dead_code)]
 pub struct GlyphMetrics {
     pub width: I26Dot6,
     pub height: I26Dot6,
     pub hori_bearing_x: I26Dot6,
     pub hori_bearing_y: I26Dot6,
     pub hori_advance: I26Dot6,
+    #[expect(dead_code)]
     pub vert_bearing_x: I26Dot6,
+    #[expect(dead_code)]
     pub vert_bearing_y: I26Dot6,
+    #[expect(dead_code)]
     pub vert_advance: I26Dot6,
 }
 
@@ -109,9 +110,6 @@ trait FontImpl: Sized {
 
     fn size_cache_key(&self) -> FontSizeCacheKey;
 
-    type MeasureError;
-    fn measure_glyph_uncached(&self, index: u32) -> Result<GlyphMetrics, Self::MeasureError>;
-
     type RenderError;
     fn render_glyph_uncached(
         &self,
@@ -165,6 +163,7 @@ impl Face {
         freetype::Face::load_from_bytes(bytes, index).map(Face::FreeType)
     }
 
+    #[cfg(all(test, feature = "_layout_tests"))]
     pub fn load_from_static_bytes(bytes: &'static [u8], index: i32) -> Result<Self, FreeTypeError> {
         freetype::Face::load_from_static_bytes(bytes, index).map(Face::FreeType)
     }
@@ -224,20 +223,6 @@ impl Font {
         match self {
             Font::FreeType(font) => Face::FreeType(font.face().clone()),
             Font::Tofu(_) => Face::tofu(),
-        }
-    }
-
-    pub fn glyph_extents<'c>(
-        &'c self,
-        cache: &'c GlyphCache,
-        glyph: u32,
-    ) -> Result<&'c GlyphMetrics, FreeTypeError> {
-        match self {
-            Font::FreeType(font) => {
-                let key = self.size_cache_key().for_glyph(self.face(), glyph, 0.0, 0);
-                cache.get_or_try_insert_with(key, || font.measure_glyph_uncached(glyph))
-            }
-            Font::Tofu(font) => Ok(font.glyph_metrics()),
         }
     }
 

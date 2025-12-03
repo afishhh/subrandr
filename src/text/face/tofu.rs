@@ -64,8 +64,6 @@ static TOFU_HB_FONT_USERDATA_KEY: hb_user_data_key_t = hb_user_data_key_t { unus
 struct FontShared {
     point_size: I26Dot6,
     dpi: u32,
-    pixel_height: I26Dot6,
-    pixel_width: I26Dot6,
     glyph_metrics: GlyphMetrics,
     font_metrics: FontMetrics,
 }
@@ -89,8 +87,6 @@ impl Font {
             FontShared {
                 point_size,
                 dpi,
-                pixel_height,
-                pixel_width,
                 glyph_metrics: GlyphMetrics {
                     width: pixel_width,
                     height: pixel_height,
@@ -247,7 +243,7 @@ impl Font {
         shared: &FontShared,
         _glyph: hb_codepoint_t,
     ) -> hb_position_t {
-        shared.pixel_width.into_raw()
+        shared.glyph_metrics.hori_advance.into_raw()
     }
 
     unsafe fn hb_glyph_h_origin_func(
@@ -267,8 +263,8 @@ impl Font {
         extents: *mut hb_glyph_extents_t,
     ) -> i32 {
         let out = &mut *extents;
-        out.width = shared.pixel_width.into_raw();
-        out.height = shared.pixel_height.into_raw();
+        out.width = shared.glyph_metrics.width.into_raw();
+        out.height = shared.glyph_metrics.height.into_raw();
         out.x_bearing = shared.glyph_metrics.hori_bearing_x.into_raw();
         out.y_bearing = shared.glyph_metrics.hori_bearing_y.into_raw();
         1
@@ -279,10 +275,6 @@ impl Font {
             &*hb_font_get_user_data(self.hb, (&raw const TOFU_HB_FONT_USERDATA_KEY).cast_mut())
                 .cast::<FontShared>()
         }
-    }
-
-    pub fn glyph_metrics(&self) -> &GlyphMetrics {
-        &self.shared().glyph_metrics
     }
 
     pub fn as_harfbuzz_font(&self) -> *mut hb_font_t {
@@ -299,8 +291,8 @@ pub struct TofuGlyph {
 impl Font {
     fn draw_glyph(&self, index: u32, offset: Vec2L, rasterizer: &mut StripRasterizer) -> TofuGlyph {
         let shared = self.shared();
-        let pixel_height = shared.pixel_height;
-        let pixel_width = shared.pixel_width;
+        let pixel_height = shared.glyph_metrics.height;
+        let pixel_width = shared.glyph_metrics.width;
         let outline_width = pixel_height / 40;
         let base_spacing = pixel_height / 12;
         let margin = base_spacing;
@@ -449,11 +441,6 @@ impl FontImpl for Font {
             self.shared().dpi,
             [I16Dot16::ZERO; text_sys::T1_MAX_MM_AXIS as usize],
         )
-    }
-
-    type MeasureError = Infallible;
-    fn measure_glyph_uncached(&self, _index: u32) -> Result<GlyphMetrics, Self::MeasureError> {
-        unreachable!()
     }
 
     type RenderError = Infallible;

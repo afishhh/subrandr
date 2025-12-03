@@ -12,7 +12,7 @@ use text_sys::*;
 use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Vec2};
 
-use super::{Axis, FaceImpl, FontImpl, FontMetrics, GlyphMetrics, OpenTypeTag, SingleGlyphBitmap};
+use super::{Axis, FaceImpl, FontImpl, FontMetrics, OpenTypeTag, SingleGlyphBitmap};
 use crate::text::{ft_utils::*, FontSizeCacheKey};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
@@ -136,6 +136,7 @@ impl Face {
         }
     }
 
+    #[cfg(all(test, feature = "_layout_tests"))]
     pub fn load_from_static_bytes(bytes: &'static [u8], index: i32) -> Result<Self, FreeTypeError> {
         unsafe { Self::adopt_ft(Self::ft_from_memory(bytes, index)?, None) }
     }
@@ -678,53 +679,6 @@ impl FontImpl for Font {
             self.size.dpi,
             self.coords.map(I16Dot16::from_ft),
         )
-    }
-
-    type MeasureError = FreeTypeError;
-    fn measure_glyph_uncached(&self, index: u32) -> Result<GlyphMetrics, Self::MeasureError> {
-        let face = self.with_applied_size()?;
-        let slot = unsafe {
-            fttry!(FT_Load_Glyph(
-                face,
-                index,
-                (FT_LOAD_COLOR | FT_LOAD_TARGET_LIGHT | FT_LOAD_BITMAP_METRICS_ONLY) as i32
-            ))?;
-            &*(*face).glyph
-        };
-        let mut metrics = slot.metrics;
-
-        // I have no idea whether this is correct or necessary but the advance
-        // fields are currently unused so it doesn't matter.
-        metrics.horiAdvance += slot.lsb_delta - slot.rsb_delta;
-
-        let scale = self.size.bitmap_scale;
-        if scale != I26Dot6::ONE {
-            macro_rules! scale_field {
-                ($name: ident) => {
-                    metrics.$name = (metrics.$name * scale.into_raw() as FT_Long) >> 6;
-                };
-            }
-
-            scale_field!(width);
-            scale_field!(height);
-            scale_field!(horiBearingX);
-            scale_field!(horiBearingY);
-            scale_field!(horiAdvance);
-            scale_field!(vertBearingX);
-            scale_field!(vertBearingY);
-            scale_field!(vertAdvance);
-        }
-
-        Ok(GlyphMetrics {
-            width: I26Dot6::from_raw(metrics.width as i32),
-            height: I26Dot6::from_raw(metrics.height as i32),
-            hori_bearing_x: I26Dot6::from_raw(metrics.horiBearingX as i32),
-            hori_bearing_y: I26Dot6::from_raw(metrics.horiBearingY as i32),
-            hori_advance: I26Dot6::from_raw(metrics.horiAdvance as i32),
-            vert_bearing_x: I26Dot6::from_raw(metrics.vertBearingX as i32),
-            vert_bearing_y: I26Dot6::from_raw(metrics.vertBearingY as i32),
-            vert_advance: I26Dot6::from_raw(metrics.vertAdvance as i32),
-        })
     }
 
     type RenderError = GlyphRenderError;

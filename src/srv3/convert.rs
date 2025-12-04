@@ -18,7 +18,8 @@ use crate::{
     srv3::{Event, RubyPosition},
     style::{
         computed::{
-            Alignment, FontSlant, HorizontalAlignment, Length, Ruby, TextShadow, VerticalAlignment,
+            Alignment, FontSlant, HorizontalAlignment, InlineSizing, Length, Ruby, TextShadow,
+            VerticalAlignment,
         },
         ComputedStyle,
     },
@@ -307,6 +308,9 @@ impl Segment {
                 .make_font_feature_settings_mut()
                 .set(OpenTypeTag::FEAT_RUBY, 1);
         }
+
+        // FIXME: This is not correct but *looks* more correct :)
+        *result.make_inline_sizing_mut() = InlineSizing::Stretch;
 
         *result.make_font_size_mut() = I26Dot6::from(size);
 

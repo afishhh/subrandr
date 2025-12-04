@@ -34,6 +34,7 @@ macros::implement_style_module! {
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: HorizontalAlignment = HorizontalAlignment::Left,
+        inline_sizing: InlineSizing = InlineSizing::Normal,
     }
 
     rc uninherited {

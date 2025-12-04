@@ -620,30 +620,20 @@ impl Rasterizer {
 }
 
 impl Rasterizer {
-    fn stroke_polyline_or_polygon(
+    fn stroke_polyline(
         &mut self,
         target: &mut super::RenderTarget<'_>,
-        offset: Vec2f,
         vertices: &[Point2f],
-        closed: bool,
         color: BGRA8,
     ) {
         let Some(target) = self.unwrap_render_target(target, RenderTargetUse::Other) else {
             return;
         };
 
-        let data = {
-            let mut result = Vec::with_capacity(vertices.len() + closed as usize);
-            result.extend(
-                vertices
-                    .iter()
-                    .map(|&point| target_transform_point_for(target, point + offset)),
-            );
-            if closed {
-                result.push(result[0]);
-            }
-            result
-        };
+        let data: Vec<_> = vertices
+            .iter()
+            .map(|&point| target_transform_point_for(target, point))
+            .collect();
 
         let buffer = self
             .device
@@ -1052,43 +1042,15 @@ impl super::Rasterizer for Rasterizer {
         self.packers.bgra.defragment();
     }
 
-    fn line(
+    fn horizontal_line(
         &mut self,
         target: &mut super::RenderTarget,
-        p0: Point2f,
-        p1: Point2f,
-        color: crate::color::BGRA8,
+        y: f32,
+        x0: f32,
+        x1: f32,
+        color: BGRA8,
     ) {
-        self.stroke_polyline_or_polygon(target, Vec2::ZERO, &[p0, p1], false, color);
-    }
-
-    fn stroke_polyline(
-        &mut self,
-        target: &mut super::RenderTarget,
-        offset: Vec2f,
-        vertices: &[Point2f],
-        color: crate::color::BGRA8,
-    ) {
-        self.stroke_polyline_or_polygon(target, offset, vertices, false, color);
-    }
-
-    fn stroke_polygon(
-        &mut self,
-        target: &mut super::RenderTarget,
-        offset: Vec2f,
-        vertices: &[Point2f],
-        color: crate::color::BGRA8,
-    ) {
-        self.stroke_polyline_or_polygon(target, offset, vertices, true, color);
-    }
-
-    fn fill_triangle(
-        &mut self,
-        target: &mut super::RenderTarget,
-        vertices: &[Point2f; 3],
-        color: crate::color::BGRA8,
-    ) {
-        self.fill_triangles(target, vertices, color);
+        self.stroke_polyline(target, &[Point2f::new(x0, y), Point2f::new(x1, y)], color);
     }
 
     fn fill_axis_aligned_rect(

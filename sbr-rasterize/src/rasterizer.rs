@@ -1,6 +1,6 @@
 use std::{fmt::Write, mem::MaybeUninit};
 
-use util::math::{Point2f, Rect2f, Vec2, Vec2f};
+use util::math::{Rect2f, Vec2};
 
 use crate::color::BGRA8;
 
@@ -165,8 +165,6 @@ pub trait Rasterizer {
     fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
     fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture;
 
-    fn line(&mut self, target: &mut RenderTarget, p0: Point2f, p1: Point2f, color: BGRA8);
-
     fn horizontal_line(
         &mut self,
         target: &mut RenderTarget,
@@ -174,39 +172,7 @@ pub trait Rasterizer {
         x0: f32,
         x1: f32,
         color: BGRA8,
-    ) {
-        self.line(target, Point2f::new(x0, y), Point2f::new(x1, y), color);
-    }
-
-    fn fill_triangle(&mut self, target: &mut RenderTarget, vertices: &[Point2f; 3], color: BGRA8);
-
-    fn stroke_polygon(
-        &mut self,
-        target: &mut RenderTarget,
-        offset: Vec2f,
-        vertices: &[Point2f],
-        color: BGRA8,
-    ) {
-        let mut last = vertices[vertices.len() - 1];
-        for &point in vertices {
-            self.line(target, last + offset, point + offset, color);
-            last = point;
-        }
-    }
-
-    fn stroke_polyline(
-        &mut self,
-        target: &mut RenderTarget,
-        offset: Vec2f,
-        vertices: &[Point2f],
-        color: BGRA8,
-    ) {
-        let mut last = vertices[0];
-        for &point in &vertices[1..] {
-            self.line(target, last + offset, point + offset, color);
-            last = point;
-        }
-    }
+    );
 
     fn fill_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8);
 

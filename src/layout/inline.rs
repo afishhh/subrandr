@@ -8,7 +8,7 @@ use super::{FixedL, FragmentBox, LayoutConstraints, LayoutContext, Vec2L};
 use crate::{
     layout::BoxFragmentationPart,
     style::{
-        computed::{FontSlant, HorizontalAlignment},
+        computed::{FontSlant, HorizontalAlignment, InlineSizing},
         ComputedStyle,
     },
     text::{self, Direction, Font, FontArena, FontMatcher, ShapingBuffer},
@@ -1519,7 +1519,8 @@ fn layout_run_full(
     #[derive(Debug)]
     struct InlineItemFragmentBuilder<'o, 'a> {
         output: &'o mut OffsetInlineItemFragmentVec,
-        line_ascender: FixedL,
+        line_metrics: LineHeightMetrics,
+        current_top_y: FixedL,
         current_x: FixedL,
         content: &'a InlineContent,
         dpi: u32,
@@ -1619,12 +1620,14 @@ fn layout_run_full(
         fn child_builder<'o2>(
             &mut self,
             output: &'o2 mut OffsetInlineItemFragmentVec,
-            line_ascender: FixedL,
+            line_metrics: LineHeightMetrics,
+            top_y: FixedL,
             current_x: FixedL,
         ) -> InlineItemFragmentBuilder<'o2, 'a> {
             InlineItemFragmentBuilder {
                 output,
-                line_ascender,
+                line_metrics,
+                current_top_y: top_y,
                 current_x,
                 dpi: self.dpi,
                 content: self.content,
@@ -1649,9 +1652,18 @@ fn layout_run_full(
                 let state = &mut span_state[span_id];
                 let font_metrics = state.primary_font.metrics();
 
-                // https://drafts.csswg.org/css-inline/#valdef-inline-sizing-normal
-                let logical_height = font_metrics.ascender - font_metrics.descender;
-                let y_asc_offset = self.line_ascender - font_metrics.ascender;
+                // https://drafts.csswg.org/css-inline/#line-fill
+                let (y_asc_offset, logical_height) = {
+                    let (ascender, descender) = match state.style.inline_sizing() {
+                        InlineSizing::Normal => (font_metrics.ascender, font_metrics.descender),
+                        InlineSizing::Stretch => (
+                            self.line_metrics.max_ascender,
+                            self.line_metrics.min_descender,
+                        ),
+                    };
+
+                    (self.current_top_y - ascender, ascender - descender)
+                };
 
                 let mut part = BoxFragmentationPart::VERTICAL_FULL;
                 if !state.seen_first {
@@ -1710,7 +1722,7 @@ fn layout_run_full(
                                 std::mem::transmute::<GlyphString<'_>, GlyphString<'static>>(glyphs)
                             },
                             _font_arena: font_arena.clone(),
-                            baseline_offset: Vec2::new(FixedL::ZERO, self.line_ascender),
+                            baseline_offset: Vec2::new(FixedL::ZERO, self.current_top_y),
                         };
 
                         let (fragment, width, y_correction) = self.rebuild_leaf_branch(
@@ -1759,7 +1771,7 @@ fn layout_run_full(
 
                         let base_offset = Vec2::new(
                             ruby_current_x,
-                            self.line_ascender - base_font_metrics.ascender,
+                            self.current_top_y - base_font_metrics.ascender,
                         );
                         // FIXME: Apparently ruby internal boxes are not supposed to use
                         //        inline-sizing sizing. Now this makes sense with the ruby
@@ -1779,6 +1791,7 @@ fn layout_run_full(
 
                         self.child_builder(
                             &mut base_fragment.children,
+                            self.line_metrics,
                             base_font_metrics.ascender,
                             base_half_padding,
                         )
@@ -1802,6 +1815,7 @@ fn layout_run_full(
 
                         self.child_builder(
                             &mut annotation_fragment.children,
+                            annotation_metrics,
                             annotation_metrics.max_ascender,
                             annotation_half_padding,
                         )
@@ -1936,7 +1950,8 @@ fn layout_run_full(
             {
                 InlineItemFragmentBuilder {
                     output: &mut line_box.children,
-                    line_ascender: line_metrics.max_ascender,
+                    line_metrics,
+                    current_top_y: line_metrics.max_ascender,
                     current_x: FixedL::ZERO,
                     dpi: self.dpi,
                     content: self.content,

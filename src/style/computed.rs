@@ -104,3 +104,9 @@ impl FontFeatureSettings {
         Self(BTreeMap::new())
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum InlineSizing {
+    Normal,
+    Stretch,
+}

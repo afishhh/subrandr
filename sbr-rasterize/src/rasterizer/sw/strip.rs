@@ -297,13 +297,13 @@ impl StripRasterizer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Strips {
     strips: Vec<Strip>,
     alpha_buffer: AlphaBuffer,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct AlphaBuffer(Vec<u64>);
 
 impl AlphaBuffer {
@@ -329,7 +329,7 @@ impl AlphaBuffer {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 struct Strip {
     pos: Point2<u16>,
     width: u16,
@@ -447,12 +447,12 @@ pub struct StripPaintIter<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum StripPaintOp<'a> {
     Copy(StripCopyOp<'a>),
-    Fill(StripFillOp),
+    Fill(StripFillOp<'a>),
 }
 
 impl StripPaintOp<'_> {
     #[inline]
-    fn pos(&self) -> Point2<u16> {
+    pub fn pos(&self) -> Point2<u16> {
         match self {
             Self::Copy(x) => x.pos,
             Self::Fill(x) => x.pos,
@@ -460,7 +460,7 @@ impl StripPaintOp<'_> {
     }
 
     #[inline]
-    fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         match self {
             StripPaintOp::Copy(x) => x.width().into(),
             StripPaintOp::Fill(x) => usize::from(x.width) * 4,
@@ -474,7 +474,7 @@ pub struct StripCopyOp<'a> {
     pub buffer: &'a [u8],
 }
 
-impl StripCopyOp<'_> {
+impl<'a> StripCopyOp<'a> {
     #[inline]
     pub fn height(&self) -> u16 {
         4
@@ -484,13 +484,33 @@ impl StripCopyOp<'_> {
     pub fn width(&self) -> u16 {
         (self.buffer.len() / 4) as u16
     }
+
+    #[inline]
+    pub fn to_texture(self) -> super::Texture<'a> {
+        super::Texture {
+            width: u32::from(self.width()),
+            height: u32::from(self.height()),
+            data: super::TextureData::BorrowedMono(self.buffer),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct StripFillOp {
+pub struct StripFillOp<'a> {
     pub pos: Point2<u16>,
     pub width: u16,
-    pub alpha: [u8; 4],
+    pub alpha: &'a [u8; 4],
+}
+
+impl<'a> StripFillOp<'a> {
+    #[inline]
+    pub fn to_vertical_texture(self) -> super::Texture<'a> {
+        super::Texture {
+            width: 1,
+            height: 4,
+            data: super::TextureData::BorrowedMono(self.alpha),
+        }
+    }
 }
 
 impl<'a> Iterator for StripPaintIter<'a> {
@@ -505,7 +525,7 @@ impl<'a> Iterator for StripPaintIter<'a> {
             return Some(StripPaintOp::Fill(StripFillOp {
                 pos: Point2::new(last_x, next.pos.y),
                 width: next.pos.x - last_x,
-                alpha: next.fill_previous,
+                alpha: &next.fill_previous,
             }));
         }
 

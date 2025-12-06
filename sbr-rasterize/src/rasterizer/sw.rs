@@ -1,4 +1,4 @@
-use std::{any::Any, hash::Hash, mem::MaybeUninit};
+use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
 
 use util::{
     math::{Point2, Vec2},
@@ -8,7 +8,7 @@ use util::{
 use crate::{
     color::{Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, Rect2S, SceneNode, Vec2S},
+    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, SceneNode, Vec2S},
     PixelFormat, SceneRenderError,
 };
 
@@ -250,6 +250,25 @@ pub struct RenderTarget<'a> {
 }
 
 impl<'a> RenderTarget<'a> {
+    pub fn new_borrowed_bgra8(
+        buffer: &'a mut [BGRA8],
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Self {
+        assert!(
+            buffer.len() >= height as usize * stride as usize,
+            "Buffer passed to rasterize::sw::RenderTarget::create_render_target is too small!"
+        );
+
+        RenderTarget {
+            buffer: RenderTargetBuffer::BorrowedBgra(buffer),
+            width,
+            height,
+            stride,
+        }
+    }
+
     fn new_owned_mono(width: u32, height: u32) -> Self {
         Self {
             buffer: {
@@ -265,7 +284,7 @@ impl<'a> RenderTarget<'a> {
         }
     }
 
-    fn owned_into_texture(self) -> Texture {
+    fn owned_into_texture(self) -> Texture<'static> {
         assert_eq!(self.stride, self.width);
 
         Texture {
@@ -315,16 +334,9 @@ pub fn create_render_target(
     height: u32,
     stride: u32,
 ) -> super::RenderTarget<'_> {
-    assert!(
-        buffer.len() >= height as usize * stride as usize,
-        "Buffer passed to rasterize::sw::create_render_target is too small!"
-    );
-    super::RenderTarget(super::RenderTargetInner::Software(RenderTarget {
-        buffer: RenderTargetBuffer::BorrowedBgra(buffer),
-        width,
-        height,
-        stride,
-    }))
+    super::RenderTarget(super::RenderTargetInner::Software(
+        RenderTarget::new_borrowed_bgra8(buffer, width, height, stride),
+    ))
 }
 
 pub fn create_render_target_mono(
@@ -377,33 +389,59 @@ impl RenderTargetBuffer<'_> {
 }
 
 #[derive(Clone)]
-enum TextureData {
+enum TextureData<'a> {
     OwnedMono(Arc<[u8]>),
     OwnedBgra(Arc<[BGRA8]>),
+    BorrowedMono(&'a [u8]),
 }
 
-impl TextureData {
+impl TextureData<'_> {
     pub fn as_ref(&self) -> TextureDataRef<'_> {
         match self {
             TextureData::OwnedMono(a8) => TextureDataRef::Mono(a8),
             TextureData::OwnedBgra(bgra8) => TextureDataRef::Bgra(bgra8),
+            TextureData::BorrowedMono(a8) => TextureDataRef::Mono(a8),
         }
     }
 }
+
+impl Hash for TextureData<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            TextureData::OwnedMono(mono) => Arc::hash_ptr(mono, state),
+            TextureData::OwnedBgra(bgra) => Arc::hash_ptr(bgra, state),
+            TextureData::BorrowedMono(mono) => mono.as_ptr().hash(state),
+        }
+    }
+}
+
+impl PartialEq for TextureData<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::OwnedMono(l), Self::OwnedMono(r)) => Arc::ptr_eq(l, r),
+            (Self::OwnedBgra(l), Self::OwnedBgra(r)) => Arc::ptr_eq(l, r),
+            (Self::BorrowedMono(l), Self::BorrowedMono(r)) => std::ptr::eq(l, r),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for TextureData<'_> {}
 
 enum TextureDataRef<'a> {
     Mono(&'a [u8]),
     Bgra(&'a [BGRA8]),
 }
 
-#[derive(Clone)]
-pub struct Texture {
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct Texture<'a> {
     width: u32,
     height: u32,
-    data: TextureData,
+    data: TextureData<'a>,
 }
 
-impl Texture {
+impl Texture<'static> {
     unsafe fn new_with_initializer(
         width: u32,
         height: u32,
@@ -446,6 +484,18 @@ impl Texture {
         }
     }
 
+    pub const SINGLE_FILLED_MONO_PIXEL: Texture<'static> = Texture {
+        width: 1,
+        height: 1,
+        data: TextureData::BorrowedMono(&[u8::MAX]),
+    };
+}
+
+impl Texture<'_> {
+    pub fn size(&self) -> Vec2<u32> {
+        Vec2::new(self.width, self.height)
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -458,18 +508,19 @@ impl Texture {
         match &self.data {
             TextureData::OwnedMono(mono) => mono.len(),
             TextureData::OwnedBgra(bgra) => bgra.len() * 4,
+            TextureData::BorrowedMono(mono) => mono.len(),
         }
     }
 
     pub(super) fn is_mono(&self) -> bool {
         match &self.data {
-            TextureData::OwnedMono(_) => true,
+            TextureData::OwnedMono(_) | TextureData::BorrowedMono(_) => true,
             TextureData::OwnedBgra(_) => false,
         }
     }
 }
 
-fn unwrap_sw_texture(texture: &super::Texture) -> &Texture {
+fn unwrap_sw_texture(texture: &super::Texture) -> &Texture<'static> {
     #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
     match &texture.0 {
         super::TextureInner::Software(texture) => texture,
@@ -558,6 +609,64 @@ impl Rasterizer {
                     pos.x as isize,
                     pos.y as isize,
                     color,
+                );
+            }
+        }
+    }
+
+    pub fn copy_texture_filtered(
+        &self,
+        target: &mut RenderTarget,
+        pos: Point2<i32>,
+        texture: &Texture,
+        filter: Option<BitmapFilter>,
+        color: BGRA8,
+    ) {
+        let dst = target.buffer.unwrap_for::<BGRA8>();
+        match (texture.data.as_ref(), filter) {
+            (TextureDataRef::Mono(mono), Some(BitmapFilter::ExtractAlpha) | None) => {
+                blit::cvt_mono_to_bgra(
+                    dst,
+                    target.stride as usize,
+                    target.width as usize,
+                    target.height as usize,
+                    mono,
+                    texture.width as usize,
+                    texture.width as usize,
+                    texture.height as usize,
+                    pos.x as isize,
+                    pos.y as isize,
+                    color,
+                );
+            }
+            (TextureDataRef::Bgra(bgra), Some(BitmapFilter::ExtractAlpha)) => {
+                blit::cvt_xxxa_to_bgra(
+                    dst,
+                    target.stride as usize,
+                    target.width as usize,
+                    target.height as usize,
+                    bgra,
+                    texture.width as usize,
+                    texture.width as usize,
+                    texture.height as usize,
+                    pos.x as isize,
+                    pos.y as isize,
+                    color,
+                );
+            }
+            (TextureDataRef::Bgra(source), None) => {
+                blit::cvt_bgra_to_bgra(
+                    dst,
+                    target.stride as usize,
+                    target.width as usize,
+                    target.height as usize,
+                    source,
+                    texture.width as usize,
+                    texture.width as usize,
+                    texture.height as usize,
+                    pos.x as isize,
+                    pos.y as isize,
+                    color.a,
                 );
             }
         }
@@ -691,9 +800,9 @@ impl super::Rasterizer for Rasterizer {
     }
 }
 
-#[derive(Clone)]
-pub struct OutputBitmap {
-    pub texture: Texture,
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct OutputBitmap<'a> {
+    pub texture: Texture<'a>,
     pub filter: Option<BitmapFilter>,
     pub color: BGRA8,
 }
@@ -710,7 +819,7 @@ pub struct OutputRect {
 }
 
 pub enum OutputPieceContent {
-    Texture(OutputBitmap),
+    Texture(OutputBitmap<'static>),
     Strips(OutputStrips),
     Rect(OutputRect),
 }
@@ -865,5 +974,162 @@ impl OutputPieceContent {
         pos: Point2<i32>,
     ) {
         self.blend_to_impl(rasterizer, unwrap_sw_render_target(target), pos);
+    }
+}
+
+pub enum OutputImage<'a> {
+    Texture(OutputBitmap<'a>),
+    Rect(OutputRect),
+}
+
+impl OutputImage<'_> {
+    pub fn draw_to(
+        &self,
+        rasterizer: &mut Rasterizer,
+        target: &mut RenderTarget<'_>,
+        offset: Point2<i32>,
+    ) {
+        match self {
+            OutputImage::Texture(bitmap) => {
+                rasterizer.copy_texture_filtered(
+                    target,
+                    offset,
+                    &bitmap.texture,
+                    bitmap.filter,
+                    bitmap.color,
+                );
+            }
+            &OutputImage::Rect(OutputRect { rect, color }) => {
+                let frect = Rect2S::to_float(rect.translate(offset.to_vec()));
+                fill_axis_aligned_antialias_rect(
+                    frect.min.x,
+                    frect.min.y,
+                    frect.max.x,
+                    frect.max.y,
+                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.width,
+                    target.height,
+                    target.stride,
+                    color,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OutputInstanceParameters {
+    pub pos: Point2<i32>,
+    pub size: Vec2<u32>,
+}
+
+pub trait InstancedOutputBuilder<'a> {
+    type ImageHandle: Copy;
+
+    fn on_image(&mut self, size: Vec2<u32>, image: OutputImage<'a>) -> Self::ImageHandle;
+    fn on_instance(&mut self, image: Self::ImageHandle, params: OutputInstanceParameters);
+}
+
+pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
+    builder: &mut B,
+    pieces: impl Iterator<Item = &'a OutputPiece>,
+) {
+    let mut texture_map = HashMap::<OutputBitmap<'static>, B::ImageHandle>::new();
+
+    for piece in pieces {
+        let mut try_insert_bitmap = |bitmap: OutputBitmap<'static>| {
+            let occupied = match texture_map.entry(bitmap) {
+                std::collections::hash_map::Entry::Occupied(occupied) => occupied,
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    let bitmap = vacant.key().clone();
+                    let handle =
+                        builder.on_image(bitmap.texture.size(), OutputImage::Texture(bitmap));
+                    vacant.insert_entry(handle)
+                }
+            };
+            *occupied.get()
+        };
+
+        match &piece.content {
+            OutputPieceContent::Texture(bitmap) => {
+                let handle = try_insert_bitmap(bitmap.clone());
+                builder.on_instance(
+                    handle,
+                    OutputInstanceParameters {
+                        pos: piece.pos,
+                        size: bitmap.texture.size(),
+                    },
+                );
+            }
+            OutputPieceContent::Strips(strips) => {
+                for op in strips.strips.paint_iter() {
+                    let pos =
+                        piece.pos + Vec2::new(i32::from(op.pos().x), i32::from(op.pos().y)) * 4;
+                    match op {
+                        StripPaintOp::Copy(copy) => {
+                            let texture = copy.to_texture();
+                            let size = texture.size();
+                            let handle = builder.on_image(
+                                size,
+                                OutputImage::Texture(OutputBitmap {
+                                    texture,
+                                    filter: None,
+                                    color: strips.color,
+                                }),
+                            );
+                            builder.on_instance(handle, OutputInstanceParameters { pos, size });
+                        }
+                        StripPaintOp::Fill(fill) => {
+                            let texture = fill.to_vertical_texture();
+                            let handle = builder.on_image(
+                                texture.size(),
+                                OutputImage::Texture(OutputBitmap {
+                                    texture,
+                                    filter: None,
+                                    color: strips.color,
+                                }),
+                            );
+                            builder.on_instance(
+                                handle,
+                                OutputInstanceParameters {
+                                    pos,
+                                    size: Vec2::new(u32::from(fill.width) * 4, 4),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            &OutputPieceContent::Rect(rect) => {
+                if rect.rect.min.x.fract() == FixedS::ZERO
+                    && rect.rect.min.y.fract() == FixedS::ZERO
+                    && rect.rect.max.x.fract() == FixedS::ZERO
+                    && rect.rect.max.y.fract() == FixedS::ZERO
+                {
+                    let bitmap = OutputBitmap {
+                        texture: Texture::SINGLE_FILLED_MONO_PIXEL,
+                        filter: None,
+                        color: rect.color,
+                    };
+                    let handle = try_insert_bitmap(bitmap.clone());
+                    builder.on_instance(
+                        handle,
+                        OutputInstanceParameters {
+                            pos: piece.pos,
+                            size: piece.size,
+                        },
+                    );
+                } else {
+                    let handle = builder.on_image(piece.size, OutputImage::Rect(rect));
+                    builder.on_instance(
+                        handle,
+                        OutputInstanceParameters {
+                            pos: piece.pos,
+                            size: piece.size,
+                        },
+                    );
+                }
+            }
+        }
     }
 }

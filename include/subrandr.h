@@ -122,7 +122,7 @@ typedef SBR_UNSTABLE struct sbr_output_image {
   uint32_t width, height;
   // This field is always NULL when returned by subrandr and isn't
   // read or modified by the library.
-  // Can be used to associate custom data with primitives to simplify packing.
+  // Can be used to associate custom data with images to simplify packing.
   void *user_data;
 } sbr_output_image;
 
@@ -135,7 +135,7 @@ typedef SBR_UNSTABLE struct sbr_output_instance {
   struct sbr_output_instance *next;
 } sbr_output_instance;
 
-typedef SBR_UNSTABLE struct sbr_piece_raster_pass sbr_piece_raster_pass;
+typedef SBR_UNSTABLE struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
 
 // Renders a single subtitle frame to output images and immediately
 // begins a piece raster pass which it returns a handle to.
@@ -143,14 +143,14 @@ typedef SBR_UNSTABLE struct sbr_piece_raster_pass sbr_piece_raster_pass;
 // `flags` must be zero.
 //
 // See `sbr_renderer_render` for details on other parameters.
-sbr_piece_raster_pass *
+sbr_instanced_raster_pass *
 sbr_renderer_render_instanced(sbr_renderer *, sbr_subtitle_context const *,
                               uint32_t t, uint64_t flags) SBR_UNSTABLE;
 
 // Returns the first element of the internal list of output image instances
 // that are to be drawn during this raster pass.
-sbr_output_instance *
-sbr_piece_raster_pass_get_instances(sbr_piece_raster_pass *) SBR_UNSTABLE;
+sbr_output_instance *sbr_instanced_raster_pass_get_instances(
+    sbr_instanced_raster_pass *) SBR_UNSTABLE;
 
 // Rasterizes this output image into the provided pixel buffer at
 // a specified offset.
@@ -161,16 +161,16 @@ sbr_piece_raster_pass_get_instances(sbr_piece_raster_pass *) SBR_UNSTABLE;
 //
 // The pixel buffer is provided in `buffer`, `width`, `height`, and `stride`
 // like in `sbr_renderer_render`.
-int sbr_output_image_copy_to(sbr_output_image const *, sbr_piece_raster_pass *,
-                             int32_t off_x, int32_t off_y, sbr_bgra8 *buffer,
-                             uint32_t width, uint32_t height,
-                             uint32_t stride) SBR_UNSTABLE;
+int sbr_output_image_draw_to(sbr_output_image const *,
+                             sbr_instanced_raster_pass *, int32_t off_x,
+                             int32_t off_y, sbr_bgra8 *buffer, uint32_t width,
+                             uint32_t height, uint32_t stride) SBR_UNSTABLE;
 
 // Marks the provided raster pass as finished.
 //
 // Note that calling this function after a raster pass is *mandatory*,
 // currently failing to do so will be met with an assertion failure.
-void sbr_piece_raster_pass_finish(sbr_piece_raster_pass *) SBR_UNSTABLE;
+void sbr_instanced_raster_pass_finish(sbr_instanced_raster_pass *) SBR_UNSTABLE;
 #endif
 
 void sbr_renderer_destroy(sbr_renderer *);

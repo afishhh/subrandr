@@ -1,15 +1,17 @@
 use std::ffi::c_int;
 
-use rasterize::color::BGRA8;
+use rasterize::{color::BGRA8, sw::OutputPiece};
 
 use crate::{Renderer, Subrandr, SubtitleContext, Subtitles};
 
-mod piece_render;
+mod instanced;
 
 pub struct CRenderer {
     pub(super) inner: Renderer<'static>,
     rasterizer: rasterize::sw::Rasterizer,
-    output_pieces: Vec<piece_render::COutputPiece>,
+    output_pieces: Vec<OutputPiece>,
+    output_images: Vec<instanced::COutputImage<'static>>,
+    output_instances: Vec<instanced::COutputInstance<'static>>,
 }
 
 #[unsafe(no_mangle)]
@@ -18,6 +20,8 @@ unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut CRenderer {
         inner: ctry!(Renderer::new(&*sbr)),
         rasterizer: rasterize::sw::Rasterizer::new(),
         output_pieces: Vec::new(),
+        output_images: Vec::new(),
+        output_instances: Vec::new(),
     }))
 }
 

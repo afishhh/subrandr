@@ -62,7 +62,7 @@ impl RenderTarget<'_> {
 
 #[derive(Clone)]
 enum TextureInner {
-    Software(sw::Texture),
+    Software(sw::Texture<'static>),
     #[cfg(feature = "wgpu")]
     Wgpu(wgpu::Texture),
 }

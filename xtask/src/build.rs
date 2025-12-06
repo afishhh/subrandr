@@ -142,9 +142,9 @@ fn copy_dir_all_if(
     Ok(())
 }
 
-fn copy_file(src: &Path, dst: &Path, file: &str) -> anyhow::Result<()> {
-    std::fs::copy(src.join(file), dst.join(file))
-        .with_context(|| format!("Failed to copy `{file}`"))
+fn copy_file(src: &Path, dst: &Path, src_file: &str, dst_file: &str) -> anyhow::Result<()> {
+    std::fs::copy(src.join(src_file), dst.join(dst_file))
+        .with_context(|| format!("Failed to copy `{dst_file}`"))
         .map(|_| ())
 }
 
@@ -413,10 +413,15 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         .join("target")
         .join(install.build.target.to_string())
         .join("release");
+    let static_in = if install.build.target.env.as_deref() == Some("msvc") {
+        "subrandr.lib"
+    } else {
+        "libsubrandr.a"
+    };
 
     if install.build.static_library {
         statusln!(ctx, "Installing", "libsubrandr.a to `{}`", libdir.display());
-        copy_file(&target_dir, &libdir, "libsubrandr.a")?;
+        copy_file(&target_dir, &libdir, static_in, "libsubrandr.a")?;
     }
 
     let (shared_in, shared_dir, shared_out) = if install.build.target.is_windows() {

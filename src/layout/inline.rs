@@ -267,7 +267,7 @@ pub struct SpanFragment {
     pub content: OffsetInlineItemFragmentVec,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextFragment {
     pub style: ComputedStyle,
     // self-referential
@@ -279,12 +279,6 @@ pub struct TextFragment {
 impl TextFragment {
     pub fn glyphs(&self) -> &GlyphString<'_> {
         &self.glyphs
-    }
-
-    pub unsafe fn glyphs_and_font_arena(
-        &self,
-    ) -> (&GlyphString<'static>, &util::rc::Rc<FontArena>) {
-        (&self.glyphs, &self._font_arena)
     }
 }
 

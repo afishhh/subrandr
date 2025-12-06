@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - Fixed occasional gaps between backgrounds boxes if non-integer padding is involved.
+- Fixed static MSVC build failing due to different static library naming.
 
 ## [v1.0.1]
 

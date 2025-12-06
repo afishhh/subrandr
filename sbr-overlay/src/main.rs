@@ -532,13 +532,17 @@ impl winit::application::ApplicationHandler for App<'_> {
                                 if let Some(subs) = self.subs.as_ref() {
                                     let surface_texture =
                                         wgpu.surface.get_current_texture().unwrap();
-                                    let target = wgpu
+                                    let mut target = wgpu
                                         .rasterizer
                                         .target_from_texture(surface_texture.texture.clone());
                                     self.renderer.set_subtitles(Some(subs));
+
+                                    let mut frame_rasterizer = wgpu.rasterizer.begin_frame();
                                     self.renderer
-                                        .render_to_wgpu(&mut wgpu.rasterizer, target, &ctx, t)
+                                        .render_to(&mut frame_rasterizer, &mut target, &ctx, t)
                                         .unwrap();
+                                    frame_rasterizer.end_frame();
+                                    self.renderer.end_raster();
 
                                     surface_texture.present();
                                 }

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 #[allow(clippy::upper_case_acronyms)]
 #[repr(C, align(4))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 // BGRA8888 in memory
 // ARGB32 value on little-endian
 // BGRA32 value on big-endian
@@ -72,6 +72,15 @@ impl BGRA8 {
         Self {
             a: mul_rgb(self.a, other),
             ..self
+        }
+    }
+
+    pub const fn mask_color(self) -> Self {
+        Self {
+            b: 0,
+            g: 0,
+            r: 0,
+            a: self.a,
         }
     }
 }

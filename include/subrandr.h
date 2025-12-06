@@ -109,50 +109,62 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
                         uint32_t height, uint32_t stride);
 
 #ifdef SBR_UNSTABLE
-// Structure representing a single output piece that resulted from
+// Structure representing a single output image that resulted from
 // fragmented rendering of a subtitle frame.
 //
-// Pieces are output primitives that may not be fully rasterized yet,
+// Note that even though this is called an "image" it may be a
+// different output primitive internally that is not fully rasterized
 // but whose bounding box is known and can be used for packing purposes.
 //
 // The size of this struct is not part of the public ABI,
 // new fields may be added in ABI-compatible releases.
-typedef SBR_UNSTABLE struct sbr_output_piece {
+typedef SBR_UNSTABLE struct sbr_output_image {
+  uint32_t width, height;
+  // This field is always NULL when returned by subrandr and isn't
+  // read or modified by the library.
+  // Can be used to associate custom data with primitives to simplify packing.
+  void *user_data;
+} sbr_output_image;
+
+// The size of this struct is not part of the public ABI,
+// new fields may be added in ABI-compatible releases.
+typedef SBR_UNSTABLE struct sbr_output_instance {
   int32_t x, y;
   uint32_t width, height;
-  struct sbr_output_piece *next;
-} sbr_output_piece;
+  struct sbr_output_image *base;
+  struct sbr_output_instance *next;
+} sbr_output_instance;
 
 typedef SBR_UNSTABLE struct sbr_piece_raster_pass sbr_piece_raster_pass;
 
-// Renders a single subtitle frame to output pieces and immediately
+// Renders a single subtitle frame to output images and immediately
 // begins a piece raster pass which it returns a handle to.
 //
-// See `sbr_renderer_render` for details on parameters.
-sbr_piece_raster_pass *sbr_renderer_render_pieces(sbr_renderer *,
-                                                  sbr_subtitle_context const *,
-                                                  uint32_t t) SBR_UNSTABLE;
+// `flags` must be zero.
+//
+// See `sbr_renderer_render` for details on other parameters.
+sbr_piece_raster_pass *
+sbr_renderer_render_instanced(sbr_renderer *, sbr_subtitle_context const *,
+                              uint32_t t, uint64_t flags) SBR_UNSTABLE;
 
-// Returns the first element of the internal list of output pieces
+// Returns the first element of the internal list of output image instances
 // that are to be drawn during this raster pass.
-sbr_output_piece const *
-sbr_piece_raster_pass_get_pieces(sbr_piece_raster_pass *) SBR_UNSTABLE;
+sbr_output_instance *
+sbr_piece_raster_pass_get_instances(sbr_piece_raster_pass *) SBR_UNSTABLE;
 
-// Rasterizes the provided output piece into the provided pixel buffer at
+// Rasterizes this output image into the provided pixel buffer at
 // a specified offset.
 //
-// `off_x` and `off_y` specify the offset at which to draw the piece.
+// `off_x` and `off_y` specify the offset at which to draw the image.
 // These values may be negative or otherwise out of bounds of the
 // output buffer and the result will be appropriately clipped.
 //
 // The pixel buffer is provided in `buffer`, `width`, `height`, and `stride`
-// same as in `sbr_renderer_render`.
-int sbr_piece_raster_pass_draw_piece(sbr_piece_raster_pass *,
-                                     sbr_output_piece const *piece,
-                                     int32_t off_x, int32_t off_y,
-                                     sbr_bgra8 *buffer, uint32_t width,
-                                     uint32_t height,
-                                     uint32_t stride) SBR_UNSTABLE;
+// like in `sbr_renderer_render`.
+int sbr_output_image_copy_to(sbr_output_image const *, sbr_piece_raster_pass *,
+                             int32_t off_x, int32_t off_y, sbr_bgra8 *buffer,
+                             uint32_t width, uint32_t height,
+                             uint32_t stride) SBR_UNSTABLE;
 
 // Marks the provided raster pass as finished.
 //

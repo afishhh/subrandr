@@ -1,13 +1,13 @@
 use std::ffi::c_int;
 
-use rasterize::color::BGRA8;
+use rasterize::{
+    color::BGRA8,
+    sw::{OutputPiece, OutputPieceContent},
+};
 use util::math::{Point2, Vec2};
 
 use super::CRenderer;
-use crate::{
-    raster::{rasterize_to_pieces, OutputPiece, OutputPieceContent},
-    SubtitleContext,
-};
+use crate::SubtitleContext;
 
 #[repr(C)]
 pub(super) struct COutputPiece {
@@ -38,13 +38,11 @@ unsafe extern "C" fn sbr_renderer_render_pieces(
         let renderer = &mut (*renderer);
         assert!(renderer.output_pieces.is_empty(), "Output piece buffer isn't empty, did you forget to call `sbr_piece_raster_pass_finish`?");
 
-        ctry!(renderer.inner.render_to_ops(&*ctx, t, &renderer.rasterizer));
-        ctry!(rasterize_to_pieces(
-            &mut renderer.rasterizer,
-            &mut crate::raster::RasterContext {
-                glyph_cache: &renderer.inner.glyph_cache
-            },
-            renderer.inner.paint_ops(),
+        ctry!(renderer
+            .inner
+            .render_to_scene(&*ctx, t, &renderer.rasterizer));
+        ctry!(renderer.rasterizer.render_scene_pieces(
+            renderer.inner.scene(),
             &mut |piece| {
                 if piece.size.x == 0 || piece.size.y == 0 {
                     return;
@@ -53,7 +51,8 @@ unsafe extern "C" fn sbr_renderer_render_pieces(
                 renderer
                     .output_pieces
                     .push(COutputPiece::from_output_piece(piece));
-            }
+            },
+            &renderer.inner.glyph_cache
         ));
 
         if !renderer.output_pieces.is_empty() {
@@ -101,9 +100,10 @@ unsafe extern "C" fn sbr_piece_raster_pass_draw_piece(
         height,
         stride,
     );
+
     (*piece)
         .content
-        .rasterize_to(rasterizer, &mut target, Point2::new(off_x, off_y));
+        .blend_to(rasterizer, &mut target, Point2::new(off_x, off_y));
 
     0
 }

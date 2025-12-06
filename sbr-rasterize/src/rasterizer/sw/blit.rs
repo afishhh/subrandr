@@ -88,6 +88,53 @@ pub unsafe fn blit_xxxa_to_bgra_unchecked(
 }
 
 #[inline(never)]
+unsafe fn cvt_mono_to_bgra_unchecked(
+    dst: *mut BGRA8,
+    dst_stride: usize,
+    src: *const u8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+    color: BGRA8,
+) {
+    let pre = color.premultiply();
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = pre.mul_alpha(s).0;
+    });
+}
+
+#[inline(never)]
+unsafe fn cvt_bgra_to_bgra_unchecked(
+    dst: *mut BGRA8,
+    dst_stride: usize,
+    src: *const BGRA8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+    alpha: u8,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = Premultiplied(s).mul_alpha(alpha).0;
+    });
+}
+
+#[inline(never)]
+pub unsafe fn cvt_xxxa_to_bgra_unchecked(
+    dst: *mut BGRA8,
+    dst_stride: usize,
+    src: *const BGRA8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+    color: BGRA8,
+) {
+    let pre = color.premultiply();
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = pre.mul_alpha(s.a).0;
+    });
+}
+
+#[inline(never)]
 pub unsafe fn copy_mono_to_float_unchecked(
     dst: *mut f32,
     dst_stride: usize,
@@ -225,3 +272,7 @@ make_checked_blitter!(
 make_checked_blitter!(copy_mono_to_float via copy_mono_to_float_unchecked, u8 [over] f32);
 make_checked_blitter!(copy_bgra_to_float via copy_bgra_to_float_unchecked, BGRA8 [over] f32);
 make_checked_blitter!(copy_float_to_mono via copy_float_to_mono_unchecked, f32 [over] u8);
+
+make_checked_blitter!(cvt_mono_to_bgra via cvt_mono_to_bgra_unchecked, u8 [over] BGRA8, color: BGRA8);
+make_checked_blitter!(cvt_xxxa_to_bgra via cvt_xxxa_to_bgra_unchecked, BGRA8 [over] BGRA8, color: BGRA8);
+make_checked_blitter!(cvt_bgra_to_bgra via cvt_bgra_to_bgra_unchecked, BGRA8 [over] BGRA8, alpha: u8);

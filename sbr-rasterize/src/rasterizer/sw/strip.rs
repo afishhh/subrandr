@@ -226,7 +226,9 @@ impl StripRasterizer {
         let end_inner_y16 = top.y - tile_to_coord(end_tile_y as i16);
         let end_inner_y = to_tile_fixed(end_inner_y16);
         let mut current_inner_x = bottom.x - floor_to_tile(bottom.x.floor());
-        let dx4 = dx * 4;
+        // TODO: Fixed::saturating_mul or something
+        //       would be nice to be generally more careful about overflows in this file
+        let dx4 = I16Dot16::from_raw(I16Dot16::into_raw(dx).saturating_mul(4));
 
         let bottom_inner_y = bottom.y - floor_to_tile(bottom.y);
         if tile_y == end_tile_y {

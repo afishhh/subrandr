@@ -11,7 +11,7 @@ use crate::{
         computed::{FontSlant, HorizontalAlignment, InlineSizing},
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontArena, FontMatcher, ShapingBuffer},
+    text::{self, Direction, Font, FontArena, FontMatcher, FontMetrics, ShapingBuffer},
 };
 
 mod glyph_string;
@@ -1616,6 +1616,12 @@ fn layout_run_full(
         }
     }
 
+    struct InlineBoxSizingMetrics {
+        top_y_offset: FixedL,
+        box_height: FixedL,
+        ascender: FixedL,
+    }
+
     impl<'o, 'a> InlineItemFragmentBuilder<'o, 'a> {
         fn child_builder<'o2>(
             &mut self,
@@ -1631,6 +1637,27 @@ fn layout_run_full(
                 current_x,
                 dpi: self.dpi,
                 content: self.content,
+            }
+        }
+
+        fn compute_inline_box_sizing_metrics(
+            &self,
+            style: &ComputedStyle,
+            font_metrics: &FontMetrics,
+        ) -> InlineBoxSizingMetrics {
+            // https://drafts.csswg.org/css-inline/#line-fill
+            let (ascender, descender) = match style.inline_sizing() {
+                InlineSizing::Normal => (font_metrics.ascender, font_metrics.descender),
+                InlineSizing::Stretch => (
+                    self.line_metrics.max_ascender,
+                    self.line_metrics.min_descender,
+                ),
+            };
+
+            InlineBoxSizingMetrics {
+                top_y_offset: self.current_top_y - ascender,
+                box_height: ascender - descender,
+                ascender,
             }
         }
 
@@ -1652,18 +1679,11 @@ fn layout_run_full(
                 let state = &mut span_state[span_id];
                 let font_metrics = state.primary_font.metrics();
 
-                // https://drafts.csswg.org/css-inline/#line-fill
-                let (y_asc_offset, logical_height) = {
-                    let (ascender, descender) = match state.style.inline_sizing() {
-                        InlineSizing::Normal => (font_metrics.ascender, font_metrics.descender),
-                        InlineSizing::Stretch => (
-                            self.line_metrics.max_ascender,
-                            self.line_metrics.min_descender,
-                        ),
-                    };
-
-                    (self.current_top_y - ascender, ascender - descender)
-                };
+                let InlineBoxSizingMetrics {
+                    top_y_offset,
+                    box_height: logical_height,
+                    ascender: _,
+                } = self.compute_inline_box_sizing_metrics(state.style, font_metrics);
 
                 let mut part = BoxFragmentationPart::VERTICAL_FULL;
                 if !state.seen_first {
@@ -1684,14 +1704,14 @@ fn layout_run_full(
                 inner_width = fbox.size_for_layout().x;
                 result = util::rc::Rc::new(InlineItemFragment::Span(SpanFragment {
                     content: vec![(
-                        Vec2L::new(FixedL::ZERO, y_correction - y_asc_offset),
+                        Vec2L::new(FixedL::ZERO, y_correction - top_y_offset),
                         result,
                     )],
                     fbox,
                     style: state.style.clone(),
                     primary_font: state.primary_font.clone(),
                 }));
-                y_correction = y_asc_offset - fbox.content_offset().y;
+                y_correction = top_y_offset - fbox.content_offset().y;
                 span_id = state.parent;
             }
 
@@ -1762,17 +1782,18 @@ fn layout_run_full(
                         }
 
                         let base_font_metrics = base.primary_font.metrics();
-                        let base_height = base_font_metrics.ascender - base_font_metrics.descender;
+                        let InlineBoxSizingMetrics {
+                            top_y_offset: base_y_offset,
+                            box_height: base_height,
+                            ascender: base_box_ascender,
+                        } = self.compute_inline_box_sizing_metrics(base.style, base_font_metrics);
                         let annotation_height = annotation_metrics.height();
                         let signed_half_padding = (annotation_width - base_width) / 2;
                         let base_half_padding = signed_half_padding.max(FixedL::ZERO);
                         let annotation_half_padding = (-signed_half_padding).max(FixedL::ZERO);
                         let ruby_width = base_width.max(annotation_width);
 
-                        let base_offset = Vec2::new(
-                            ruby_current_x,
-                            self.current_top_y - base_font_metrics.ascender,
-                        );
+                        let base_offset = Vec2::new(ruby_current_x, base_y_offset);
                         // FIXME: Apparently ruby internal boxes are not supposed to use
                         //        inline-sizing sizing. Now this makes sense with the ruby
                         //        annotation box because it creates/is a new line box and
@@ -1792,7 +1813,7 @@ fn layout_run_full(
                         self.child_builder(
                             &mut base_fragment.children,
                             self.line_metrics,
-                            base_font_metrics.ascender,
+                            base_box_ascender,
                             base_half_padding,
                         )
                         .reorder_and_append(

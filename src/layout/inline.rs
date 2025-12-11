@@ -1606,6 +1606,7 @@ fn layout_run_full(
     #[derive(Debug)]
     struct InlineItemFragmentBuilder<'o, 'a> {
         output: &'o mut OffsetInlineItemFragmentVec,
+        min_ruby_y: &'o mut FixedL,
         line_metrics: LineHeightMetrics,
         current_top_y: FixedL,
         current_x: FixedL,
@@ -1616,7 +1617,6 @@ fn layout_run_full(
     #[derive(Debug, Clone, Copy)]
     struct LineHeightMetrics {
         max_ascender: FixedL,
-        max_ruby_overflow_ascender: FixedL,
         min_descender: FixedL,
     }
 
@@ -1627,13 +1627,13 @@ fn layout_run_full(
     }
 
     impl LineHeight {
-        const RUBY_ANNOTATION: LineHeight = LineHeight::Value(FixedL::ONE);
+        const ONE: Self = Self::Value(FixedL::ONE);
+        const RUBY_ANNOTATION: Self = Self::ONE;
     }
 
     impl LineHeightMetrics {
         const ZERO: Self = LineHeightMetrics {
             max_ascender: FixedL::ZERO,
-            max_ruby_overflow_ascender: FixedL::ZERO,
             min_descender: FixedL::ZERO,
         };
 
@@ -1681,21 +1681,10 @@ fn layout_run_full(
                     }
                 },
                 ShapedItemKind::Ruby(ruby) => {
-                    for (base, annotation) in &ruby.base_annotation_pairs {
-                        let mut base_metrics = LineHeightMetrics::ZERO;
-                        let mut annotation_metrics = LineHeightMetrics::ZERO;
-
+                    for (base, _) in &ruby.base_annotation_pairs {
                         for item in &base.inner.shaped {
-                            base_metrics.process_item(item, line_height);
+                            self.process_item(item, line_height);
                         }
-                        for item in &annotation.inner.shaped {
-                            annotation_metrics.process_item(item, LineHeight::RUBY_ANNOTATION);
-                        }
-
-                        self.max_ruby_overflow_ascender = self
-                            .max_ruby_overflow_ascender
-                            .max(base_metrics.max_ascender + annotation_metrics.max_ascender);
-                        self.expand_to(base_metrics.max_ascender, base_metrics.min_descender);
                     }
                 }
             }
@@ -1712,12 +1701,14 @@ fn layout_run_full(
         fn child_builder<'o2>(
             &mut self,
             output: &'o2 mut OffsetInlineItemFragmentVec,
+            min_ruby_y: &'o2 mut FixedL,
             line_metrics: LineHeightMetrics,
             top_y: FixedL,
             current_x: FixedL,
         ) -> InlineItemFragmentBuilder<'o2, 'a> {
             InlineItemFragmentBuilder {
                 output,
+                min_ruby_y,
                 line_metrics,
                 current_top_y: top_y,
                 current_x,
@@ -1857,10 +1848,12 @@ fn layout_run_full(
                     let mut ruby_current_x = FixedL::ZERO;
                     for (base, annotation) in &ruby.base_annotation_pairs {
                         let mut base_width = FixedL::ZERO;
+                        let mut base_metrics = LineHeightMetrics::ZERO;
                         let mut annotation_width = FixedL::ZERO;
                         let mut annotation_metrics = LineHeightMetrics::ZERO;
                         for item in &base.inner.shaped {
                             shaped_item_width(&mut base_width, item);
+                            base_metrics.process_item(item, LineHeight::ONE);
                         }
                         for item in &annotation.inner.shaped {
                             shaped_item_width(&mut annotation_width, item);
@@ -1874,8 +1867,10 @@ fn layout_run_full(
                             ascender: mut base_box_ascender,
                         } = self.compute_inline_box_sizing_metrics(base.style, base_font_metrics);
                         let annotation_height = annotation_metrics.height();
-                        let annotation_y_offset =
-                            -annotation_metrics.max_ascender - annotation_metrics.min_descender;
+                        let annotation_y_offset = self.current_top_y
+                            - base_metrics.max_ascender
+                            - annotation_metrics.max_ascender
+                            + annotation_metrics.min_descender;
                         let signed_half_padding = (annotation_width - base_width) / 2;
                         let base_half_padding = signed_half_padding.max(FixedL::ZERO);
                         let annotation_half_padding = (-signed_half_padding).max(FixedL::ZERO);
@@ -1909,6 +1904,8 @@ fn layout_run_full(
 
                         self.child_builder(
                             &mut base_fragment.children,
+                            // TODO: ruby nested in base
+                            &mut { FixedL::ZERO },
                             self.line_metrics,
                             base_box_ascender,
                             base_half_padding,
@@ -1933,6 +1930,8 @@ fn layout_run_full(
 
                         self.child_builder(
                             &mut annotation_fragment.children,
+                            // TODO: ruby nested in annotation
+                            &mut { FixedL::ZERO },
                             annotation_metrics,
                             annotation_metrics.max_ascender,
                             annotation_half_padding,
@@ -1946,6 +1945,7 @@ fn layout_run_full(
                         )?;
 
                         let width_for_layout = base_fragment.fbox.size_for_layout().x;
+                        *self.min_ruby_y = (*self.min_ruby_y).min(annotation_y_offset);
                         result.content.push((
                             Vec2::new(ruby_current_x, base_y_offset),
                             base_fragment,
@@ -2061,9 +2061,11 @@ fn layout_run_full(
                 children: Vec::new(),
             };
 
+            let mut min_ruby_y = FixedL::ZERO;
             {
                 InlineItemFragmentBuilder {
                     output: &mut line_box.children,
+                    min_ruby_y: &mut min_ruby_y,
                     line_metrics,
                     current_top_y: line_metrics.max_ascender,
                     current_x: FixedL::ZERO,
@@ -2104,20 +2106,14 @@ fn layout_run_full(
                 HorizontalAlignment::Right => -line_width,
             };
 
-            // HACK: I don't know why this works... but this appears to be somewhat close to Chromium.
-            let ruby_leading = line_metrics
-                .max_ruby_overflow_ascender
-                .max(line_metrics.max_ascender)
-                - line_metrics.max_ascender;
-            let ruby_half_leading = ruby_leading / 2;
-
+            let ruby_leading = (-min_ruby_y).max(FixedL::ZERO);
             self.result.fbox.content_size.x = self
                 .result
                 .fbox
                 .content_size
                 .x
                 .max(line_box.fbox.size_for_layout().x);
-            self.current_y += ruby_half_leading;
+            self.current_y += ruby_leading;
             self.result.lines.push((
                 Vec2L::new(aligning_x_offset, self.current_y),
                 line_box.into(),

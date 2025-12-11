@@ -54,7 +54,6 @@ check_test! {
     }
 }
 
-// FIXME: This annotation is currently misplaced due to our annotation positioning hack.
 check_test! {
     name = ruby_background,
     size = (70, 40),

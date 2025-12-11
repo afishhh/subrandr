@@ -7,3 +7,4 @@ Some of these assets have a license different from this repository's default lic
 - `NotoSansArabic-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Sans+Arabic, under the SIL Open Font License (see `OFL-arabic.txt` for details)
 - `NotoSerif-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Serif, under the SIL Open Font License (see `OFL-serif.txt` for details)
 - `NotoSansJP-Regular.ttf`, from https://fonts.google.com/noto/specimen/Noto+Sans+JP, under the SIL Open Font License (see `OFL-jp.txt` for details)
+- `NotoColorEmoji-Subset.ttf`, from https://github.com/googlefonts/noto-emoji/blob/v2.051/fonts/NotoColorEmoji.ttf, under the SIL Open Font License (see `OFL-emoji.txt` for details), subset to only include "😀😭🧱⭕"

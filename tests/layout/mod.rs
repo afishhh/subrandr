@@ -6,3 +6,4 @@ mod input_edge_cases;
 mod line_break_anywhere;
 mod padding;
 mod ruby;
+mod text_shadow;

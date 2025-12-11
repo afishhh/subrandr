@@ -1,0 +1,92 @@
+use rasterize::color::BGRA8;
+use util::{math::Vec2, rc_static};
+
+use super::common::*;
+use crate::{layout::FixedL, style::computed::TextShadow};
+
+test_define_style! {
+    .green_shadow {
+        text_shadows: rc_static![[TextShadow {
+            offset: Vec2::new(5.0, 5.0),
+            blur_radius: FixedL::ZERO,
+            color: BGRA8::GREEN,
+        }]],
+    }
+    .green_shadow_blurred {
+        text_shadows: rc_static![[TextShadow {
+            offset: Vec2::new(5.0, 5.0),
+            blur_radius: FixedL::new(3),
+            color: BGRA8::GREEN,
+        }]],
+    }
+    .blue_shadow_blurred {
+        text_shadows: rc_static![[TextShadow {
+            offset: Vec2::new(5.0, 5.0),
+            blur_radius: FixedL::new(3),
+            color: BGRA8::BLUE,
+        }]],
+    }
+    .many_shadows {
+        text_shadows: rc_static![[
+            TextShadow {
+                offset: Vec2::new(3.0, 3.0),
+                blur_radius: FixedL::ZERO,
+                color: BGRA8::RED,
+            },
+            TextShadow {
+                offset: Vec2::new(5.0, 5.0),
+                blur_radius: FixedL::new(3),
+                color: BGRA8::GREEN,
+            },
+            TextShadow {
+                offset: Vec2::new(7.0, 7.0),
+                blur_radius: FixedL::ZERO,
+                color: BGRA8::BLUE,
+            },
+    ]],
+    }
+}
+
+check_test! {
+    name = simple,
+    size = (140, 30),
+    inline.noto_serif {
+        span.green_shadow {
+            text "hello world"
+        }
+    }
+}
+
+check_test! {
+    name = blurred_line_broken,
+    size = (60, 50),
+    inline.noto_serif {
+        span.green_shadow_blurred {
+            text "hello world"
+        }
+    }
+}
+
+// TODO: Is this correct? Since we use the broken gamma-encoded blending it's hard to tell...
+check_test! {
+    name = many,
+    size = (60, 50),
+    inline.noto_serif {
+        span.many_shadows {
+            text "hello world"
+        }
+    }
+}
+
+check_test! {
+    name = emoji,
+    size = (90, 32),
+    inline.noto_serif.green_shadow {
+        span.noto_color_emoji {
+            text "😀🧱"
+        }
+        span.noto_color_emoji.blue_shadow_blurred {
+            text "😭⭕️"
+        }
+    }
+}

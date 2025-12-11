@@ -180,14 +180,26 @@ test_font!(
     "NotoSansArabic-Regular.ttf"
 );
 test_font!(NOTO_SANS_JP, b"Noto Sans JP", "NotoSansJP-Regular.ttf");
+test_font!(
+    NOTO_COLOR_EMOJI,
+    b"Noto Color Emoji",
+    "NotoColorEmoji-Subset.ttf"
+);
 
-const ALL_FONTS: &[&TestFont] = &[AHEM, NOTO_SERIF, NOTO_SANS_ARABIC, NOTO_SANS_JP];
+const ALL_FONTS: &[&TestFont] = &[
+    AHEM,
+    NOTO_SERIF,
+    NOTO_SANS_ARABIC,
+    NOTO_SANS_JP,
+    NOTO_COLOR_EMOJI,
+];
 
 test_define_style! {
     pub .ahem { font_family: rc_static!([AHEM.family()]) }
     pub .noto_serif { font_family: rc_static!([NOTO_SERIF.family()])}
     pub .noto_sans_arabic { font_family: rc_static!([NOTO_SANS_ARABIC.family()])}
     pub .noto_sans_jp { font_family: rc_static!([NOTO_SANS_JP.family()])}
+    pub .noto_color_emoji { font_family: rc_static!([NOTO_COLOR_EMOJI.family()])}
 }
 
 fn read_pixel_hash_from_ptr(ptr: &Path) -> Option<String> {

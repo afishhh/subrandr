@@ -265,16 +265,11 @@ impl Font {
                     subpixel_bucket,
                 )?;
 
-                rasterizer.blur_prepare(
-                    unblurred.texture.width(),
-                    unblurred.texture.height(),
-                    blur_sigma,
-                );
-                rasterizer.blur_buffer_blit(0, 0, &unblurred.texture);
-                let pad = rasterizer.blur_padding();
+                let output = rasterizer.blur_texture(&unblurred.texture, blur_sigma);
                 Ok(SingleGlyphBitmap {
-                    offset: unblurred.offset - Vec2::new(pad.x as i32, pad.y as i32),
-                    texture: rasterizer.blur_to_mono_texture(),
+                    offset: unblurred.offset
+                        - Vec2::new(output.padding.x as i32, output.padding.y as i32),
+                    texture: output.texture,
                 })
             })
         }

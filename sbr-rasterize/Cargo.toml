@@ -7,6 +7,8 @@ edition.workspace = true
 wgpu = ["dep:wgpu"]
 
 [dependencies]
+thiserror = "1"
+
 util = { workspace = true }
 wgpu = { workspace = true, optional = true }
 

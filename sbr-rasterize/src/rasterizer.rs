@@ -1,8 +1,9 @@
-use std::{fmt::Write, mem::MaybeUninit};
+use std::{any::Any, fmt::Write, mem::MaybeUninit};
 
-use util::math::{Rect2f, Vec2};
+use thiserror::Error;
+use util::{math::Vec2, AnyError};
 
-use crate::color::BGRA8;
+use crate::scene::SceneNode;
 
 pub mod sw;
 #[cfg(feature = "wgpu")]
@@ -24,12 +25,9 @@ impl PixelFormat {
 }
 
 enum RenderTargetInner<'a> {
-    Software(sw::RenderTargetImpl<'a>),
+    Software(sw::RenderTarget<'a>),
     #[cfg(feature = "wgpu")]
-    Wgpu(Box<wgpu::RenderTargetImpl>),
-    #[cfg(feature = "wgpu")]
-    // For zero-sized renders, TODO: move this logic into RenderTargetImpl
-    WgpuEmpty,
+    Wgpu(Box<wgpu::RenderTarget>),
 }
 
 impl RenderTargetInner<'_> {
@@ -37,7 +35,7 @@ impl RenderTargetInner<'_> {
         match self {
             Self::Software(_) => "software",
             #[cfg(feature = "wgpu")]
-            Self::Wgpu(_) | Self::WgpuEmpty => "wgpu",
+            Self::Wgpu(_) => "wgpu",
         }
     }
 }
@@ -47,32 +45,26 @@ pub struct RenderTarget<'a>(RenderTargetInner<'a>);
 impl RenderTarget<'_> {
     pub fn width(&self) -> u32 {
         match &self.0 {
-            // TODO: Make these fields private and have all the impls define accessors for them
-            RenderTargetInner::Software(sw) => sw.width,
+            RenderTargetInner::Software(sw) => sw.width(),
             #[cfg(feature = "wgpu")]
-            RenderTargetInner::Wgpu(wgpu) => wgpu.tex.width(),
-            #[cfg(feature = "wgpu")]
-            RenderTargetInner::WgpuEmpty => 0,
+            RenderTargetInner::Wgpu(wgpu) => wgpu.width(),
         }
     }
 
     pub fn height(&self) -> u32 {
         match &self.0 {
-            // TODO: Make these fields private and have all the impls define accessors for them
-            RenderTargetInner::Software(sw) => sw.height,
+            RenderTargetInner::Software(sw) => sw.height(),
             #[cfg(feature = "wgpu")]
-            RenderTargetInner::Wgpu(wgpu) => wgpu.tex.height(),
-            #[cfg(feature = "wgpu")]
-            RenderTargetInner::WgpuEmpty => 0,
+            RenderTargetInner::Wgpu(wgpu) => wgpu.height(),
         }
     }
 }
 
 #[derive(Clone)]
 enum TextureInner {
-    Software(sw::TextureImpl),
+    Software(sw::Texture),
     #[cfg(feature = "wgpu")]
-    Wgpu(wgpu::TextureImpl),
+    Wgpu(wgpu::Texture),
 }
 
 impl TextureInner {
@@ -99,7 +91,7 @@ impl Texture {
 
     pub fn width(&self) -> u32 {
         match &self.0 {
-            TextureInner::Software(sw) => sw.width,
+            TextureInner::Software(sw) => sw.width(),
             #[cfg(feature = "wgpu")]
             TextureInner::Wgpu(wgpu) => wgpu.width(),
         }
@@ -107,7 +99,7 @@ impl Texture {
 
     pub fn height(&self) -> u32 {
         match &self.0 {
-            TextureInner::Software(sw) => sw.height,
+            TextureInner::Software(sw) => sw.height(),
             #[cfg(feature = "wgpu")]
             TextureInner::Wgpu(wgpu) => wgpu.height(),
         }
@@ -121,6 +113,16 @@ impl Texture {
         }
     }
 }
+
+#[derive(Debug, Error)]
+enum SceneRenderErrorInner {
+    #[error(transparent)]
+    ToBitmaps(AnyError),
+}
+
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct SceneRenderError(#[from] SceneRenderErrorInner);
 
 pub trait Rasterizer {
     // Used for displaying debug information
@@ -162,52 +164,17 @@ pub trait Rasterizer {
         self.create_texture_mapped(width, height, format, callback)
     }
 
-    fn create_mono_texture_rendered(&mut self, width: u32, height: u32) -> RenderTarget<'static>;
-    fn finalize_texture_render(&mut self, target: RenderTarget<'static>) -> Texture;
+    fn blur_texture(&mut self, texture: &Texture, blur_sigma: f32) -> BlurOutput;
 
-    fn horizontal_line(
+    fn render_scene(
         &mut self,
         target: &mut RenderTarget,
-        y: f32,
-        x0: f32,
-        x1: f32,
-        color: BGRA8,
-    );
+        scene: &[SceneNode],
+        user_data: &(dyn Any + 'static),
+    ) -> Result<(), SceneRenderError>;
+}
 
-    fn fill_axis_aligned_rect(&mut self, target: &mut RenderTarget, rect: Rect2f, color: BGRA8);
-
-    fn blit(
-        &mut self,
-        target: &mut RenderTarget,
-        dx: i32,
-        dy: i32,
-        texture: &Texture,
-        color: BGRA8,
-    );
-
-    /// Blits `texture` onto `target` at (`dx`, `dy`).
-    ///
-    /// `target` must be a monochrome render texture and `texture` must be a monochrome texture.
-    fn blit_to_mono_texture(
-        &mut self,
-        target: &mut RenderTarget,
-        dx: i32,
-        dy: i32,
-        texture: &Texture,
-    );
-
-    /// Flushes pending buffered draws.
-    ///
-    /// Some rasterizers, like the wgpu one, may batch some operations to reduce the amount of
-    /// binding and draw calls. These batched operations may be flushed to ensure they're executed
-    /// now rather than on the next batch-incompatible operation.
-    ///
-    /// Note that currently this function will also defragment texture atlases although this may
-    /// be changed in the future to use a separate once per-frame housekeeping function.
-    fn flush(&mut self, _target: &mut RenderTarget) {}
-
-    fn blur_prepare(&mut self, width: u32, height: u32, sigma: f32);
-    fn blur_buffer_blit(&mut self, dx: i32, dy: i32, texture: &Texture);
-    fn blur_padding(&mut self) -> Vec2<u32>;
-    fn blur_to_mono_texture(&mut self) -> Texture;
+pub struct BlurOutput {
+    pub padding: Vec2<u32>,
+    pub texture: Texture,
 }

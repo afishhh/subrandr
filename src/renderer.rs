@@ -1,6 +1,15 @@
-use std::{collections::VecDeque, fmt::Debug, fmt::Write as _, ops::Range};
+use std::{
+    collections::VecDeque,
+    fmt::{Debug, Write as _},
+    ops::Range,
+    sync::Arc,
+};
 
-use rasterize::{color::BGRA8, Rasterizer};
+use rasterize::{
+    color::BGRA8,
+    scene::{SceneNode, StrokedPolyline, Subscene},
+    Rasterizer,
+};
 use thiserror::Error;
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Vec2},
@@ -9,14 +18,13 @@ use util::{
 };
 
 use crate::{
-    display::{DisplayPass, Drawing, DrawingNode, PaintOp, PaintOpBuilder, StrokedPolyline},
+    display::DisplayPass,
     layout::{
         self,
         inline::{InlineContentBuilder, InlineContentFragment},
         FixedL, LayoutConstraints, LayoutContext, Point2L,
     },
     log::{info, trace},
-    raster::{rasterize_to_target, RasterContext, RasterError},
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},
@@ -230,7 +238,10 @@ impl PerfStats {
         self.whole.frames.is_empty()
     }
 
-    fn make_frame_time_graph(&self, pixel_scale: I16Dot16) -> Option<(Vec2<I16Dot16>, Drawing)> {
+    fn make_frame_time_graph(
+        &self,
+        pixel_scale: I16Dot16,
+    ) -> Option<(Vec2<I16Dot16>, Arc<[SceneNode]>)> {
         if self.whole.frames.len() <= 1 {
             return None;
         }
@@ -244,7 +255,7 @@ impl PerfStats {
 
         let graph_width = I16Dot16::new(500) * pixel_scale;
         let graph_height = I16Dot16::new(80) * pixel_scale;
-        let mut graph_drawing = Drawing { nodes: Vec::new() };
+        let mut graph_drawing = Vec::with_capacity(5);
 
         let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
             let polyline = times
@@ -261,13 +272,11 @@ impl PerfStats {
                 })
                 .collect();
 
-            graph_drawing
-                .nodes
-                .push(DrawingNode::StrokedPolyline(StrokedPolyline {
-                    polyline,
-                    width: pixel_scale,
-                    color,
-                }));
+            graph_drawing.push(SceneNode::StrokedPolyline(StrokedPolyline {
+                polyline,
+                width: pixel_scale,
+                color,
+            }));
         };
 
         draw_polyline(&self.whole, BGRA8::YELLOW);
@@ -276,7 +285,7 @@ impl PerfStats {
         draw_polyline(&self.display, BGRA8::LIME);
         draw_polyline(&self.raster, BGRA8::ORANGERED);
 
-        Some((Vec2::new(graph_width, graph_height), graph_drawing))
+        Some((Vec2::new(graph_width, graph_height), graph_drawing.into()))
     }
 }
 
@@ -287,7 +296,7 @@ pub struct Renderer<'a> {
     pub(crate) fonts: text::FontDb<'a>,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
-    paint_ops: Vec<PaintOp>,
+    scene: Vec<SceneNode>,
 
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
@@ -325,7 +334,7 @@ impl<'a> Renderer<'a> {
                 padding_top: I26Dot6::ZERO,
                 padding_bottom: I26Dot6::ZERO,
             },
-            paint_ops: Vec::new(),
+            scene: Vec::new(),
             layouter: None,
         })
     }
@@ -374,7 +383,7 @@ pub enum RenderError {
     #[error("Failed to refresh system fonts")]
     FontProviderUpdate(#[from] platform_font_provider::UpdateError),
     #[error("Failed to paint output")]
-    Paint(#[from] RasterError),
+    Paint(#[from] rasterize::SceneRenderError),
     #[error("Failed to layout inline content")]
     Layout(#[from] layout::InlineLayoutError),
     #[error("Failed to layout debug overlay")]
@@ -389,11 +398,10 @@ pub enum DebugLayoutError {
 
 enum DebugContentFragment {
     Inline(InlineContentFragment),
-    Drawing(Drawing),
+    Subscene(Arc<[SceneNode]>),
 }
 
 impl Renderer<'_> {
-    // TODO: inline into callers?
     pub fn render(
         &mut self,
         ctx: &SubtitleContext,
@@ -403,42 +411,25 @@ impl Renderer<'_> {
         height: u32,
         stride: u32,
     ) -> Result<(), RenderError> {
-        let mut rasterizer = rasterize::sw::Rasterizer::new();
-        self.render_to_ops(ctx, t, &rasterizer)?;
-
-        buffer.fill(BGRA8::ZERO);
-        rasterize_to_target(
-            &mut rasterizer,
+        self.render_to(
+            &mut rasterize::sw::Rasterizer::new(),
             &mut rasterize::sw::create_render_target(buffer, width, height, stride),
-            &mut RasterContext {
-                glyph_cache: &self.glyph_cache,
-            },
-            &self.paint_ops,
-        )?;
-        self.end_raster();
-        Ok(())
+            ctx,
+            t,
+        )
+        .inspect(|_| self.end_raster())
     }
 
-    #[cfg(feature = "wgpu")]
-    pub fn render_to_wgpu(
+    pub fn render_to(
         &mut self,
-        rasterizer: &mut rasterize::wgpu::Rasterizer,
-        mut target: rasterize::RenderTarget,
+        rasterizer: &mut dyn rasterize::Rasterizer,
+        target: &mut rasterize::RenderTarget,
         ctx: &SubtitleContext,
         t: u32,
     ) -> Result<(), RenderError> {
         self.render_to_ops(ctx, t, rasterizer)?;
+        rasterizer.render_scene(target, &self.scene, &self.glyph_cache)?;
 
-        rasterize_to_target(
-            rasterizer,
-            &mut target,
-            &mut RasterContext {
-                glyph_cache: &self.glyph_cache,
-            },
-            &self.paint_ops,
-        )?;
-        rasterizer.submit_render(target);
-        self.end_raster();
         Ok(())
     }
 
@@ -580,7 +571,7 @@ impl Renderer<'_> {
                                 - FixedL::from_raw(graph_size.x.into_raw() >> 10),
                             graph_y,
                         ),
-                        DebugContentFragment::Drawing(graph_drawing),
+                        DebugContentFragment::Subscene(graph_drawing),
                     ));
                 }
             }
@@ -600,7 +591,7 @@ impl Renderer<'_> {
         self.perf.start_frame();
         self.fonts.update_platform_font_list()?;
         self.glyph_cache.advance_generation();
-        self.paint_ops.clear();
+        self.scene.clear();
 
         let ctx = SubtitleContext {
             dpi: self.sbr.debug.dpi_override.unwrap_or(ctx.dpi),
@@ -662,7 +653,7 @@ impl Renderer<'_> {
 
         {
             let mut pass = DisplayPass {
-                output: PaintOpBuilder(&mut self.paint_ops),
+                output: &mut self.scene,
             };
 
             for &(pos, ref fragment) in &fragments {
@@ -674,9 +665,11 @@ impl Renderer<'_> {
                     DebugContentFragment::Inline(inline) => {
                         pass.display_inline_content_fragment(pos, inline);
                     }
-                    DebugContentFragment::Drawing(drawing) => {
-                        pass.output
-                            .push_drawing(Point2::new(pos.x, pos.y), drawing.clone());
+                    DebugContentFragment::Subscene(scene) => {
+                        pass.output.push(SceneNode::Subscene(Subscene {
+                            pos: Point2::new(pos.x, pos.y),
+                            scene: scene.clone(),
+                        }));
                     }
                 }
             }
@@ -686,8 +679,8 @@ impl Renderer<'_> {
         Ok(())
     }
 
-    pub(crate) fn paint_ops(&self) -> &[PaintOp] {
-        &self.paint_ops
+    pub(crate) fn scene(&self) -> &[SceneNode] {
+        &self.scene
     }
 
     pub fn end_raster(&mut self) {

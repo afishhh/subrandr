@@ -3,14 +3,16 @@ use std::{
     sync::OnceLock,
 };
 
-use rasterize::color::{Premultiplied, BGRA8};
+use rasterize::{
+    color::{Premultiplied, BGRA8},
+    Rasterizer,
+};
 use sha2::Digest;
 use util::rc::{rc_static, Rc};
 
 use crate::{
-    display::{DisplayPass, PaintOpBuilder},
+    display::DisplayPass,
     layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
-    raster::RasterContext,
     style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
     Subrandr,
@@ -269,26 +271,17 @@ pub fn check_inline(
 
         let mut pixels = vec![BGRA8::ZERO; width as usize * height as usize];
         let glyph_cache = GlyphCache::new();
-        let mut paint_list = Vec::new();
+        let mut scene = Vec::new();
 
-        DisplayPass {
-            output: PaintOpBuilder(&mut paint_list),
-        }
-        .display_inline_content_fragment(pos, &fragment);
+        DisplayPass { output: &mut scene }.display_inline_content_fragment(pos, &fragment);
 
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
             rasterize::sw::create_render_target(&mut pixels, width, height, width);
 
-        crate::raster::rasterize_to_target(
-            &mut rasterizer,
-            &mut render_target,
-            &mut RasterContext {
-                glyph_cache: &glyph_cache,
-            },
-            &paint_list,
-        )
-        .expect("Fragment rasterization failed");
+        rasterizer
+            .render_scene(&mut render_target, &scene, &glyph_cache)
+            .expect("Fragment rasterization failed");
 
         pixels
     };

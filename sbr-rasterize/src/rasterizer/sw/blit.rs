@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::color::{Premultiplied, BGRA8};
+use crate::color::{Premultiplied, Premultiply, BGRA8};
 
 #[inline(always)]
 unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
@@ -47,8 +47,9 @@ unsafe fn blit_mono_unchecked(
     height: usize,
     color: BGRA8,
 ) {
+    let pre = color.premultiply();
     blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
-        *d = color.mul_alpha(s).blend_over(*d).0;
+        *d = pre.mul_alpha(s).blend_over(*d).0;
     });
 }
 
@@ -95,30 +96,18 @@ fn calculate_blit_rectangle(
 }
 
 #[inline(never)]
-pub unsafe fn blit_bgra_to_mono_unchecked(
-    dst: *mut u8,
+pub unsafe fn blit_xxxa_to_bgra_unchecked(
+    dst: *mut BGRA8,
     dst_stride: usize,
     src: *const BGRA8,
     src_stride: usize,
     width: usize,
     height: usize,
+    color: BGRA8,
 ) {
+    let pre = color.premultiply();
     blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
-        *d = s.a;
-    });
-}
-
-#[inline(never)]
-pub unsafe fn blit_mono_to_mono_unchecked(
-    dst: *mut u8,
-    dst_stride: usize,
-    src: *const u8,
-    src_stride: usize,
-    width: usize,
-    height: usize,
-) {
-    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
-        *d = s;
+        *d = pre.mul_alpha(s.a).blend_over(*d).0;
     });
 }
 
@@ -229,13 +218,8 @@ make_checked_blitter!(
 );
 
 make_checked_blitter!(
-    blit_mono_to_mono via blit_mono_to_mono_unchecked,
-    u8 [over] u8
-);
-
-make_checked_blitter!(
-    blit_bgra_to_mono via blit_bgra_to_mono_unchecked,
-    BGRA8 [over] u8
+    blit_xxxa_to_bgra via blit_xxxa_to_bgra_unchecked,
+    BGRA8 [over] BGRA8, color: BGRA8
 );
 
 make_checked_blitter!(copy_mono_to_float via copy_mono_to_float_unchecked, u8 [over] f32);

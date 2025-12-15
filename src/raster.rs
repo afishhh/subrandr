@@ -236,6 +236,10 @@ pub fn rasterize_to_pieces(
                 }
             }
             PaintOp::Rect(fill) => {
+                if fill.rect.is_empty() {
+                    continue;
+                }
+
                 on_piece(OutputPiece {
                     pos: Point2::new(
                         fill.rect.min.x.floor_to_inner(),

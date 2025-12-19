@@ -1,4 +1,4 @@
-use std::{any::Any, collections::BinaryHeap, mem::MaybeUninit};
+use std::{any::Any, mem::MaybeUninit};
 
 use util::{
     math::{Point2, Rect2, Vec2},
@@ -9,7 +9,7 @@ use super::PixelFormat;
 use crate::{
     color::{Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Point2S, Rect2S, SceneNode, Vec2S},
+    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, SceneNode, Vec2S},
     SceneRenderError,
 };
 
@@ -18,6 +18,8 @@ pub(super) mod blur;
 use blur::gaussian_sigma_to_box_radius;
 mod strip;
 pub use strip::*;
+mod tiler;
+use tiler::*;
 
 trait DrawPixel: Copy + Sized {
     fn put(&mut self, value: Self);
@@ -717,6 +719,167 @@ impl super::Rasterizer for Rasterizer {
     }
 }
 
+struct RenderPass {
+    command_arena: Vec<TileCommand>,
+    tiler: RectTiler,
+    max: Point2<u16>,
+}
+
+impl RenderPass {
+    fn new() -> Self {
+        Self {
+            command_arena: Vec::new(),
+            tiler: RectTiler::new(),
+            max: Point2::ZERO,
+        }
+    }
+
+    fn add(&mut self, rect: Rect2S, command: TileCommand, z: u16) {
+        if rect.max.x <= 0 || rect.max.y <= 0 {
+            return;
+        }
+        self.max.x = self.max.x.max(rect.max.x.ceil_to_inner() as u16);
+        self.max.y = self.max.y.max(rect.max.y.ceil_to_inner() as u16);
+
+        // TODO: check overflow
+        let id = self.command_arena.len() as u16;
+        self.command_arena.push(command);
+        self.tiler.add(QuadRect { rect, id, z });
+    }
+}
+
+impl Rasterizer {
+    fn record_scene_at(
+        &mut self,
+        pass: &mut RenderPass,
+        offset: Vec2S,
+        scene: &[SceneNode],
+        user_data: &(dyn Any + 'static),
+    ) -> Result<(), SceneRenderError> {
+        let mut z = 0;
+        let current_translation = offset;
+
+        for node in scene {
+            let mut tile_bitmap = |bitmap: Bitmap| {
+                let tex = unwrap_sw_texture(&bitmap.texture);
+                pass.add(
+                    Rect2::new(
+                        Point2::new(FixedS::new(bitmap.pos.x), FixedS::new(bitmap.pos.y)),
+                        Point2::new(
+                            FixedS::new(bitmap.pos.x + bitmap.texture.width() as i32),
+                            FixedS::new(bitmap.pos.y + bitmap.texture.height() as i32),
+                        ),
+                    ),
+                    TileCommand::BlendTexture(
+                        TextureView {
+                            texture: tex.clone(),
+                            pixel_offset: bitmap.pos,
+                        },
+                        match (tex.pixel_format(), bitmap.filter) {
+                            (PixelFormat::Mono, None)
+                            | (PixelFormat::Mono, Some(BitmapFilter::ExtractAlpha)) => {
+                                BlendMode::Mono
+                            }
+                            (PixelFormat::Bgra, None) => BlendMode::Bgra,
+                            (PixelFormat::Bgra, Some(BitmapFilter::ExtractAlpha)) => {
+                                BlendMode::Xxxa
+                            }
+                        },
+                        bitmap.color,
+                    ),
+                    z,
+                );
+            };
+
+            match node {
+                SceneNode::DeferredBitmaps(bitmaps) => {
+                    for bitmap in (bitmaps.to_bitmaps)(self, user_data)
+                        .map_err(SceneRenderErrorInner::ToBitmaps)?
+                    {
+                        // TODO: z is wrong
+                        tile_bitmap(bitmap);
+                    }
+                }
+                SceneNode::Bitmap(bitmap) => {
+                    tile_bitmap(bitmap.clone());
+                }
+                &SceneNode::FilledRect(FilledRect { rect, color }) => {
+                    if rect.is_empty() {
+                        continue;
+                    }
+
+                    pass.add(rect, TileCommand::DrawRect(rect, color), z);
+                }
+                SceneNode::StrokedPolyline(polyline) => {
+                    let bitmap = polyline.to_bitmap(current_translation.to_point(), self);
+                    tile_bitmap(bitmap);
+                }
+                SceneNode::Subscene(subscene) => self.record_scene_at(
+                    pass,
+                    current_translation + subscene.pos.to_vec(),
+                    &subscene.scene,
+                    user_data,
+                )?,
+            }
+
+            z += 1;
+        }
+
+        Ok(())
+    }
+}
+
+struct RenderPassTile<'p> {
+    pos: Point2<u16>,
+    arena: &'p [TileCommand],
+    rects: &'p [QuadRect],
+}
+impl RenderPassTile<'_> {
+    fn commands(&self) -> impl ExactSizeIterator<Item = &TileCommand> + use<'_> {
+        self.rects.iter().map(|q| &self.arena[usize::from(q.id)])
+    }
+}
+
+impl RenderPass {
+    fn start_tiling(&mut self) {
+        self.tiler.start(self.max.to_vec(), TILE_SIZE);
+    }
+
+    fn next_tile(&mut self) -> Option<RenderPassTile<'_>> {
+        let (pos, rects) = self.tiler.next()?;
+        rects.sort_unstable_by_key(|q| q.z);
+        Some(RenderPassTile {
+            pos,
+            arena: &self.command_arena,
+            rects,
+        })
+    }
+
+    fn into_pieces(mut self) -> impl Iterator<Item = OutputPiece> {
+        self.start_tiling();
+
+        std::iter::from_fn(move || {
+            let tile = self.next_tile()?;
+
+            Some(OutputPiece {
+                pos: Point2::new(
+                    tile.pos.x as i32 * TILE_SIZE.x as i32,
+                    tile.pos.y as i32 * TILE_SIZE.y as i32,
+                ),
+                size: Vec2::new(TILE_SIZE.x.into(), TILE_SIZE.y.into()),
+                content: OutputPieceContent {
+                    tile_pos: tile.pos,
+                    tile_commands: tile
+                        .commands()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
+                },
+            })
+        })
+    }
+}
+
 pub struct OutputBitmap {
     pub texture: Texture,
     pub filter: Option<BitmapFilter>,
@@ -741,7 +904,7 @@ pub struct OutputPiece {
 }
 
 pub struct OutputPieceContent {
-    tile_pos: Point2<u32>,
+    tile_pos: Point2<u16>,
     tile_commands: Box<[TileCommand]>,
 }
 
@@ -753,142 +916,13 @@ impl Rasterizer {
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_tiled_at(
-            offset,
-            scene,
-            &mut |r, p, c| {
-                on_piece(
-                    r,
-                    OutputPiece {
-                        pos: Point2::new((p.x * TILE_SIZE.x) as i32, (p.y * TILE_SIZE.y) as i32),
-                        size: TILE_SIZE,
-                        content: OutputPieceContent {
-                            tile_pos: p,
-                            tile_commands: c.into(),
-                        },
-                    },
-                )
-            },
-            user_data,
-        )
-    }
+        let mut pass = RenderPass::new();
 
-    fn render_scene_tiled_at(
-        &mut self,
-        offset: Vec2S,
-        scene: &[SceneNode],
-        on_tile: &mut dyn FnMut(&mut Rasterizer, Point2<u32>, &[TileCommand]),
-        user_data: &(dyn Any + 'static),
-    ) -> Result<(), SceneRenderError> {
-        let mut tiler = Tiler::new();
-        let mut z = 0;
-        let current_translation = offset;
+        self.record_scene_at(&mut pass, offset, scene, user_data)?;
 
-        for node in scene {
-            let mut tile_bitmap = |bitmap: Bitmap| {
-                tiler.add_bitmap(BitmapState::new(bitmap), z);
-            };
-
-            match node {
-                SceneNode::DeferredBitmaps(bitmaps) => {
-                    for bitmap in (bitmaps.to_bitmaps)(self, user_data)
-                        .map_err(SceneRenderErrorInner::ToBitmaps)?
-                    {
-                        // TODO: z is wrong
-                        tile_bitmap(bitmap);
-                    }
-                }
-                SceneNode::Bitmap(bitmap) => {
-                    tile_bitmap(bitmap.clone());
-                }
-                &SceneNode::FilledRect(FilledRect { rect, color }) => {
-                    if rect.is_empty() {
-                        continue;
-                    }
-
-                    tiler.add_rect(RectState::new(rect, color), z);
-                    // on_piece(
-                    //     self,
-                    //     OutputPiece {
-                    //         pos: Point2::new(
-                    //             rect.min.x.floor_to_inner(),
-                    //             rect.min.y.floor_to_inner(),
-                    //         ),
-                    //         size: Vec2::new(
-                    //             (rect.max.x - rect.min.x.floor()).ceil_to_inner() as u32,
-                    //             (rect.max.y - rect.min.y.floor()).ceil_to_inner() as u32,
-                    //         ),
-                    //         content: OutputPieceContent::Rect(OutputRect {
-                    //             rect: Rect2S {
-                    //                 min: Point2::new(rect.min.x.fract(), rect.min.y.fract()),
-                    //                 max: Point2::new(
-                    //                     rect.max.x - rect.min.x.floor(),
-                    //                     rect.max.y - rect.min.y.floor(),
-                    //                 ),
-                    //             },
-                    //             color,
-                    //         }),
-                    //     },
-                    // );
-                }
-                SceneNode::StrokedPolyline(polyline) => {
-                    let bitmap = polyline.to_bitmap(current_translation.to_point(), self);
-                    tile_bitmap(bitmap);
-                }
-                SceneNode::Subscene(subscene) => continue,
-                // self.render_scene_tiled_at(
-                //     current_translation + subscene.pos.to_vec(),
-                //     &subscene.scene,
-                //     on_tile,
-                //     user_data,
-                // )?,
-            }
-
-            z += 1;
+        for piece in pass.into_pieces() {
+            on_piece(self, piece)
         }
-
-        eprintln!("have {} instances to tile", tiler.state.len());
-        let start = std::time::Instant::now();
-
-        let mut tile_it = tiler.tile();
-        let mut tile_commands = Vec::new();
-        while let Some((current, layers)) = tile_it.next() {
-            for layer in layers {
-                tile_commands.push(match layer {
-                    &Layer::Rect(RectLayer { rect, color }) => TileCommand::DrawRect(rect, color),
-                    Layer::Bitmap(bitmap) => {
-                        let tex = unwrap_sw_texture(&bitmap.bitmap.texture);
-
-                        TileCommand::BlendTexture(
-                            TextureView {
-                                texture: tex.clone(),
-                                pixel_offset: bitmap.bitmap.pos,
-                            },
-                            match (tex.pixel_format(), bitmap.bitmap.filter) {
-                                (PixelFormat::Mono, None)
-                                | (PixelFormat::Mono, Some(BitmapFilter::ExtractAlpha)) => {
-                                    BlendMode::Mono
-                                }
-                                (PixelFormat::Bgra, None) => BlendMode::Bgra,
-                                (PixelFormat::Bgra, Some(BitmapFilter::ExtractAlpha)) => {
-                                    BlendMode::Xxxa
-                                }
-                            },
-                            bitmap.bitmap.color,
-                        )
-                    }
-                });
-            }
-
-            on_tile(self, current, &tile_commands);
-
-            tile_commands.clear();
-            // std::hint::black_box(layers);
-            // println!("tile@{current:?} = {layers:#?}");
-        }
-
-        let end = std::time::Instant::now();
-        eprintln!("tiling took {:.2}ms", (end - start).as_secs_f32() * 1000.);
 
         Ok(())
     }
@@ -914,37 +948,7 @@ impl OutputPieceContent {
         for command in &self.tile_commands {
             rasterizer.tile_rasterizer.draw(self.tile_pos, command);
         }
-        // eprintln!("writing tile {:?}", self.tile_pos);
         rasterizer.tile_rasterizer.write(target, pos);
-        // match self {
-        //     OutputPieceContent::Texture(image) => {
-        //         rasterizer.blit_texture_filtered(
-        //             target,
-        //             pos,
-        //             &image.texture,
-        //             image.filter,
-        //             image.color,
-        //         );
-        //     }
-        //     OutputPieceContent::Strips(OutputStrips { strips, color }) => {
-        //         let pre = color.premultiply();
-        //         strips.blend_to_at(
-        //             target.buffer.unwrap_for::<BGRA8>(),
-        //             |d, s| *d = pre.mul_alpha(s).blend_over(*d).0,
-        //             Vec2::new(pos.x as isize, pos.y as isize),
-        //             target.width as usize,
-        //             target.height as usize,
-        //             target.stride as usize,
-        //         );
-        //     }
-        //     &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-        //         rasterizer.fill_axis_aligned_rect(
-        //             target,
-        //             rect.translate(Vec2::new(pos.x as f32, pos.y as f32)),
-        //             color,
-        //         );
-        //     }
-        // }
     }
 
     pub fn rasterize_to(
@@ -957,7 +961,7 @@ impl OutputPieceContent {
     }
 }
 
-const TILE_SIZE: Vec2<u32> = Vec2::new(128, 32);
+const TILE_SIZE: Vec2<u16> = Vec2::new(128, 32);
 
 #[repr(align(64))]
 #[derive(Clone, Copy)]
@@ -965,277 +969,6 @@ struct Tile([BGRA8; TILE_SIZE.x as usize * TILE_SIZE.y as usize]);
 
 impl Tile {
     const ZERO: Self = Self([BGRA8::ZERO; TILE_SIZE.x as usize * TILE_SIZE.y as usize]);
-}
-
-struct RectState {
-    pixel_rect: Rect2<u32>,
-    rect: Rect2S,
-    color: BGRA8,
-}
-
-impl RectState {
-    fn new(rect: Rect2S, color: BGRA8) -> Self {
-        let pixel_rect = Rect2::new(
-            Point2::new(
-                rect.min.x.floor_to_inner().max(0) as u32 / TILE_SIZE.x,
-                rect.min.y.floor_to_inner().max(0) as u32 / TILE_SIZE.y,
-            ),
-            Point2::new(
-                (rect.max.x.ceil_to_inner().max(0) as u32).div_ceil(TILE_SIZE.x),
-                (rect.max.y.ceil_to_inner().max(0) as u32).div_ceil(TILE_SIZE.y),
-            ),
-        );
-
-        Self {
-            pixel_rect,
-            rect,
-            color,
-        }
-    }
-
-    fn first(&self) -> Point2<u32> {
-        self.pixel_rect.min
-    }
-
-    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
-        debug_assert!(
-            current.y > self.pixel_rect.max.y
-                || (current.y == self.pixel_rect.max.y && current.x >= self.pixel_rect.min.x),
-            "Current point {current:?} is not after {:?}",
-            self.pixel_rect.min
-        );
-
-        let mut next = current;
-        next.x += 1;
-        if next.x > self.pixel_rect.max.x {
-            if next.y == self.pixel_rect.max.y {
-                return None;
-            }
-
-            next.x = self.pixel_rect.min.x;
-            next.y += 1;
-        }
-
-        debug_assert!(self.pixel_rect.contains(next));
-
-        Some(next)
-    }
-
-    fn layer_for(&self, _current: Point2<u32>) -> RectLayer {
-        RectLayer {
-            rect: self.rect,
-            color: self.color,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct RectLayer {
-    rect: Rect2S,
-    color: BGRA8,
-}
-
-struct BitmapState {
-    tile_rect: Rect2<u32>,
-    bitmap: Bitmap,
-}
-
-impl BitmapState {
-    fn new(bitmap: Bitmap) -> Self {
-        let tile_pos = Point2::new(
-            bitmap.pos.x.max(0) as u32 / TILE_SIZE.x,
-            bitmap.pos.y.max(0) as u32 / TILE_SIZE.y,
-        );
-        let tile_rect = Rect2::new(
-            tile_pos,
-            Point2::new(
-                ((bitmap.texture.width() as i32 + bitmap.pos.x).max(0) as u32)
-                    .div_ceil(TILE_SIZE.x),
-                ((bitmap.texture.height() as i32 + bitmap.pos.y).max(0) as u32)
-                    .div_ceil(TILE_SIZE.y),
-            ),
-        );
-
-        Self { tile_rect, bitmap }
-    }
-
-    fn first(&self) -> Point2<u32> {
-        self.tile_rect.min
-    }
-
-    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
-        debug_assert!(
-            current.y > self.tile_rect.max.y
-                || (current.y == self.tile_rect.max.y && current.x >= self.tile_rect.min.x),
-            "Current point {current:?} is not after {:?}",
-            self.tile_rect.min
-        );
-
-        let mut next = current;
-        next.x += 1;
-        if next.x > self.tile_rect.max.x {
-            if next.y == self.tile_rect.max.y {
-                return None;
-            }
-
-            next.x = self.tile_rect.min.x;
-            next.y += 1;
-        }
-
-        debug_assert!(self.tile_rect.contains(next));
-
-        Some(next)
-    }
-
-    fn layer_for(&self, current: Point2<u32>) -> BitmapLayer {
-        BitmapLayer {
-            bitmap: self.bitmap.clone(),
-            dst_offset: self.bitmap.pos.to_vec()
-                - Vec2::new(
-                    (current.x * TILE_SIZE.x) as i32,
-                    (current.y * TILE_SIZE.y) as i32,
-                ),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct BitmapLayer {
-    bitmap: Bitmap,
-    dst_offset: Vec2<i32>,
-}
-
-enum State {
-    Rect(RectState),
-    Bitmap(BitmapState),
-}
-
-#[derive(Debug)]
-enum Layer {
-    Rect(RectLayer),
-    Bitmap(BitmapLayer),
-}
-
-impl State {
-    fn first(&self) -> Point2<u32> {
-        match self {
-            Self::Rect(rect) => rect.first(),
-            Self::Bitmap(bitmap) => bitmap.first(),
-        }
-    }
-
-    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
-        match self {
-            Self::Rect(rect) => rect.next(current),
-            Self::Bitmap(bitmap) => bitmap.next(current),
-        }
-    }
-
-    fn layer_for(&self, current: Point2<u32>) -> Layer {
-        match self {
-            Self::Rect(rect) => Layer::Rect(rect.layer_for(current)),
-            Self::Bitmap(bitmap) => Layer::Bitmap(bitmap.layer_for(current)),
-        }
-    }
-}
-
-struct StateAndNext {
-    next: Point2<u32>,
-    z: u32,
-    state: State,
-}
-
-impl PartialEq for StateAndNext {
-    fn eq(&self, other: &Self) -> bool {
-        self.next == other.next && self.z == other.z
-    }
-}
-
-impl Eq for StateAndNext {}
-
-impl PartialOrd for StateAndNext {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for StateAndNext {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other
-            .next
-            .y
-            .cmp(&self.next.y)
-            .then_with(|| other.next.x.cmp(&self.next.x))
-            .then_with(|| other.z.cmp(&self.z))
-    }
-}
-
-struct Tiler {
-    state: BinaryHeap<StateAndNext>,
-    current_tile_outputs: Vec<Layer>,
-}
-
-impl Tiler {
-    fn new() -> Self {
-        Self {
-            state: BinaryHeap::new(),
-            current_tile_outputs: Vec::new(),
-        }
-    }
-
-    fn add_rect(&mut self, state: RectState, z: u32) {
-        self.state.push(StateAndNext {
-            next: state.first(),
-            z,
-            state: State::Rect(state),
-        });
-    }
-
-    fn add_bitmap(&mut self, state: BitmapState, z: u32) {
-        self.state.push(StateAndNext {
-            next: state.first(),
-            z,
-            state: State::Bitmap(state),
-        });
-    }
-
-    fn tile(&mut self) -> TileIterator<'_> {
-        TileIterator { tiler: self }
-    }
-}
-
-struct TileIterator<'t> {
-    tiler: &'t mut Tiler,
-}
-
-impl TileIterator<'_> {
-    fn next(&mut self) -> Option<(Point2<u32>, &[Layer])> {
-        let current = self.tiler.state.peek()?.next;
-
-        self.tiler.current_tile_outputs.clear();
-        while let Some(mut peek) = self.tiler.state.peek_mut() {
-            if peek.next != current {
-                break;
-            }
-
-            self.tiler
-                .current_tile_outputs
-                .push(peek.state.layer_for(current));
-
-            match peek.state.next(current) {
-                Some(next) => peek.next = next,
-                None => _ = std::collections::binary_heap::PeekMut::pop(peek),
-            }
-        }
-
-        Some((current, &self.tiler.current_tile_outputs))
-    }
-}
-
-impl Drop for TileIterator<'_> {
-    fn drop(&mut self) {
-        self.tiler.state.clear();
-    }
 }
 
 #[derive(Clone)]
@@ -1277,18 +1010,18 @@ impl TileRasterizer {
         }
     }
 
-    fn draw(&mut self, tile_pos: Point2<u32>, command: &TileCommand) {
+    fn draw(&mut self, tile_pos: Point2<u16>, command: &TileCommand) {
         self.dirty = true;
         match *command {
             TileCommand::DrawRect(rect, color) => {
                 let off_rect = Rect2::new(
                     Point2::new(
-                        rect.min.x - (tile_pos.x * TILE_SIZE.x) as i32,
-                        rect.min.y - (tile_pos.y * TILE_SIZE.y) as i32,
+                        rect.min.x - tile_pos.x as i32 * i32::from(TILE_SIZE.x),
+                        rect.min.y - tile_pos.y as i32 * i32::from(TILE_SIZE.y),
                     ),
                     Point2::new(
-                        rect.max.x - (tile_pos.x * TILE_SIZE.x) as i32,
-                        rect.max.y - (tile_pos.y * TILE_SIZE.y) as i32,
+                        rect.max.x - tile_pos.x as i32 * i32::from(TILE_SIZE.x),
+                        rect.max.y - tile_pos.y as i32 * i32::from(TILE_SIZE.y),
                     ),
                 );
 
@@ -1298,9 +1031,9 @@ impl TileRasterizer {
                     off_rect.max.x.into_f32(),
                     off_rect.max.y.into_f32(),
                     &mut self.scratch.0,
-                    TILE_SIZE.x,
-                    TILE_SIZE.y,
-                    TILE_SIZE.x,
+                    u32::from(TILE_SIZE.x),
+                    u32::from(TILE_SIZE.y),
+                    u32::from(TILE_SIZE.x),
                     color,
                 );
             }

@@ -64,6 +64,13 @@ impl Number for u32 {
     const ZERO: Self = 0;
 }
 
+impl Number for u16 {
+    const MIN: Self = u16::MIN;
+    const MAX: Self = u16::MAX;
+    const ONE: Self = 1;
+    const ZERO: Self = 0;
+}
+
 pub trait Sqrt: Number {
     fn sqrt(self) -> Self;
     fn fast_normalize(vector: Vec2<Self>) -> Vec2<Self> {

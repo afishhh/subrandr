@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 #[allow(clippy::upper_case_acronyms)]
 #[repr(C, align(4))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 // BGRA8888 in memory
 // ARGB32 value on little-endian
 // BGRA32 value on big-endian
@@ -73,6 +73,16 @@ impl BGRA8 {
             a: mul_rgb(self.a, other),
             ..self
         }
+    }
+}
+
+impl Debug for BGRA8 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BGRA8#{:>02x}{:>02x}{:>02x}{:>02x}",
+            self.b, self.g, self.r, self.a
+        )
     }
 }
 

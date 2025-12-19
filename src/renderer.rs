@@ -685,6 +685,10 @@ impl Renderer<'_> {
 
     pub fn end_raster(&mut self) {
         let time = self.perf.end_frame();
-        trace!(self.sbr, "frame took {time:.2}ms to render");
+        trace!(
+            self.sbr,
+            "frame took {time:.2}ms (raster: {:.2}ms) to render",
+            self.perf.raster.last().unwrap_or_default()
+        );
     }
 }

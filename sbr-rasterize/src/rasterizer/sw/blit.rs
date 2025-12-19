@@ -153,6 +153,20 @@ pub unsafe fn copy_float_to_mono_unchecked(
     });
 }
 
+#[inline(never)]
+pub unsafe fn copy_bgra_unchecked(
+    dst: *mut BGRA8,
+    dst_stride: usize,
+    src: *const BGRA8,
+    src_stride: usize,
+    width: usize,
+    height: usize,
+) {
+    blit_generic_unchecked(dst, dst_stride, src, src_stride, width, height, |s, d| {
+        *d = s;
+    });
+}
+
 macro_rules! make_checked_blitter {
     (
         $name: ident via $unchecked_name: ident,
@@ -225,3 +239,4 @@ make_checked_blitter!(
 make_checked_blitter!(copy_mono_to_float via copy_mono_to_float_unchecked, u8 [over] f32);
 make_checked_blitter!(copy_bgra_to_float via copy_bgra_to_float_unchecked, BGRA8 [over] f32);
 make_checked_blitter!(copy_float_to_mono via copy_float_to_mono_unchecked, f32 [over] u8);
+make_checked_blitter!(copy_bgra via copy_bgra_unchecked, BGRA8 [over] BGRA8);

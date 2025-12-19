@@ -306,6 +306,13 @@ impl<N: Number> Rect2<N> {
             && self.max.y >= other.max.y
     }
 
+    pub fn contains(&self, other: Point2<N>) -> bool {
+        self.min.x <= other.x
+            && self.max.x >= other.x
+            && self.min.y <= other.y
+            && self.max.y >= other.y
+    }
+
     pub fn is_empty(&self) -> bool {
         self.min.x >= self.max.x || self.min.y >= self.max.y
     }

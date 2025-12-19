@@ -1,4 +1,8 @@
-use std::{any::Any, fmt::Write, mem::MaybeUninit};
+use std::{
+    any::Any,
+    fmt::{Debug, Write},
+    mem::MaybeUninit,
+};
 
 use thiserror::Error;
 use util::{math::Vec2, AnyError};
@@ -9,7 +13,7 @@ pub mod sw;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
     Mono,
     Bgra,
@@ -20,6 +24,15 @@ impl PixelFormat {
         match self {
             PixelFormat::Mono => 1,
             PixelFormat::Bgra => 4,
+        }
+    }
+}
+
+impl Debug for PixelFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mono => write!(f, "A8"),
+            Self::Bgra => write!(f, "BGRA8"),
         }
     }
 }
@@ -106,10 +119,14 @@ impl Texture {
     }
 
     pub fn is_mono(&self) -> bool {
+        self.pixel_format() == PixelFormat::Mono
+    }
+
+    pub fn pixel_format(&self) -> PixelFormat {
         match &self.0 {
-            TextureInner::Software(sw) => sw.is_mono(),
+            TextureInner::Software(sw) => sw.pixel_format(),
             #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu) => wgpu.is_mono(),
+            TextureInner::Wgpu(wgpu) => wgpu.pixel_format(),
         }
     }
 }

@@ -330,7 +330,7 @@ pub(super) enum Texture {
     //       i.e. per-glyph blur
     Full(wgpu::Texture),
     Packed(PackedTexture, PixelFormat),
-    Empty,
+    Empty(PixelFormat),
 }
 
 impl Texture {
@@ -344,7 +344,7 @@ impl Texture {
                 let size = texture.size();
                 format.width() as usize * size.x as usize * size.y as usize
             }
-            Texture::Empty => 0,
+            Texture::Empty(_) => 0,
         }
     }
 
@@ -352,7 +352,7 @@ impl Texture {
         match self {
             Texture::Full(texture) => texture.width(),
             Texture::Packed(packed, _) => packed.size().x,
-            Texture::Empty => 0,
+            Texture::Empty(_) => 0,
         }
     }
 
@@ -360,23 +360,20 @@ impl Texture {
         match self {
             Texture::Full(texture) => texture.height(),
             Texture::Packed(packed, _) => packed.size().y,
-            Texture::Empty => 0,
+            Texture::Empty(_) => 0,
         }
     }
 
-    pub fn is_mono(&self) -> bool {
+    pub fn pixel_format(&self) -> PixelFormat {
         match self {
             Texture::Full(texture) => match texture.format() {
-                wgpu::TextureFormat::Bgra8Unorm => false,
-                wgpu::TextureFormat::R8Unorm => true,
-                wgpu::TextureFormat::R32Float => true,
+                wgpu::TextureFormat::Bgra8Unorm => PixelFormat::Bgra,
+                wgpu::TextureFormat::R8Unorm => PixelFormat::Mono,
+                wgpu::TextureFormat::R32Float => PixelFormat::Mono,
                 _ => unreachable!(),
             },
-            Texture::Packed(_, pixel_format) => match pixel_format {
-                PixelFormat::Mono => true,
-                PixelFormat::Bgra => false,
-            },
-            Texture::Empty => true,
+            &Texture::Packed(_, pixel_format) => pixel_format,
+            &Texture::Empty(pixel_format) => pixel_format,
         }
     }
 }
@@ -415,7 +412,7 @@ fn unwrap_wgpu_texture<'a>(
     packers: &'a Packers,
 ) -> Option<UnwrappedTexture<'a>> {
     match &texture.0 {
-        super::TextureInner::Wgpu(Texture::Empty) => None,
+        super::TextureInner::Wgpu(Texture::Empty(_)) => None,
         super::TextureInner::Wgpu(Texture::Full(texture)) => {
             Some(UnwrappedTexture::from_texture_region(
                 texture,
@@ -872,7 +869,7 @@ impl FrameRasterizer<'_> {
     ) -> super::Texture {
         if width == 0 || height == 0 {
             callback(&mut [], 0);
-            return super::Texture(super::TextureInner::Wgpu(Texture::Empty));
+            return super::Texture(super::TextureInner::Wgpu(Texture::Empty(format)));
         }
 
         let byte_stride = (width * u32::from(format.width()))
@@ -1000,7 +997,9 @@ impl super::Rasterizer for FrameRasterizer<'_> {
         let Some(unwrapped) = unwrap_wgpu_texture(texture, &self.parent.packers) else {
             return super::BlurOutput {
                 padding: Vec2::ZERO,
-                texture: super::Texture(super::TextureInner::Wgpu(Texture::Empty)),
+                texture: super::Texture(super::TextureInner::Wgpu(Texture::Empty(
+                    PixelFormat::Mono,
+                ))),
             };
         };
 

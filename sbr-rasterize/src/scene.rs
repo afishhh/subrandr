@@ -46,6 +46,28 @@ pub enum BitmapFilter {
     ExtractAlpha,
 }
 
+impl Debug for Bitmap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Bitmap")
+            .field("pos", &self.pos)
+            .field(
+                "texture",
+                &util::fmt_from_fn(|f| {
+                    write!(
+                        f,
+                        "{}x{} {:?} texture",
+                        self.texture.width(),
+                        self.texture.height(),
+                        self.texture.pixel_format()
+                    )
+                }),
+            )
+            .field("filter", &self.filter)
+            .field("color", &self.color)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StrokedPolyline {
     pub polyline: Vec<Point2<I16Dot16>>,

@@ -1,7 +1,7 @@
-use std::{any::Any, mem::MaybeUninit};
+use std::{any::Any, collections::BinaryHeap, mem::MaybeUninit};
 
 use util::{
-    math::{Point2, Vec2},
+    math::{Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
 };
 
@@ -9,7 +9,7 @@ use super::PixelFormat;
 use crate::{
     color::{Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, Rect2S, SceneNode, Vec2S},
+    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Point2S, Rect2S, SceneNode, Vec2S},
     SceneRenderError,
 };
 
@@ -24,6 +24,7 @@ trait DrawPixel: Copy + Sized {
     fn scale_alpha(self, scale: u8) -> Self;
     const PIXEL_FORMAT: PixelFormat;
     fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]>;
+    fn cast_texture_data<'a>(data: TextureDataRef<'a>) -> Option<&'a [Self]>;
 }
 
 impl DrawPixel for BGRA8 {
@@ -40,6 +41,12 @@ impl DrawPixel for BGRA8 {
     fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]> {
         match buffer {
             RenderTargetBufferMut::Bgra(bgra) => Some(bgra),
+            _ => None,
+        }
+    }
+    fn cast_texture_data<'a>(data: TextureDataRef<'a>) -> Option<&'a [Self]> {
+        match data {
+            TextureDataRef::Bgra(bgra) => Some(bgra),
             _ => None,
         }
     }
@@ -61,6 +68,12 @@ impl DrawPixel for u8 {
     fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]> {
         match buffer {
             RenderTargetBufferMut::Mono(mono) => Some(mono),
+            _ => None,
+        }
+    }
+    fn cast_texture_data<'a>(data: TextureDataRef<'a>) -> Option<&'a [Self]> {
+        match data {
+            TextureDataRef::Mono(a) => Some(a),
             _ => None,
         }
     }
@@ -462,11 +475,21 @@ impl Texture {
         }
     }
 
-    pub(super) fn is_mono(&self) -> bool {
+    pub fn pixel_format(&self) -> PixelFormat {
         match &self.data {
-            TextureData::OwnedMono(_) => true,
-            TextureData::OwnedBgra(_) => false,
+            TextureData::OwnedMono(_) => PixelFormat::Mono,
+            TextureData::OwnedBgra(_) => PixelFormat::Bgra,
         }
+    }
+
+    fn unwrap_for<P: DrawPixel>(&self) -> &'_ [P] {
+        P::cast_texture_data(self.data.as_ref()).unwrap_or_else(|| {
+            panic!(
+                "Unwrap of format {:?} called on texture with format {:?}",
+                P::PIXEL_FORMAT,
+                self.pixel_format(),
+            )
+        })
     }
 }
 
@@ -483,12 +506,14 @@ fn unwrap_sw_texture(texture: &super::Texture) -> &Texture {
 
 pub struct Rasterizer {
     blurer: blur::Blurer,
+    tile_rasterizer: TileRasterizer,
 }
 
 impl Rasterizer {
     pub fn new() -> Self {
         Self {
             blurer: blur::Blurer::new(),
+            tile_rasterizer: TileRasterizer::new(),
         }
     }
 
@@ -715,27 +740,9 @@ pub struct OutputPiece {
     pub content: OutputPieceContent,
 }
 
-impl OutputPiece {
-    fn from_bitmap(bitmap: Bitmap) -> Self {
-        let texture = unwrap_sw_texture(&bitmap.texture);
-        Self {
-            pos: bitmap.pos,
-            size: Vec2::new(bitmap.texture.width(), bitmap.texture.height()),
-            content: {
-                OutputPieceContent::Texture(OutputBitmap {
-                    texture: texture.clone(),
-                    filter: bitmap.filter,
-                    color: bitmap.color,
-                })
-            },
-        }
-    }
-}
-
-pub enum OutputPieceContent {
-    Texture(OutputBitmap),
-    Strips(OutputStrips),
-    Rect(OutputRect),
+pub struct OutputPieceContent {
+    tile_pos: Point2<u32>,
+    tile_commands: Box<[TileCommand]>,
 }
 
 impl Rasterizer {
@@ -746,66 +753,142 @@ impl Rasterizer {
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
+        self.render_scene_tiled_at(
+            offset,
+            scene,
+            &mut |r, p, c| {
+                on_piece(
+                    r,
+                    OutputPiece {
+                        pos: Point2::new((p.x * TILE_SIZE.x) as i32, (p.y * TILE_SIZE.y) as i32),
+                        size: TILE_SIZE,
+                        content: OutputPieceContent {
+                            tile_pos: p,
+                            tile_commands: c.into(),
+                        },
+                    },
+                )
+            },
+            user_data,
+        )
+    }
+
+    fn render_scene_tiled_at(
+        &mut self,
+        offset: Vec2S,
+        scene: &[SceneNode],
+        on_tile: &mut dyn FnMut(&mut Rasterizer, Point2<u32>, &[TileCommand]),
+        user_data: &(dyn Any + 'static),
+    ) -> Result<(), SceneRenderError> {
+        let mut tiler = Tiler::new();
+        let mut z = 0;
         let current_translation = offset;
+
         for node in scene {
+            let mut tile_bitmap = |bitmap: Bitmap| {
+                tiler.add_bitmap(BitmapState::new(bitmap), z);
+            };
+
             match node {
                 SceneNode::DeferredBitmaps(bitmaps) => {
                     for bitmap in (bitmaps.to_bitmaps)(self, user_data)
                         .map_err(SceneRenderErrorInner::ToBitmaps)?
                     {
-                        on_piece(self, OutputPiece::from_bitmap(bitmap));
+                        // TODO: z is wrong
+                        tile_bitmap(bitmap);
                     }
                 }
                 SceneNode::Bitmap(bitmap) => {
-                    on_piece(self, OutputPiece::from_bitmap(bitmap.clone()));
+                    tile_bitmap(bitmap.clone());
                 }
                 &SceneNode::FilledRect(FilledRect { rect, color }) => {
-                    on_piece(
-                        self,
-                        OutputPiece {
-                            pos: Point2::new(
-                                rect.min.x.floor_to_inner(),
-                                rect.min.y.floor_to_inner(),
-                            ),
-                            size: Vec2::new(
-                                (rect.max.x - rect.min.x.floor()).ceil_to_inner() as u32,
-                                (rect.max.y - rect.min.y.floor()).ceil_to_inner() as u32,
-                            ),
-                            content: OutputPieceContent::Rect(OutputRect {
-                                rect: Rect2S {
-                                    min: Point2::new(rect.min.x.fract(), rect.min.y.fract()),
-                                    max: Point2::new(
-                                        rect.max.x - rect.min.x.floor(),
-                                        rect.max.y - rect.min.y.floor(),
-                                    ),
-                                },
-                                color,
-                            }),
-                        },
-                    );
+                    if rect.is_empty() {
+                        continue;
+                    }
+
+                    tiler.add_rect(RectState::new(rect, color), z);
+                    // on_piece(
+                    //     self,
+                    //     OutputPiece {
+                    //         pos: Point2::new(
+                    //             rect.min.x.floor_to_inner(),
+                    //             rect.min.y.floor_to_inner(),
+                    //         ),
+                    //         size: Vec2::new(
+                    //             (rect.max.x - rect.min.x.floor()).ceil_to_inner() as u32,
+                    //             (rect.max.y - rect.min.y.floor()).ceil_to_inner() as u32,
+                    //         ),
+                    //         content: OutputPieceContent::Rect(OutputRect {
+                    //             rect: Rect2S {
+                    //                 min: Point2::new(rect.min.x.fract(), rect.min.y.fract()),
+                    //                 max: Point2::new(
+                    //                     rect.max.x - rect.min.x.floor(),
+                    //                     rect.max.y - rect.min.y.floor(),
+                    //                 ),
+                    //             },
+                    //             color,
+                    //         }),
+                    //     },
+                    // );
                 }
                 SceneNode::StrokedPolyline(polyline) => {
-                    let (pos, size, strips) = polyline.to_strips(current_translation.to_point());
-                    on_piece(
-                        self,
-                        OutputPiece {
-                            pos,
-                            size,
-                            content: OutputPieceContent::Strips(OutputStrips {
-                                strips,
-                                color: polyline.color,
-                            }),
-                        },
-                    )
+                    let bitmap = polyline.to_bitmap(current_translation.to_point(), self);
+                    tile_bitmap(bitmap);
                 }
-                SceneNode::Subscene(subscene) => self.render_scene_pieces_at(
-                    current_translation + subscene.pos.to_vec(),
-                    &subscene.scene,
-                    on_piece,
-                    user_data,
-                )?,
+                SceneNode::Subscene(subscene) => continue,
+                // self.render_scene_tiled_at(
+                //     current_translation + subscene.pos.to_vec(),
+                //     &subscene.scene,
+                //     on_tile,
+                //     user_data,
+                // )?,
             }
+
+            z += 1;
         }
+
+        eprintln!("have {} instances to tile", tiler.state.len());
+        let start = std::time::Instant::now();
+
+        let mut tile_it = tiler.tile();
+        let mut tile_commands = Vec::new();
+        while let Some((current, layers)) = tile_it.next() {
+            for layer in layers {
+                tile_commands.push(match layer {
+                    &Layer::Rect(RectLayer { rect, color }) => TileCommand::DrawRect(rect, color),
+                    Layer::Bitmap(bitmap) => {
+                        let tex = unwrap_sw_texture(&bitmap.bitmap.texture);
+
+                        TileCommand::BlendTexture(
+                            TextureView {
+                                texture: tex.clone(),
+                                pixel_offset: bitmap.bitmap.pos,
+                            },
+                            match (tex.pixel_format(), bitmap.bitmap.filter) {
+                                (PixelFormat::Mono, None)
+                                | (PixelFormat::Mono, Some(BitmapFilter::ExtractAlpha)) => {
+                                    BlendMode::Mono
+                                }
+                                (PixelFormat::Bgra, None) => BlendMode::Bgra,
+                                (PixelFormat::Bgra, Some(BitmapFilter::ExtractAlpha)) => {
+                                    BlendMode::Xxxa
+                                }
+                            },
+                            bitmap.bitmap.color,
+                        )
+                    }
+                });
+            }
+
+            on_tile(self, current, &tile_commands);
+
+            tile_commands.clear();
+            // std::hint::black_box(layers);
+            // println!("tile@{current:?} = {layers:#?}");
+        }
+
+        let end = std::time::Instant::now();
+        eprintln!("tiling took {:.2}ms", (end - start).as_secs_f32() * 1000.);
 
         Ok(())
     }
@@ -827,35 +910,41 @@ impl OutputPieceContent {
         target: &mut RenderTarget,
         pos: Point2<i32>,
     ) {
-        match self {
-            OutputPieceContent::Texture(image) => {
-                rasterizer.blit_texture_filtered(
-                    target,
-                    pos,
-                    &image.texture,
-                    image.filter,
-                    image.color,
-                );
-            }
-            OutputPieceContent::Strips(OutputStrips { strips, color }) => {
-                let pre = color.premultiply();
-                strips.blend_to_at(
-                    target.buffer.unwrap_for::<BGRA8>(),
-                    |d, s| *d = pre.mul_alpha(s).blend_over(*d).0,
-                    Vec2::new(pos.x as isize, pos.y as isize),
-                    target.width as usize,
-                    target.height as usize,
-                    target.stride as usize,
-                );
-            }
-            &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-                rasterizer.fill_axis_aligned_rect(
-                    target,
-                    rect.translate(Vec2::new(pos.x as f32, pos.y as f32)),
-                    color,
-                );
-            }
+        rasterizer.tile_rasterizer.reset();
+        for command in &self.tile_commands {
+            rasterizer.tile_rasterizer.draw(self.tile_pos, command);
         }
+        // eprintln!("writing tile {:?}", self.tile_pos);
+        rasterizer.tile_rasterizer.write(target, pos);
+        // match self {
+        //     OutputPieceContent::Texture(image) => {
+        //         rasterizer.blit_texture_filtered(
+        //             target,
+        //             pos,
+        //             &image.texture,
+        //             image.filter,
+        //             image.color,
+        //         );
+        //     }
+        //     OutputPieceContent::Strips(OutputStrips { strips, color }) => {
+        //         let pre = color.premultiply();
+        //         strips.blend_to_at(
+        //             target.buffer.unwrap_for::<BGRA8>(),
+        //             |d, s| *d = pre.mul_alpha(s).blend_over(*d).0,
+        //             Vec2::new(pos.x as isize, pos.y as isize),
+        //             target.width as usize,
+        //             target.height as usize,
+        //             target.stride as usize,
+        //         );
+        //     }
+        //     &OutputPieceContent::Rect(OutputRect { rect, color }) => {
+        //         rasterizer.fill_axis_aligned_rect(
+        //             target,
+        //             rect.translate(Vec2::new(pos.x as f32, pos.y as f32)),
+        //             color,
+        //         );
+        //     }
+        // }
     }
 
     pub fn rasterize_to(
@@ -867,3 +956,455 @@ impl OutputPieceContent {
         self.rasterize_to_sw(rasterizer, unwrap_sw_render_target(target), pos);
     }
 }
+
+const TILE_SIZE: Vec2<u32> = Vec2::new(128, 32);
+
+#[repr(align(64))]
+#[derive(Clone, Copy)]
+struct Tile([BGRA8; TILE_SIZE.x as usize * TILE_SIZE.y as usize]);
+
+impl Tile {
+    const ZERO: Self = Self([BGRA8::ZERO; TILE_SIZE.x as usize * TILE_SIZE.y as usize]);
+}
+
+struct RectState {
+    pixel_rect: Rect2<u32>,
+    rect: Rect2S,
+    color: BGRA8,
+}
+
+impl RectState {
+    fn new(rect: Rect2S, color: BGRA8) -> Self {
+        let pixel_rect = Rect2::new(
+            Point2::new(
+                rect.min.x.floor_to_inner().max(0) as u32 / TILE_SIZE.x,
+                rect.min.y.floor_to_inner().max(0) as u32 / TILE_SIZE.y,
+            ),
+            Point2::new(
+                (rect.max.x.ceil_to_inner().max(0) as u32).div_ceil(TILE_SIZE.x),
+                (rect.max.y.ceil_to_inner().max(0) as u32).div_ceil(TILE_SIZE.y),
+            ),
+        );
+
+        Self {
+            pixel_rect,
+            rect,
+            color,
+        }
+    }
+
+    fn first(&self) -> Point2<u32> {
+        self.pixel_rect.min
+    }
+
+    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
+        debug_assert!(
+            current.y > self.pixel_rect.max.y
+                || (current.y == self.pixel_rect.max.y && current.x >= self.pixel_rect.min.x),
+            "Current point {current:?} is not after {:?}",
+            self.pixel_rect.min
+        );
+
+        let mut next = current;
+        next.x += 1;
+        if next.x > self.pixel_rect.max.x {
+            if next.y == self.pixel_rect.max.y {
+                return None;
+            }
+
+            next.x = self.pixel_rect.min.x;
+            next.y += 1;
+        }
+
+        debug_assert!(self.pixel_rect.contains(next));
+
+        Some(next)
+    }
+
+    fn layer_for(&self, _current: Point2<u32>) -> RectLayer {
+        RectLayer {
+            rect: self.rect,
+            color: self.color,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RectLayer {
+    rect: Rect2S,
+    color: BGRA8,
+}
+
+struct BitmapState {
+    tile_rect: Rect2<u32>,
+    bitmap: Bitmap,
+}
+
+impl BitmapState {
+    fn new(bitmap: Bitmap) -> Self {
+        let tile_pos = Point2::new(
+            bitmap.pos.x.max(0) as u32 / TILE_SIZE.x,
+            bitmap.pos.y.max(0) as u32 / TILE_SIZE.y,
+        );
+        let tile_rect = Rect2::new(
+            tile_pos,
+            Point2::new(
+                ((bitmap.texture.width() as i32 + bitmap.pos.x).max(0) as u32)
+                    .div_ceil(TILE_SIZE.x),
+                ((bitmap.texture.height() as i32 + bitmap.pos.y).max(0) as u32)
+                    .div_ceil(TILE_SIZE.y),
+            ),
+        );
+
+        Self { tile_rect, bitmap }
+    }
+
+    fn first(&self) -> Point2<u32> {
+        self.tile_rect.min
+    }
+
+    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
+        debug_assert!(
+            current.y > self.tile_rect.max.y
+                || (current.y == self.tile_rect.max.y && current.x >= self.tile_rect.min.x),
+            "Current point {current:?} is not after {:?}",
+            self.tile_rect.min
+        );
+
+        let mut next = current;
+        next.x += 1;
+        if next.x > self.tile_rect.max.x {
+            if next.y == self.tile_rect.max.y {
+                return None;
+            }
+
+            next.x = self.tile_rect.min.x;
+            next.y += 1;
+        }
+
+        debug_assert!(self.tile_rect.contains(next));
+
+        Some(next)
+    }
+
+    fn layer_for(&self, current: Point2<u32>) -> BitmapLayer {
+        BitmapLayer {
+            bitmap: self.bitmap.clone(),
+            dst_offset: self.bitmap.pos.to_vec()
+                - Vec2::new(
+                    (current.x * TILE_SIZE.x) as i32,
+                    (current.y * TILE_SIZE.y) as i32,
+                ),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BitmapLayer {
+    bitmap: Bitmap,
+    dst_offset: Vec2<i32>,
+}
+
+enum State {
+    Rect(RectState),
+    Bitmap(BitmapState),
+}
+
+#[derive(Debug)]
+enum Layer {
+    Rect(RectLayer),
+    Bitmap(BitmapLayer),
+}
+
+impl State {
+    fn first(&self) -> Point2<u32> {
+        match self {
+            Self::Rect(rect) => rect.first(),
+            Self::Bitmap(bitmap) => bitmap.first(),
+        }
+    }
+
+    fn next(&mut self, current: Point2<u32>) -> Option<Point2<u32>> {
+        match self {
+            Self::Rect(rect) => rect.next(current),
+            Self::Bitmap(bitmap) => bitmap.next(current),
+        }
+    }
+
+    fn layer_for(&self, current: Point2<u32>) -> Layer {
+        match self {
+            Self::Rect(rect) => Layer::Rect(rect.layer_for(current)),
+            Self::Bitmap(bitmap) => Layer::Bitmap(bitmap.layer_for(current)),
+        }
+    }
+}
+
+struct StateAndNext {
+    next: Point2<u32>,
+    z: u32,
+    state: State,
+}
+
+impl PartialEq for StateAndNext {
+    fn eq(&self, other: &Self) -> bool {
+        self.next == other.next && self.z == other.z
+    }
+}
+
+impl Eq for StateAndNext {}
+
+impl PartialOrd for StateAndNext {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StateAndNext {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .next
+            .y
+            .cmp(&self.next.y)
+            .then_with(|| other.next.x.cmp(&self.next.x))
+            .then_with(|| other.z.cmp(&self.z))
+    }
+}
+
+struct Tiler {
+    state: BinaryHeap<StateAndNext>,
+    current_tile_outputs: Vec<Layer>,
+}
+
+impl Tiler {
+    fn new() -> Self {
+        Self {
+            state: BinaryHeap::new(),
+            current_tile_outputs: Vec::new(),
+        }
+    }
+
+    fn add_rect(&mut self, state: RectState, z: u32) {
+        self.state.push(StateAndNext {
+            next: state.first(),
+            z,
+            state: State::Rect(state),
+        });
+    }
+
+    fn add_bitmap(&mut self, state: BitmapState, z: u32) {
+        self.state.push(StateAndNext {
+            next: state.first(),
+            z,
+            state: State::Bitmap(state),
+        });
+    }
+
+    fn tile(&mut self) -> TileIterator<'_> {
+        TileIterator { tiler: self }
+    }
+}
+
+struct TileIterator<'t> {
+    tiler: &'t mut Tiler,
+}
+
+impl TileIterator<'_> {
+    fn next(&mut self) -> Option<(Point2<u32>, &[Layer])> {
+        let current = self.tiler.state.peek()?.next;
+
+        self.tiler.current_tile_outputs.clear();
+        while let Some(mut peek) = self.tiler.state.peek_mut() {
+            if peek.next != current {
+                break;
+            }
+
+            self.tiler
+                .current_tile_outputs
+                .push(peek.state.layer_for(current));
+
+            match peek.state.next(current) {
+                Some(next) => peek.next = next,
+                None => _ = std::collections::binary_heap::PeekMut::pop(peek),
+            }
+        }
+
+        Some((current, &self.tiler.current_tile_outputs))
+    }
+}
+
+impl Drop for TileIterator<'_> {
+    fn drop(&mut self) {
+        self.tiler.state.clear();
+    }
+}
+
+#[derive(Clone)]
+struct TextureView {
+    texture: Texture,
+    pixel_offset: Point2<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlendMode {
+    Bgra,
+    Mono,
+    Xxxa,
+}
+
+#[derive(Clone)]
+enum TileCommand {
+    DrawRect(Rect2S, BGRA8),
+    BlendTexture(TextureView, BlendMode, BGRA8),
+}
+
+struct TileRasterizer {
+    scratch: Box<Tile>,
+    dirty: bool,
+}
+
+impl TileRasterizer {
+    fn new() -> Self {
+        Self {
+            scratch: Box::new(Tile::ZERO),
+            dirty: false,
+        }
+    }
+
+    fn reset(&mut self) {
+        if self.dirty {
+            self.scratch.0.fill(BGRA8::ZERO);
+            self.dirty = false;
+        }
+    }
+
+    fn draw(&mut self, tile_pos: Point2<u32>, command: &TileCommand) {
+        self.dirty = true;
+        match *command {
+            TileCommand::DrawRect(rect, color) => {
+                let off_rect = Rect2::new(
+                    Point2::new(
+                        rect.min.x - (tile_pos.x * TILE_SIZE.x) as i32,
+                        rect.min.y - (tile_pos.y * TILE_SIZE.y) as i32,
+                    ),
+                    Point2::new(
+                        rect.max.x - (tile_pos.x * TILE_SIZE.x) as i32,
+                        rect.max.y - (tile_pos.y * TILE_SIZE.y) as i32,
+                    ),
+                );
+
+                fill_axis_aligned_antialias_rect(
+                    off_rect.min.x.into_f32(),
+                    off_rect.min.y.into_f32(),
+                    off_rect.max.x.into_f32(),
+                    off_rect.max.y.into_f32(),
+                    &mut self.scratch.0,
+                    TILE_SIZE.x,
+                    TILE_SIZE.y,
+                    TILE_SIZE.x,
+                    color,
+                );
+            }
+            TileCommand::BlendTexture(
+                TextureView {
+                    ref texture,
+                    pixel_offset,
+                },
+                mode,
+                color,
+            ) => match mode {
+                BlendMode::Bgra => {
+                    blit::blit_bgra(
+                        &mut self.scratch.0,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.y as usize,
+                        texture.unwrap_for::<BGRA8>(),
+                        texture.width as usize,
+                        texture.width as usize,
+                        texture.height as usize,
+                        pixel_offset.x as isize - tile_pos.x as isize * TILE_SIZE.x as isize,
+                        pixel_offset.y as isize - tile_pos.y as isize * TILE_SIZE.y as isize,
+                        color.a,
+                    );
+                }
+                BlendMode::Mono => {
+                    blit::blit_mono(
+                        &mut self.scratch.0,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.y as usize,
+                        texture.unwrap_for::<u8>(),
+                        texture.width as usize,
+                        texture.width as usize,
+                        texture.height as usize,
+                        pixel_offset.x as isize - tile_pos.x as isize * TILE_SIZE.x as isize,
+                        pixel_offset.y as isize - tile_pos.y as isize * TILE_SIZE.y as isize,
+                        color,
+                    );
+                }
+                BlendMode::Xxxa => {
+                    blit::blit_xxxa_to_bgra(
+                        &mut self.scratch.0,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.x as usize,
+                        TILE_SIZE.y as usize,
+                        texture.unwrap_for::<BGRA8>(),
+                        texture.width as usize,
+                        texture.width as usize,
+                        texture.height as usize,
+                        pixel_offset.x as isize - tile_pos.x as isize * TILE_SIZE.x as isize,
+                        pixel_offset.y as isize - tile_pos.y as isize * TILE_SIZE.y as isize,
+                        color,
+                    );
+                }
+            },
+        }
+    }
+
+    fn write(&mut self, target: &mut RenderTarget, pos: Point2<i32>) {
+        // TODO: if !self.dirty { just fill with zeroes }
+        blit::copy_bgra(
+            target.buffer.unwrap_for::<BGRA8>(),
+            target.stride as usize,
+            target.width as usize,
+            target.height as usize,
+            &self.scratch.0,
+            TILE_SIZE.x as usize,
+            TILE_SIZE.x as usize,
+            TILE_SIZE.y as usize,
+            pos.x as isize,
+            pos.y as isize,
+        );
+    }
+}
+
+// /*
+// Insn {
+//   Blend(Operand),
+//   Gamma22ToLinear,
+//   LinearToGamma22,
+//   BroadcastAlpha,
+// }
+
+// Operand {
+//   LoadTexture(&Texture),
+//   SampleRectangle(&Rect2),
+//   InterpolateSin256(BGRA8, BGRA8),
+// }
+// */
+// enum ShaderRegister {
+//     Output,
+//     Tmp0,
+// }
+
+// enum ShaderInsn {
+//     LoadTexture(TextureView),
+//     SampleRect(Rect2S),
+//     // BlendWithSin256(ShaderRegister, BGRA8, BGRA8),
+//     Blend(ShaderRegister, ShaderRegister),
+//     Gamma22ToLinear(ShaderRegister),
+//     LinearToGamma22(ShaderRegister),
+//     BroadcastAlpha(ShaderRegister, ShaderRegister),
+// }
+
+// struct ShaderPipeline(Vec<ShaderInsn>);

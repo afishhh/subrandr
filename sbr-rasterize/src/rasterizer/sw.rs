@@ -706,14 +706,41 @@ impl super::Rasterizer for Rasterizer {
         user_data: &(dyn Any + 'static),
     ) -> Result<(), super::SceneRenderError> {
         let target = unwrap_sw_render_target(target);
-        target.buffer.unwrap_for::<BGRA8>().fill(BGRA8::ZERO);
+        let mut pass = RenderPass::new();
 
-        self.render_scene_pieces_at(
-            Vec2::ZERO,
-            scene,
-            &mut |r, piece| piece.content.rasterize_to_sw(r, target, piece.pos),
-            user_data,
-        )?;
+        self.record_scene_at(&mut pass, Vec2::ZERO, scene, user_data)?;
+        pass.start_tiling(Vec2::new(target.width as u16, target.height as u16));
+
+        while let Some(event) = pass.next_event() {
+            match event {
+                RenderPassEvent::Tile(tile) => {
+                    self.tile_rasterizer.reset();
+                    for cmd in tile.commands() {
+                        self.tile_rasterizer.draw(tile.pos, cmd);
+                    }
+                    self.tile_rasterizer.write(
+                        target,
+                        Point2::new(
+                            tile.pos.x as i32 * TILE_SIZE.x as i32,
+                            tile.pos.y as i32 * TILE_SIZE.y as i32,
+                        ),
+                    );
+                }
+                RenderPassEvent::Clear(empty) => {
+                    blit::fill_bgra(
+                        target.buffer.unwrap_for::<BGRA8>(),
+                        target.stride as usize,
+                        target.width as usize,
+                        target.height as usize,
+                        usize::from(empty.pos.x) * usize::from(TILE_SIZE.x),
+                        usize::from(empty.pos.y) * usize::from(TILE_SIZE.y),
+                        usize::from(empty.size.x) * usize::from(TILE_SIZE.x),
+                        usize::from(empty.size.y) * usize::from(TILE_SIZE.y),
+                        BGRA8::ZERO,
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
@@ -834,34 +861,49 @@ struct RenderPassTile<'p> {
     arena: &'p [TileCommand],
     rects: &'p [QuadRect],
 }
+
 impl RenderPassTile<'_> {
     fn commands(&self) -> impl ExactSizeIterator<Item = &TileCommand> + use<'_> {
         self.rects.iter().map(|q| &self.arena[usize::from(q.id)])
     }
 }
 
+enum RenderPassEvent<'p> {
+    Tile(RenderPassTile<'p>),
+    Clear(EmptyEvent),
+}
+
 impl RenderPass {
-    fn start_tiling(&mut self) {
-        self.tiler.start(self.max.to_vec(), TILE_SIZE);
+    fn start_tiling(&mut self, min_size: Vec2<u16>) {
+        self.tiler.start(
+            Vec2::new(self.max.x.max(min_size.x), self.max.y.max(min_size.y)),
+            TILE_SIZE,
+        );
     }
 
-    fn next_tile(&mut self) -> Option<RenderPassTile<'_>> {
-        let (pos, rects) = self.tiler.next()?;
-        rects.sort_unstable_by_key(|q| q.z);
-        Some(RenderPassTile {
-            pos,
-            arena: &self.command_arena,
-            rects,
+    fn next_event(&mut self) -> Option<RenderPassEvent<'_>> {
+        self.tiler.next().map(|event| match event {
+            TilerEvent::Tile(TileEvent { pos, rects }) => {
+                rects.sort_unstable_by_key(|q| q.z);
+                RenderPassEvent::Tile(RenderPassTile {
+                    pos,
+                    arena: &self.command_arena,
+                    rects,
+                })
+            }
+            TilerEvent::Empty(empty) => RenderPassEvent::Clear(empty),
         })
     }
 
     fn into_pieces(mut self) -> impl Iterator<Item = OutputPiece> {
-        self.start_tiling();
+        self.start_tiling(Vec2::ZERO);
 
-        std::iter::from_fn(move || {
-            let tile = self.next_tile()?;
+        std::iter::from_fn(move || loop {
+            let RenderPassEvent::Tile(tile) = self.next_event()? else {
+                continue;
+            };
 
-            Some(OutputPiece {
+            return Some(OutputPiece {
                 pos: Point2::new(
                     tile.pos.x as i32 * TILE_SIZE.x as i32,
                     tile.pos.y as i32 * TILE_SIZE.y as i32,
@@ -875,7 +917,7 @@ impl RenderPass {
                         .collect::<Vec<_>>()
                         .into_boxed_slice(),
                 },
-            })
+            });
         })
     }
 }
@@ -1095,7 +1137,6 @@ impl TileRasterizer {
     }
 
     fn write(&mut self, target: &mut RenderTarget, pos: Point2<i32>) {
-        // TODO: if !self.dirty { just fill with zeroes }
         blit::copy_bgra(
             target.buffer.unwrap_for::<BGRA8>(),
             target.stride as usize,
@@ -1110,34 +1151,3 @@ impl TileRasterizer {
         );
     }
 }
-
-// /*
-// Insn {
-//   Blend(Operand),
-//   Gamma22ToLinear,
-//   LinearToGamma22,
-//   BroadcastAlpha,
-// }
-
-// Operand {
-//   LoadTexture(&Texture),
-//   SampleRectangle(&Rect2),
-//   InterpolateSin256(BGRA8, BGRA8),
-// }
-// */
-// enum ShaderRegister {
-//     Output,
-//     Tmp0,
-// }
-
-// enum ShaderInsn {
-//     LoadTexture(TextureView),
-//     SampleRect(Rect2S),
-//     // BlendWithSin256(ShaderRegister, BGRA8, BGRA8),
-//     Blend(ShaderRegister, ShaderRegister),
-//     Gamma22ToLinear(ShaderRegister),
-//     LinearToGamma22(ShaderRegister),
-//     BroadcastAlpha(ShaderRegister, ShaderRegister),
-// }
-
-// struct ShaderPipeline(Vec<ShaderInsn>);

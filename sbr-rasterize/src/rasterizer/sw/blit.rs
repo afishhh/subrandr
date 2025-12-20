@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{mem::MaybeUninit, ops::Range};
 
 use crate::color::{Premultiplied, Premultiply, BGRA8};
 
@@ -96,7 +96,7 @@ fn calculate_blit_rectangle(
 }
 
 #[inline(never)]
-pub unsafe fn blit_xxxa_to_bgra_unchecked(
+unsafe fn blit_xxxa_to_bgra_unchecked(
     dst: *mut BGRA8,
     dst_stride: usize,
     src: *const BGRA8,
@@ -112,7 +112,7 @@ pub unsafe fn blit_xxxa_to_bgra_unchecked(
 }
 
 #[inline(never)]
-pub unsafe fn copy_mono_to_float_unchecked(
+unsafe fn copy_mono_to_float_unchecked(
     dst: *mut f32,
     dst_stride: usize,
     src: *const u8,
@@ -126,7 +126,7 @@ pub unsafe fn copy_mono_to_float_unchecked(
 }
 
 #[inline(never)]
-pub unsafe fn copy_bgra_to_float_unchecked(
+unsafe fn copy_bgra_to_float_unchecked(
     dst: *mut f32,
     dst_stride: usize,
     src: *const BGRA8,
@@ -140,7 +140,7 @@ pub unsafe fn copy_bgra_to_float_unchecked(
 }
 
 #[inline(never)]
-pub unsafe fn copy_float_to_mono_unchecked(
+unsafe fn copy_float_to_mono_unchecked(
     dst: *mut u8,
     dst_stride: usize,
     src: *const f32,
@@ -154,7 +154,7 @@ pub unsafe fn copy_float_to_mono_unchecked(
 }
 
 #[inline(never)]
-pub unsafe fn copy_bgra_unchecked(
+unsafe fn copy_bgra_unchecked(
     dst: *mut BGRA8,
     dst_stride: usize,
     src: *const BGRA8,
@@ -240,3 +240,46 @@ make_checked_blitter!(copy_mono_to_float via copy_mono_to_float_unchecked, u8 [o
 make_checked_blitter!(copy_bgra_to_float via copy_bgra_to_float_unchecked, BGRA8 [over] f32);
 make_checked_blitter!(copy_float_to_mono via copy_float_to_mono_unchecked, f32 [over] u8);
 make_checked_blitter!(copy_bgra via copy_bgra_unchecked, BGRA8 [over] BGRA8);
+
+#[inline(never)]
+unsafe fn fill_bgra_unchecked(
+    mut dst: *mut BGRA8,
+    stride: usize,
+    width: usize,
+    height: usize,
+    value: BGRA8,
+) {
+    let dst_end = dst.add(stride * height);
+
+    while dst < dst_end {
+        std::slice::from_raw_parts_mut(dst.cast::<MaybeUninit<BGRA8>>(), width)
+            .fill(MaybeUninit::new(value));
+        dst = dst.add(stride);
+    }
+}
+
+pub fn fill_bgra(
+    dst: &mut [BGRA8],
+    dst_stride: usize,
+    dst_width: usize,
+    dst_height: usize,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    value: BGRA8,
+) {
+    assert!(dst_stride * dst_height <= dst.len());
+
+    if x >= dst_width || y >= dst_height {
+        return;
+    }
+
+    let clamped_width = width.min(dst_width - x);
+    let clamped_height = height.min(dst_height - y);
+
+    unsafe {
+        let dst_ptr = dst.as_mut_ptr().add(y * dst_stride + x);
+        fill_bgra_unchecked(dst_ptr, dst_stride, clamped_width, clamped_height, value);
+    }
+}

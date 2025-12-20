@@ -45,6 +45,24 @@ enum ItemPartition {
     Both,
 }
 
+#[derive(Debug)]
+pub(super) enum TilerEvent<'t> {
+    Tile(TileEvent<'t>),
+    Empty(EmptyEvent),
+}
+
+#[derive(Debug)]
+pub(super) struct TileEvent<'t> {
+    pub(super) pos: Point2<u16>,
+    pub(super) rects: &'t mut [QuadRect],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EmptyEvent {
+    pub(super) pos: Point2<u16>,
+    pub(super) size: Vec2<u16>,
+}
+
 impl RectTiler {
     fn partition(
         &mut self,
@@ -95,7 +113,7 @@ impl RectTiler {
         }
     }
 
-    pub(super) fn next(&mut self) -> Option<(Point2<u16>, &mut [QuadRect])> {
+    pub(super) fn next(&mut self) -> Option<TilerEvent<'_>> {
         loop {
             let quad = self.queue.pop()?;
 
@@ -104,17 +122,25 @@ impl RectTiler {
 
                 unsafe {
                     self.rects.set_len(start);
-                    return Some((
-                        Point2::new(quad.x, quad.y),
-                        std::slice::from_raw_parts_mut(
+                    return Some(TilerEvent::Tile(TileEvent {
+                        pos: Point2::new(quad.x, quad.y),
+                        rects: std::slice::from_raw_parts_mut(
                             self.rects.as_mut_ptr().add(start),
                             usize::from(quad.n_rects),
                         ),
-                    ));
+                    }));
                 };
             }
 
             if quad.order & 1 == 0 {
+                // NOTE: This can only happen in the top-level quad
+                if self.rects.is_empty() {
+                    return Some(TilerEvent::Empty(EmptyEvent {
+                        pos: Point2::new(quad.x, quad.y),
+                        size: Vec2::splat(u16::from(quad.order >> 1)),
+                    }));
+                }
+
                 let level = (quad.order >> 1) - 1;
                 let split_y = (FixedS::new(quad.y.into()) + (1 << level)) * self.tile_size.y as i32;
                 let (n_first, n_second) =
@@ -128,6 +154,7 @@ impl RectTiler {
                         }
                     });
 
+                let mut empty_y = None;
                 if n_first > 0 {
                     self.queue.push(Quad {
                         x: quad.x,
@@ -135,15 +162,28 @@ impl RectTiler {
                         order: quad.order - 1,
                         n_rects: n_first,
                     });
+                } else {
+                    empty_y = Some(quad.y);
                 }
 
+                let second_y = quad.y + (1 << level);
                 if n_second > 0 {
                     self.queue.push(Quad {
                         x: quad.x,
-                        y: quad.y + (1 << level),
+                        y: second_y,
                         order: quad.order - 1,
                         n_rects: n_second,
                     });
+                } else {
+                    empty_y = Some(second_y);
+                }
+
+                if let Some(y) = empty_y {
+                    let height = 1 << level;
+                    return Some(TilerEvent::Empty(EmptyEvent {
+                        pos: Point2::new(quad.x, y),
+                        size: Vec2::new(height << 1, height),
+                    }));
                 }
             } else {
                 let level = ((quad.order + 1) >> 1) - 1;
@@ -159,6 +199,7 @@ impl RectTiler {
                         }
                     });
 
+                let mut empty_x = None;
                 if n_first > 0 {
                     self.queue.push(Quad {
                         x: quad.x,
@@ -166,15 +207,27 @@ impl RectTiler {
                         order: quad.order - 1,
                         n_rects: n_first,
                     });
+                } else {
+                    empty_x = Some(quad.x);
                 }
 
+                let second_x = quad.x + (1 << level);
                 if n_second > 0 {
                     self.queue.push(Quad {
-                        x: quad.x + (1 << level),
+                        x: second_x,
                         y: quad.y,
                         order: quad.order - 1,
                         n_rects: n_second,
                     });
+                } else {
+                    empty_x = Some(second_x);
+                }
+
+                if let Some(x) = empty_x {
+                    return Some(TilerEvent::Empty(EmptyEvent {
+                        pos: Point2::new(x, quad.y),
+                        size: Vec2::splat(1 << level),
+                    }));
                 }
             }
         }
@@ -187,7 +240,7 @@ mod test {
 
     use util::math::{Point2, Rect2, Vec2};
 
-    use super::{QuadRect, RectTiler};
+    use super::{QuadRect, RectTiler, TileEvent, TilerEvent};
     use crate::scene::FixedS;
 
     macro_rules! test_tiler {
@@ -217,6 +270,9 @@ mod test {
 
             $tiler.start(Vec2::new($sx, $sy), Vec2::new(8, 4));
 
+            let tile_cols = ($sx as usize).div_ceil(8);
+            let tile_rows = ($sy as usize).div_ceil(4);
+            let mut seen = vec![false; tile_cols * tile_rows];
             let mut expected = {
                 #[allow(unused_mut)]
                 let mut result = HashMap::<Point2<u16>, Box<[u16]>>::new();
@@ -228,17 +284,42 @@ mod test {
                 result
             };
 
-            while let Some((tile_pos, rects)) = $tiler.next() {
-                let mut r: Vec<_> = rects.iter().map(|q| q.id).collect();
-                r.sort_unstable();
-                let exp = expected.remove(&tile_pos);
-                assert_eq!(exp.as_deref(), Some(&r[..]),
-                    "expected tile {tile_pos:?} to have {exp:?} but got {r:?}"
-                );
+            while let Some(event) = $tiler.next() {
+                match event {
+                    TilerEvent::Tile(TileEvent { pos, rects }) => {
+                        dbg!(pos);
+                        seen[usize::from(pos.y) * tile_cols + usize::from(pos.x)] = true;
+                        let mut r: Vec<_> = rects.iter().map(|q| q.id).collect();
+                        r.sort_unstable();
+                        let exp = expected.remove(&pos);
+                        assert_eq!(exp.as_deref(), Some(&r[..]),
+                            "expected tile {pos:?} to have {exp:?} but got {r:?}"
+                        );
+                    },
+                    TilerEvent::Empty(empty) => {
+                        dbg!(empty);
+                        for y in empty.pos.y..(empty.pos.y + empty.size.y).min(tile_rows as u16) {
+                            for x in empty.pos.x..(empty.pos.x + empty.size.x).min(tile_cols as u16) {
+                                let cell = &mut seen[usize::from(y) * tile_cols + usize::from(x)];
+                                assert!(!*cell);
+                                *cell = true;
+                            }
+                        }
+                        continue;
+                    }
+                };
             }
 
             if !expected.is_empty() {
                 panic!("tiles {:?} should've been emitted but weren't", expected.keys().collect::<Vec<_>>());
+            }
+
+            let missed = seen.into_iter()
+                .enumerate()
+                .filter_map(|(i, v)| (!v).then(|| Point2::new(i / tile_cols, i % tile_cols)))
+                .collect::<Vec<_>>();
+            if !missed.is_empty() {
+                panic!("tiles {missed:?} weren't emitted nor cleared");
             }
         };
     }

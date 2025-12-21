@@ -14,7 +14,11 @@ extern "C" {
 
 #ifdef SBR_ALLOW_UNSTABLE
 #define SBR_UNSTABLE
-#elif defined(__has_attribute)
+// clang implements this attribute sensibly and doesn't cause unavailable errors
+// if an unavailable type is only used in other unavailable declarations.
+// GCC does not have these semantics and I'm scared of what other compilers
+// might do here.
+#elif defined(__has_attribute) && __clang__
 #if __has_attribute(unavailable)
 #define SBR_UNSTABLE                                                           \
   __attribute__((                                                              \
@@ -100,6 +104,7 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
                         uint32_t t, sbr_bgra8 *buffer, uint32_t width,
                         uint32_t height, uint32_t stride);
 
+#ifdef SBR_UNSTABLE
 // Structure representing a single output piece that resulted from
 // fragmented rendering of a subtitle frame.
 //
@@ -108,13 +113,13 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
 //
 // The size of this struct is not part of the public ABI,
 // new fields may be added in ABI-compatible releases.
-typedef struct sbr_output_piece {
+typedef SBR_UNSTABLE struct sbr_output_piece {
   int32_t x, y;
   uint32_t width, height;
   struct sbr_output_piece *next;
 } sbr_output_piece;
 
-typedef struct sbr_piece_raster_pass sbr_piece_raster_pass;
+typedef SBR_UNSTABLE struct sbr_piece_raster_pass sbr_piece_raster_pass;
 
 // Renders a single subtitle frame to output pieces and immediately
 // begins a piece raster pass which it returns a handle to.
@@ -122,12 +127,12 @@ typedef struct sbr_piece_raster_pass sbr_piece_raster_pass;
 // See `sbr_renderer_render` for details on parameters.
 sbr_piece_raster_pass *sbr_renderer_render_pieces(sbr_renderer *,
                                                   sbr_subtitle_context const *,
-                                                  uint32_t t);
+                                                  uint32_t t) SBR_UNSTABLE;
 
 // Returns the first element of the internal list of output pieces
 // that are to be drawn during this raster pass.
 sbr_output_piece const *
-sbr_piece_raster_pass_get_pieces(sbr_piece_raster_pass *);
+sbr_piece_raster_pass_get_pieces(sbr_piece_raster_pass *) SBR_UNSTABLE;
 
 // Rasterizes the provided output piece into the provided pixel buffer at
 // a specified offset.
@@ -142,13 +147,15 @@ int sbr_piece_raster_pass_draw_piece(sbr_piece_raster_pass *,
                                      sbr_output_piece const *piece,
                                      int32_t off_x, int32_t off_y,
                                      sbr_bgra8 *buffer, uint32_t width,
-                                     uint32_t height, uint32_t stride);
+                                     uint32_t height,
+                                     uint32_t stride) SBR_UNSTABLE;
 
 // Marks the provided raster pass as finished.
 //
 // Note that calling this function after a raster pass is *mandatory*,
 // currently failing to do so will be met with an assertion failure.
-void sbr_piece_raster_pass_finish(sbr_piece_raster_pass *);
+void sbr_piece_raster_pass_finish(sbr_piece_raster_pass *) SBR_UNSTABLE;
+#endif
 
 void sbr_renderer_destroy(sbr_renderer *);
 

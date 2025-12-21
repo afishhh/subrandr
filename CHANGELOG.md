@@ -14,6 +14,15 @@
 - Made WebVTT parser correctly ignore STYLE and REGION blocks following the first cue.
 - Ruby annotations are now shaped with the `ruby` OpenType feature enabled.
 - Shaping is now done with character cluster level. This means that intra-grapheme styling changes are now sometimes possible.
+- Failing to initialize a font provider will now result in an error instead of a panic.
+- Failing to open a font in the DirectWrite font provider will no longer lead to it failing to initialize (a warning is logged instead).
+- Fixed rendering of COLRv0 glyphs.
+- Fixed DPI scaling of tofu font.
+- Fixed many line-breaking and padding edge cases.
+- Made background box rounding significantly saner.
+- Increased target glyph cache memory footprint to 8MiB as 2MiB was very easily reached on HiDPI.
+- Text shadow y-positions are now rounded (like text baselines).
+- SRV3 is now laid out with `inline-sizing: stretch` set on most boxes.
 
 ## [v0.2.2]
 

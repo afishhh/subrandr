@@ -18,7 +18,7 @@ extern "C" {
 // if an unavailable type is only used in other unavailable declarations.
 // GCC does not have these semantics and I'm scared of what other compilers
 // might do here.
-#elif defined(__has_attribute) && __clang__
+#elif defined(__has_attribute) && defined(__clang__)
 #if __has_attribute(unavailable)
 #define SBR_UNSTABLE                                                           \
   __attribute__((                                                              \

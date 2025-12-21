@@ -1,5 +1,3 @@
-//! Converts parsed SRV3 subtitles into Subtitles.
-
 use std::{collections::HashMap, ops::Range};
 
 use rasterize::color::BGRA8;
@@ -134,12 +132,10 @@ fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
 #[allow(clippy::let_and_return)] // shut up
 fn font_size_to_pixels(size: u16) -> f32 {
     let c = 1.0 + 0.25 * (size as f32 / 100.0 - 1.0);
-    // This appears to be further modified based on an "of" attribute
-    // currently we don't even parse it but if start doing so this is the
-    // correct transformation:
-    // if offset == 0 || offset == 2 {
-    //     c *= 0.8;
-    // }
+    // NOTE: This appears to be further modified based on an "of" attribute which we
+    //       currently don't support.
+    //       If we start doing so the correct transformation seems to be
+    //       `if of == 0 || of == 2 { c *= 0.8 }`.
     c
 }
 
@@ -165,7 +161,6 @@ fn pixels_to_points(pixels: f32) -> f32 {
 
 #[derive(Debug, Clone)]
 pub struct Srv3TextShadow {
-    // never None
     kind: EdgeType,
     color: BGRA8,
 }
@@ -181,11 +176,10 @@ impl Srv3TextShadow {
         match self.kind {
             EdgeType::None => (),
             EdgeType::HardShadow => {
-                // in captions.js it is window.devicePixelRatio >= 2 ? 0.5 : 1
-                // BUT that is NOT what we want, I think they do this to increase fidelity on displays
-                // with a lower DPI, because browsers scale all their units by window.devicePixelRatio
-                // however we're working with direct device pixels here, so we want to do the OPPOSITE
-                // of what they do and pick 0.5 when we have less pixels.
+                // NOTE: If `text-shadow` is ever updated to use logical pixels instead of device
+                //       pixels this code should be updated.
+                //       Currently this increases the step on `dpi >= 144` but in that case
+                //       it would have to do the opposite and increase it if `dpi < 144`.
                 let step = (ctx.dpi >= 144) as i32 as f32 * 0.5 + 0.5;
                 let mut x = e;
                 while x <= t {

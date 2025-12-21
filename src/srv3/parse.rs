@@ -109,7 +109,6 @@ pub struct WindowPos {
     pub row_count: u32,
 }
 
-// TODO: Find correct values
 const DEFAULT_WINDOW_POS: WindowPos = WindowPos {
     point: Point::BottomCenter,
     x: 50,
@@ -579,7 +578,7 @@ fn parse_body(
                     b"p" => {
                         // time=0 and duration=0 are defaults YouTube uses
                         // duration=0 events should probably be stripped during conversion
-                        // since they're effectively noops unless I'm missing some subtle behaviour
+                        // since they're effectively no-ops unless I'm missing some subtle behaviour
                         let mut result = Event {
                             time: 0,
                             duration: 0,

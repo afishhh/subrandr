@@ -120,17 +120,22 @@ impl Display for Triple {
     }
 }
 
-fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+fn copy_dir_all_if(
+    src: &Path,
+    dst: &Path,
+    filter: &mut impl FnMut(&Path) -> bool,
+) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
 
     for entry in src.read_dir()? {
         let entry = entry?;
         let entry_dst = dst.join(entry.file_name());
         let entry_type = entry.file_type()?;
+        let entry_path = entry.path();
         if entry_type.is_dir() {
-            copy_dir_all(&entry.path(), &entry_dst)?;
-        } else {
-            std::fs::copy(entry.path(), entry_dst)?;
+            copy_dir_all_if(&entry_path, &entry_dst, filter)?;
+        } else if filter(&entry_path) {
+            std::fs::copy(entry_path, entry_dst)?;
         }
     }
 
@@ -311,6 +316,24 @@ pub fn build_library(ctx: &CommandContext, build: &BuildCommand) -> Result<()> {
     Ok(())
 }
 
+fn copy_and_substitute_version(src: &Path, dst: &Path, version: &str) -> Result<()> {
+    let [major, minor, patch] = version.splitn(3, '.').collect::<Vec<_>>()[..] else {
+        bail!("Failed to split version {version:?} into (major, minor, patch)");
+    };
+
+    assert!(major.chars().all(|c| c.is_ascii_digit()));
+    assert!(minor.chars().all(|c| c.is_ascii_digit()));
+    assert!(patch.chars().all(|c| c.is_ascii_digit()));
+
+    let content = std::fs::read_to_string(src)?;
+    let replaced = content
+        .replace("SUBRANDR_MAJOR_PLACEHOLDER", major)
+        .replace("SUBRANDR_MINOR_PLACEHOLDER", minor)
+        .replace("SUBRANDR_PATCH_PLACEHOLDER", patch);
+
+    std::fs::write(dst, replaced).map_err(Into::into)
+}
+
 pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<()> {
     let prefix = install
         .prefix
@@ -366,13 +389,20 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
     })()
     .context("Failed to create directory structure")?;
 
+    let src_include_dir = ctx.project_dir().join("include");
     let include_dir = destdir.join(&install.includedir);
     statusln!(ctx, "Installing", "headers to `{}`", include_dir.display());
-    copy_dir_all(
-        &ctx.project_dir().join("include"),
-        &include_dir.join("subrandr"),
-    )
+    copy_dir_all_if(&src_include_dir, &include_dir.join("subrandr"), &mut |p| {
+        !p.ends_with("include/subrandr.h")
+    })
     .context("Failed to copy headers")?;
+
+    copy_and_substitute_version(
+        &src_include_dir.join("subrandr.h"),
+        &include_dir.join("subrandr/subrandr.h"),
+        version,
+    )
+    .context("Failed to copy subrandr.h header")?;
 
     let target_dir = ctx
         .project_dir()

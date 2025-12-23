@@ -28,6 +28,10 @@ extern "C" {
 #endif
 #endif
 
+#define SUBRANDR_MAJOR SUBRANDR_MAJOR_PLACEHOLDER
+#define SUBRANDR_MINOR SUBRANDR_MINOR_PLACEHOLDER
+#define SUBRANDR_PATCH SUBRANDR_PATCH_PLACEHOLDER
+
 typedef int32_t sbr_26dot6;
 typedef uint32_t sbr_bgra8;
 

@@ -231,7 +231,7 @@ Libs.private: {required_static_libs}
 
 fn target_has_broken_implib(target: &Triple) -> bool {
     target.is_windows()
-        && target.env.as_deref().is_some_and(|env| env != "msvc")
+        && !matches!(target.env.as_deref(), Some("msvc" | "gnullvm"))
         && matches!(&*target.arch, "i686")
 }
 
@@ -243,6 +243,10 @@ fn write_implib(
 ) -> Result<()> {
     let flavor = match target.env.as_deref() {
         Some("msvc") => implib::Flavor::Msvc,
+        // The LLVM toolchain seems to prefer MSVC implibs and in general
+        // they are less hacky so let's use them.
+        // Fixes https://github.com/msys2/MINGW-packages/issues/25267.
+        Some("gnullvm") => implib::Flavor::Msvc,
         _ => implib::Flavor::Gnu,
     };
 

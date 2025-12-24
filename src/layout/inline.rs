@@ -1783,17 +1783,28 @@ fn layout_run_full(
 
                         let base_font_metrics = base.primary_font.metrics();
                         let InlineBoxSizingMetrics {
-                            top_y_offset: base_y_offset,
-                            box_height: base_height,
-                            ascender: base_box_ascender,
+                            top_y_offset: mut base_y_offset,
+                            box_height: mut base_height,
+                            ascender: mut base_box_ascender,
                         } = self.compute_inline_box_sizing_metrics(base.style, base_font_metrics);
                         let annotation_height = annotation_metrics.height();
+                        let annotation_y_offset =
+                            -annotation_metrics.max_ascender - annotation_metrics.min_descender;
                         let signed_half_padding = (annotation_width - base_width) / 2;
                         let base_half_padding = signed_half_padding.max(FixedL::ZERO);
                         let annotation_half_padding = (-signed_half_padding).max(FixedL::ZERO);
                         let ruby_width = base_width.max(annotation_width);
 
-                        let base_offset = Vec2::new(ruby_current_x, base_y_offset);
+                        // HACK: This is to make ruby base and annotation backgrounds not overlap.
+                        //       The correct solution is block layout (#111) or a subrandr-specific
+                        //       style property.
+                        let background_overlap = (annotation_y_offset - base_y_offset
+                            + annotation_height)
+                            .max(FixedL::ZERO);
+                        base_y_offset += background_overlap;
+                        base_box_ascender -= background_overlap;
+                        base_height -= background_overlap;
+
                         // FIXME: Apparently ruby internal boxes are not supposed to use
                         //        inline-sizing sizing. Now this makes sense with the ruby
                         //        annotation box because it creates/is a new line box and
@@ -1848,18 +1859,14 @@ fn layout_run_full(
                             span_state,
                         )?;
 
-                        let annotation_offset = Vec2::new(
-                            ruby_current_x,
-                            -annotation_metrics.max_ascender - annotation_metrics.min_descender,
-                        );
-
-                        ruby_current_x += base_fragment.fbox.size_for_layout().x;
+                        let width_for_layout = base_fragment.fbox.size_for_layout().x;
                         result.content.push((
-                            base_offset,
+                            Vec2::new(ruby_current_x, base_y_offset),
                             base_fragment,
-                            annotation_offset,
+                            Vec2::new(ruby_current_x, annotation_y_offset),
                             annotation_fragment,
                         ));
+                        ruby_current_x += width_for_layout;
                     }
 
                     let (fragment, width, y_correction) = self.rebuild_leaf_branch(

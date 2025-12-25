@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- Fixed occasional gaps between backgrounds boxes if non-integer padding is involved.
+
 ## [v1.0.1]
 
 - Generate MSVC implibs on `gnullvm` targets

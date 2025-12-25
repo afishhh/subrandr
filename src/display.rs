@@ -119,7 +119,7 @@ impl DisplayPass<'_> {
 
     fn display_inline_background(
         &mut self,
-        mut pos: Point2L,
+        pos: Point2L,
         style: &ComputedStyle,
         fragment_box: &FragmentBox,
     ) {
@@ -129,14 +129,12 @@ impl DisplayPass<'_> {
             // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.
             // 2. It rounds the background box to whole integers avoiding conflation artifacts.
             // Not sure what browsers do here though maybe that's worthwhile to investigate.
-            let mut fbox = *fragment_box;
-            fbox.content_size.x = (fbox.content_size.x + pos.x.fract()).floor();
-            fbox.content_size.y = (fbox.content_size.y + pos.y.fract()).round();
-            pos.x = pos.x.floor();
-            pos.y = pos.y.round();
-
-            self.output
-                .push_rect_fill(fbox.padding_box().translate(pos.to_vec()), background);
+            let mut bg = fragment_box.padding_box().translate(pos.to_vec());
+            bg.max.x = bg.max.x.floor();
+            bg.max.y = bg.max.y.round();
+            bg.min.x = bg.min.x.floor();
+            bg.min.y = bg.min.y.round();
+            self.output.push_rect_fill(bg, background);
         }
     }
 

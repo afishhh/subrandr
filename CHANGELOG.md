@@ -2,6 +2,7 @@
 
 - Fixed occasional gaps between backgrounds boxes if non-integer padding is involved.
 - Fixed static MSVC build failing due to different static library naming.
+- Switched MSVC build to use clang-compatible naming convention. As a consequence `--shared-library` and `--static-library` are now mutually exclusive on MSVC targets.
 
 ## [v1.0.1]
 

@@ -64,6 +64,10 @@ impl Triple {
         &*self.os == "windows"
     }
 
+    fn is_msvc(&self) -> bool {
+        self.env.as_deref() == Some("msvc")
+    }
+
     fn is_unix(&self) -> bool {
         // Censored version of `rustc -Z unstable-options --print all-target-specs-json | jq -r '.[] | select(.["target-family"] | index("unix") != null) | .os' | sort | uniq`
         matches!(
@@ -359,6 +363,22 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         panic!("Build for broken platform aborted");
     }
 
+    // See https://github.com/afishhh/subrandr/pull/126
+    // The MSVC world is absolutely restarted and the `*-pc-windows-msvc` triple
+    // for some reason refuses to accept MinGW wisdom of making things work.
+    // i.e. clang went and decided that it will only look for `.lib` on the MSVC
+    //      triple which helpfully forces the naming scheme of "foo.lib" on BOTH
+    //      static libraries and import libraries with no way to distinguish them.
+    // If not for msvc clang then the meson solution discussed in https://github.com/mesonbuild/meson/issues/8153
+    // would work just fine.
+    if install.build.target.is_msvc()
+        && (install.build.shared_library && install.build.static_library)
+    {
+        bail!(
+            "Mixed shared and static builds are not supported on MSVC targets\nMake sure only one of `static-library` or `shared-library` is enabled to continue"
+        );
+    }
+
     build_library(ctx, &install.build)?;
 
     let package = ctx
@@ -375,6 +395,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         .context("Failed to parse `capi` metadata table")?
         .abiver;
 
+    let bindir = destdir.join(&install.bindir);
     let libdir = destdir.join(&install.libdir);
     let pkgconfigdir = if let Some(pkgconfigdir) = install.pkgconfigdir {
         destdir.join(pkgconfigdir)
@@ -383,8 +404,8 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
     };
 
     (|| -> Result<()> {
-        if install.build.target.is_windows() {
-            std::fs::create_dir_all(destdir.join(&install.bindir))?;
+        if install.build.target.is_windows() && install.build.shared_library {
+            std::fs::create_dir_all(&bindir)?;
         }
         std::fs::create_dir_all(&libdir)?;
         std::fs::create_dir_all(destdir.join(&install.includedir).join("subrandr"))?;
@@ -413,7 +434,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         .join("target")
         .join(install.build.target.to_string())
         .join("release");
-    let static_in = if install.build.target.env.as_deref() == Some("msvc") {
+    let static_name = if install.build.target.is_msvc() {
         "subrandr.lib"
     } else {
         "libsubrandr.a"
@@ -421,7 +442,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
 
     if install.build.static_library {
         statusln!(ctx, "Installing", "libsubrandr.a to `{}`", libdir.display());
-        copy_file(&target_dir, &libdir, static_in, "libsubrandr.a")?;
+        copy_file(&target_dir, &libdir, static_name, static_name)?;
     }
 
     let (shared_in, shared_dir, shared_out) = if install.build.target.is_windows() {
@@ -472,15 +493,26 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
 
         if install.build.target.is_windows() {
             statusln!(ctx, "Installing", "implib to `{}`", libdir.display());
-            write_implib(
-                &install.build.target,
-                &std::fs::read_to_string(target_dir.join("subrandr.def"))
-                    .context("Failed to read module definition file")?,
-                &shared_out,
-                &libdir.join("libsubrandr.dll.a"),
-            )?;
+            if install.build.target.is_msvc() {
+                copy_file(&target_dir, &bindir, "subrandr.dll.lib", "subrandr.lib")?;
+            } else {
+                write_implib(
+                    &install.build.target,
+                    &std::fs::read_to_string(target_dir.join("subrandr.def"))
+                        .context("Failed to read module definition file")?,
+                    &shared_out,
+                    &libdir.join("libsubrandr.dll.a"),
+                )?;
+            };
         }
     }
+
+    // Part two of MSVC target idiocy described at the top of this function.
+    let link_dir = if install.build.target.is_msvc() && install.build.shared_library {
+        &install.bindir
+    } else {
+        &install.libdir
+    };
 
     statusln!(
         ctx,
@@ -495,7 +527,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
             &prefix,
             version,
             &install.build.target,
-            &install.libdir,
+            link_dir,
             &install.includedir,
             install.build.static_library,
         )?,

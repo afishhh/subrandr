@@ -64,6 +64,10 @@ impl Triple {
         &*self.os == "windows"
     }
 
+    fn is_msvc(&self) -> bool {
+        self.env.as_deref() == Some("msvc")
+    }
+
     fn is_unix(&self) -> bool {
         // Censored version of `rustc -Z unstable-options --print all-target-specs-json | jq -r '.[] | select(.["target-family"] | index("unix") != null) | .os' | sort | uniq`
         matches!(
@@ -413,7 +417,7 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         .join("target")
         .join(install.build.target.to_string())
         .join("release");
-    let static_in = if install.build.target.env.as_deref() == Some("msvc") {
+    let static_in = if install.build.target.is_msvc() {
         "subrandr.lib"
     } else {
         "libsubrandr.a"
@@ -471,13 +475,19 @@ pub fn install_library(ctx: &CommandContext, install: InstallCommand) -> Result<
         }
 
         if install.build.target.is_windows() {
+            let implib_out = if install.build.target.is_msvc() {
+                "subrandr.lib"
+            } else {
+                "libsubrandr.dll.a"
+            };
+
             statusln!(ctx, "Installing", "implib to `{}`", libdir.display());
             write_implib(
                 &install.build.target,
                 &std::fs::read_to_string(target_dir.join("subrandr.def"))
                     .context("Failed to read module definition file")?,
                 &shared_out,
-                &libdir.join("libsubrandr.dll.a"),
+                &libdir.join(implib_out),
             )?;
         }
     }

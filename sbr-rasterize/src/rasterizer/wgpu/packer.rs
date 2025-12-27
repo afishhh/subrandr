@@ -6,7 +6,7 @@ use std::{
 };
 
 use util::math::{Point2, Vec2};
-use wgpu::{CommandEncoder, TextureFormat};
+use wgpu::TextureFormat;
 
 /// A texture packer that packs stuff into (potentially multiple) atlas textures.
 ///
@@ -17,12 +17,10 @@ use wgpu::{CommandEncoder, TextureFormat};
 /// necessary anyway.
 pub struct TexturePacker {
     device: wgpu::Device,
-    queue: wgpu::Queue,
     format: TextureFormat,
     textures: HashMap<u32, AtlasTexture>,
     next_texture_id: u32,
     free: Vec<FreeBlock>,
-    command_encoder: Cell<Option<CommandEncoder>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +73,6 @@ impl PackedTexture {
         &self,
         packer: &'a TexturePacker,
     ) -> (&'a wgpu::Texture, Point2<u32>, Vec2<u32>) {
-        packer.flush_commands();
         (
             &packer.textures[&self.block.texture.get()].texture,
             self.block.position.get(),
@@ -85,15 +82,13 @@ impl PackedTexture {
 }
 
 impl TexturePacker {
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue, format: TextureFormat) -> Self {
+    pub fn new(device: wgpu::Device, format: TextureFormat) -> Self {
         Self {
             device,
-            queue,
             format,
             textures: HashMap::new(),
             next_texture_id: 0,
             free: Vec::new(),
-            command_encoder: Cell::new(None),
         }
     }
 
@@ -183,7 +178,7 @@ impl TexturePacker {
     /// Note that this may change what textures existing `PackedTexture`s derived from this
     /// packer point to, thus it shall not be called if those are expected not to change, like
     /// when a draw is being actively batched.
-    pub fn defragment(&mut self) {
+    pub fn defragment(&mut self, encoder: &mut wgpu::CommandEncoder) {
         // TODO: hash_extract_if will be stabilised in 1.88.0
         //       they delayed it from 1.87 :(
         // let fragmented = self
@@ -224,33 +219,15 @@ impl TexturePacker {
         for atlas in fragmented {
             for weak_block in atlas.allocated {
                 if let Some(block) = weak_block.upgrade() {
-                    self.relocate_block(&atlas.texture, block, weak_block);
+                    self.relocate_block(encoder, &atlas.texture, block, weak_block);
                 }
             }
         }
     }
 
-    fn flush_commands(&self) {
-        let old = Cell::new(None);
-        self.command_encoder.swap(&old);
-        if let Some(encoder) = old.take() {
-            self.queue.submit([encoder.finish()]);
-        }
-    }
-
-    fn get_command_encoder_mut<'a>(
-        cell: &'a mut Cell<Option<CommandEncoder>>,
-        device: &wgpu::Device,
-    ) -> &'a mut CommandEncoder {
-        cell.get_mut().get_or_insert_with(|| {
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("texture texture command encoder"),
-            })
-        })
-    }
-
     fn relocate_block(
         &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         texture: &wgpu::Texture,
         allocated_block: Rc<AllocatedBlock>,
         weak_allocated_block: Weak<AllocatedBlock>,
@@ -259,7 +236,6 @@ impl TexturePacker {
         let block = self.allocate_block(size);
         let atlas = self.textures.get_mut(&block.texture).unwrap();
 
-        let encoder = Self::get_command_encoder_mut(&mut self.command_encoder, &self.device);
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -295,6 +271,7 @@ impl TexturePacker {
 
     pub fn add_from_buffer(
         &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         buffer: &wgpu::Buffer,
         stride: u32,
         width: u32,
@@ -304,7 +281,6 @@ impl TexturePacker {
         let block = self.allocate_block(size);
         let atlas = self.textures.get_mut(&block.texture).unwrap();
 
-        let encoder = Self::get_command_encoder_mut(&mut self.command_encoder, &self.device);
         encoder.copy_buffer_to_texture(
             wgpu::TexelCopyBufferInfo {
                 buffer,

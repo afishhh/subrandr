@@ -1,19 +1,22 @@
-use rasterize::color::BGRA8;
+use std::rc::Rc;
+
+use rasterize::{
+    color::BGRA8,
+    scene::{Bitmap, BitmapFilter, DeferredBitmaps, FilledRect, SceneNode},
+};
 use util::math::{I26Dot6, Point2, Rect2};
 
 use crate::{
     layout::{
         inline::{InlineContentFragment, InlineItemFragment, SpanFragment, TextFragment},
-        FixedL, FragmentBox, Point2L,
+        FixedL, FragmentBox, Point2L, Rect2L,
     },
     style::ComputedStyle,
+    text::{self, GlyphCache},
 };
 
-mod paint_op;
-pub use paint_op::*;
-
 pub struct DisplayPass<'r> {
-    pub output: PaintOpBuilder<'r>,
+    pub output: &'r mut Vec<SceneNode>,
 }
 
 struct LineDecoration {
@@ -35,6 +38,55 @@ fn round_y(mut p: Point2L) -> Point2L {
 }
 
 impl DisplayPass<'_> {
+    pub fn push_rect_fill(&mut self, rect: Rect2L, color: BGRA8) {
+        self.output
+            .push(SceneNode::FilledRect(FilledRect { rect, color }));
+    }
+
+    fn push_text(
+        &mut self,
+        pos: Point2L,
+        fragment: &TextFragment,
+        shadow: Option<f32>,
+        color: BGRA8,
+    ) {
+        let fragment = fragment.clone();
+        self.output
+            .push(SceneNode::DeferredBitmaps(DeferredBitmaps {
+                to_bitmaps: Rc::new(move |rasterizer, user_data| {
+                    let glyph_cache = user_data
+                        .downcast_ref::<GlyphCache>()
+                        .expect("to_bitmaps user_data is not a GlyphCache?");
+
+                    let mut bitmaps = Vec::new();
+                    let glyphs = text::render(
+                        glyph_cache,
+                        rasterizer,
+                        pos.x.fract(),
+                        pos.y.fract(),
+                        shadow.unwrap_or(0.0),
+                        &mut fragment.glyphs().iter_glyphs_visual(),
+                    )?;
+
+                    let base_pos = Point2::new(pos.x.floor_to_inner(), pos.y.floor_to_inner());
+                    for glyph in glyphs {
+                        bitmaps.push(Bitmap {
+                            pos: base_pos + glyph.offset,
+                            texture: glyph.texture,
+                            filter: if shadow.is_some() {
+                                Some(BitmapFilter::ExtractAlpha)
+                            } else {
+                                None
+                            },
+                            color,
+                        });
+                    }
+
+                    Ok(bitmaps)
+                }),
+            }));
+    }
+
     fn display_line_decoration(
         &mut self,
         x0: FixedL,
@@ -44,7 +96,7 @@ impl DisplayPass<'_> {
     ) {
         let decoration_y = baseline_y + decoration.baseline_offset;
 
-        self.output.push_rect_fill(
+        self.push_rect_fill(
             Rect2::new(
                 Point2::new(x0, decoration_y),
                 Point2::new(x1, decoration_y + decoration.thickness),
@@ -72,14 +124,12 @@ impl DisplayPass<'_> {
                     FixedL::ZERO
                 };
 
-                self.output.push_text(Text::from_fragment(
+                self.push_text(
                     round_y(pos + shadow.offset),
                     fragment,
-                    TextKind::Shadow {
-                        blur_stddev: stddev,
-                        color: shadow.color,
-                    },
-                ));
+                    Some(stddev.into_f32()),
+                    shadow.color,
+                );
             }
         }
 
@@ -102,11 +152,7 @@ impl DisplayPass<'_> {
 
         let color = fragment.style.color();
         if color.a > 0 {
-            self.output.push_text(Text::from_fragment(
-                pos,
-                fragment,
-                TextKind::Normal { mono_color: color },
-            ));
+            self.push_text(pos, fragment, None, color);
         }
 
         for decoration in decorations
@@ -134,7 +180,7 @@ impl DisplayPass<'_> {
             bg.max.y = bg.max.y.round();
             bg.min.x = bg.min.x.floor();
             bg.min.y = bg.min.y.round();
-            self.output.push_rect_fill(bg, background);
+            self.push_rect_fill(bg, background);
         }
     }
 

@@ -336,6 +336,11 @@ impl<R: Refcount, T: ?Sized> RcBase<R, T> {
     }
 
     #[inline]
+    pub fn hash_ptr(this: &Self, hasher: &mut impl std::hash::Hasher) {
+        std::hash::Hash::hash(&this.ptr, hasher)
+    }
+
+    #[inline]
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
         std::ptr::eq(this.ptr.as_ptr() as *mut (), other.ptr.as_ptr() as *mut ())
     }

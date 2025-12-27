@@ -30,6 +30,13 @@ pub fn vec_into_parts<T>(mut v: Vec<T>) -> (*mut T, usize, usize) {
     parts
 }
 
+/// # Safety
+///
+/// `value` must contain no uninitialized bytes (including padding bytes).
+pub unsafe fn cast_bytes<T>(value: &[T]) -> &[u8] {
+    std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), size_of_val(value))
+}
+
 // Formatting helpers
 // Remove once [debug_closure_helpers](https://github.com/rust-lang/rust/issues/117729) is stabilized.
 

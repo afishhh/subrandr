@@ -7,7 +7,7 @@ use rasterize::{
     color::BGRA8,
     sw::{InstancedOutputBuilder, OutputImage, OutputPiece},
 };
-use util::math::{Point2, Vec2};
+use util::math::{Point2, Rect2, Vec2};
 
 use super::CRenderer;
 use crate::SubtitleContext;
@@ -22,10 +22,12 @@ pub(super) struct COutputImage<'a> {
 
 #[repr(C)]
 pub(super) struct COutputInstance<'a> {
-    pos: Point2<i32>,
-    size: Vec2<u32>,
-    base: COutputInstanceBase<'a>,
     next: *const COutputInstance<'a>,
+    base: COutputInstanceBase<'a>,
+    dst_pos: Point2<i32>,
+    dst_size: Vec2<u32>,
+    src_off: Vec2<u32>,
+    src_size: Vec2<u32>,
 }
 
 union COutputInstanceBase<'a> {
@@ -38,6 +40,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
     renderer: *mut CRenderer,
     ctx: *const SubtitleContext,
     t: u32,
+    clip_rect: Rect2<i32>,
     flags: u64,
 ) -> *mut CRenderer {
     if flags != 0 {
@@ -47,9 +50,13 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
         );
     }
 
-    {
+    assert!(
+        (*renderer).output_pieces.is_empty(),
+        "Output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
+    );
+
+    if !clip_rect.is_empty() {
         let renderer = &mut (*renderer);
-        assert!(renderer.output_pieces.is_empty(), "Output piece buffer isn't empty, did you forget to call `sbr_piece_raster_pass_finish`?");
 
         ctry!(renderer
             .inner
@@ -94,8 +101,10 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
                 params: rasterize::sw::OutputInstanceParameters,
             ) {
                 self.instances.push(COutputInstance {
-                    pos: params.pos,
-                    size: params.size,
+                    dst_pos: params.dst_pos,
+                    dst_size: params.dst_size,
+                    src_off: params.src_off,
+                    src_size: params.src_size,
                     base: COutputInstanceBase { idx: image },
                     next: std::ptr::null(),
                 });
@@ -109,6 +118,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
                 _lifetime: PhantomData,
             },
             renderer.output_pieces.iter(),
+            clip_rect,
         );
 
         if !renderer.output_instances.is_empty() {
@@ -143,7 +153,7 @@ unsafe extern "C" fn sbr_instanced_raster_pass_get_instances(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_output_image_draw_to(
+unsafe extern "C" fn sbr_output_image_rasterize_into(
     image: *const COutputImage,
     renderer: *mut CRenderer,
     off_x: i32,
@@ -163,7 +173,7 @@ unsafe extern "C" fn sbr_output_image_draw_to(
 
     (*image)
         .content
-        .draw_to(rasterizer, &mut target, Point2::new(off_x, off_y));
+        .rasterize_to(rasterizer, &mut target, Point2::new(off_x, off_y));
 
     0
 }

@@ -1,7 +1,7 @@
 use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
 
 use util::{
-    math::{Point2, Vec2},
+    math::{Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
 };
 
@@ -258,7 +258,7 @@ impl<'a> RenderTarget<'a> {
     ) -> Self {
         assert!(
             buffer.len() >= height as usize * stride as usize,
-            "Buffer passed to rasterize::sw::RenderTarget::create_render_target is too small!"
+            "Buffer passed to rasterize::sw::RenderTarget::new_borrowed_bgra8 is too small!"
         );
 
         RenderTarget {
@@ -983,7 +983,7 @@ pub enum OutputImage<'a> {
 }
 
 impl OutputImage<'_> {
-    pub fn draw_to(
+    pub fn rasterize_to(
         &self,
         rasterizer: &mut Rasterizer,
         target: &mut RenderTarget<'_>,
@@ -1019,8 +1019,21 @@ impl OutputImage<'_> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct OutputInstanceParameters {
-    pub pos: Point2<i32>,
-    pub size: Vec2<u32>,
+    pub dst_pos: Point2<i32>,
+    pub dst_size: Vec2<u32>,
+    pub src_off: Vec2<u32>,
+    pub src_size: Vec2<u32>,
+}
+
+impl From<ClipRectIntersection> for OutputInstanceParameters {
+    fn from(value: ClipRectIntersection) -> Self {
+        Self {
+            dst_pos: value.dst_pos,
+            dst_size: value.size,
+            src_off: value.min_clip,
+            src_size: value.size,
+        }
+    }
 }
 
 pub trait InstancedOutputBuilder<'a> {
@@ -1030,13 +1043,72 @@ pub trait InstancedOutputBuilder<'a> {
     fn on_instance(&mut self, image: Self::ImageHandle, params: OutputInstanceParameters);
 }
 
+struct ClipRectIntersection {
+    dst_pos: Point2<i32>,
+    min_clip: Vec2<u32>,
+    max_clip: Vec2<u32>,
+    size: Vec2<u32>,
+}
+
+fn clip_pixel_rects(src: Rect2<i32>, clip_rect: Rect2<i32>) -> Option<ClipRectIntersection> {
+    if src.is_empty() {
+        return None;
+    }
+
+    let mut intersection = ClipRectIntersection {
+        dst_pos: src.min,
+        min_clip: Vec2::ZERO,
+        max_clip: Vec2::ZERO,
+        size: Vec2::new(src.width() as u32, src.height() as u32),
+    };
+
+    if let Ok(left_clip) = u32::try_from(clip_rect.min.x - src.min.x) {
+        intersection.dst_pos.x = clip_rect.min.x;
+        intersection.min_clip.x = left_clip;
+        intersection.size.x = intersection.size.x.checked_sub(left_clip)?;
+    }
+
+    if let Ok(top_clip) = u32::try_from(clip_rect.min.y - src.min.y) {
+        intersection.dst_pos.y = clip_rect.min.y;
+        intersection.min_clip.y = top_clip;
+        intersection.size.y = intersection.size.y.checked_sub(top_clip)?;
+    }
+
+    if let Ok(right_clip) = u32::try_from(src.max.x - clip_rect.max.x) {
+        intersection.max_clip.x = right_clip;
+        intersection.size.x = intersection.size.x.checked_sub(right_clip)?;
+    }
+
+    if let Ok(bottom_clip) = u32::try_from(src.max.y - clip_rect.max.y) {
+        intersection.max_clip.y = bottom_clip;
+        intersection.size.y = intersection.size.y.checked_sub(bottom_clip)?;
+    }
+
+    if intersection.size.x == 0 || intersection.size.y == 0 {
+        return None;
+    }
+
+    Some(intersection)
+}
+
+impl OutputPiece {
+    fn rect(&self) -> Rect2<i32> {
+        Rect2::from_min_size(self.pos, Vec2::new(self.size.x as i32, self.size.y as i32))
+    }
+}
+
 pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
     builder: &mut B,
     pieces: impl Iterator<Item = &'a OutputPiece>,
+    clip_rect: Rect2<i32>,
 ) {
     let mut texture_map = HashMap::<OutputBitmap<'static>, B::ImageHandle>::new();
 
     for piece in pieces {
+        let Some(clip_intersection) = clip_pixel_rects(piece.rect(), clip_rect) else {
+            continue;
+        };
+
         let mut try_insert_bitmap = |bitmap: OutputBitmap<'static>| {
             let occupied = match texture_map.entry(bitmap) {
                 std::collections::hash_map::Entry::Occupied(occupied) => occupied,
@@ -1053,18 +1125,20 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
         match &piece.content {
             OutputPieceContent::Texture(bitmap) => {
                 let handle = try_insert_bitmap(bitmap.clone());
-                builder.on_instance(
-                    handle,
-                    OutputInstanceParameters {
-                        pos: piece.pos,
-                        size: bitmap.texture.size(),
-                    },
-                );
+                builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
             }
             OutputPieceContent::Strips(strips) => {
                 for op in strips.strips.paint_iter() {
                     let pos =
                         piece.pos + Vec2::new(i32::from(op.pos().x), i32::from(op.pos().y)) * 4;
+                    let isize = Vec2::new(op.width() as i32, 4);
+
+                    let Some(op_clip_intersection) =
+                        clip_pixel_rects(Rect2::from_min_size(pos, isize), clip_rect)
+                    else {
+                        continue;
+                    };
+
                     match op {
                         StripPaintOp::Copy(copy) => {
                             let texture = copy.to_texture();
@@ -1077,7 +1151,10 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                                     color: strips.color,
                                 }),
                             );
-                            builder.on_instance(handle, OutputInstanceParameters { pos, size });
+                            builder.on_instance(
+                                handle,
+                                OutputInstanceParameters::from(op_clip_intersection),
+                            );
                         }
                         StripPaintOp::Fill(fill) => {
                             let texture = fill.to_vertical_texture();
@@ -1092,42 +1169,63 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                             builder.on_instance(
                                 handle,
                                 OutputInstanceParameters {
-                                    pos,
-                                    size: Vec2::new(u32::from(fill.width) * 4, 4),
+                                    dst_pos: op_clip_intersection.dst_pos,
+                                    dst_size: op_clip_intersection.size,
+                                    src_off: Vec2::new(0, op_clip_intersection.min_clip.y),
+                                    src_size: Vec2::new(1, op_clip_intersection.size.y),
                                 },
                             );
                         }
                     }
                 }
             }
-            &OutputPieceContent::Rect(rect) => {
-                if rect.rect.min.x.fract() == FixedS::ZERO
-                    && rect.rect.min.y.fract() == FixedS::ZERO
-                    && rect.rect.max.x.fract() == FixedS::ZERO
-                    && rect.rect.max.y.fract() == FixedS::ZERO
+            &OutputPieceContent::Rect(OutputRect { mut rect, color }) => {
+                if let Some(clip_horizontal) = piece.size.x.checked_sub(clip_intersection.size.x) {
+                    rect.max.y -= FixedS::new(clip_horizontal as i32);
+                }
+                if let Some(clip_vertical) = piece.size.y.checked_sub(clip_intersection.size.y) {
+                    rect.max.y -= FixedS::new(clip_vertical as i32);
+                }
+
+                // If the rectangle has any of its sides clipped by at least one pixel then
+                // the anti-aliasing on that side goes away.
+                if clip_intersection.min_clip.x > 0 {
+                    rect.min.x = FixedS::ZERO;
+                }
+                if clip_intersection.min_clip.y > 0 {
+                    rect.min.y = FixedS::ZERO;
+                }
+                if clip_intersection.max_clip.x > 0 {
+                    rect.max.x = rect.max.x.ceil();
+                }
+                if clip_intersection.max_clip.y > 0 {
+                    rect.max.y = rect.max.y.ceil();
+                }
+
+                if rect.min.x.is_integer()
+                    && rect.min.y.is_integer()
+                    && rect.max.x.is_integer()
+                    && rect.max.y.is_integer()
                 {
                     let bitmap = OutputBitmap {
                         texture: Texture::SINGLE_FILLED_MONO_PIXEL,
                         filter: None,
-                        color: rect.color,
+                        color,
                     };
                     let handle = try_insert_bitmap(bitmap.clone());
                     builder.on_instance(
                         handle,
                         OutputInstanceParameters {
-                            pos: piece.pos,
-                            size: piece.size,
+                            dst_pos: clip_intersection.dst_pos,
+                            dst_size: clip_intersection.size,
+                            src_off: Vec2::ZERO,
+                            src_size: bitmap.texture.size(),
                         },
                     );
                 } else {
-                    let handle = builder.on_image(piece.size, OutputImage::Rect(rect));
-                    builder.on_instance(
-                        handle,
-                        OutputInstanceParameters {
-                            pos: piece.pos,
-                            size: piece.size,
-                        },
-                    );
+                    let handle =
+                        builder.on_image(piece.size, OutputImage::Rect(OutputRect { rect, color }));
+                    builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
                 }
             }
         }

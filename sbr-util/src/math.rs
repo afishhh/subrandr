@@ -245,6 +245,7 @@ impl<N: Number> Sum<Vec2<N>> for Point2<N> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(C)]
 pub struct Rect2<N> {
     pub min: Point2<N>,
     pub max: Point2<N>,

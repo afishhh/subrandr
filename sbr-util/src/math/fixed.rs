@@ -127,6 +127,10 @@ macro_rules! define_fixed_for_type {
                 self.ceil().0 >> P
             }
 
+            pub const fn is_integer(self) -> bool {
+                self.fract().0 == Self::ZERO.0
+            }
+
             pub const ONE: Self = Self(1 << P);
             pub const ZERO: Self = Self(0);
             pub const MIN: Self = Self(<$type>::MIN);
@@ -159,12 +163,14 @@ macro_rules! define_fixed_for_type {
         impl<const P: u32> Mul<$type> for Fixed<P, $type> {
             type Output = Self;
 
+            #[track_caller]
             fn mul(self, rhs: $type) -> Self::Output {
                 Self(self.0 * rhs)
             }
         }
 
         impl<const P: u32> MulAssign<$type> for Fixed<P, $type> {
+            #[track_caller]
             fn mul_assign(&mut self, rhs: $type) {
                 *self = *self * rhs;
             }

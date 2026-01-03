@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use util::math::{Fixed, FloatOutlineIterExt, I16Dot16, OutlineEvent, Point2, Point2f};
+use util::math::{Fixed, FloatOutlineIterExt, I16Dot16, OutlineEvent, Point2, Point2f, Vec2};
 
 mod tile;
 
@@ -226,7 +226,9 @@ impl StripRasterizer {
         let end_inner_y16 = top.y - tile_to_coord(end_tile_y as i16);
         let end_inner_y = to_tile_fixed(end_inner_y16);
         let mut current_inner_x = bottom.x - floor_to_tile(bottom.x.floor());
-        let dx4 = dx * 4;
+        // TODO: Fixed::saturating_mul or something
+        //       would be nice to be generally more careful about overflows in this file
+        let dx4 = I16Dot16::from_raw(I16Dot16::into_raw(dx).saturating_mul(4));
 
         let bottom_inner_y = bottom.y - floor_to_tile(bottom.y);
         if tile_y == end_tile_y {
@@ -295,13 +297,13 @@ impl StripRasterizer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Strips {
     strips: Vec<Strip>,
     alpha_buffer: AlphaBuffer,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct AlphaBuffer(Vec<u64>);
 
 impl AlphaBuffer {
@@ -327,7 +329,7 @@ impl AlphaBuffer {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 struct Strip {
     pos: Point2<u16>,
     width: u16,
@@ -350,7 +352,19 @@ impl Strips {
     pub fn blend_to<P: Copy>(
         &self,
         buffer: &mut [P],
+        blend_func: impl FnMut(&mut P, u8),
+        width: usize,
+        height: usize,
+        stride: usize,
+    ) {
+        self.blend_to_at(buffer, blend_func, Vec2::new(0, 0), width, height, stride);
+    }
+
+    pub fn blend_to_at<P: Copy>(
+        &self,
+        buffer: &mut [P],
         mut blend_func: impl FnMut(&mut P, u8),
+        offset: Vec2<isize>,
         width: usize,
         height: usize,
         stride: usize,
@@ -360,21 +374,37 @@ impl Strips {
 
         for op in self.paint_iter() {
             let pos = op.pos();
-            let out_pos = Point2::new(usize::from(pos.x) * 4, usize::from(pos.y) * 4);
-            if out_pos.y >= height || out_pos.x >= width {
-                continue;
-            }
+            let (out_off, out_pos) = {
+                let out_sx = pos.x as isize * 4 + offset.x;
+                let out_sy = pos.y as isize * 4 + offset.y;
+
+                if out_sx <= -4 || out_sy <= -4 {
+                    continue;
+                }
+
+                let out_offx = -out_sx.min(0) as usize;
+                let out_offy = -out_sy.min(0) as usize;
+                let out_x = out_sx.max(0) as usize;
+                let out_y = out_sy.max(0) as usize;
+
+                if out_x >= width || out_y >= height {
+                    continue;
+                }
+
+                (Vec2::new(out_offx, out_offy), Point2::new(out_x, out_y))
+            };
 
             let op_width = op.width();
-            let out_width = op_width.min(width - out_pos.x);
-            let out_height = 4.min(height - out_pos.y);
+            let out_width = (op_width - out_off.x).min(width - out_pos.x);
+            let out_height = (4 - out_off.y).min(height - out_pos.y);
             let mut current_out =
                 unsafe { buffer.as_mut_ptr().add(out_pos.y * stride + out_pos.x) };
             let row_step = stride - out_width;
 
             match op {
                 StripPaintOp::Copy(op) => {
-                    let mut current_src = op.buffer.as_ptr();
+                    let mut current_src =
+                        unsafe { op.buffer.as_ptr().add(out_off.y * op_width + out_off.x) };
                     let src_row_step = op_width - out_width;
 
                     for _ in 0..out_height {
@@ -391,7 +421,7 @@ impl Strips {
                     }
                 }
                 StripPaintOp::Fill(op) => {
-                    for &alpha in &op.alpha[..out_height] {
+                    for &alpha in &op.alpha[out_off.y..out_height] {
                         unsafe {
                             for _ in 0..out_width {
                                 blend_func(&mut *current_out, alpha);
@@ -417,12 +447,12 @@ pub struct StripPaintIter<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum StripPaintOp<'a> {
     Copy(StripCopyOp<'a>),
-    Fill(StripFillOp),
+    Fill(StripFillOp<'a>),
 }
 
 impl StripPaintOp<'_> {
     #[inline]
-    fn pos(&self) -> Point2<u16> {
+    pub fn pos(&self) -> Point2<u16> {
         match self {
             Self::Copy(x) => x.pos,
             Self::Fill(x) => x.pos,
@@ -430,7 +460,7 @@ impl StripPaintOp<'_> {
     }
 
     #[inline]
-    fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         match self {
             StripPaintOp::Copy(x) => x.width().into(),
             StripPaintOp::Fill(x) => usize::from(x.width) * 4,
@@ -444,7 +474,7 @@ pub struct StripCopyOp<'a> {
     pub buffer: &'a [u8],
 }
 
-impl StripCopyOp<'_> {
+impl<'a> StripCopyOp<'a> {
     #[inline]
     pub fn height(&self) -> u16 {
         4
@@ -454,13 +484,33 @@ impl StripCopyOp<'_> {
     pub fn width(&self) -> u16 {
         (self.buffer.len() / 4) as u16
     }
+
+    #[inline]
+    pub fn to_texture(self) -> super::Texture<'a> {
+        super::Texture {
+            width: u32::from(self.width()),
+            height: u32::from(self.height()),
+            data: super::TextureData::BorrowedMono(self.buffer),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct StripFillOp {
+pub struct StripFillOp<'a> {
     pub pos: Point2<u16>,
     pub width: u16,
-    pub alpha: [u8; 4],
+    pub alpha: &'a [u8; 4],
+}
+
+impl<'a> StripFillOp<'a> {
+    #[inline]
+    pub fn to_vertical_texture(self) -> super::Texture<'a> {
+        super::Texture {
+            width: 1,
+            height: 4,
+            data: super::TextureData::BorrowedMono(self.alpha),
+        }
+    }
 }
 
 impl<'a> Iterator for StripPaintIter<'a> {
@@ -475,7 +525,7 @@ impl<'a> Iterator for StripPaintIter<'a> {
             return Some(StripPaintOp::Fill(StripFillOp {
                 pos: Point2::new(last_x, next.pos.y),
                 width: next.pos.x - last_x,
-                alpha: next.fill_previous,
+                alpha: &next.fill_previous,
             }));
         }
 

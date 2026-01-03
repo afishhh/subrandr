@@ -17,7 +17,6 @@ mod display;
 mod html;
 mod layout;
 mod log;
-mod raster;
 mod style;
 mod text;
 

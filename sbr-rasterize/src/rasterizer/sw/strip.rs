@@ -183,7 +183,7 @@ impl StripRasterizer {
         let upos_x = if let Ok(upos_x) = u16::try_from(pos_x) {
             upos_x
         } else {
-            // If `pos_x < 0` then one or both of this line's points is to the left of
+            // If `pos_x < 0` then one or both of this line's points are to the left of
             // the y-axis and hence our canvas. This means we need to clip it and insert
             // a vertical line along the y-axis for the clipped part.
             let (left_fill_bottom, left_fill_top) = if pos_x + width <= 0 {
@@ -411,11 +411,12 @@ impl Strips {
     ) {
         for op in self.paint_iter() {
             let pos = op.pos();
+            let op_width = op.width() as u32;
             let (out_off, out_pos) = {
                 let out_sx = pos.x as i32 * 4 + offset.x;
                 let out_sy = pos.y as i32 * 4 + offset.y;
 
-                if out_sx <= -4 || out_sy <= -4 {
+                if out_sx <= -(op_width as i32) || out_sy <= -4 {
                     continue;
                 }
 
@@ -431,7 +432,6 @@ impl Strips {
                 (Vec2::new(out_offx, out_offy), Point2::new(out_x, out_y))
             };
 
-            let op_width = op.width() as u32;
             let out_width = (op_width - out_off.x).min(target.width - out_pos.x);
             let out_height = (4 - out_off.y).min(target.height - out_pos.y);
             let mut current_out = unsafe {

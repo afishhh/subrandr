@@ -215,7 +215,7 @@ macro_rules! make_checked_blitter {
             $($extra_name: $extra_ty),*
         ) {
             // `RenderTargetView`'s buffer is already guaranteed to be large enough.
-            assert!(src_stride * src_height <= src.len());
+            assert!(src_stride.checked_mul(src_height).is_some_and(|required| required <= src.len()));
 
             let Some((xs, ys)) = calculate_blit_rectangle(
                 dx, dy,

@@ -15,6 +15,7 @@ use crate::{
 
 mod blit;
 pub(super) mod blur;
+mod scale;
 use blur::gaussian_sigma_to_box_radius;
 mod strip;
 pub use strip::*;
@@ -584,6 +585,43 @@ impl Rasterizer {
                     color.a,
                 );
             }
+        }
+    }
+
+    pub fn scale_texture(
+        &self,
+        texture: &Texture,
+        dst_size: Vec2<u32>,
+        src_off: Vec2<u32>,
+        src_size: Vec2<u32>,
+    ) -> Texture<'static> {
+        match texture.data.as_ref() {
+            TextureDataRef::Mono(mono) => unsafe {
+                Texture::new_with_uninit(dst_size, |target| {
+                    scale::scale_mono(
+                        target,
+                        mono,
+                        texture.width as usize,
+                        texture.width,
+                        texture.height,
+                        Vec2::new(src_off.x as i32, src_off.y as i32),
+                        Vec2::new(src_size.x as i32, src_size.y as i32),
+                    )
+                })
+            },
+            TextureDataRef::Bgra(bgra) => unsafe {
+                Texture::new_with_uninit(dst_size, |target| {
+                    scale::scale_bgra(
+                        target,
+                        bgra,
+                        texture.width as usize,
+                        texture.width,
+                        texture.height,
+                        Vec2::new(src_off.x as i32, src_off.y as i32),
+                        Vec2::new(src_size.x as i32, src_size.y as i32),
+                    )
+                })
+            },
         }
     }
 }

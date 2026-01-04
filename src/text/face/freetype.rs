@@ -770,6 +770,11 @@ impl FontImpl for Font {
                     PixelFormat::Mono
                 },
                 Box::new(|mut target| {
+                    // TODO: The software rasterizer now supports texture scaling.
+                    //       However that cannot really be used by this code because it expects
+                    //       sane textures with a positive stride (and FreeType's can be negative).
+                    //       I think I will defer switching to that here until we start using
+                    //       skrifa for parsing fonts.
                     let stride = target.stride() as usize;
                     macro_rules! copy_font_bitmap_with {
                         ($pixel_mode: expr) => {

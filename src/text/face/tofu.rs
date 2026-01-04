@@ -1,7 +1,7 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
 use rasterize::{
-    sw::{RenderTargetView, StripRasterizer, Strips},
+    sw::{StripRasterizer, Strips},
     PixelFormat, Rasterizer,
 };
 use text_sys::*;
@@ -456,23 +456,14 @@ impl FontImpl for Font {
         } = self.draw_glyph(index, offset, &mut StripRasterizer::new());
         let texture = unsafe {
             rasterizer.create_packed_texture_mapped(
-                texture_size.x,
-                texture_size.y,
+                texture_size,
                 PixelFormat::Mono,
-                Box::new(|buffer, stride| {
-                    buffer.fill(MaybeUninit::new(0));
+                Box::new(|mut target| {
+                    target.buffer_mut().fill(MaybeUninit::new(0));
 
-                    strips.blend_to(
-                        RenderTargetView::new(
-                            buffer,
-                            texture_size.x,
-                            texture_size.y,
-                            stride as u32,
-                        ),
-                        |out, value| {
-                            out.write(value);
-                        },
-                    );
+                    strips.blend_to(target, |out, value| {
+                        out.write(value);
+                    });
                 }),
             )
         };

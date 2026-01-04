@@ -145,11 +145,10 @@ pub trait Rasterizer {
     #[allow(clippy::type_complexity)]
     unsafe fn create_texture_mapped(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vec2<u32>,
         format: PixelFormat,
         // FIXME: ugly box...
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> Texture;
 
     /// Creates a new atlased texture via memory-mapped initialization.
@@ -161,13 +160,11 @@ pub trait Rasterizer {
     #[allow(clippy::type_complexity)]
     unsafe fn create_packed_texture_mapped(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vec2<u32>,
         format: PixelFormat,
-        // FIXME: ugly box...
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> Texture {
-        self.create_texture_mapped(width, height, format, callback)
+        self.create_texture_mapped(size, format, callback)
     }
 
     fn blur_texture(&mut self, texture: &Texture, blur_sigma: f32) -> BlurOutput;

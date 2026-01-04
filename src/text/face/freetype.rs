@@ -763,14 +763,14 @@ impl FontImpl for Font {
             };
 
             let texture = rasterizer.create_packed_texture_mapped(
-                scaled_width,
-                scaled_height,
+                Vec2::new(scaled_width, scaled_height),
                 if matches!(pixel_mode, CopyPixelMode::Bgra32) {
                     PixelFormat::Bgra
                 } else {
                     PixelFormat::Mono
                 },
-                Box::new(|buffer_data, stride| {
+                Box::new(|mut target| {
+                    let stride = target.stride() as usize;
                     macro_rules! copy_font_bitmap_with {
                         ($pixel_mode: expr) => {
                             copy_font_bitmap::<$pixel_mode>(
@@ -778,7 +778,7 @@ impl FontImpl for Font {
                                 bitmap.pitch as isize,
                                 bitmap.width as u32,
                                 bitmap.rows as u32,
-                                buffer_data,
+                                target.buffer_mut(),
                                 stride,
                                 scale,
                                 scaled_width,

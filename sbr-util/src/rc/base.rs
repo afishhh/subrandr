@@ -182,13 +182,6 @@ impl<R: Refcount, T> UniqueRcBase<R, [T]> {
             UniqueRcBase::from_raw_box(raw_box)
         }
     }
-
-    #[inline]
-    pub fn new_zeroed_slice(len: usize) -> UniqueRcBase<R, [MaybeUninit<T>]> {
-        let mut result = Self::new_uninit_slice(len);
-        unsafe { result.as_mut_ptr().write_bytes(0, len) };
-        result
-    }
 }
 
 impl<R: Refcount, T> UniqueRcBase<R, [MaybeUninit<T>]> {

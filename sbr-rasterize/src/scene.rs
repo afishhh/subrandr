@@ -7,7 +7,7 @@ use util::{
 
 use crate::{
     color::BGRA8,
-    sw::{self, RenderTargetView, Strips},
+    sw::{self, Strips},
     Rasterizer, Texture,
 };
 
@@ -110,18 +110,14 @@ impl StrokedPolyline {
 
         let texture = unsafe {
             rasterizer.create_texture_mapped(
-                size.x,
-                size.y,
+                size,
                 super::PixelFormat::Mono,
-                Box::new(|buffer, stride| {
-                    buffer.fill(std::mem::MaybeUninit::zeroed());
+                Box::new(|mut target| {
+                    target.buffer_mut().fill(std::mem::MaybeUninit::zeroed());
 
-                    strips.blend_to(
-                        RenderTargetView::new(buffer, size.x, size.y, stride as u32),
-                        |out, value| {
-                            out.write(value);
-                        },
-                    );
+                    strips.blend_to(target, |out, value| {
+                        out.write(value);
+                    });
                 }),
             )
         };

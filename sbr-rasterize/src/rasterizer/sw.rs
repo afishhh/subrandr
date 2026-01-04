@@ -3,6 +3,7 @@ use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
 use util::{
     math::{Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
+    slice_assume_init_mut,
 };
 
 use crate::{
@@ -62,7 +63,7 @@ unsafe fn vertical_line_unchecked<P: DrawPixel>(
 }
 
 // Scuffed Anti-Aliasing™ (SAA)
-fn fill_rect<P: DrawPixel>(rect: Rect2S, mut target: RenderTargetView<P>, color: P) {
+fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color: P) {
     if rect.is_empty() {
         return;
     }
@@ -214,12 +215,29 @@ impl<'a, P> RenderTargetView<'a, P> {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            buffer: &mut [],
+            width: 0,
+            height: 0,
+            stride: 0,
+        }
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut [P] {
+        self.buffer
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    pub fn stride(&self) -> u32 {
+        self.stride
     }
 
     pub fn reborrow(&mut self) -> RenderTargetView<'_, P> {
@@ -243,6 +261,27 @@ impl<'a, P> RenderTargetView<'a, P> {
             self.buffer
                 .get_unchecked_mut(y as usize * self.stride as usize + x as usize)
         })
+    }
+}
+
+impl<P> RenderTargetView<'_, MaybeUninit<P>> {
+    fn as_bytes(&mut self) -> RenderTargetView<'_, MaybeUninit<u8>> {
+        let size = std::mem::size_of_val(&*self.buffer);
+        let Some(byte_width) = self.width.checked_mul(std::mem::size_of::<P>() as u32) else {
+            panic!("Width overflowed u32 while casting RenderTargetView to byte pixels");
+        };
+        let Some(byte_stride) = self.stride.checked_mul(std::mem::size_of::<P>() as u32) else {
+            panic!("Stride overflowed u32 while casting RenderTargetView to byte pixels");
+        };
+
+        RenderTargetView {
+            buffer: unsafe {
+                std::slice::from_raw_parts_mut(self.buffer.as_mut_ptr().cast(), size)
+            },
+            width: byte_width,
+            height: self.height,
+            stride: byte_stride,
+        }
     }
 }
 
@@ -271,9 +310,9 @@ enum TextureData<'a> {
 impl TextureData<'_> {
     pub fn as_ref(&self) -> TextureDataRef<'_> {
         match self {
-            TextureData::OwnedMono(a8) => TextureDataRef::Mono(a8),
-            TextureData::OwnedBgra(bgra8) => TextureDataRef::Bgra(bgra8),
-            TextureData::BorrowedMono(a8) => TextureDataRef::Mono(a8),
+            Self::OwnedMono(a) => TextureDataRef::Mono(a),
+            Self::OwnedBgra(bgra) => TextureDataRef::Bgra(bgra),
+            Self::BorrowedMono(a) => TextureDataRef::Mono(a),
         }
     }
 }
@@ -282,9 +321,9 @@ impl Hash for TextureData<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
         match self {
-            TextureData::OwnedMono(mono) => Arc::hash_ptr(mono, state),
-            TextureData::OwnedBgra(bgra) => Arc::hash_ptr(bgra, state),
-            TextureData::BorrowedMono(mono) => mono.as_ptr().hash(state),
+            Self::OwnedMono(mono) => Arc::hash_ptr(mono, state),
+            Self::OwnedBgra(bgra) => Arc::hash_ptr(bgra, state),
+            Self::BorrowedMono(mono) => mono.as_ptr().hash(state),
         }
     }
 }
@@ -307,6 +346,22 @@ enum TextureDataRef<'a> {
     Bgra(&'a [Premultiplied<BGRA8>]),
 }
 
+trait TexturePixel: Sized {
+    fn to_texture_data(owned: UniqueArc<[Self]>) -> TextureData<'static>;
+}
+
+impl TexturePixel for Premultiplied<BGRA8> {
+    fn to_texture_data(owned: UniqueArc<[Self]>) -> TextureData<'static> {
+        TextureData::OwnedBgra(UniqueArc::into_shared(owned))
+    }
+}
+
+impl TexturePixel for u8 {
+    fn to_texture_data(owned: UniqueArc<[Self]>) -> TextureData<'static> {
+        TextureData::OwnedMono(UniqueArc::into_shared(owned))
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Texture<'a> {
     width: u32,
@@ -315,45 +370,36 @@ pub struct Texture<'a> {
 }
 
 impl Texture<'static> {
-    unsafe fn new_with_initializer(
-        width: u32,
-        height: u32,
-        format: PixelFormat,
-        callback: impl FnOnce(&mut [MaybeUninit<u8>], usize),
+    fn new_with<P: TexturePixel>(
+        size: Vec2<u32>,
+        render: impl FnOnce(RenderTargetView<P>),
     ) -> Self {
-        let n_pixels = width as usize * height as usize;
+        unsafe {
+            Self::new_with_uninit(size, |target| {
+                let len = target.buffer.len();
+                target.buffer.as_mut_ptr().write_bytes(0, len);
+                render(RenderTargetView {
+                    buffer: slice_assume_init_mut(target.buffer),
+                    width: target.width,
+                    height: target.height,
+                    stride: target.stride,
+                })
+            })
+        }
+    }
 
-        match format {
-            PixelFormat::Mono => {
-                let mut data = UniqueArc::new_uninit_slice(n_pixels);
+    unsafe fn new_with_uninit<P: TexturePixel>(
+        size: Vec2<u32>,
+        fill: impl FnOnce(RenderTargetView<MaybeUninit<P>>),
+    ) -> Self {
+        let mut buffer = UniqueArc::new_uninit_slice(size.x as usize * size.y as usize);
 
-                callback(&mut data, width as usize);
-                let init = UniqueArc::assume_init(data);
+        fill(RenderTargetView::new(&mut buffer, size.x, size.y, size.x));
 
-                Texture {
-                    width,
-                    height,
-                    data: TextureData::OwnedMono(UniqueArc::into_shared(init)),
-                }
-            }
-            PixelFormat::Bgra => {
-                let mut data = UniqueArc::<[Premultiplied<BGRA8>]>::new_uninit_slice(n_pixels);
-                let slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        data.as_mut_ptr().cast::<MaybeUninit<u8>>(),
-                        data.len() * 4,
-                    )
-                };
-
-                callback(slice, width as usize * 4);
-                let init = UniqueArc::assume_init(data);
-
-                Texture {
-                    width,
-                    height,
-                    data: TextureData::OwnedBgra(UniqueArc::into_shared(init)),
-                }
-            }
+        Texture {
+            width: size.x,
+            height: size.y,
+            data: P::to_texture_data(unsafe { UniqueArc::assume_init(buffer) }),
         }
     }
 
@@ -381,7 +427,7 @@ impl Texture<'_> {
         match &self.data {
             TextureData::OwnedMono(mono) => mono.len(),
             TextureData::OwnedBgra(bgra) => bgra.len() * 4,
-            TextureData::BorrowedMono(mono) => mono.len(),
+            TextureData::BorrowedMono(_) => 0,
         }
     }
 
@@ -390,6 +436,21 @@ impl Texture<'_> {
             TextureData::OwnedMono(_) | TextureData::BorrowedMono(_) => true,
             TextureData::OwnedBgra(_) => false,
         }
+    }
+}
+
+impl std::fmt::Debug for Texture<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}x{} {} texture",
+            self.width,
+            self.height,
+            match self.data.as_ref() {
+                TextureDataRef::Mono(_) => "A8",
+                TextureDataRef::Bgra(_) => "BGRA8",
+            }
+        )
     }
 }
 
@@ -534,14 +595,20 @@ impl super::Rasterizer for Rasterizer {
 
     unsafe fn create_texture_mapped(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vec2<u32>,
         format: PixelFormat,
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> super::Texture {
-        super::Texture(super::TextureInner::Software(
-            Texture::new_with_initializer(width, height, format, callback),
-        ))
+        super::Texture(super::TextureInner::Software({
+            match format {
+                PixelFormat::Mono => Texture::new_with_uninit(size, callback),
+                PixelFormat::Bgra => {
+                    Texture::new_with_uninit::<Premultiplied<BGRA8>>(size, |mut target| {
+                        callback(target.as_bytes())
+                    })
+                }
+            }
+        }))
     }
 
     fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {
@@ -591,26 +658,13 @@ impl super::Rasterizer for Rasterizer {
         self.blurer.box_blur_vertical();
         self.blurer.box_blur_vertical();
 
-        let mut buffer =
-            unsafe { UniqueArc::assume_init(UniqueArc::new_zeroed_slice(width * height)) };
-
-        blit::copy_float_to_mono(
-            RenderTargetView::new(&mut buffer, width as u32, height as u32, width as u32),
-            self.blurer.front(),
-            width,
-            width,
-            height,
-            0,
-            0,
-        );
+        let result = Texture::new_with(Vec2::new(width as u32, height as u32), |target| {
+            blit::copy_float_to_mono(target, self.blurer.front(), width, width, height, 0, 0);
+        });
 
         super::BlurOutput {
             padding: Vec2::splat(self.blurer.padding() as u32),
-            texture: super::Texture(super::TextureInner::Software(Texture {
-                width: width as u32,
-                height: height as u32,
-                data: TextureData::OwnedMono(UniqueArc::into_shared(buffer)),
-            })),
+            texture: super::Texture(super::TextureInner::Software(result)),
         }
     }
 
@@ -790,8 +844,8 @@ impl OutputPieceContent {
             }
             &OutputPieceContent::Rect(OutputRect { rect, color }) => {
                 fill_rect(
-                    rect.translate(Vec2::new(pos.x, pos.y)),
                     target.reborrow(),
+                    rect.translate(Vec2::new(pos.x, pos.y)),
                     color.premultiply(),
                 );
             }
@@ -832,8 +886,8 @@ impl OutputImage<'_> {
             }
             &OutputImage::Rect(OutputRect { rect, color }) => {
                 fill_rect(
-                    rect.translate(offset.to_vec()),
                     target.reborrow(),
+                    rect.translate(offset.to_vec()),
                     color.premultiply(),
                 );
             }

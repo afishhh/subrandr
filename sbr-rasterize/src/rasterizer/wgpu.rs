@@ -9,7 +9,7 @@ use wgpu::{include_wgsl, vertex_attr_array};
 use crate::{
     color::BGRA8,
     scene::{self, FilledRect, SceneNode, Vec2S},
-    sw::blur::gaussian_sigma_to_box_radius,
+    sw::{self, blur::gaussian_sigma_to_box_radius},
 };
 
 use super::PixelFormat;
@@ -867,11 +867,11 @@ impl FrameRasterizer<'_> {
         height: u32,
         format: super::PixelFormat,
         // FIXME: ugly box...
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
         pack: bool,
     ) -> super::Texture {
         if width == 0 || height == 0 {
-            callback(&mut [], 0);
+            callback(sw::RenderTargetView::empty());
             return super::Texture(super::TextureInner::Wgpu(Texture::Empty));
         }
 
@@ -890,7 +890,12 @@ impl FrameRasterizer<'_> {
             let mut mapped = buffer.slice(..).get_mapped_range_mut();
             let slice = &mut *mapped;
 
-            callback(unsafe { std::mem::transmute(slice) }, byte_stride as usize);
+            callback(sw::RenderTargetView::new(
+                unsafe { std::mem::transmute(slice) },
+                width * u32::from(format.width()),
+                height,
+                byte_stride,
+            ));
         }
 
         buffer.unmap();
@@ -978,22 +983,20 @@ impl super::Rasterizer for FrameRasterizer<'_> {
 
     unsafe fn create_texture_mapped(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vec2<u32>,
         format: super::PixelFormat,
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> super::Texture {
-        self.create_texture_mapped_impl(width, height, format, callback, false)
+        self.create_texture_mapped_impl(size.x, size.y, format, callback, false)
     }
 
     unsafe fn create_packed_texture_mapped(
         &mut self,
-        width: u32,
-        height: u32,
+        size: Vec2<u32>,
         format: PixelFormat,
-        callback: Box<dyn FnOnce(&mut [MaybeUninit<u8>], usize) + '_>,
+        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> super::Texture {
-        self.create_texture_mapped_impl(width, height, format, callback, true)
+        self.create_texture_mapped_impl(size.x, size.y, format, callback, true)
     }
 
     fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {

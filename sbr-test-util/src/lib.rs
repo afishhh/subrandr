@@ -34,6 +34,33 @@ fn hex_sha256(digest: &sha2::digest::Output<sha2::Sha256>) -> Box<str> {
     std::str::from_utf8(&output).unwrap().into()
 }
 
+pub fn write_png_to(
+    file: std::fs::File,
+    rgba_pixel_bytes: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<(), png::EncodingError> {
+    let mut encoder = png::Encoder::new(file, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(rgba_pixel_bytes)?;
+    writer.finish()
+}
+
+pub fn write_png(
+    path: &Path,
+    rgba_pixel_bytes: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<(), png::EncodingError> {
+    write_png_to(
+        std::fs::File::create(path)?,
+        rgba_pixel_bytes,
+        width,
+        height,
+    )
+}
+
 pub fn check_png_snapshot(
     base_path: &Path,
     display_base_path: &str,
@@ -49,18 +76,10 @@ pub fn check_png_snapshot(
         .finalize();
     let pixel_hash_str = hex_sha256(&pixel_hash);
 
-    let write_output_png = |file: std::fs::File| -> Result<(), png::EncodingError> {
-        let mut encoder = png::Encoder::new(file, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        let mut writer = encoder.write_header()?;
-        writer.write_image_data(rgba_pixel_bytes)?;
-        writer.finish()
-    };
-
     if expected_pixel_hash.as_deref() == Some(&pixel_hash_str) {
         let result_path = base_path.with_extension("png");
         match std::fs::File::create_new(result_path) {
-            Ok(file) => write_output_png(file),
+            Ok(file) => write_png_to(file, rgba_pixel_bytes, width, height),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
             Err(err) => Err(err.into()),
         }
@@ -73,10 +92,7 @@ pub fn check_png_snapshot(
         };
 
         let new_path = base_path.with_extension(extension);
-        std::fs::File::create(new_path)
-            .map_err(Into::into)
-            .and_then(write_output_png)
-            .unwrap();
+        write_png(&new_path, rgba_pixel_bytes, width, height).unwrap();
 
         if let Some(expected) = &expected_pixel_hash {
             eprintln!("Pixel hash mismatch!");

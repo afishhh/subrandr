@@ -13,5 +13,8 @@ thiserror = "1"
 util = { workspace = true }
 wgpu = { workspace = true, optional = true }
 
+[dev-dependencies]
+test-util = { workspace = true }
+
 [lints]
 workspace = true

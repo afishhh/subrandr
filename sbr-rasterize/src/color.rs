@@ -157,6 +157,17 @@ impl Premultiplied<BGRA8> {
     }
 }
 
+// Used in tests to convert pixels to a PNG-suitable format.
+pub fn to_straight_rgba(pixels: &mut [Premultiplied<BGRA8>]) -> &[u8] {
+    for pixel in pixels.iter_mut() {
+        *pixel = Premultiplied(pixel.unpremultiply());
+        std::mem::swap(&mut pixel.0.b, &mut pixel.0.r);
+    }
+
+    let pixels_byte_len = pixels.len() * 4;
+    unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *mut u8, pixels_byte_len) }
+}
+
 /// Calculates `(a * b + 127) / 255` but without a division.
 pub(crate) const fn mul_rgb(a: u8, b: u8) -> u8 {
     let c = a as u16 * b as u16 + 128;

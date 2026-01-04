@@ -1785,6 +1785,7 @@ dependencies = [
 name = "sbr-rasterize"
 version = "0.3.0"
 dependencies = [
+ "sbr-test-util",
  "sbr-util",
  "thiserror 1.0.63",
  "wgpu",

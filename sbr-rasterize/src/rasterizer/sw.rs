@@ -624,6 +624,15 @@ impl Rasterizer {
             },
         }
     }
+
+    pub fn fill_axis_aligned_rect(
+        &self,
+        target: RenderTargetView<Premultiplied<BGRA8>>,
+        rect: Rect2S,
+        color: Premultiplied<BGRA8>,
+    ) {
+        fill_rect(target, rect, color);
+    }
 }
 
 impl super::Rasterizer for Rasterizer {

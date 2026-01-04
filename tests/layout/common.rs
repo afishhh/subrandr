@@ -1,7 +1,7 @@
 use std::{path::Path, sync::OnceLock};
 
 use rasterize::{
-    color::{Premultiplied, BGRA8},
+    color::{to_straight_rgba, Premultiplied, BGRA8},
     Rasterizer,
 };
 use util::rc::{rc_static, Rc};
@@ -254,16 +254,7 @@ pub fn check_inline(
         pixels
     };
 
-    // Convert pixels to straight RGBA8 since that's what PNG expects.
-    for pixel in &mut pixels {
-        *pixel = Premultiplied(pixel.unpremultiply());
-        std::mem::swap(&mut pixel.0.b, &mut pixel.0.r);
-    }
-
-    let pixels_byte_len = pixels.len() * 4;
-    let pixel_bytes =
-        unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *mut u8, pixels_byte_len) };
-
+    let pixel_bytes = to_straight_rgba(&mut pixels);
     test_util::check_png_snapshot(
         &tests_dir.join("layout/snapshots/").join(name),
         &format!("snapshots/{name}"),

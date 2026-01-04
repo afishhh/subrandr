@@ -48,6 +48,10 @@ fn to_tile_fixed(v: I16Dot16) -> U2Dot14 {
     U2Dot14::from_raw((v.into_raw() >> 2).clamp(0, i32::from(U2Dot14::MAX.into_raw())) as u16)
 }
 
+fn from_tile_fixed(v: U2Dot14) -> I16Dot16 {
+    I16Dot16::from_raw(i32::from(v.into_raw()) << 2)
+}
+
 impl StripRasterizer {
     pub fn new() -> Self {
         Self {
@@ -158,9 +162,9 @@ impl StripRasterizer {
         end_tile_x: i16,
         tile_y: u16,
         mut bottom_inner_x: I16Dot16,
-        bottom_inner_y: U2Dot14,
+        mut bottom_inner_y: U2Dot14,
         mut top_inner_x: I16Dot16,
-        top_inner_y: U2Dot14,
+        mut top_inner_y: U2Dot14,
         winding: Winding,
     ) {
         debug_assert!(bottom_inner_y <= top_inner_y);
@@ -171,41 +175,83 @@ impl StripRasterizer {
         } else {
             debug_assert!(top_inner_x <= 0);
             let o = I16Dot16::new(4 * i32::from(tile_x - end_tile_x));
-            bottom_inner_x = o + bottom_inner_x;
-            top_inner_x = o + top_inner_x;
+            bottom_inner_x += o;
+            top_inner_x += o;
             (end_tile_x, tile_x - end_tile_x + 1)
         };
 
-        if pos_x + width <= 0 {
+        let upos_x = if let Ok(upos_x) = u16::try_from(pos_x) {
+            upos_x
+        } else {
+            // If `pos_x < 0` then one or both of this line's points is to the left of
+            // the y-axis and hence our canvas. This means we need to clip it and insert
+            // a vertical line along the y-axis for the clipped part.
+            let (left_fill_bottom, left_fill_top) = if pos_x + width <= 0 {
+                // If `pos_x + width <= 0` then both of our points are left of the y-axis.
+                // This means we can just throw away the whole line.
+                let prev_top = top_inner_y;
+                top_inner_y = bottom_inner_y;
+                (bottom_inner_y, prev_top)
+            } else {
+                // Otherwise *only one* of the points is to the left of the y-axis.
+                // This is trickier since we need to actually split it into a vertical
+                // part and a remainder.
+                let dy = (from_tile_fixed(top_inner_y) - from_tile_fixed(bottom_inner_y))
+                    / (top_inner_x - bottom_inner_x);
+                let bottom_abs_x = bottom_inner_x + i32::from(pos_x) * 4;
+                let top_abs_x = top_inner_x + i32::from(pos_x) * 4;
+                debug_assert!((bottom_abs_x < 0) ^ (top_abs_x < 0));
+
+                if bottom_abs_x < 0 {
+                    bottom_inner_x = I16Dot16::ZERO;
+                    top_inner_x += i32::from(pos_x) * 4;
+
+                    let prev_y = bottom_inner_y;
+                    bottom_inner_y =
+                        to_tile_fixed(from_tile_fixed(bottom_inner_y) - (dy * bottom_abs_x));
+                    (prev_y, bottom_inner_y)
+                } else {
+                    top_inner_x = I16Dot16::ZERO;
+                    bottom_inner_x += i32::from(pos_x) * 4;
+
+                    let prev_y = top_inner_y;
+                    top_inner_y = to_tile_fixed(from_tile_fixed(top_inner_y) - (dy * top_abs_x));
+                    (top_inner_y, prev_y)
+                }
+            };
+
+            debug_assert!(left_fill_bottom <= left_fill_top);
+
             self.tiles.push(Tile {
                 pos: Point2::new(0, tile_y),
                 width: 1,
                 line: TileLine {
                     bottom_x: I16Dot16::ZERO,
-                    bottom_y: bottom_inner_y,
+                    bottom_y: left_fill_bottom,
                     top_x: I16Dot16::ZERO,
-                    top_y: top_inner_y,
+                    top_y: left_fill_top,
                 },
                 winding,
             });
-        } else {
-            if pos_x < 0 {
-                // TODO: Implement this case!
+
+            if bottom_inner_y >= top_inner_y {
                 return;
             }
 
-            self.tiles.push(Tile {
-                pos: Point2::new(pos_x as u16, tile_y),
-                width: width as u16,
-                line: TileLine {
-                    bottom_x: bottom_inner_x,
-                    bottom_y: bottom_inner_y,
-                    top_x: top_inner_x,
-                    top_y: top_inner_y,
-                },
-                winding,
-            });
-        }
+            0
+        };
+
+        self.tiles.push(Tile {
+            pos: Point2::new(upos_x, tile_y),
+            width: width as u16,
+            line: TileLine {
+                bottom_x: bottom_inner_x,
+                bottom_y: bottom_inner_y,
+                top_x: top_inner_x,
+                top_y: top_inner_y,
+            },
+            winding,
+        });
     }
 
     fn add_tiles(&mut self, mut bottom: Point2<I16Dot16>, top: Point2<I16Dot16>, winding: Winding) {
@@ -1050,6 +1096,74 @@ mod test {
                 line_to (-4.0, 12.0);
                 line_to (8.0, 12.0);
                 line_to (8.0, 2.0);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn negative_xy() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (-4.0, -4.0);
+                line_to (8.0, -4.0);
+                line_to (-4.0, 8.0);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn negative_xy_inv() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (-4.0, 8.0);
+                line_to (8.0, -4.0);
+                line_to (-4.0, -4.0);
+            ],
+            EXPECTED,
+        );
+    }
+
+    #[test]
+    fn negative_xy_mirror() {
+        #[rustfmt::skip]
+        const EXPECTED: &[u8] = &[
+            0x00, 0x00, 0x15, 0xAA,
+            0x00, 0x55, 0xEA, 0xFF,
+            0xAA, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF,
+        ];
+
+        test_outline(
+            &make_static_outline![
+                #move_to (4.0, -4.0);
+                line_to (-8.0, -4.0);
+                line_to (4.0, 4.0);
             ],
             EXPECTED,
         );

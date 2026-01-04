@@ -1791,6 +1791,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sbr-test-util"
+version = "0.3.0"
+dependencies = [
+ "png",
+ "sha2",
+]
+
+[[package]]
 name = "sbr-util"
 version = "0.3.0"
 dependencies = [
@@ -1947,12 +1955,11 @@ dependencies = [
  "icu_segmenter",
  "ndk-sys",
  "once_cell",
- "png",
  "quick-xml 0.36.2",
  "sbr-macros",
  "sbr-rasterize",
+ "sbr-test-util",
  "sbr-util",
- "sha2",
  "text-sys",
  "thiserror 1.0.63",
  "unicode-bidi",

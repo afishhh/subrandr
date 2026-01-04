@@ -1,0 +1,11 @@
+[package]
+name = "sbr-test-util"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sha2 = "0.10"
+png = "0.18"
+
+[lints]
+workspace = true

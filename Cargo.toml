@@ -56,8 +56,7 @@ rasterize = { workspace = true }
 macros = { workspace = true }
 
 [dev-dependencies]
-sha2 = "0.10"
-png = "0.18"
+test-util = { workspace = true }
 
 [lints]
 workspace = true
@@ -79,16 +78,18 @@ debug = true
 
 [workspace]
 members = [
+  "sbr-test-util",
   "sbr-util",
   "sbr-rasterize",
   "sbr-overlay",
   "sbr-macros",
-  "xtask"
+  "xtask",
 ]
 
 [workspace.dependencies]
 wgpu = { version = "26" }
 
+test-util = { path = "sbr-test-util", package = "sbr-test-util" }
 util = { path = "sbr-util", package = "sbr-util" }
 rasterize = { path = "sbr-rasterize", package = "sbr-rasterize" }
 macros = { path = "sbr-macros", package = "sbr-macros" }

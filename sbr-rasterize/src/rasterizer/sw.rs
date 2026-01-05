@@ -61,176 +61,152 @@ unsafe fn vertical_line_unchecked<P: DrawPixel>(
     }
 }
 
-macro_rules! check_buffer {
-    ($what: literal, $buffer: ident, $stride: ident, $height: ident) => {
-        if $buffer.len() < $stride as usize * $height as usize {
-            panic!(concat!(
-                "Buffer passed to rasterize::",
-                $what,
-                " is too small"
-            ))
-        }
-    };
-}
-
 // Scuffed Anti-Aliasing™ (SAA)
-fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-    buffer: &mut [P],
-    width: u32,
-    height: u32,
-    stride: u32,
-    color: P,
-) {
-    check_buffer!("fill_axis_aligned_antialias_rect", buffer, stride, height);
+fn fill_rect<P: DrawPixel>(rect: Rect2S, mut target: RenderTargetView<P>, color: P) {
+    if rect.is_empty() {
+        return;
+    }
 
-    debug_assert!(x0 <= x1);
-    debug_assert!(y0 <= y1);
+    const AA_THRESHOLD: FixedS = FixedS::from_quotient(1, 64);
 
-    const AA_THRESHOLD: f32 = 1. / 256.;
-
-    let (left_aa, full_left) = if (x0 - x0.round()).abs() > AA_THRESHOLD {
-        (true, x0.ceil() as i32)
+    let (left_aa, full_left) = if (rect.min.x - rect.min.x.round()).abs() > AA_THRESHOLD {
+        (true, rect.min.x.ceil_to_inner())
     } else {
-        (false, x0.round() as i32)
+        (false, rect.min.x.round_to_inner())
     };
 
-    let (right_aa, full_right) = if (x1 - x1.round()).abs() > AA_THRESHOLD {
-        (true, x1.floor() as i32)
+    let (right_aa, full_right) = if (rect.max.x - rect.max.x.round()).abs() > AA_THRESHOLD {
+        (true, rect.max.x.floor_to_inner())
     } else {
-        (false, x1.round() as i32)
+        (false, rect.max.x.round_to_inner())
     };
 
-    let (top_aa_width, full_top) = if (y0 - y0.round()).abs() > AA_THRESHOLD {
-        let top_width = 1.0 - y0.fract();
-        let top_fill = top_width * 255.;
-        let top_y = y0.floor() as i32;
-        if top_y >= 0 && top_y < height as i32 {
+    let (top_aa_width, full_top) = if (rect.min.y - rect.min.y.round()).abs() > AA_THRESHOLD {
+        let top_width = FixedS::ONE - rect.min.y.fract();
+        let top_fill = (top_width * 255).round_to_inner() as u8;
+        let top_y = rect.min.y.floor_to_inner();
+        if top_y >= 0 && top_y < target.height as i32 {
             unsafe {
                 horizontal_line_unchecked(
                     full_left,
                     full_right,
-                    &mut buffer[top_y as usize * stride as usize..],
-                    width as i32,
-                    color.scale_alpha(top_fill as u8),
+                    &mut target.buffer[top_y as usize * target.stride as usize..],
+                    target.width as i32,
+                    color.scale_alpha(top_fill),
                 );
             }
         }
         (top_width, top_y + 1)
     } else {
-        (1.0, y0.round() as i32)
+        (FixedS::ONE, rect.min.y.round_to_inner())
     };
 
-    let (bottom_aa_width, full_bottom) = if (y1 - y1.round()).abs() > AA_THRESHOLD {
-        let bottom_width = y1.fract();
-        let bottom_fill = bottom_width * 255.;
-        let bottom_y = y1.floor() as i32;
-        if bottom_y >= 0 && bottom_y < height as i32 {
+    let (bottom_aa_width, full_bottom) = if (rect.max.y - rect.max.y.round()).abs() > AA_THRESHOLD {
+        let bottom_width = rect.max.y.fract();
+        let bottom_fill = (bottom_width * 255).round_to_inner() as u8;
+        let bottom_y = rect.max.y.floor_to_inner();
+        if bottom_y >= 0 && bottom_y < target.height as i32 {
             unsafe {
                 horizontal_line_unchecked(
                     full_left,
                     full_right,
-                    &mut buffer[bottom_y as usize * stride as usize..],
-                    width as i32,
-                    color.scale_alpha(bottom_fill as u8),
+                    &mut target.buffer[bottom_y as usize * target.stride as usize..],
+                    target.width as i32,
+                    color.scale_alpha(bottom_fill),
                 );
             }
         }
         (bottom_width, bottom_y)
     } else {
-        (1.0, y1.round() as i32)
+        (FixedS::ONE, rect.max.y.round_to_inner())
     };
 
     if left_aa {
-        let left_fill = (1.0 - x0.fract()) * 255.;
+        let left_fill = (FixedS::ONE - rect.min.x.fract()) * 255;
         let left_x = full_left - 1;
-        if left_x >= 0 && left_x < width as i32 {
-            if top_aa_width < 1.0 && full_top > 0 && full_top < height as i32 {
-                buffer[(full_top - 1) as usize * stride as usize + left_x as usize]
-                    .put(color.scale_alpha((left_fill * top_aa_width) as u8));
+        if left_x >= 0 && left_x < target.width as i32 {
+            if let Some(pixel) = target.pixel_at(left_x, full_top - 1) {
+                pixel.put(color.scale_alpha((left_fill * top_aa_width).round_to_inner() as u8))
             }
 
             unsafe {
                 vertical_line_unchecked(
                     full_top,
                     full_bottom,
-                    &mut buffer[left_x as usize..],
-                    height as i32,
-                    stride as i32,
-                    color.scale_alpha(left_fill as u8),
+                    &mut target.buffer[left_x as usize..],
+                    target.height as i32,
+                    target.stride as i32,
+                    color.scale_alpha(left_fill.round_to_inner() as u8),
                 );
             }
 
-            if bottom_aa_width < 1.0 && full_bottom >= 0 && full_bottom < height as i32 {
-                buffer[full_bottom as usize * stride as usize + left_x as usize]
-                    .put(color.scale_alpha((left_fill * bottom_aa_width) as u8));
+            if let Some(pixel) = target.pixel_at(left_x, full_bottom) {
+                pixel.put(color.scale_alpha((left_fill * bottom_aa_width).round_to_inner() as u8));
             }
         }
     }
 
     if right_aa {
-        let right_fill = x1.fract() * 255.;
+        let right_fill = rect.max.x.fract() * 255;
         let right_x = full_right;
-        if right_x >= 0 && right_x < width as i32 {
-            if top_aa_width < 1.0 && full_top > 0 && full_top < height as i32 {
-                buffer[(full_top - 1) as usize * stride as usize + right_x as usize]
-                    .put(color.scale_alpha((right_fill * top_aa_width) as u8));
+        if right_x >= 0 && right_x < target.width as i32 {
+            if let Some(pixel) = target.pixel_at(right_x, full_top - 1) {
+                pixel.put(color.scale_alpha((right_fill * top_aa_width).round_to_inner() as u8))
             }
 
             unsafe {
                 vertical_line_unchecked(
                     full_top,
                     full_bottom,
-                    &mut buffer[right_x as usize..],
-                    height as i32,
-                    stride as i32,
-                    color.scale_alpha(right_fill as u8),
+                    &mut target.buffer[right_x as usize..],
+                    target.height as i32,
+                    target.stride as i32,
+                    color.scale_alpha(right_fill.round_to_inner() as u8),
                 );
             }
 
-            if bottom_aa_width < 1.0 && full_bottom >= 0 && full_bottom < height as i32 {
-                buffer[full_bottom as usize * stride as usize + right_x as usize]
-                    .put(color.scale_alpha((right_fill * bottom_aa_width) as u8));
+            if let Some(pixel) = target.pixel_at(right_x, full_bottom) {
+                pixel.put(color.scale_alpha((right_fill * bottom_aa_width).round_to_inner() as u8));
             }
         }
     }
 
-    for y in full_top.clamp(0, height as i32)..full_bottom.clamp(0, height as i32) {
+    for y in full_top.clamp(0, target.height as i32)..full_bottom.clamp(0, target.height as i32) {
         unsafe {
             horizontal_line_unchecked(
                 full_left,
                 full_right,
-                &mut buffer[y as usize * stride as usize..],
-                width as i32,
+                &mut target.buffer[y as usize * target.stride as usize..],
+                target.width as i32,
                 color,
             );
         }
     }
 }
 
-pub struct RenderTarget<'a> {
-    buffer: &'a mut [Premultiplied<BGRA8>],
+pub struct RenderTargetView<'a, P> {
+    buffer: &'a mut [P],
     width: u32,
     height: u32,
     stride: u32,
 }
 
-impl<'a> RenderTarget<'a> {
-    pub fn new(
-        buffer: &'a mut [Premultiplied<BGRA8>],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> Self {
+impl<'a, P> RenderTargetView<'a, P> {
+    pub fn new(buffer: &'a mut [P], width: u32, height: u32, stride: u32) -> Self {
+        let self_name = std::any::type_name::<Self>();
+        let Some(n_pixels) = (height as usize).checked_mul(stride as usize) else {
+            panic!("Size passed to {self_name}::new overflows `height * stride`",);
+        };
         assert!(
-            buffer.len() >= height as usize * stride as usize,
-            "Buffer passed to rasterize::sw::RenderTarget::new is too small!"
+            buffer.len() >= n_pixels,
+            "Buffer passed to {self_name}::new is too small",
+        );
+        assert!(
+            width <= stride,
+            "width passed to {self_name}::new is larger than stride",
         );
 
-        RenderTarget {
+        Self {
             buffer,
             width,
             height,
@@ -245,7 +221,32 @@ impl<'a> RenderTarget<'a> {
     pub fn height(&self) -> u32 {
         self.height
     }
+
+    pub fn reborrow(&mut self) -> RenderTargetView<'_, P> {
+        RenderTargetView {
+            buffer: &mut *self.buffer,
+            ..*self
+        }
+    }
+
+    #[inline]
+    fn pixel_at(&mut self, x: i32, y: i32) -> Option<&mut P> {
+        let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y)) else {
+            return None;
+        };
+
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+
+        Some(unsafe {
+            self.buffer
+                .get_unchecked_mut(y as usize * self.stride as usize + x as usize)
+        })
+    }
 }
+
+pub type RenderTarget<'a> = RenderTargetView<'a, Premultiplied<BGRA8>>;
 
 fn unwrap_sw_render_target<'a, 'b>(
     target: &'a mut super::RenderTarget<'b>,
@@ -425,10 +426,7 @@ impl Rasterizer {
         match texture.data.as_ref() {
             TextureDataRef::Mono(source) => {
                 blit::blit_mono(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     source,
                     texture.width as usize,
                     texture.width as usize,
@@ -440,10 +438,7 @@ impl Rasterizer {
             }
             TextureDataRef::Bgra(source) => {
                 blit::blit_bgra(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     source,
                     texture.width as usize,
                     texture.width as usize,
@@ -470,10 +465,7 @@ impl Rasterizer {
             }
             (Some(BitmapFilter::ExtractAlpha), TextureDataRef::Bgra(source)) => {
                 blit::blit_xxxa_to_bgra(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     source,
                     texture.width as usize,
                     texture.width as usize,
@@ -497,10 +489,7 @@ impl Rasterizer {
         match (texture.data.as_ref(), filter) {
             (TextureDataRef::Mono(mono), Some(BitmapFilter::ExtractAlpha) | None) => {
                 blit::cvt_mono_to_bgra(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     mono,
                     texture.width as usize,
                     texture.width as usize,
@@ -512,10 +501,7 @@ impl Rasterizer {
             }
             (TextureDataRef::Bgra(bgra), Some(BitmapFilter::ExtractAlpha)) => {
                 blit::cvt_xxxa_to_bgra(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     bgra,
                     texture.width as usize,
                     texture.width as usize,
@@ -527,10 +513,7 @@ impl Rasterizer {
             }
             (TextureDataRef::Bgra(source), None) => {
                 blit::cvt_bgra_to_bgra(
-                    target.buffer,
-                    target.stride as usize,
-                    target.width as usize,
-                    target.height as usize,
+                    target.reborrow(),
                     source,
                     texture.width as usize,
                     texture.width as usize,
@@ -574,12 +557,15 @@ impl super::Rasterizer for Rasterizer {
         let dy = self.blurer.padding() as i32;
         let width = self.blurer.width();
         let height = self.blurer.height();
+        let blurer_front_view = RenderTargetView::new(
+            self.blurer.front_mut(),
+            width as u32,
+            height as u32,
+            width as u32,
+        );
         match texture.data.as_ref() {
             TextureDataRef::Mono(source) => blit::copy_mono_to_float(
-                self.blurer.front_mut(),
-                width,
-                width,
-                height,
+                blurer_front_view,
                 source,
                 texture.width as usize,
                 texture.width as usize,
@@ -588,10 +574,7 @@ impl super::Rasterizer for Rasterizer {
                 dy as isize,
             ),
             TextureDataRef::Bgra(source) => blit::copy_xxxa_to_float(
-                self.blurer.front_mut(),
-                width,
-                width,
-                height,
+                blurer_front_view,
                 source,
                 texture.width as usize,
                 texture.width as usize,
@@ -612,10 +595,7 @@ impl super::Rasterizer for Rasterizer {
             unsafe { UniqueArc::assume_init(UniqueArc::new_zeroed_slice(width * height)) };
 
         blit::copy_float_to_mono(
-            &mut buffer,
-            width,
-            width,
-            height,
+            RenderTargetView::new(&mut buffer, width as u32, height as u32, width as u32),
             self.blurer.front(),
             width,
             width,
@@ -803,25 +783,15 @@ impl OutputPieceContent {
             OutputPieceContent::Strips(OutputStrips { strips, color }) => {
                 let pre = color.premultiply();
                 strips.blend_to_at(
-                    target.buffer,
+                    target.reborrow(),
                     |d, s| *d = pre.mul_alpha(s).blend_over(*d),
-                    Vec2::new(pos.x as isize, pos.y as isize),
-                    target.width as usize,
-                    target.height as usize,
-                    target.stride as usize,
+                    Vec2::new(pos.x, pos.y),
                 );
             }
             &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-                let rect = Rect2S::to_float(rect.translate(Vec2::new(pos.x, pos.y)));
-                fill_axis_aligned_antialias_rect(
-                    rect.min.x,
-                    rect.min.y,
-                    rect.max.x,
-                    rect.max.y,
-                    target.buffer,
-                    target.width,
-                    target.height,
-                    target.stride,
+                fill_rect(
+                    rect.translate(Vec2::new(pos.x, pos.y)),
+                    target.reborrow(),
                     color.premultiply(),
                 );
             }
@@ -861,16 +831,9 @@ impl OutputImage<'_> {
                 );
             }
             &OutputImage::Rect(OutputRect { rect, color }) => {
-                let frect = Rect2S::to_float(rect.translate(offset.to_vec()));
-                fill_axis_aligned_antialias_rect(
-                    frect.min.x,
-                    frect.min.y,
-                    frect.max.x,
-                    frect.max.y,
-                    target.buffer,
-                    target.width,
-                    target.height,
-                    target.stride,
+                fill_rect(
+                    rect.translate(offset.to_vec()),
+                    target.reborrow(),
                     color.premultiply(),
                 );
             }

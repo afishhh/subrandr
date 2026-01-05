@@ -7,7 +7,7 @@ use util::{
 
 use crate::{
     color::BGRA8,
-    sw::{self, Strips},
+    sw::{self, RenderTargetView, Strips},
     Rasterizer, Texture,
 };
 
@@ -117,13 +117,10 @@ impl StrokedPolyline {
                     buffer.fill(std::mem::MaybeUninit::zeroed());
 
                     strips.blend_to(
-                        buffer,
+                        RenderTargetView::new(buffer, size.x, size.y, stride as u32),
                         |out, value| {
                             out.write(value);
                         },
-                        size.x as usize,
-                        size.y as usize,
-                        stride,
                     );
                 }),
             )

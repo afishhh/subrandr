@@ -345,67 +345,65 @@ impl Strips {
         }
     }
 
-    pub fn paint_to(&self, buffer: &mut [u8], width: usize, height: usize, stride: usize) {
-        self.blend_to(buffer, |out, value| *out = value, width, height, stride)
+    pub fn paint_to(&self, target: super::RenderTargetView<u8>) {
+        self.blend_to(target, |out, value| *out = value)
     }
 
     pub fn blend_to<P: Copy>(
         &self,
-        buffer: &mut [P],
+        target: super::RenderTargetView<P>,
         blend_func: impl FnMut(&mut P, u8),
-        width: usize,
-        height: usize,
-        stride: usize,
     ) {
-        self.blend_to_at(buffer, blend_func, Vec2::new(0, 0), width, height, stride);
+        self.blend_to_at(target, blend_func, Vec2::new(0, 0));
     }
 
     pub fn blend_to_at<P: Copy>(
         &self,
-        buffer: &mut [P],
+        target: super::RenderTargetView<P>,
         mut blend_func: impl FnMut(&mut P, u8),
-        offset: Vec2<isize>,
-        width: usize,
-        height: usize,
-        stride: usize,
+        offset: Vec2<i32>,
     ) {
-        assert!(buffer.len() >= height * stride);
-        assert!(stride >= width);
-
         for op in self.paint_iter() {
             let pos = op.pos();
             let (out_off, out_pos) = {
-                let out_sx = pos.x as isize * 4 + offset.x;
-                let out_sy = pos.y as isize * 4 + offset.y;
+                let out_sx = pos.x as i32 * 4 + offset.x;
+                let out_sy = pos.y as i32 * 4 + offset.y;
 
                 if out_sx <= -4 || out_sy <= -4 {
                     continue;
                 }
 
-                let out_offx = -out_sx.min(0) as usize;
-                let out_offy = -out_sy.min(0) as usize;
-                let out_x = out_sx.max(0) as usize;
-                let out_y = out_sy.max(0) as usize;
+                let out_offx = -out_sx.min(0) as u32;
+                let out_offy = -out_sy.min(0) as u32;
+                let out_x = out_sx.max(0) as u32;
+                let out_y = out_sy.max(0) as u32;
 
-                if out_x >= width || out_y >= height {
+                if out_x >= target.width || out_y >= target.height {
                     continue;
                 }
 
                 (Vec2::new(out_offx, out_offy), Point2::new(out_x, out_y))
             };
 
-            let op_width = op.width();
-            let out_width = (op_width - out_off.x).min(width - out_pos.x);
-            let out_height = (4 - out_off.y).min(height - out_pos.y);
-            let mut current_out =
-                unsafe { buffer.as_mut_ptr().add(out_pos.y * stride + out_pos.x) };
-            let row_step = stride - out_width;
+            let op_width = op.width() as u32;
+            let out_width = (op_width - out_off.x).min(target.width - out_pos.x);
+            let out_height = (4 - out_off.y).min(target.height - out_pos.y);
+            let mut current_out = unsafe {
+                target
+                    .buffer
+                    .as_mut_ptr()
+                    .add(out_pos.y as usize * target.stride as usize + out_pos.x as usize)
+            };
+            let row_step = (target.stride - out_width) as usize;
 
             match op {
                 StripPaintOp::Copy(op) => {
-                    let mut current_src =
-                        unsafe { op.buffer.as_ptr().add(out_off.y * op_width + out_off.x) };
-                    let src_row_step = op_width - out_width;
+                    let mut current_src = unsafe {
+                        op.buffer
+                            .as_ptr()
+                            .add(out_off.y as usize * op_width as usize + out_off.x as usize)
+                    };
+                    let src_row_step = (op_width - out_width) as usize;
 
                     for _ in 0..out_height {
                         unsafe {
@@ -421,7 +419,7 @@ impl Strips {
                     }
                 }
                 StripPaintOp::Fill(op) => {
-                    for &alpha in &op.alpha[out_off.y..out_height] {
+                    for &alpha in &op.alpha[out_off.y as usize..out_height as usize] {
                         unsafe {
                             for _ in 0..out_width {
                                 blend_func(&mut *current_out, alpha);
@@ -612,7 +610,7 @@ mod test {
         math::{Outline, StaticOutline, Vec2},
     };
 
-    use crate::sw::StripRasterizer;
+    use crate::sw::{RenderTargetView, StripRasterizer};
 
     pub fn compare(size: Vec2<u32>, coverage: &[u8], expected: &[u8]) {
         let mut matches = true;
@@ -691,12 +689,7 @@ mod test {
 
         let strips = rasterizer.rasterize();
         let mut coverage = vec![0; size.x as usize * size.y as usize];
-        strips.paint_to(
-            &mut coverage,
-            size.x as usize,
-            size.y as usize,
-            size.x as usize,
-        );
+        strips.paint_to(RenderTargetView::new(&mut coverage, size.x, size.y, size.x));
 
         compare(size, &coverage, expected);
     }

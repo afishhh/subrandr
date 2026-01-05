@@ -205,10 +205,7 @@ macro_rules! make_checked_blitter {
         $src_type: ty [over] $dst_type: ty $(, $extra_name: ident: $extra_ty: ty)*
      ) => {
         pub fn $name(
-            dst: &mut [$dst_type],
-            dst_stride: usize,
-            dst_width: usize,
-            dst_height: usize,
+            dst: super::RenderTargetView<$dst_type>,
             src: &[$src_type],
             src_stride: usize,
             src_width: usize,
@@ -217,31 +214,31 @@ macro_rules! make_checked_blitter {
             dy: isize,
             $($extra_name: $extra_ty),*
         ) {
-            assert!(dst_stride * dst_height <= dst.len());
+            // `RenderTargetView`'s buffer is already guaranteed to be large enough.
             assert!(src_stride * src_height <= src.len());
 
             let Some((xs, ys)) = calculate_blit_rectangle(
                 dx, dy,
-                dst_width, dst_height,
+                dst.width as usize, dst.height as usize,
                 src_width, src_height
             ) else {
                 return;
             };
 
             let width = xs.len();
-            assert!(width <= dst_width);
+            assert!(width <= dst.width as usize);
             assert!(width <= src_width);
 
             unsafe {
-                let dst_ptr = dst.as_mut_ptr().add(
-                    ys.start.wrapping_add_signed(dy) * dst_stride
+                let dst_ptr = dst.buffer.as_mut_ptr().add(
+                    ys.start.wrapping_add_signed(dy) * dst.stride as usize
                     + xs.start.wrapping_add_signed(dx)
                 );
                 let src_ptr = src.as_ptr().add(ys.start * src_stride + xs.start);
 
                 $unchecked_name(
                     dst_ptr,
-                    dst_stride,
+                    dst.stride as usize,
                     src_ptr,
                     src_stride,
                     width,

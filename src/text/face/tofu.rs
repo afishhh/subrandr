@@ -1,14 +1,13 @@
 use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
 
 use rasterize::{
-    sw::{StripRasterizer, Strips},
+    sw::{RenderTargetView, StripRasterizer, Strips},
     PixelFormat, Rasterizer,
 };
 use text_sys::*;
 use util::{
     make_static_outline,
     math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
-    slice_assume_init_mut,
 };
 
 use super::{FaceImpl, FontImpl, FontMetrics, GlyphMetrics, SingleGlyphBitmap};
@@ -460,15 +459,19 @@ impl FontImpl for Font {
                 texture_size.x,
                 texture_size.y,
                 PixelFormat::Mono,
-                Box::new(|texture, stride| {
-                    texture.fill(MaybeUninit::new(0));
-                    let texture = slice_assume_init_mut(texture);
+                Box::new(|buffer, stride| {
+                    buffer.fill(MaybeUninit::new(0));
 
-                    strips.paint_to(
-                        texture,
-                        texture_size.x as usize,
-                        texture_size.y as usize,
-                        stride,
+                    strips.blend_to(
+                        RenderTargetView::new(
+                            buffer,
+                            texture_size.x,
+                            texture_size.y,
+                            stride as u32,
+                        ),
+                        |out, value| {
+                            out.write(value);
+                        },
                     );
                 }),
             )

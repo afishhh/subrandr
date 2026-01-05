@@ -22,7 +22,6 @@ trait DrawPixel: Copy + Sized {
     fn put(&mut self, value: Self);
     fn scale_alpha(self, scale: u8) -> Self;
     const PIXEL_FORMAT: PixelFormat;
-    fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]>;
 }
 
 impl DrawPixel for BGRA8 {
@@ -36,33 +35,6 @@ impl DrawPixel for BGRA8 {
     }
 
     const PIXEL_FORMAT: PixelFormat = PixelFormat::Bgra;
-    fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]> {
-        match buffer {
-            RenderTargetBufferMut::Bgra(bgra) => Some(bgra),
-            _ => None,
-        }
-    }
-}
-
-impl DrawPixel for u8 {
-    fn put(&mut self, value: Self) {
-        // Use simple additive blending for monochrome rendering
-        // TODO: It's kinda weird to be using these different blending modes for
-        //       unannotated primitives like `u8` though, maybe it could be cleaned up?
-        *self = self.saturating_add(value);
-    }
-
-    fn scale_alpha(self, scale: u8) -> Self {
-        crate::color::mul_rgb(self, scale)
-    }
-
-    const PIXEL_FORMAT: PixelFormat = PixelFormat::Mono;
-    fn cast_target_buffer<'a>(buffer: RenderTargetBufferMut<'a>) -> Option<&'a mut [Self]> {
-        match buffer {
-            RenderTargetBufferMut::Mono(mono) => Some(mono),
-            _ => None,
-        }
-    }
 }
 
 unsafe fn horizontal_line_unchecked<P: DrawPixel>(
@@ -243,59 +215,24 @@ fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
 }
 
 pub struct RenderTarget<'a> {
-    buffer: RenderTargetBuffer<'a>,
+    buffer: &'a mut [BGRA8],
     width: u32,
     height: u32,
     stride: u32,
 }
 
 impl<'a> RenderTarget<'a> {
-    pub fn new_borrowed_bgra8(
-        buffer: &'a mut [BGRA8],
-        width: u32,
-        height: u32,
-        stride: u32,
-    ) -> Self {
+    pub fn new(buffer: &'a mut [BGRA8], width: u32, height: u32, stride: u32) -> Self {
         assert!(
             buffer.len() >= height as usize * stride as usize,
-            "Buffer passed to rasterize::sw::RenderTarget::new_borrowed_bgra8 is too small!"
+            "Buffer passed to rasterize::sw::RenderTarget::new is too small!"
         );
 
         RenderTarget {
-            buffer: RenderTargetBuffer::BorrowedBgra(buffer),
+            buffer,
             width,
             height,
             stride,
-        }
-    }
-
-    fn new_owned_mono(width: u32, height: u32) -> Self {
-        Self {
-            buffer: {
-                let mut uninit = UniqueArc::new_uninit_slice(width as usize * height as usize);
-                unsafe {
-                    uninit.fill(MaybeUninit::zeroed());
-                    RenderTargetBuffer::OwnedMono(UniqueArc::assume_init(uninit))
-                }
-            },
-            width,
-            height,
-            stride: width,
-        }
-    }
-
-    fn owned_into_texture(self) -> Texture<'static> {
-        assert_eq!(self.stride, self.width);
-
-        Texture {
-            width: self.width,
-            height: self.height,
-            data: match self.buffer {
-                RenderTargetBuffer::OwnedMono(mono) => {
-                    TextureData::OwnedMono(UniqueArc::into_shared(mono))
-                }
-                _ => panic!("Cannot convert a borrowed RenderTarget into a Texture"),
-            },
         }
     }
 
@@ -308,55 +245,6 @@ impl<'a> RenderTarget<'a> {
     }
 }
 
-enum RenderTargetBuffer<'a> {
-    OwnedMono(UniqueArc<[u8]>),
-    BorrowedBgra(&'a mut [BGRA8]),
-    BorrowedMono(&'a mut [u8]),
-}
-
-impl RenderTargetBuffer<'_> {
-    fn pixel_format(&self) -> PixelFormat {
-        match self {
-            Self::BorrowedBgra(_) => PixelFormat::Bgra,
-            Self::OwnedMono(_) | Self::BorrowedMono(_) => PixelFormat::Mono,
-        }
-    }
-}
-
-enum RenderTargetBufferMut<'a> {
-    Bgra(&'a mut [BGRA8]),
-    Mono(&'a mut [u8]),
-}
-
-pub fn create_render_target(
-    buffer: &mut [BGRA8],
-    width: u32,
-    height: u32,
-    stride: u32,
-) -> super::RenderTarget<'_> {
-    super::RenderTarget(super::RenderTargetInner::Software(
-        RenderTarget::new_borrowed_bgra8(buffer, width, height, stride),
-    ))
-}
-
-pub fn create_render_target_mono(
-    buffer: &mut [u8],
-    width: u32,
-    height: u32,
-    stride: u32,
-) -> super::RenderTarget<'_> {
-    assert!(
-        buffer.len() >= height as usize * stride as usize,
-        "Buffer passed to rasterize::sw::create_render_target is too small!"
-    );
-    super::RenderTarget(super::RenderTargetInner::Software(RenderTarget {
-        buffer: RenderTargetBuffer::BorrowedMono(buffer),
-        width,
-        height,
-        stride,
-    }))
-}
-
 fn unwrap_sw_render_target<'a, 'b>(
     target: &'a mut super::RenderTarget<'b>,
 ) -> &'a mut RenderTarget<'b> {
@@ -367,24 +255,6 @@ fn unwrap_sw_render_target<'a, 'b>(
             "Incompatible render target {:?} passed to software rasterizer (expected: software)",
             target.variant_name()
         ),
-    }
-}
-
-impl RenderTargetBuffer<'_> {
-    fn as_mut(&mut self) -> RenderTargetBufferMut<'_> {
-        match self {
-            RenderTargetBuffer::OwnedMono(mono) => RenderTargetBufferMut::Mono(mono),
-            RenderTargetBuffer::BorrowedBgra(bgra) => RenderTargetBufferMut::Bgra(bgra),
-            RenderTargetBuffer::BorrowedMono(mono) => RenderTargetBufferMut::Mono(mono),
-        }
-    }
-
-    fn unwrap_for<P: DrawPixel>(&mut self) -> &'_ mut [P] {
-        // TODO: NLL problem case 3
-        let pixel_format = self.pixel_format();
-        P::cast_target_buffer( self.as_mut()).unwrap_or_else(|| {
-            panic!("Incompatible render target format {:?} passed to software rasterizer (expected: {:?})", pixel_format, P::PIXEL_FORMAT)
-        })
     }
 }
 
@@ -553,7 +423,7 @@ impl Rasterizer {
         match texture.data.as_ref() {
             TextureDataRef::Mono(source) => {
                 blit::blit_mono(
-                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -568,7 +438,7 @@ impl Rasterizer {
             }
             TextureDataRef::Bgra(source) => {
                 blit::blit_bgra(
-                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -598,7 +468,7 @@ impl Rasterizer {
             }
             (Some(BitmapFilter::ExtractAlpha), TextureDataRef::Bgra(source)) => {
                 blit::blit_xxxa_to_bgra(
-                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -622,7 +492,7 @@ impl Rasterizer {
         filter: Option<BitmapFilter>,
         color: BGRA8,
     ) {
-        let dst = target.buffer.unwrap_for::<BGRA8>();
+        let dst = target.buffer;
         match (texture.data.as_ref(), filter) {
             (TextureDataRef::Mono(mono), Some(BitmapFilter::ExtractAlpha) | None) => {
                 blit::cvt_mono_to_bgra(
@@ -685,7 +555,7 @@ impl Rasterizer {
             rect.min.y,
             rect.max.x,
             rect.max.y,
-            target.buffer.unwrap_for::<BGRA8>(),
+            target.buffer,
             target.width,
             target.height,
             target.stride,
@@ -758,25 +628,29 @@ impl super::Rasterizer for Rasterizer {
         self.blurer.box_blur_vertical();
         self.blurer.box_blur_vertical();
 
-        let mut target =
-            RenderTarget::new_owned_mono(self.blurer.width() as u32, self.blurer.height() as u32);
+        let mut buffer =
+            unsafe { UniqueArc::assume_init(UniqueArc::new_zeroed_slice(width * height)) };
 
         blit::copy_float_to_mono(
-            target.buffer.unwrap_for::<u8>(),
-            target.stride as usize,
-            target.width as usize,
-            target.height as usize,
+            &mut buffer,
+            width,
+            width,
+            height,
             self.blurer.front(),
-            self.blurer.width(),
-            self.blurer.width(),
-            self.blurer.height(),
+            width,
+            width,
+            height,
             0,
             0,
         );
 
         super::BlurOutput {
             padding: Vec2::splat(self.blurer.padding() as u32),
-            texture: super::Texture(super::TextureInner::Software(target.owned_into_texture())),
+            texture: super::Texture(super::TextureInner::Software(Texture {
+                width: width as u32,
+                height: height as u32,
+                data: TextureData::OwnedMono(UniqueArc::into_shared(buffer)),
+            })),
         }
     }
 
@@ -787,7 +661,7 @@ impl super::Rasterizer for Rasterizer {
         user_data: &(dyn Any + 'static),
     ) -> Result<(), super::SceneRenderError> {
         let target = unwrap_sw_render_target(target);
-        target.buffer.unwrap_for::<BGRA8>().fill(BGRA8::ZERO);
+        target.buffer.fill(BGRA8::ZERO);
 
         self.render_scene_pieces_at(
             Vec2::ZERO,
@@ -949,7 +823,7 @@ impl OutputPieceContent {
             OutputPieceContent::Strips(OutputStrips { strips, color }) => {
                 let pre = color.premultiply();
                 strips.blend_to_at(
-                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.buffer,
                     |d, s| *d = pre.mul_alpha(s).blend_over(*d).0,
                     Vec2::new(pos.x as isize, pos.y as isize),
                     target.width as usize,
@@ -1006,7 +880,7 @@ impl OutputImage<'_> {
                     frect.min.y,
                     frect.max.x,
                     frect.max.y,
-                    target.buffer.unwrap_for::<BGRA8>(),
+                    target.buffer,
                     target.width,
                     target.height,
                     target.stride,

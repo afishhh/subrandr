@@ -164,7 +164,7 @@ unsafe extern "C" fn sbr_output_image_rasterize_into(
     stride: u32,
 ) -> c_int {
     let rasterizer = &mut (*renderer).rasterizer;
-    let mut target = rasterize::sw::RenderTarget::new_borrowed_bgra8(
+    let mut target = rasterize::sw::RenderTarget::new_borrowed_bgra(
         std::slice::from_raw_parts_mut(buffer, height as usize * stride as usize),
         width,
         height,

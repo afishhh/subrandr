@@ -277,7 +277,8 @@ pub fn check_inline(
 
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
-            rasterize::sw::create_render_target(&mut pixels, width, height, width);
+            rasterize::sw::RenderTarget::new_borrowed_bgra(&mut pixels, width, height, width)
+                .into();
 
         rasterizer
             .render_scene(&mut render_target, &scene, &glyph_cache)

@@ -413,7 +413,8 @@ impl Renderer<'_> {
     ) -> Result<(), RenderError> {
         self.render_to(
             &mut rasterize::sw::Rasterizer::new(),
-            &mut rasterize::sw::create_render_target(buffer, width, height, stride),
+            &mut rasterize::sw::RenderTarget::new_borrowed_bgra(buffer, width, height, stride)
+                .into(),
             ctx,
             t,
         )

@@ -116,16 +116,13 @@ impl Premultiply for BGRA8 {
 // TODO: blend_over_mul_alpha
 
 impl BGRA8 {
-    pub fn blend_over(self, b: BGRA8) -> Premultiplied<BGRA8> {
+    pub fn blend_over(self, b: Premultiplied<BGRA8>) -> Premultiplied<BGRA8> {
         self.premultiply().blend_over(b)
     }
 }
 
 impl Premultiplied<BGRA8> {
-    pub fn blend_over(
-        self,
-        b: /* TODO: Premultiplied< */ BGRA8, /* > */
-    ) -> Premultiplied<BGRA8> {
+    pub fn blend_over(self, Premultiplied(b): Premultiplied<BGRA8>) -> Premultiplied<BGRA8> {
         let a = self.0;
         let inva = 255 - a.a;
         let one = |a, b| a + mul_rgb(inva, b);

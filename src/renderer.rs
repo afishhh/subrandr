@@ -6,7 +6,7 @@ use std::{
 };
 
 use rasterize::{
-    color::BGRA8,
+    color::{Premultiplied, BGRA8},
     scene::{SceneNode, StrokedPolyline, Subscene},
     Rasterizer,
 };
@@ -406,15 +406,14 @@ impl Renderer<'_> {
         &mut self,
         ctx: &SubtitleContext,
         t: u32,
-        buffer: &mut [BGRA8],
+        buffer: &mut [Premultiplied<BGRA8>],
         width: u32,
         height: u32,
         stride: u32,
     ) -> Result<(), RenderError> {
         self.render_to(
             &mut rasterize::sw::Rasterizer::new(),
-            &mut rasterize::sw::RenderTarget::new_borrowed_bgra(buffer, width, height, stride)
-                .into(),
+            &mut rasterize::sw::RenderTarget::new(buffer, width, height, stride).into(),
             ctx,
             t,
         )

@@ -6,7 +6,7 @@ use util::{
 };
 
 use crate::{
-    color::{Premultiply, BGRA8},
+    color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
     scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, SceneNode, Vec2S},
     PixelFormat, SceneRenderError,
@@ -21,20 +21,17 @@ pub use strip::*;
 trait DrawPixel: Copy + Sized {
     fn put(&mut self, value: Self);
     fn scale_alpha(self, scale: u8) -> Self;
-    const PIXEL_FORMAT: PixelFormat;
 }
 
-impl DrawPixel for BGRA8 {
+impl DrawPixel for Premultiplied<BGRA8> {
     fn put(&mut self, value: Self) {
         // TODO: blend_over
-        *self = value.premultiply().0;
+        *self = value;
     }
 
     fn scale_alpha(self, scale: u8) -> Self {
         self.mul_alpha(scale)
     }
-
-    const PIXEL_FORMAT: PixelFormat = PixelFormat::Bgra;
 }
 
 unsafe fn horizontal_line_unchecked<P: DrawPixel>(
@@ -215,14 +212,19 @@ fn fill_axis_aligned_antialias_rect<P: DrawPixel>(
 }
 
 pub struct RenderTarget<'a> {
-    buffer: &'a mut [BGRA8],
+    buffer: &'a mut [Premultiplied<BGRA8>],
     width: u32,
     height: u32,
     stride: u32,
 }
 
 impl<'a> RenderTarget<'a> {
-    pub fn new(buffer: &'a mut [BGRA8], width: u32, height: u32, stride: u32) -> Self {
+    pub fn new(
+        buffer: &'a mut [Premultiplied<BGRA8>],
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Self {
         assert!(
             buffer.len() >= height as usize * stride as usize,
             "Buffer passed to rasterize::sw::RenderTarget::new is too small!"
@@ -261,7 +263,7 @@ fn unwrap_sw_render_target<'a, 'b>(
 #[derive(Clone)]
 enum TextureData<'a> {
     OwnedMono(Arc<[u8]>),
-    OwnedBgra(Arc<[BGRA8]>),
+    OwnedBgra(Arc<[Premultiplied<BGRA8>]>),
     BorrowedMono(&'a [u8]),
 }
 
@@ -301,7 +303,7 @@ impl Eq for TextureData<'_> {}
 
 enum TextureDataRef<'a> {
     Mono(&'a [u8]),
-    Bgra(&'a [BGRA8]),
+    Bgra(&'a [Premultiplied<BGRA8>]),
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -334,7 +336,7 @@ impl Texture<'static> {
                 }
             }
             PixelFormat::Bgra => {
-                let mut data = UniqueArc::<[BGRA8]>::new_uninit_slice(n_pixels);
+                let mut data = UniqueArc::<[Premultiplied<BGRA8>]>::new_uninit_slice(n_pixels);
                 let slice = unsafe {
                     std::slice::from_raw_parts_mut(
                         data.as_mut_ptr().cast::<MaybeUninit<u8>>(),
@@ -492,11 +494,10 @@ impl Rasterizer {
         filter: Option<BitmapFilter>,
         color: BGRA8,
     ) {
-        let dst = target.buffer;
         match (texture.data.as_ref(), filter) {
             (TextureDataRef::Mono(mono), Some(BitmapFilter::ExtractAlpha) | None) => {
                 blit::cvt_mono_to_bgra(
-                    dst,
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -511,7 +512,7 @@ impl Rasterizer {
             }
             (TextureDataRef::Bgra(bgra), Some(BitmapFilter::ExtractAlpha)) => {
                 blit::cvt_xxxa_to_bgra(
-                    dst,
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -526,7 +527,7 @@ impl Rasterizer {
             }
             (TextureDataRef::Bgra(source), None) => {
                 blit::cvt_bgra_to_bgra(
-                    dst,
+                    target.buffer,
                     target.stride as usize,
                     target.width as usize,
                     target.height as usize,
@@ -540,27 +541,6 @@ impl Rasterizer {
                 );
             }
         }
-    }
-
-    pub fn fill_axis_aligned_rect(
-        &mut self,
-        target: &mut RenderTarget,
-        rect: Rect2S,
-        color: BGRA8,
-    ) {
-        // TODO: update fill_axis_aligned_antialias_rect to Fixed
-        let rect = Rect2S::to_float(rect);
-        fill_axis_aligned_antialias_rect(
-            rect.min.x,
-            rect.min.y,
-            rect.max.x,
-            rect.max.y,
-            target.buffer,
-            target.width,
-            target.height,
-            target.stride,
-            color,
-        );
     }
 }
 
@@ -607,7 +587,7 @@ impl super::Rasterizer for Rasterizer {
                 dx as isize,
                 dy as isize,
             ),
-            TextureDataRef::Bgra(source) => blit::copy_bgra_to_float(
+            TextureDataRef::Bgra(source) => blit::copy_xxxa_to_float(
                 self.blurer.front_mut(),
                 width,
                 width,
@@ -661,7 +641,7 @@ impl super::Rasterizer for Rasterizer {
         user_data: &(dyn Any + 'static),
     ) -> Result<(), super::SceneRenderError> {
         let target = unwrap_sw_render_target(target);
-        target.buffer.fill(BGRA8::ZERO);
+        target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
         self.render_scene_pieces_at(
             Vec2::ZERO,
@@ -824,7 +804,7 @@ impl OutputPieceContent {
                 let pre = color.premultiply();
                 strips.blend_to_at(
                     target.buffer,
-                    |d, s| *d = pre.mul_alpha(s).blend_over(*d).0,
+                    |d, s| *d = pre.mul_alpha(s).blend_over(*d),
                     Vec2::new(pos.x as isize, pos.y as isize),
                     target.width as usize,
                     target.height as usize,
@@ -832,10 +812,17 @@ impl OutputPieceContent {
                 );
             }
             &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-                rasterizer.fill_axis_aligned_rect(
-                    target,
-                    rect.translate(Vec2::new(pos.x as f32, pos.y as f32)),
-                    color,
+                let rect = Rect2S::to_float(rect.translate(Vec2::new(pos.x, pos.y)));
+                fill_axis_aligned_antialias_rect(
+                    rect.min.x,
+                    rect.min.y,
+                    rect.max.x,
+                    rect.max.y,
+                    target.buffer,
+                    target.width,
+                    target.height,
+                    target.stride,
+                    color.premultiply(),
                 );
             }
         }
@@ -884,7 +871,7 @@ impl OutputImage<'_> {
                     target.width,
                     target.height,
                     target.stride,
-                    color,
+                    color.premultiply(),
                 );
             }
         }

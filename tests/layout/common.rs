@@ -269,7 +269,7 @@ pub fn check_inline(
         )
         .expect("Inline layout failed");
 
-        let mut pixels = vec![BGRA8::ZERO; width as usize * height as usize];
+        let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
         let glyph_cache = GlyphCache::new();
         let mut scene = Vec::new();
 
@@ -277,8 +277,7 @@ pub fn check_inline(
 
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
-            rasterize::sw::RenderTarget::new_borrowed_bgra(&mut pixels, width, height, width)
-                .into();
+            rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
 
         rasterizer
             .render_scene(&mut render_target, &scene, &glyph_cache)
@@ -293,8 +292,8 @@ pub fn check_inline(
 
     // Convert pixels to straight RGBA8 since that's what PNG expects.
     for pixel in &mut pixels {
-        *pixel = Premultiplied(*pixel).unpremultiply();
-        std::mem::swap(&mut pixel.b, &mut pixel.r);
+        *pixel = Premultiplied(pixel.unpremultiply());
+        std::mem::swap(&mut pixel.0.b, &mut pixel.0.r);
     }
 
     let pixels_byte_len = pixels.len() * 4;

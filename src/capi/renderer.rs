@@ -1,6 +1,9 @@
 use std::ffi::c_int;
 
-use rasterize::{color::BGRA8, sw::OutputPiece};
+use rasterize::{
+    color::{Premultiplied, BGRA8},
+    sw::OutputPiece,
+};
 
 use crate::{Renderer, Subrandr, SubtitleContext, Subtitles};
 
@@ -47,7 +50,7 @@ unsafe extern "C" fn sbr_renderer_render(
     renderer: *mut CRenderer,
     ctx: *const SubtitleContext,
     t: u32,
-    buffer: *mut BGRA8,
+    buffer: *mut Premultiplied<BGRA8>,
     width: u32,
     height: u32,
     stride: u32,

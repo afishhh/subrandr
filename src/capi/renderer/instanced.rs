@@ -4,7 +4,7 @@ use std::{
 };
 
 use rasterize::{
-    color::BGRA8,
+    color::{Premultiplied, BGRA8},
     sw::{InstancedOutputBuilder, OutputImage, OutputPiece},
 };
 use util::math::{Point2, Rect2, Vec2};
@@ -158,13 +158,13 @@ unsafe extern "C" fn sbr_output_image_rasterize_into(
     renderer: *mut CRenderer,
     off_x: i32,
     off_y: i32,
-    buffer: *mut BGRA8,
+    buffer: *mut Premultiplied<BGRA8>,
     width: u32,
     height: u32,
     stride: u32,
 ) -> c_int {
     let rasterizer = &mut (*renderer).rasterizer;
-    let mut target = rasterize::sw::RenderTarget::new_borrowed_bgra(
+    let mut target = rasterize::sw::RenderTarget::new(
         std::slice::from_raw_parts_mut(buffer, height as usize * stride as usize),
         width,
         height,

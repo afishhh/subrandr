@@ -14,7 +14,7 @@ let
 in
 rustPlatform.buildRustPackage {
   pname = cargoToml.package.name;
-  version = cargoToml.workspace.package.version;
+  version = cargoToml.package.version;
 
   SUBRANDR_BUILD_REV = buildRevision;
 
@@ -34,7 +34,6 @@ rustPlatform.buildRustPackage {
 
   buildPhase = ''
     cargo xtask build --target ${stdenv.targetPlatform.rust.rustcTarget}
-    #
   '';
 
   installPhase = ''

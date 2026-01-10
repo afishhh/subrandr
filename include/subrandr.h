@@ -167,7 +167,7 @@ typedef struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
 // `flags` must be zero.
 //
 // Calling `sbr_instanced_raster_pass_get_instances` on the resulting raster
-// pass will yield a linked-list of instances that must be composited onto the
+// pass will yield a linked list of instances that must be composited onto the
 // output to correctly display the subtitle frame.
 // Instances must be composited in the order they are returned for correct
 // results.

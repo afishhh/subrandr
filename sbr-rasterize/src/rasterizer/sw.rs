@@ -1143,12 +1143,8 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                 }
             }
             &OutputPieceContent::Rect(OutputRect { mut rect, color }) => {
-                if let Some(clip_horizontal) = piece.size.x.checked_sub(clip_intersection.size.x) {
-                    rect.max.y -= FixedS::new(clip_horizontal as i32);
-                }
-                if let Some(clip_vertical) = piece.size.y.checked_sub(clip_intersection.size.y) {
-                    rect.max.y -= FixedS::new(clip_vertical as i32);
-                }
+                rect.max.x -= (piece.size.x - clip_intersection.size.x) as i32;
+                rect.max.y -= (piece.size.y - clip_intersection.size.y) as i32;
 
                 // If the rectangle has any of its sides clipped by at least one pixel then
                 // the anti-aliasing on that side goes away.
@@ -1186,9 +1182,19 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                         },
                     );
                 } else {
-                    let handle =
-                        builder.on_image(piece.size, OutputImage::Rect(OutputRect { rect, color }));
-                    builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
+                    let handle = builder.on_image(
+                        clip_intersection.size,
+                        OutputImage::Rect(OutputRect { rect, color }),
+                    );
+                    builder.on_instance(
+                        handle,
+                        OutputInstanceParameters {
+                            dst_pos: clip_intersection.dst_pos,
+                            dst_size: clip_intersection.size,
+                            src_off: Vec2::ZERO,
+                            src_size: clip_intersection.size,
+                        },
+                    );
                 }
             }
         }

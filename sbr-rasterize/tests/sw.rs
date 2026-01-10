@@ -297,3 +297,20 @@ fn translated_subscene_with_polyline() {
     checker.check_instanced(Rect2::new(Point2::new(20, 43), Point2::new(91, 76)), false);
     checker.check_instanced(Rect2::new(Point2::new(37, 37), Point2::new(75, 89)), false);
 }
+
+#[test]
+fn antialiased_rectangle() {
+    let scene = &[scene::SceneNode::FilledRect(scene::FilledRect {
+        rect: Rect2 {
+            min: Point2::new(FixedS::from_f32(1.75), FixedS::from_f32(1.5)),
+            max: Point2::new(FixedS::from_f32(7.5), FixedS::from_f32(7.3)),
+        },
+        color: BGRA8::YELLOW,
+    })];
+
+    let mut checker =
+        DrawChecker::check_immediate("antialiased_rectangle", Vec2::new(10, 10), scene);
+    checker.check_instanced(Rect2::new(Point2::new(2, 2), Point2::new(8, 8)), false);
+    checker.check_instanced(Rect2::new(Point2::new(1, 3), Point2::new(5, 6)), false);
+    checker.check_instanced(Rect2::new(Point2::new(0, 0), Point2::new(5, 10)), false);
+}

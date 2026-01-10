@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.1.0]
+
 - Fixed occasional gaps between backgrounds boxes if non-integer padding is involved.
 - Fixed static MSVC build failing due to different static library naming.
 - Switched MSVC build to use clang-compatible naming convention. As a consequence `--shared-library` and `--static-library` are now mutually exclusive on MSVC targets.
@@ -47,7 +49,8 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.1.0...HEAD
+[v1.1.0]: https://github.com/afishhh/subrandr/compare/v1.0.1...v1.1.0
 [v1.0.1]: https://github.com/afishhh/subrandr/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/afishhh/subrandr/compare/v0.2.2...v1.0.0
 [v0.2.2]: https://github.com/afishhh/subrandr/compare/v0.2.1...v0.2.2

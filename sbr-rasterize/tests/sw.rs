@@ -219,7 +219,6 @@ fn simple_rectangles() {
             },
             color: BGRA8::BLUE,
         }),
-        // FIXME: Primitives are not currently blended with their background
         scene::SceneNode::FilledRect(scene::FilledRect {
             rect: Rect2 {
                 min: Point2::new(FixedS::new(25), FixedS::new(25)),
@@ -229,10 +228,7 @@ fn simple_rectangles() {
         }),
     ];
 
-    // NOTE: Once the above FIXME is fixed, switch this to `check_defaults`.
-    //       Currently this fails due to instanced rendering correctly doing
-    //       transparency :P
-    DrawChecker::check_immediate("simple_rectangles", Vec2::new(100, 100), scene);
+    DrawChecker::check_defaults("simple_rectangles", Vec2::new(100, 100), scene);
 }
 
 #[test]

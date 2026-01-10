@@ -21,22 +21,34 @@ mod strip;
 pub use strip::*;
 
 trait DrawPixel: Copy + Sized {
-    fn put(&mut self, value: Self);
     fn scale_alpha(self, scale: u8) -> Self;
 }
 
 impl DrawPixel for Premultiplied<BGRA8> {
-    fn put(&mut self, value: Self) {
-        // TODO: blend_over
-        *self = value;
-    }
-
     fn scale_alpha(self, scale: u8) -> Self {
         self.mul_alpha(scale)
     }
 }
 
-unsafe fn horizontal_line_unchecked<P: DrawPixel>(
+trait BlendMode<P: DrawPixel> {
+    fn blend(dst: &mut P, src: P);
+}
+
+struct BlendOver;
+impl BlendMode<Premultiplied<BGRA8>> for BlendOver {
+    fn blend(dst: &mut Premultiplied<BGRA8>, src: Premultiplied<BGRA8>) {
+        *dst = src.blend_over(*dst)
+    }
+}
+
+struct BlendSet;
+impl BlendMode<Premultiplied<BGRA8>> for BlendSet {
+    fn blend(dst: &mut Premultiplied<BGRA8>, src: Premultiplied<BGRA8>) {
+        *dst = src;
+    }
+}
+
+unsafe fn horizontal_line_unchecked<B: BlendMode<P>, P: DrawPixel>(
     x0: i32,
     x1: i32,
     offset_buffer: &mut [P],
@@ -44,11 +56,11 @@ unsafe fn horizontal_line_unchecked<P: DrawPixel>(
     color: P,
 ) {
     for x in x0.clamp(0, width)..x1.clamp(0, width) {
-        offset_buffer.get_unchecked_mut(x as usize).put(color);
+        B::blend(offset_buffer.get_unchecked_mut(x as usize), color);
     }
 }
 
-unsafe fn vertical_line_unchecked<P: DrawPixel>(
+unsafe fn vertical_line_unchecked<B: BlendMode<P>, P: DrawPixel>(
     y0: i32,
     y1: i32,
     offset_buffer: &mut [P],
@@ -57,14 +69,19 @@ unsafe fn vertical_line_unchecked<P: DrawPixel>(
     color: P,
 ) {
     for y in y0.clamp(0, height)..y1.clamp(0, height) {
-        offset_buffer
-            .get_unchecked_mut((y * stride) as usize)
-            .put(color);
+        B::blend(
+            offset_buffer.get_unchecked_mut((y * stride) as usize),
+            color,
+        );
     }
 }
 
 // Scuffed Anti-Aliasing™ (SAA)
-fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color: P) {
+fn fill_rect<B: BlendMode<P>, P: DrawPixel>(
+    mut target: RenderTargetView<P>,
+    rect: Rect2S,
+    color: P,
+) {
     if rect.is_empty() {
         return;
     }
@@ -89,7 +106,7 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
         let top_y = rect.min.y.floor_to_inner();
         if top_y >= 0 && top_y < target.height as i32 {
             unsafe {
-                horizontal_line_unchecked(
+                horizontal_line_unchecked::<B, _>(
                     full_left,
                     full_right,
                     &mut target.buffer[top_y as usize * target.stride as usize..],
@@ -109,7 +126,7 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
         let bottom_y = rect.max.y.floor_to_inner();
         if bottom_y >= 0 && bottom_y < target.height as i32 {
             unsafe {
-                horizontal_line_unchecked(
+                horizontal_line_unchecked::<B, _>(
                     full_left,
                     full_right,
                     &mut target.buffer[bottom_y as usize * target.stride as usize..],
@@ -128,11 +145,14 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
         let left_x = full_left - 1;
         if left_x >= 0 && left_x < target.width as i32 {
             if let Some(pixel) = target.pixel_at(left_x, full_top - 1) {
-                pixel.put(color.scale_alpha((left_fill * top_aa_width).round_to_inner() as u8))
+                B::blend(
+                    pixel,
+                    color.scale_alpha((left_fill * top_aa_width).round_to_inner() as u8),
+                )
             }
 
             unsafe {
-                vertical_line_unchecked(
+                vertical_line_unchecked::<B, _>(
                     full_top,
                     full_bottom,
                     &mut target.buffer[left_x as usize..],
@@ -143,7 +163,10 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
             }
 
             if let Some(pixel) = target.pixel_at(left_x, full_bottom) {
-                pixel.put(color.scale_alpha((left_fill * bottom_aa_width).round_to_inner() as u8));
+                B::blend(
+                    pixel,
+                    color.scale_alpha((left_fill * bottom_aa_width).round_to_inner() as u8),
+                );
             }
         }
     }
@@ -153,11 +176,14 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
         let right_x = full_right;
         if right_x >= 0 && right_x < target.width as i32 {
             if let Some(pixel) = target.pixel_at(right_x, full_top - 1) {
-                pixel.put(color.scale_alpha((right_fill * top_aa_width).round_to_inner() as u8))
+                B::blend(
+                    pixel,
+                    color.scale_alpha((right_fill * top_aa_width).round_to_inner() as u8),
+                )
             }
 
             unsafe {
-                vertical_line_unchecked(
+                vertical_line_unchecked::<B, _>(
                     full_top,
                     full_bottom,
                     &mut target.buffer[right_x as usize..],
@@ -168,14 +194,17 @@ fn fill_rect<P: DrawPixel>(mut target: RenderTargetView<P>, rect: Rect2S, color:
             }
 
             if let Some(pixel) = target.pixel_at(right_x, full_bottom) {
-                pixel.put(color.scale_alpha((right_fill * bottom_aa_width).round_to_inner() as u8));
+                B::blend(
+                    pixel,
+                    color.scale_alpha((right_fill * bottom_aa_width).round_to_inner() as u8),
+                );
             }
         }
     }
 
     for y in full_top.clamp(0, target.height as i32)..full_bottom.clamp(0, target.height as i32) {
         unsafe {
-            horizontal_line_unchecked(
+            horizontal_line_unchecked::<B, _>(
                 full_left,
                 full_right,
                 &mut target.buffer[y as usize * target.stride as usize..],
@@ -631,7 +660,7 @@ impl Rasterizer {
         rect: Rect2S,
         color: Premultiplied<BGRA8>,
     ) {
-        fill_rect(target, rect, color);
+        fill_rect::<BlendOver, _>(target, rect, color);
     }
 }
 
@@ -890,7 +919,7 @@ impl OutputPieceContent {
                 );
             }
             &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-                fill_rect(
+                fill_rect::<BlendOver, _>(
                     target.reborrow(),
                     rect.translate(Vec2::new(pos.x, pos.y)),
                     color.premultiply(),
@@ -932,7 +961,7 @@ impl OutputImage<'_> {
                 );
             }
             &OutputImage::Rect(OutputRect { rect, color }) => {
-                fill_rect(
+                fill_rect::<BlendSet, _>(
                     target.reborrow(),
                     rect.translate(offset.to_vec()),
                     color.premultiply(),

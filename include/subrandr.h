@@ -43,11 +43,9 @@ typedef struct sbr_subtitle_context {
   sbr_26dot6 video_width, video_height;
   sbr_26dot6 padding_left, padding_right, padding_top, padding_bottom;
 } sbr_subtitle_context;
-#ifdef SBR_UNSTABLE
-typedef SBR_UNSTABLE struct sbr_rect2i {
+typedef struct sbr_rect2i {
   int32_t min_x, min_y, max_x, max_y;
 } sbr_rect2i;
-#endif
 
 // Construct a new `sbr_library *` that is required to use most subrandr APIs.
 //
@@ -113,7 +111,6 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
                         uint32_t t, sbr_bgra8 *buffer, uint32_t width,
                         uint32_t height, uint32_t stride);
 
-#ifdef SBR_UNSTABLE
 // A single output image that resulted from instanced rendering of
 // a subtitle frame.
 //
@@ -123,7 +120,7 @@ int sbr_renderer_render(sbr_renderer *, sbr_subtitle_context const *,
 //
 // The size of this struct is not part of the public ABI,
 // new fields may be added in ABI-compatible releases.
-typedef SBR_UNSTABLE struct sbr_output_image {
+typedef struct sbr_output_image {
   uint32_t width, height;
   // This field is always NULL when returned by subrandr and isn't
   // read or modified by the library.
@@ -152,7 +149,7 @@ typedef SBR_UNSTABLE struct sbr_output_image {
 //
 // The size of this struct is not part of the public ABI,
 // new fields may be added in ABI-compatible releases.
-typedef SBR_UNSTABLE struct sbr_output_instance {
+typedef struct sbr_output_instance {
   struct sbr_output_instance *next;
   struct sbr_output_image *base;
   int32_t dst_x, dst_y;
@@ -161,7 +158,7 @@ typedef SBR_UNSTABLE struct sbr_output_instance {
   uint32_t src_width, src_height;
 } sbr_output_instance;
 
-typedef SBR_UNSTABLE struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
+typedef struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
 
 // Renders a single subtitle frame to output images and immediately
 // begins an instanced raster pass which it returns a handle to.
@@ -178,13 +175,12 @@ typedef SBR_UNSTABLE struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
 // See `sbr_renderer_render` for details on other parameters.
 sbr_instanced_raster_pass *
 sbr_renderer_render_instanced(sbr_renderer *, sbr_subtitle_context const *,
-                              uint32_t t, sbr_rect2i clip_rect,
-                              uint64_t flags) SBR_UNSTABLE;
+                              uint32_t t, sbr_rect2i clip_rect, uint64_t flags);
 
 // Returns the first element of the internal list of output image instances
 // that are to be drawn during this raster pass.
-sbr_output_instance *sbr_instanced_raster_pass_get_instances(
-    sbr_instanced_raster_pass *) SBR_UNSTABLE;
+sbr_output_instance *
+sbr_instanced_raster_pass_get_instances(sbr_instanced_raster_pass *);
 
 // Rasterizes this output image into the provided pixel buffer at
 // a specified offset.
@@ -199,14 +195,13 @@ int sbr_output_image_rasterize_into(sbr_output_image const *,
                                     sbr_instanced_raster_pass *, int32_t off_x,
                                     int32_t off_y, sbr_bgra8 *buffer,
                                     uint32_t width, uint32_t height,
-                                    uint32_t stride) SBR_UNSTABLE;
+                                    uint32_t stride);
 
 // Marks the provided raster pass as finished.
 //
 // Must be called before the parent renderer can be used again.
 // Failing to do so will currently result in an assertion failure.
-void sbr_instanced_raster_pass_finish(sbr_instanced_raster_pass *) SBR_UNSTABLE;
-#endif
+void sbr_instanced_raster_pass_finish(sbr_instanced_raster_pass *);
 
 void sbr_renderer_destroy(sbr_renderer *);
 

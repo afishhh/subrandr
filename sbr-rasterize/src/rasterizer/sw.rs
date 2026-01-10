@@ -509,8 +509,7 @@ impl Rasterizer {
     pub fn blit(
         &self,
         target: &mut RenderTarget,
-        dx: i32,
-        dy: i32,
+        pos: Point2<i32>,
         texture: &Texture,
         color: BGRA8,
     ) {
@@ -522,8 +521,8 @@ impl Rasterizer {
                     texture.width as usize,
                     texture.width as usize,
                     texture.height as usize,
-                    dx as isize,
-                    dy as isize,
+                    pos.x as isize,
+                    pos.y as isize,
                     color,
                 );
             }
@@ -534,8 +533,8 @@ impl Rasterizer {
                     texture.width as usize,
                     texture.width as usize,
                     texture.height as usize,
-                    dx as isize,
-                    dy as isize,
+                    pos.x as isize,
+                    pos.y as isize,
                     color.a,
                 );
             }
@@ -552,7 +551,7 @@ impl Rasterizer {
     ) {
         match (filter, texture.data.as_ref()) {
             (None, _) | (Some(BitmapFilter::ExtractAlpha), TextureDataRef::Mono(_)) => {
-                self.blit(target, pos.x, pos.y, texture, color)
+                self.blit(target, pos, texture, color)
             }
             (Some(BitmapFilter::ExtractAlpha), TextureDataRef::Bgra(source)) => {
                 blit::blit_xxxa_to_bgra(
@@ -968,6 +967,16 @@ impl OutputImage<'_> {
                 );
             }
         }
+    }
+
+    pub fn rasterize_to_texture(
+        &self,
+        rasterizer: &mut Rasterizer,
+        size: Vec2<u32>,
+    ) -> Texture<'static> {
+        Texture::new_with(size, |mut target| {
+            self.rasterize_to(rasterizer, &mut target, Point2::ZERO)
+        })
     }
 }
 

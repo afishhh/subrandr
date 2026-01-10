@@ -1,9 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use sbr_rasterize::{
-    color::{to_straight_rgba, Premultiplied, Premultiply, BGRA8},
+    color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::{self, FixedS},
-    sw::{self, InstancedOutputBuilder, OutputImage, OutputPiece},
+    sw::{self, InstancedOutputBuilder, OutputPiece},
     Rasterizer as _,
 };
 use util::math::{I16Dot16, Point2, Rect2, Vec2};
@@ -66,59 +66,42 @@ impl DrawChecker {
     }
 }
 
-struct InstanceCompositor<'t, 'i> {
+struct InstanceCompositor<'t> {
     rasterizer: sw::Rasterizer,
     target: sw::RenderTarget<'t>,
-    images: Vec<OutputImage<'i>>,
+    images: Vec<sw::Texture<'static>>,
 }
 
-impl<'i, 't> InstancedOutputBuilder<'i> for InstanceCompositor<'t, 'i> {
+impl<'i, 't> InstancedOutputBuilder<'i> for InstanceCompositor<'t> {
     type ImageHandle = usize;
 
-    fn on_image(&mut self, _size: Vec2<u32>, image: sw::OutputImage<'i>) -> Self::ImageHandle {
+    fn on_image(&mut self, size: Vec2<u32>, image: sw::OutputImage<'i>) -> Self::ImageHandle {
         let id = self.images.len();
-        self.images.push(image);
+        self.images
+            .push(image.rasterize_to_texture(&mut self.rasterizer, size));
         id
     }
 
     fn on_instance(&mut self, handle: Self::ImageHandle, params: sw::OutputInstanceParameters) {
-        let image = &self.images[handle];
-        match *image {
-            OutputImage::Texture(sw::OutputBitmap {
-                ref texture,
-                filter,
-                color,
-            }) => {
-                let src_texture =
-                    if params.src_size != params.dst_size || params.src_size != texture.size() {
-                        &self.rasterizer.scale_texture(
-                            texture,
-                            params.dst_size,
-                            params.src_off,
-                            params.src_size,
-                        )
-                    } else {
-                        texture
-                    };
+        let texture = &self.images[handle];
+        let needs_scaling = params.src_size != params.dst_size || params.src_size != texture.size();
+        let src_texture = if needs_scaling {
+            &self.rasterizer.scale_texture(
+                texture,
+                params.dst_size,
+                params.src_off,
+                params.src_size,
+            )
+        } else {
+            texture
+        };
 
-                self.rasterizer.blit_texture_filtered(
-                    &mut self.target.reborrow(),
-                    params.dst_pos,
-                    src_texture,
-                    filter,
-                    color,
-                );
-            }
-            OutputImage::Rect(sw::OutputRect { rect, color }) => {
-                assert_eq!(params.src_size, params.dst_size);
-                assert_eq!(params.src_off, Vec2::ZERO);
-                self.rasterizer.fill_axis_aligned_rect(
-                    self.target.reborrow(),
-                    rect,
-                    color.premultiply(),
-                );
-            }
-        }
+        self.rasterizer.blit(
+            &mut self.target.reborrow(),
+            params.dst_pos,
+            src_texture,
+            BGRA8::WHITE,
+        );
     }
 }
 

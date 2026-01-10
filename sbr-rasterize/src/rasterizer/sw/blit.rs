@@ -12,7 +12,9 @@ unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
     height: usize,
     process: impl Fn(S, &mut D),
 ) {
-    let src_end = src.add(src_stride * height);
+    // NOTE: These `add`s have to be `wrapping_add`s because they can
+    //       go out-of-bounds of the underlying allocations if `dx > 0`.
+    let src_end = src.wrapping_add(src_stride * height);
     let dst_row_step = dst_stride - width;
     let src_row_step = src_stride - width;
 
@@ -26,8 +28,8 @@ unsafe fn blit_generic_unchecked<S: Copy, D: Copy>(
             src = src.add(1);
             dst = dst.add(1);
         }
-        src = src.add(src_row_step);
-        dst = dst.add(dst_row_step);
+        src = src.wrapping_add(src_row_step);
+        dst = dst.wrapping_add(dst_row_step);
     }
 }
 

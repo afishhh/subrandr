@@ -85,7 +85,7 @@ unsafe fn scale_generic<W: WrapMode, S: Copy, D: Copy>(
     src_size: Vec2<i32>,
     process: impl Fn(LinearSamples<S>, &mut D),
 ) {
-    let dst_end = dst.add(dst_stride * dst_height);
+    let dst_end = dst.wrapping_add(dst_stride * dst_height);
     let dst_row_step = dst_stride - dst_width;
     let dx = I16Dot16::from_quotient(src_size.x, dst_width as i32);
     let dy = I16Dot16::from_quotient(src_size.y, dst_height as i32);
@@ -117,7 +117,7 @@ unsafe fn scale_generic<W: WrapMode, S: Copy, D: Copy>(
             dst = dst.add(1);
         }
         src_y += dy;
-        dst = dst.add(dst_row_step);
+        dst = dst.wrapping_add(dst_row_step);
     }
 }
 

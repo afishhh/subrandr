@@ -134,3 +134,12 @@ pub fn layout_initial<'a>(
         content,
     })
 }
+
+#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+pub fn layout(
+    lctx: &mut LayoutContext,
+    constraints: &LayoutConstraints,
+    container: &BlockContainer,
+) -> Result<BlockContainerFragment, InlineLayoutError> {
+    layout_initial(lctx, container)?.layout(lctx, constraints)
+}

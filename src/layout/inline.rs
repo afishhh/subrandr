@@ -1455,13 +1455,14 @@ fn shaped_item_width(result: &mut FixedL, item: &ShapedItem) {
     }
 }
 
-fn layout_run_full(
-    content: &InlineContent,
-    run_index: usize,
-    item_index: usize,
-    end_item_index: &mut usize,
+// unsafe because `font_arena` must hold all fonts required by `initial_shaping_result`
+unsafe fn layout_run_full<'a, 'f>(
+    content: &'a InlineContent,
+    initial_shaping_result: InitialShapingResult<'a, 'f>,
+    span_state: Vec<SpanState<'a, 'f>>,
     lctx: &mut LayoutContext,
     constraints: &LayoutConstraints,
+    font_arena: util::rc::Rc<FontArena>,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
@@ -2226,9 +2227,6 @@ fn layout_run_full(
         }
     }
 
-    let font_arena = util::rc::Rc::new(FontArena::new());
-
-    let mut span_state = Vec::new();
     let InitialShapingResult {
         mut shaped,
         break_opportunities,
@@ -2236,17 +2234,7 @@ fn layout_run_full(
         bidi,
         font_feature_events,
         grapheme_cluster_boundaries,
-    } = shape_run_initial(
-        content,
-        run_index,
-        item_index,
-        end_item_index,
-        lctx,
-        &font_arena,
-        true,
-        &mut span_state,
-        &content.root_style,
-    )?;
+    } = initial_shaping_result;
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
@@ -2326,14 +2314,72 @@ fn layout_run_full(
     Ok(builder.finish())
 }
 
+pub struct PartialInline<'a> {
+    content: &'a InlineContent,
+    font_arena: util::rc::Rc<FontArena>,
+    span_state: Vec<SpanState<'a, 'static>>,
+    initial_shaping_result: InitialShapingResult<'a, 'static>,
+}
+
+pub fn shape<'l, 'a, 'b, 'c>(
+    lctx: &'b mut LayoutContext<'l, 'a>,
+    content: &'c InlineContent,
+) -> Result<PartialInline<'c>, InlineLayoutError> {
+    let font_arena = util::rc::Rc::new(FontArena::new());
+
+    if content.text_runs.is_empty() {
+        return Ok(PartialInline {
+            content,
+            span_state: Vec::new(),
+            font_arena,
+            initial_shaping_result: InitialShapingResult::empty(),
+        });
+    }
+
+    let mut span_state = Vec::new();
+    let initial_shaping_result = shape_run_initial(
+        content,
+        0,
+        0,
+        &mut content.items.len(),
+        lctx,
+        &font_arena,
+        true,
+        &mut span_state,
+        &content.root_style,
+    )?;
+
+    Ok(PartialInline {
+        content,
+        span_state: unsafe { std::mem::transmute(span_state) },
+        initial_shaping_result: unsafe { std::mem::transmute(initial_shaping_result) },
+        font_arena,
+    })
+}
+
+impl PartialInline<'_> {
+    pub fn layout<'b, 'l, 'a>(
+        self,
+        lctx: &'b mut LayoutContext<'l, 'a>,
+        constraints: &LayoutConstraints,
+    ) -> Result<InlineContentFragment, InlineLayoutError> {
+        unsafe {
+            layout_run_full(
+                self.content,
+                self.initial_shaping_result,
+                self.span_state,
+                lctx,
+                constraints,
+                self.font_arena,
+            )
+        }
+    }
+}
+
 pub fn layout<'l, 'a, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l, 'a>,
     constraints: &LayoutConstraints,
     content: &'c InlineContent,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
-    if content.text_runs.is_empty() {
-        return Ok(InlineContentFragment::EMPTY);
-    }
-
-    layout_run_full(content, 0, 0, &mut content.items.len(), lctx, constraints)
+    shape(lctx, content).and_then(|s| s.layout(lctx, constraints))
 }

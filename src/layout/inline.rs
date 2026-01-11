@@ -2266,6 +2266,19 @@ pub fn shape<'l, 'a, 'b, 'c>(
 }
 
 impl PartialInline<'_> {
+    pub fn intrinsic_width(&self, _lctx: &mut LayoutContext) -> FixedL {
+        let mut max = FixedL::ZERO;
+        let mut current = FixedL::ZERO;
+        for item in &self.initial_shaping_result.shaped {
+            shaped_item_width(&mut result, item);
+            if item.forces_line_break_after() {
+                max = max.max(current);
+                current = FixedL::ZERO;
+            }
+        }
+        max.max(current)
+    }
+
     pub fn layout<'b, 'l, 'a>(
         self,
         lctx: &'b mut LayoutContext<'l, 'a>,

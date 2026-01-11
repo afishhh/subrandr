@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Add};
 
 use rasterize::color::BGRA8;
 use util::math::{I26Dot6, Vec2f};
@@ -85,6 +85,14 @@ impl Length {
 
     pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
         self.0 * dpi as i32 / 72
+    }
+}
+
+impl Add for Length {
+    type Output = Length;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
     }
 }
 

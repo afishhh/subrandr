@@ -8,6 +8,7 @@ use util::math::{I26Dot6, Point2, Rect2};
 
 use crate::{
     layout::{
+        block::{BlockContainerFragment, BlockContainerFragmentContent},
         inline::{InlineContentFragment, InlineItemFragment, SpanFragment, TextFragment},
         FixedL, FragmentBox, Point2L, Rect2L,
     },
@@ -163,7 +164,7 @@ impl DisplayPass<'_> {
         }
     }
 
-    fn display_inline_background(
+    fn display_background(
         &mut self,
         pos: Point2L,
         style: &ComputedStyle,
@@ -191,7 +192,7 @@ impl DisplayPass<'_> {
     ) {
         match fragment {
             InlineItemFragment::Span(span) => {
-                self.display_inline_background(pos, &span.style, &span.fbox);
+                self.display_background(pos, &span.style, &span.fbox);
 
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
@@ -202,7 +203,7 @@ impl DisplayPass<'_> {
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
                     let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    self.display_inline_background(base_pos, &base.style, &base.fbox);
+                    self.display_background(base_pos, &base.style, &base.fbox);
                     for &(base_item_offset, ref base_item) in &base.children {
                         self.display_inline_item_fragment_background(
                             base_pos + base.fbox.content_offset() + base_item_offset,
@@ -211,11 +212,7 @@ impl DisplayPass<'_> {
                     }
 
                     let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    self.display_inline_background(
-                        annotation_pos,
-                        &annotation.style,
-                        &annotation.fbox,
-                    );
+                    self.display_background(annotation_pos, &annotation.style, &annotation.fbox);
                     for &(annotation_item_offset, ref annotation_item) in &annotation.children {
                         self.display_inline_item_fragment_background(
                             annotation_pos
@@ -339,6 +336,27 @@ impl DisplayPass<'_> {
                 let current = current + offset;
 
                 self.display_inline_item_fragment_content(current, item, &mut decoration_stack);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn display_block_container_fragment(
+        &mut self,
+        pos: Point2L,
+        fragment: &BlockContainerFragment,
+    ) {
+        self.display_background(pos, &fragment.style, &fragment.fbox);
+
+        let content_pos = pos + fragment.fbox.content_offset();
+        match &fragment.content {
+            &BlockContainerFragmentContent::Inline(offset, ref inline) => {
+                self.display_inline_content_fragment(content_pos + offset, inline);
+            }
+            BlockContainerFragmentContent::Block(children) => {
+                for &(child_off, ref child) in children {
+                    self.display_block_container_fragment(content_pos + child_off, child);
+                }
             }
         }
     }

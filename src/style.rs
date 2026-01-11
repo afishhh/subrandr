@@ -50,3 +50,9 @@ macros::implement_style_module! {
         color: BGRA8 = BGRA8::WHITE,
     }
 }
+
+impl ComputedStyle {
+    pub fn horizontal_padding(&self) -> Length {
+        self.padding_left() + self.padding_right()
+    }
+}

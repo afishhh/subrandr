@@ -4,10 +4,6 @@ use util::math::{BoolExt, I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{style::ComputedStyle, text::FontDb};
 
-// Layout engine coordinate space:
-// Vec2::x, Point2::x = inline axis
-// Vec2::y, Point2::y =  block axis
-
 pub type FixedL = I26Dot6;
 pub type Point2L = Point2<FixedL>;
 pub type Vec2L = Vec2<FixedL>;
@@ -198,3 +194,5 @@ impl LayoutConstraints {
 
 pub mod inline;
 pub use inline::InlineLayoutError;
+#[expect(dead_code)]
+pub mod block;

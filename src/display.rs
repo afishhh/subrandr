@@ -8,6 +8,7 @@ use util::math::{I26Dot6, Point2, Rect2};
 
 use crate::{
     layout::{
+        block::{BlockContainerFragment, BlockContainerFragmentContent},
         inline::{InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
         FixedL, FragmentBox, Point2L, Rect2L,
     },
@@ -330,6 +331,28 @@ impl DisplayContext<'_> {
                 let current = current + offset;
 
                 scope.display_inline_item_fragment(current, baseline_y, item)
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn display_block_container_fragment(
+        &mut self,
+        pos: Point2L,
+        fragment: &BlockContainerFragment,
+    ) {
+        self.display_background(pos, &fragment.style, &fragment.fbox);
+
+        let content_pos = pos + fragment.fbox.content_offset();
+        let mut scope = self.enter_box(&fragment.style, None);
+        match &fragment.content {
+            &BlockContainerFragmentContent::Inline(offset, ref inline) => {
+                scope.display_inline_content_fragment(content_pos + offset, inline);
+            }
+            BlockContainerFragmentContent::Block(children) => {
+                for &(child_off, ref child) in children {
+                    scope.display_block_container_fragment(content_pos + child_off, child);
+                }
             }
         }
     }

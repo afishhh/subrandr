@@ -223,6 +223,7 @@ impl DisplayPass<'_> {
                     }
                 }
             }
+            InlineItemFragment::Block(_) => (),
         }
     }
 
@@ -265,6 +266,7 @@ impl DisplayPass<'_> {
             //       Decorations on ruby bases and annotations probably have the same problem.
             InlineItemFragment::Ruby(_) => (),
             InlineItemFragment::Text(_) => (),
+            InlineItemFragment::Block(_) => (),
         }
 
         match fragment {
@@ -279,11 +281,7 @@ impl DisplayPass<'_> {
                 }
             }
             InlineItemFragment::Text(text) => {
-                self.display_text(
-                    round_y(pos + text.baseline_offset),
-                    text,
-                    current_decorations,
-                );
+                self.display_text(round_y(pos), text, current_decorations);
             }
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
@@ -308,6 +306,7 @@ impl DisplayPass<'_> {
                     }
                 }
             }
+            InlineItemFragment::Block(block) => self.display_block_container_fragment(pos, block),
         }
 
         current_decorations.truncate(previous_decoration_count);

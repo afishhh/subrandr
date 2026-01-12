@@ -122,3 +122,8 @@ pub enum InlineSizing {
     Normal,
     Stretch,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaselineSource {
+    Last,
+}

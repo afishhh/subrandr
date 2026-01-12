@@ -43,6 +43,9 @@ macro_rules! make_tree {
     (@map_child inline->ruby $value: expr) => {
         $value
     };
+    (@map_child inline->block $value: expr) => {
+        $value
+    };
     (@build_all_result_ty inline) => { () };
 
     (@build text [$style: expr; inline=$builder: ident]; $value: literal) => {
@@ -56,6 +59,14 @@ macro_rules! make_tree {
     (@build ruby [$style: expr; inline=$builder: ident]; { $($content: tt)* }) => {{
         let mut builder = $builder.push_ruby($style.clone());
         make_tree!(@build_all ruby [$style; inline=builder]; $($content)*);
+    }};
+    (@build block [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
+        $builder.push_inline_block(
+            crate::layout::block::BlockContainer {
+                style: $style.clone(),
+                content: make_tree!(@build_block_content [$style;] $content_block)
+            }
+        );
     }};
     (@map_child ruby->base $value: expr) => {
         $value

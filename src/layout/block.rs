@@ -4,7 +4,10 @@ use super::{
     inline::{InlineContent, InlineContentFragment, PartialInline},
     FixedL, FragmentBox, InlineLayoutError, LayoutConstraints, LayoutContext, Vec2L,
 };
-use crate::style::{computed::HorizontalAlignment, ComputedStyle};
+use crate::style::{
+    computed::{BaselineSource, HorizontalAlignment},
+    ComputedStyle,
+};
 
 #[derive(Debug, Clone)]
 pub struct BlockContainer {
@@ -23,6 +26,39 @@ pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
     pub content: BlockContainerFragmentContent,
+}
+
+impl BlockContainerFragment {
+    pub(super) const EMPTY: Self = Self {
+        fbox: FragmentBox::ZERO,
+        style: ComputedStyle::DEFAULT,
+        content: BlockContainerFragmentContent::Block(Vec::new()),
+    };
+
+    pub(super) fn alphabetic_baseline_from(&self, source: BaselineSource) -> Option<FixedL> {
+        // Here so this code blows up if `BaselineSource` is ever extended.
+        match source {
+            BaselineSource::Last => (),
+        }
+
+        match &self.content {
+            BlockContainerFragmentContent::Inline(off, inline_content_fragment) => {
+                let (line_off, line) = inline_content_fragment.lines.last()?;
+                Some(off.y + line_off.y + line.baseline_y)
+            }
+            BlockContainerFragmentContent::Block(children) => {
+                children.iter().rev().find_map(|&(child_off, ref child)| {
+                    child
+                        .alphabetic_baseline()
+                        .map(|child_baseline| child_baseline + child_off.y)
+                })
+            }
+        }
+    }
+
+    pub(super) fn alphabetic_baseline(&self) -> Option<FixedL> {
+        self.alphabetic_baseline_from(self.style.baseline_source())
+    }
 }
 
 #[derive(Debug)]
@@ -106,21 +142,18 @@ pub fn layout_initial<'a>(
     lctx: &mut LayoutContext,
     container: &'a BlockContainer,
 ) -> Result<PartialBlockContainer<'a>, InlineLayoutError> {
-    let mut intrinsic_width = container
-        .style
-        .horizontal_padding()
-        .to_physical_pixels(lctx.dpi);
+    let mut intrinsic_content_width = FixedL::ZERO;
     let content = match &container.content {
         BlockContainerContent::Inline(inline) => {
             let inline = super::inline::shape(lctx, inline)?;
-            intrinsic_width += inline.intrinsic_width(lctx);
+            intrinsic_content_width = inline.intrinsic_width(lctx);
             PartialBlockContainerContent::Inline(inline)
         }
         BlockContainerContent::Block(children) => {
             let mut partials = Vec::new();
             for child in children {
                 let block = layout_initial(lctx, child)?;
-                intrinsic_width = intrinsic_width.max(block.intrinsic_width);
+                intrinsic_content_width = intrinsic_content_width.max(block.intrinsic_width);
                 partials.push(block);
             }
 
@@ -130,7 +163,11 @@ pub fn layout_initial<'a>(
 
     Ok(PartialBlockContainer {
         style: container.style.clone(),
-        intrinsic_width,
+        intrinsic_width: intrinsic_content_width
+            + container
+                .style
+                .horizontal_padding()
+                .to_physical_pixels(lctx.dpi),
         content,
     })
 }

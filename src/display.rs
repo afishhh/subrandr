@@ -58,7 +58,7 @@ impl<'r> DisplayPass<'r> {
             .display_inline_content_fragment(pos, fragment);
     }
 
-    #[expect(dead_code)]
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
     pub fn display_block_container_fragment(
         &mut self,
         pos: Point2L,

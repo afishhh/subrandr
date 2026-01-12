@@ -193,7 +193,7 @@ impl<'a> InlineSpanBuilder<'a> {
         ))
     }
 
-    #[expect(dead_code)]
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
     pub fn push_inline_block(&mut self, block: BlockContainer) {
         let content_index = self.push_object_replacement();
         self.push_child(InlineItem::Block(InlineBlock {

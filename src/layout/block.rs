@@ -15,6 +15,7 @@ pub struct BlockContainer {
     pub content: BlockContainerContent,
 }
 
+#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
 #[derive(Debug, Clone)]
 pub enum BlockContainerContent {
     Inline(InlineContent),
@@ -166,4 +167,13 @@ pub fn layout_initial<'a>(
                 .to_physical_pixels(lctx.dpi),
         content,
     })
+}
+
+#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+pub fn layout(
+    lctx: &mut LayoutContext,
+    constraints: &LayoutConstraints,
+    container: &BlockContainer,
+) -> Result<BlockContainerFragment, InlineLayoutError> {
+    layout_initial(lctx, container)?.layout(lctx, constraints)
 }

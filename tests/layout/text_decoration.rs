@@ -115,3 +115,31 @@ check_test! {
         }
     }
 }
+
+check_test! {
+    name = block_propagation,
+    size = (216, 48),
+    block.ahem.blue_strikethrough {
+        // The above strikethrough should propagate to this block's
+        // anonymous root inline and decarate it using its metrics.
+        block.large {
+            inline {
+                span.large { text "LARGE" }
+                span.normal.green_strikethrough {
+                    text " world\n"
+                }
+                text "i"
+                // Active decorations should be suspended inside an `inline-block`.
+                block.normal {
+                    inline {
+                        text "nline横"
+                        span.red_strikethrough {
+                            text "bloc"
+                        }
+                    }
+                }
+                text "k"
+            }
+        }
+    }
+}

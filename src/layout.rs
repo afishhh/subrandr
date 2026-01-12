@@ -194,5 +194,4 @@ impl LayoutConstraints {
 
 pub mod inline;
 pub use inline::InlineLayoutError;
-#[expect(dead_code)]
 pub mod block;

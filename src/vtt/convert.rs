@@ -10,6 +10,7 @@ use util::{
 use crate::{
     layout::{
         self,
+        block::BlockContainerFragment,
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
@@ -653,8 +654,8 @@ impl Layouter {
                 continue;
             }
 
-            let (pos, block) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
-            pass.emit_fragment(pos, block);
+            let (pos, inline) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
+            pass.emit_fragment(pos, BlockContainerFragment::from_inline(inline));
         }
 
         Ok(())

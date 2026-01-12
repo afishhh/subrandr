@@ -15,7 +15,6 @@ pub struct BlockContainer {
     pub content: BlockContainerContent,
 }
 
-#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
 #[derive(Debug, Clone)]
 pub enum BlockContainerContent {
     Inline(InlineContent),
@@ -35,6 +34,14 @@ impl BlockContainerFragment {
         style: ComputedStyle::DEFAULT,
         content: BlockContainerFragmentContent::Block(Vec::new()),
     };
+
+    pub fn from_inline(inline: InlineContentFragment) -> Self {
+        Self {
+            fbox: FragmentBox::new_content_only(inline.fbox.content_size),
+            style: ComputedStyle::DEFAULT,
+            content: BlockContainerFragmentContent::Inline(Vec2L::ZERO, inline),
+        }
+    }
 
     pub(super) fn alphabetic_baseline_from(&self, source: BaselineSource) -> Option<FixedL> {
         // Here so this code blows up if `BaselineSource` is ever extended.

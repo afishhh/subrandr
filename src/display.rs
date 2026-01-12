@@ -340,7 +340,6 @@ impl DisplayPass<'_> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn display_block_container_fragment(
         &mut self,
         pos: Point2L,

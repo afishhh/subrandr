@@ -65,10 +65,6 @@ impl InlineContentBuilder {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
     pub fn root(&mut self) -> InlineSpanBuilder<'_> {
         if self.text_runs.is_empty() {
             self.text_runs.push(String::new());

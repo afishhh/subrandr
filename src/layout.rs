@@ -121,7 +121,7 @@ impl FragmentBox {
         padding: EdgeExtents::ZERO,
     };
 
-    const fn new_content_only(content_size: Vec2L) -> Self {
+    pub const fn new_content_only(content_size: Vec2L) -> Self {
         Self {
             content_size,
             padding: EdgeExtents::ZERO,

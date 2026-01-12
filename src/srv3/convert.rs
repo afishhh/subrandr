@@ -9,8 +9,10 @@ use util::{
 
 use crate::{
     layout::{
-        self, inline::InlineContentBuilder, FixedL, InlineLayoutError, LayoutConstraints, Point2L,
-        Vec2L,
+        self,
+        block::{BlockContainer, BlockContainerContent},
+        inline::{InlineContent, InlineContentBuilder},
+        FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
@@ -267,7 +269,7 @@ struct Window {
     //       How does a timestamp on a window work?
     //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
-    inner_style: ComputedStyle,
+    segment_style: ComputedStyle,
     vertical_align: VerticalAlignment,
     lines: Vec<VisualLine>,
 }
@@ -318,14 +320,15 @@ impl Segment {
 
 fn segments_to_inline(
     pass: &mut FrameLayoutPass,
-    content: &mut InlineContentBuilder,
     event_time: u32,
     segments: &[Segment],
-) {
+    root_inline_style: ComputedStyle,
+) -> InlineContent {
+    let mut builder = InlineContentBuilder::new(root_inline_style);
     // What lack of Peekable::inner() and Filter::inner() does to a language...
     let mut next_idx = 0;
     let sctx = pass.sctx;
-    let mut root = content.root();
+    let mut root = builder.root();
     let mut it = segments
         .iter()
         .filter(|segment| {
@@ -369,34 +372,55 @@ fn segments_to_inline(
             }
         }
     }
+
+    drop(root);
+    builder.finish()
 }
 
 impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
-    ) -> Result<Option<(Point2L, layout::inline::InlineContentFragment)>, layout::InlineLayoutError>
+    ) -> Result<Option<(Point2L, layout::block::BlockContainerFragment)>, layout::InlineLayoutError>
     {
-        let mut content = InlineContentBuilder::new(self.inner_style.clone());
+        let inner_style = {
+            let mut result = self.segment_style.clone();
+            *result.make_background_color_mut() = BGRA8::ZERO;
+            result
+        };
+        let mut lines = Vec::new();
         for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
-                if !content.is_empty() {
-                    content.root().push_text("\n");
-                }
-
-                segments_to_inline(pass, &mut content, line.range.start, &line.segments)
+                lines.push(BlockContainer {
+                    style: inner_style.clone(),
+                    content: BlockContainerContent::Inline(segments_to_inline(
+                        pass,
+                        line.range.start,
+                        &line.segments,
+                        self.segment_style.clone(),
+                    )),
+                });
             }
         }
 
-        if content.is_empty() {
+        if lines.is_empty() {
             return Ok(None);
         }
 
+        let window = BlockContainer {
+            style: inner_style,
+            content: BlockContainerContent::Block(lines),
+        };
+        let partial_window = layout::block::layout_initial(pass.lctx, &window)?;
+
+        let width = partial_window
+            .intrinsic_width()
+            .min(pass.sctx.player_width() * 96 / 100);
         let constraints = LayoutConstraints {
-            size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
+            size: Vec2L::new(width, FixedL::MAX),
         };
 
-        let fragment = layout::inline::layout(pass.lctx, &constraints, &content.finish())?;
+        let fragment = partial_window.layout(pass.lctx, &constraints)?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),
@@ -404,7 +428,7 @@ impl Window {
         );
 
         let fragment_size = fragment.fbox.size_for_layout();
-        match self.inner_style.text_align() {
+        match self.segment_style.text_align() {
             HorizontalAlignment::Left => (),
             HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
             HorizontalAlignment::Right => pos.x -= fragment_size.x,
@@ -486,7 +510,7 @@ impl WindowBuilder<'_> {
             x,
             y,
             range: time..time + duration,
-            inner_style: {
+            segment_style: {
                 let mut style = self.base_style.clone();
                 *style.make_text_align_mut() = align.0;
                 style

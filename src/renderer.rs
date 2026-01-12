@@ -21,6 +21,7 @@ use crate::{
     display::DisplayPass,
     layout::{
         self,
+        block::BlockContainerFragment,
         inline::{InlineContentBuilder, InlineContentFragment},
         FixedL, LayoutConstraints, LayoutContext, Point2L,
     },
@@ -82,7 +83,7 @@ pub(crate) struct FrameLayoutPass<'s, 'frame> {
     pub lctx: &'frame mut LayoutContext<'frame, 's>,
     pub t: u32,
     unchanged_range: Range<u32>,
-    fragments: Vec<(Point2L, InlineContentFragment)>,
+    fragments: Vec<(Point2L, BlockContainerFragment)>,
 }
 
 impl FrameLayoutPass<'_, '_> {
@@ -112,7 +113,7 @@ impl FrameLayoutPass<'_, '_> {
         }
     }
 
-    pub fn emit_fragment(&mut self, pos: Point2L, block: InlineContentFragment) {
+    pub fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
         self.fragments.push((pos, block));
     }
 }
@@ -646,7 +647,7 @@ impl Renderer<'_> {
             let mut pass = DisplayPass::new(&mut self.scene);
 
             for &(pos, ref fragment) in &fragments {
-                pass.display_inline_content_fragment(pos, fragment);
+                pass.display_block_container_fragment(pos, fragment);
             }
 
             for &(pos, ref fragment) in &debug_overlay_fragments {

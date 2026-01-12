@@ -15,7 +15,6 @@ pub struct BlockContainer {
     pub content: BlockContainerContent,
 }
 
-#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
 #[derive(Debug, Clone)]
 pub enum BlockContainerContent {
     Inline(InlineContent),

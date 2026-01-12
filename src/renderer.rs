@@ -446,23 +446,22 @@ impl Renderer<'_> {
         };
 
         if sbr.debug.draw_version_string {
-            let mut builder = InlineContentBuilder::new();
+            let mut builder = InlineContentBuilder::new(base_style.clone());
             let mut root = builder.root();
-            let mut main = root.push_span(base_style.clone());
 
-            main.push_text(concat!(
+            root.push_text(concat!(
                 "subrandr ",
                 env!("CARGO_PKG_VERSION"),
                 env!("BUILD_REV_SUFFIX"),
                 "\n"
             ));
 
-            _ = writeln!(main, "subtitle class: {subtitle_class_name}");
+            _ = writeln!(root, "subtitle class: {subtitle_class_name}");
 
-            _ = writeln!(main, "=== rasterizer: {} ===", rasterizer.name());
-            _ = rasterizer.write_debug_info(&mut main);
-            if !main.current_run_text().ends_with('\n') {
-                main.push_text("\n");
+            _ = writeln!(root, "=== rasterizer: {} ===", rasterizer.name());
+            _ = rasterizer.write_debug_info(&mut root);
+            if !root.current_run_text().ends_with('\n') {
+                root.push_text("\n");
             }
 
             {
@@ -470,17 +469,16 @@ impl Renderer<'_> {
                 let (footprint_divisor, footprint_suffix) =
                     util::human_size_suffix(stats.total_memory_footprint);
 
-                _ = writeln!(main, "=== glyph cache stats ===");
+                _ = writeln!(root, "=== glyph cache stats ===");
                 _ = writeln!(
-                    main,
+                    root,
                     "approximate memory footprint: {:.3}{footprint_suffix}B",
                     stats.total_memory_footprint as f32 / footprint_divisor as f32
                 );
-                _ = writeln!(main, "total entries: {}", stats.total_entries);
-                _ = writeln!(main, "current generation: {}", stats.generation);
+                _ = writeln!(root, "total entries: {}", stats.total_entries);
+                _ = writeln!(root, "current generation: {}", stats.generation);
             }
 
-            drop(main);
             drop(root);
             fragments.push((
                 Point2L::ZERO,
@@ -488,31 +486,33 @@ impl Renderer<'_> {
                     lctx,
                     &LayoutConstraints::NONE,
                     &builder.finish(),
-                    &base_style,
                 )?),
             ));
         }
 
         if sbr.debug.draw_perf_info {
-            let mut builder = InlineContentBuilder::new();
+            let mut builder = InlineContentBuilder::new({
+                let mut style = base_style.clone();
+                *style.make_text_align_mut() = HorizontalAlignment::Right;
+                style
+            });
             let mut root = builder.root();
-            let mut main = root.push_span(base_style.clone());
 
             _ = writeln!(
-                main,
+                root,
                 "{:.2}x{:.2} dpi:{}",
                 ctx.video_width, ctx.video_height, ctx.dpi
             );
 
             _ = writeln!(
-                main,
+                root,
                 "l:{:.2} r:{:.2} t:{:.2} b:{:.2}",
                 ctx.padding_left, ctx.padding_right, ctx.padding_top, ctx.padding_bottom
             );
 
             if !perf.is_empty() {
                 let mut draw_times = |name: &str, times: &PerfTimes, color: BGRA8| {
-                    main.push_span({
+                    root.push_span({
                         let mut result = base_style.create_derived();
                         *result.make_color_mut() = color;
                         *result.make_font_weight_mut() = I16Dot16::new(700);
@@ -524,7 +524,7 @@ impl Renderer<'_> {
                     let last = times.last().unwrap();
                     let avg = times.avg_frame_time();
                     _ = writeln!(
-                        main,
+                        root,
                         " last={:.1}ms avg={:.1}ms ({:.1}/s) max={:.1}ms ({:.1}/s)",
                         last,
                         avg,
@@ -540,14 +540,9 @@ impl Renderer<'_> {
                 draw_times("display", &perf.display, BGRA8::LIME);
                 draw_times("raster", &perf.raster, BGRA8::ORANGERED);
 
-                drop(main);
                 drop(root);
                 let perf_text_fragment =
-                    layout::inline::layout(lctx, &LayoutConstraints::NONE, &builder.finish(), &{
-                        let mut style = ComputedStyle::DEFAULT;
-                        *style.make_text_align_mut() = HorizontalAlignment::Right;
-                        style
-                    })?;
+                    layout::inline::layout(lctx, &LayoutConstraints::NONE, &builder.finish())?;
                 let graph_y = perf_text_fragment.fbox.size_for_layout().y;
                 fragments.push((
                     Point2L::new(

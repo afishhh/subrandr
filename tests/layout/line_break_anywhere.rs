@@ -1,6 +1,8 @@
 use rasterize::color::BGRA8;
 use util::math::I26Dot6;
 
+use crate::style::computed::HorizontalAlignment;
+
 use super::common::*;
 
 test_define_style! {
@@ -14,6 +16,10 @@ test_define_style! {
     .red { color: BGRA8::RED }
     .green_bg { background_color: BGRA8::GREEN }
     .blue { color: BGRA8::BLUE }
+
+    .align_right {
+        text_align: HorizontalAlignment::Right
+    }
 }
 
 check_test! {
@@ -185,9 +191,8 @@ check_test! {
 
 check_test! {
     name = arabic_rtl,
-    align = Right,
     size = (16 * 13, 64 * 3),
-    inline.noto_sans_arabic.fs32.break_anywhere {
+    inline.noto_sans_arabic.align_right.fs32.break_anywhere {
         span.g1 {
             text "لمّا كان الاعترا"
         }
@@ -205,9 +210,8 @@ check_test! {
 
 check_test! {
     name = arabic_rtl_reshaping,
-    align = Right,
     size = (16. * 4., 64 * 2),
-    inline.noto_sans_arabic.fs32.break_anywhere {
+    inline.noto_sans_arabic.align_right.fs32.break_anywhere {
         span.g1 {
             text "جمي"
         }

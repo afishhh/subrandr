@@ -34,6 +34,7 @@ const OBJECT_REPLACEMENT_LENGTH: usize = OBJECT_REPLACEMENT_CHARACTER.len_utf8()
 pub struct InlineContent {
     text_runs: Vec<Rc<str>>,
     items: Vec<InlineItem>,
+    root_style: ComputedStyle,
 }
 
 impl Default for InlineContent {
@@ -41,6 +42,7 @@ impl Default for InlineContent {
         Self {
             text_runs: vec![Rc::from("")],
             items: Vec::new(),
+            root_style: ComputedStyle::DEFAULT,
         }
     }
 }
@@ -48,13 +50,15 @@ impl Default for InlineContent {
 pub struct InlineContentBuilder {
     text_runs: Vec<String>,
     items: Vec<InlineItem>,
+    root_style: ComputedStyle,
 }
 
 impl InlineContentBuilder {
-    pub fn new() -> Self {
+    pub fn new(root_style: ComputedStyle) -> Self {
         Self {
             text_runs: Vec::new(),
             items: Vec::new(),
+            root_style,
         }
     }
 
@@ -80,6 +84,7 @@ impl InlineContentBuilder {
         InlineContent {
             text_runs: self.text_runs.drain(..).map(|s| s.into()).collect(),
             items: std::mem::take(&mut self.items),
+            root_style: std::mem::take(&mut self.root_style),
         }
     }
 }
@@ -1388,7 +1393,6 @@ fn layout_run_full(
     end_item_index: &mut usize,
     lctx: &mut LayoutContext,
     constraints: &LayoutConstraints,
-    inner_style: &ComputedStyle,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
@@ -2168,13 +2172,13 @@ fn layout_run_full(
         &font_arena,
         true,
         &mut span_state,
-        inner_style,
+        &content.root_style,
     )?;
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
         result: InlineContentFragment::EMPTY,
-        line_align: inner_style.text_align(),
+        line_align: content.root_style.text_align(),
         bidi,
         text_leaf_items,
         dpi: lctx.dpi,
@@ -2248,19 +2252,10 @@ pub fn layout<'l, 'a, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l, 'a>,
     constraints: &LayoutConstraints,
     content: &'c InlineContent,
-    inner_style: &ComputedStyle,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     if content.text_runs.is_empty() {
         return Ok(InlineContentFragment::EMPTY);
     }
 
-    layout_run_full(
-        content,
-        0,
-        0,
-        &mut content.items.len(),
-        lctx,
-        constraints,
-        inner_style,
-    )
+    layout_run_full(content, 0, 0, &mut content.items.len(), lctx, constraints)
 }

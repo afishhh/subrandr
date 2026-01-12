@@ -377,7 +377,7 @@ impl Window {
         pass: &mut FrameLayoutPass,
     ) -> Result<Option<(Point2L, layout::inline::InlineContentFragment)>, layout::InlineLayoutError>
     {
-        let mut content = InlineContentBuilder::new();
+        let mut content = InlineContentBuilder::new(self.inner_style.clone());
         for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
                 if !content.is_empty() {
@@ -396,12 +396,7 @@ impl Window {
             size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment = layout::inline::layout(
-            pass.lctx,
-            &constraints,
-            &content.finish(),
-            &self.inner_style,
-        )?;
+        let fragment = layout::inline::layout(pass.lctx, &constraints, &content.finish())?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),

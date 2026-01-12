@@ -9,10 +9,6 @@ use util::rc::{rc_static, Rc};
 use crate::{
     display::DisplayPass,
     layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
-    style::{
-        computed::{Direction, HorizontalAlignment},
-        ComputedStyle,
-    },
     text::{Face, FaceInfo, FontDb, GlyphCache},
     Subrandr,
 };
@@ -24,11 +20,10 @@ macro_rules! make_tree {
     { $what: ident $block: tt } => { make_tree!(@build $what [crate::style::ComputedStyle::DEFAULT;]; $block) };
 
     (@build inline [$style: expr;]; { $($content: tt)* }) => {{
-        let mut builder = crate::layout::inline::InlineContentBuilder::new();
+        let mut builder = crate::layout::inline::InlineContentBuilder::new($style.clone());
         {
-            let mut root = builder.root();
             #[allow(unused)] // this is unused if the inline is empty
-            let mut root = root.push_span($style.clone());
+            let mut root = builder.root();
             make_tree!(@build_all inline [$style; inline=root]; $($content)*);
         }
         builder.finish()
@@ -207,8 +202,6 @@ pub fn check_inline(
     name: &str,
     pos: Point2L,
     viewport_size: Vec2L,
-    align: HorizontalAlignment,
-    direction: Direction,
     inline: InlineContent,
     dpi: u32,
 ) {
@@ -237,12 +230,6 @@ pub fn check_inline(
                 size: viewport_size,
             },
             &inline,
-            &{
-                let mut style = ComputedStyle::DEFAULT;
-                *style.make_text_align_mut() = align;
-                *style.make_direction_mut() = direction;
-                style
-            },
         )
         .expect("Inline layout failed");
 
@@ -276,8 +263,6 @@ pub fn check_inline(
 macro_rules! check_one {
     (
         name = $name: expr,
-        $(align = $align: ident,)?
-        $(direction = $direction: ident,)?
         $(dpi = $dpi: literal,)?
         $(pos = $p: tt,)?
         size = ($sx: expr, $sy: expr),
@@ -289,8 +274,6 @@ macro_rules! check_one {
         let submodule_start = module_path!().find(TEST_ROOT_MODULE).unwrap() + TEST_ROOT_MODULE.len();
         let prefix = module_path!()[submodule_start..].replace("::", "_");
         let name = format!("{prefix}_{}", $name);
-        let align = check_one!(@align $($align)?);
-        let direction = check_one!(@direction $($direction)?);
         let dpi = check_one!(@dpi $($dpi)?);
         let pos = check_one!(@pos $($p)?);
         let size = $crate::layout::Vec2L::new(
@@ -301,12 +284,8 @@ macro_rules! check_one {
         use $crate::layout_tests::common::make_tree;
         let tree = make_tree!($what $(.$class)+ { $($block_content)* }) ;
 
-        check_inline(&name, pos, size, align, direction, tree, dpi);
+        check_inline(&name, pos, size, tree, dpi);
     }};
-    (@align $name: ident) => { $crate::style::computed::HorizontalAlignment::$name };
-    (@align) => { check_one!(@align Left) };
-    (@direction $name: ident) => { $crate::style::computed::Direction::$name };
-    (@direction) => { check_one!(@direction Ltr) };
     (@dpi $value: literal) => { $value };
     (@dpi) => { 72 };
     (@pos) => { $crate::layout::Point2L::ZERO };

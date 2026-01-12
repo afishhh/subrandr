@@ -1,5 +1,7 @@
 use rasterize::color::BGRA8;
 
+use crate::style::computed::Direction;
+
 use super::common::*;
 
 test_define_style! {
@@ -38,11 +40,14 @@ check_test! {
     }
 }
 
+test_define_style! {
+    .rtl { direction: Direction::Rtl }
+}
+
 check_test! {
     name = explicitly_rtl,
-    direction = Rtl,
     size = (16 * 12, 16),
-    inline.ahem {
+    inline.ahem.rtl {
         span.hello {
             text "縦 "
         }

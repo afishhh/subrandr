@@ -123,14 +123,13 @@ impl Event {
                 size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
             },
             &{
-                let mut builder = InlineContentBuilder::new();
+                let mut builder = InlineContentBuilder::new({
+                    let mut style = self.root.base_style.clone();
+                    *style.make_text_align_mut() = self.horizontal_alignment;
+                    style
+                });
                 self.root.append_to(&mut builder.root(), font_size);
                 builder.finish()
-            },
-            &{
-                let mut style = self.root.base_style.clone();
-                *style.make_text_align_mut() = self.horizontal_alignment;
-                style
             },
         )?;
 

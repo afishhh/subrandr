@@ -57,6 +57,16 @@ impl<'r> DisplayPass<'r> {
         self.root_ctx()
             .display_inline_content_fragment(pos, fragment);
     }
+
+    #[expect(dead_code)]
+    pub fn display_block_container_fragment(
+        &mut self,
+        pos: Point2L,
+        fragment: &BlockContainerFragment,
+    ) {
+        self.root_ctx()
+            .display_block_container_fragment(pos, fragment);
+    }
 }
 
 impl DisplayContext<'_> {
@@ -314,9 +324,10 @@ impl DisplayContext<'_> {
                 }
             }
             InlineItemFragment::Text(text) => {
-                self.display_text(round_y(pos + text.baseline_offset), baseline_y, text);
+                self.display_text(round_y(pos), baseline_y, text);
             }
             InlineItemFragment::Ruby(ruby) => self.display_ruby_fragment(pos, baseline_y, ruby),
+            InlineItemFragment::Block(block) => self.display_block_container_fragment(pos, block),
         }
     }
 
@@ -335,7 +346,6 @@ impl DisplayContext<'_> {
         }
     }
 
-    #[allow(dead_code)]
     fn display_block_container_fragment(
         &mut self,
         pos: Point2L,

@@ -4,7 +4,10 @@ use super::{
     inline::{InlineContent, InlineContentFragment, PartialInline},
     FixedL, FragmentBox, InlineLayoutError, LayoutConstraints, LayoutContext, Vec2L,
 };
-use crate::style::{computed::HorizontalAlignment, ComputedStyle};
+use crate::style::{
+    computed::{BaselineSource, HorizontalAlignment},
+    ComputedStyle,
+};
 
 #[derive(Debug, Clone)]
 pub struct BlockContainer {
@@ -23,6 +26,39 @@ pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
     pub content: BlockContainerFragmentContent,
+}
+
+impl BlockContainerFragment {
+    pub(super) const EMPTY: Self = Self {
+        fbox: FragmentBox::ZERO,
+        style: ComputedStyle::DEFAULT,
+        content: BlockContainerFragmentContent::Block(Vec::new()),
+    };
+
+    pub(super) fn alphabetic_baseline_from(&self, source: BaselineSource) -> Option<FixedL> {
+        // Here so this code blows up if `BaselineSource` is ever extended.
+        match source {
+            BaselineSource::Last => (),
+        }
+
+        match &self.content {
+            BlockContainerFragmentContent::Inline(off, inline_content_fragment) => {
+                let (line_off, line) = inline_content_fragment.lines.last()?;
+                Some(off.y + line_off.y + line.baseline_y)
+            }
+            BlockContainerFragmentContent::Block(children) => {
+                children.iter().rev().find_map(|&(child_off, ref child)| {
+                    child
+                        .alphabetic_baseline()
+                        .map(|child_baseline| child_baseline + child_off.y)
+                })
+            }
+        }
+    }
+
+    pub(super) fn alphabetic_baseline(&self) -> Option<FixedL> {
+        self.alphabetic_baseline_from(self.style.baseline_source())
+    }
 }
 
 #[derive(Debug)]

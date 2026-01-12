@@ -123,6 +123,11 @@ pub enum InlineSizing {
     Stretch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaselineSource {
+    Last,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Ltr,

@@ -84,6 +84,10 @@ pub(crate) struct FrameLayoutPass<'s, 'frame> {
     pub t: u32,
     unchanged_range: Range<u32>,
     fragments: Vec<(Point2L, BlockContainerFragment)>,
+    // TODO: proper configuration system
+    // TODO: fully inline mode could probably keep using blocks for ruby which would clean
+    //       up a sizing hack in inline layout
+    pub srv3_use_inlines: bool,
 }
 
 impl FrameLayoutPass<'_, '_> {
@@ -616,6 +620,7 @@ impl Renderer<'_> {
                 t,
                 unchanged_range: 0..u32::MAX,
                 fragments: Vec::new(),
+                srv3_use_inlines: self.sbr.debug.srv3_use_inlines,
             };
 
             fragments = {

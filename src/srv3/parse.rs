@@ -41,7 +41,7 @@ pub enum RubyPosition {
     Under,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pen {
     pub font_size: u16,
     pub font_style: u32,

@@ -650,8 +650,18 @@ impl Layouter {
                 continue;
             }
 
-            let (pos, block) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
-            pass.emit_fragment(pos, block);
+            let (pos, inline) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
+            pass.emit_fragment(
+                pos,
+                layout::block::BlockContainerFragment {
+                    fbox: layout::FragmentBox::new_content_only(inline.fbox.content_size),
+                    style: ComputedStyle::DEFAULT,
+                    content: layout::block::BlockContainerFragmentContent::Inline(
+                        Vec2L::ZERO,
+                        inline,
+                    ),
+                },
+            );
         }
 
         Ok(())

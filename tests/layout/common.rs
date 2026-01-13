@@ -2,13 +2,17 @@ use std::{path::Path, sync::OnceLock};
 
 use rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
+    scene::SceneNode,
     Rasterizer,
 };
 use util::rc::{rc_static, Rc};
 
 use crate::{
     display::DisplayPass,
-    layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
+    layout::{
+        self, block::BlockContainer, inline::InlineContent, LayoutConstraints, LayoutContext,
+        Point2L, Vec2L,
+    },
     style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
     Subrandr,
@@ -39,6 +43,7 @@ macro_rules! make_tree {
     (@map_child inline->ruby $value: expr) => {
         $value
     };
+    (@build_all_result_ty inline) => { () };
 
     (@build text [$style: expr; inline=$builder: ident]; $value: literal) => {
         $builder.push_text($value)
@@ -66,6 +71,28 @@ macro_rules! make_tree {
         let mut builder = $builder.push_annotation($style.clone());
         make_tree!(@build_all inline [$style; inline=builder]; $($content)*);
     }};
+    (@build_all_result_ty ruby) => { () };
+
+    (@build block [$style: expr;]; $content_block: tt) => {{
+        crate::layout::block::BlockContainer {
+            style: $style.clone(),
+            content: make_tree!(@build_block_content [$style;] $content_block)
+        }
+    }};
+    (@build_block_content [$style: expr;] { inline $(.$class: ident)* { $($content: tt)* } }) => {
+        crate::layout::block::BlockContainerContent::Inline(
+            make_tree!(@build inline $(.$class)*  [$style;]; { $($content)* })
+        )
+    };
+    (@build_block_content [$style: expr;] { $($content: tt)* }) => {
+        crate::layout::block::BlockContainerContent::Block(
+            make_tree!(@build_all block [$style;]; $($content)*).into()
+        )
+    };
+    (@map_child block->block $value: expr) => {
+        $value
+    };
+    (@build_all_result_ty block) => { crate::layout::block::BlockContainer };
 
     (@build $what: ident [$parent_style: expr; $($context_rest: tt)*]; [$($class: ident)*] { $($block_content: tt)* }) => {{
         let style = make_tree!(@apply_style $parent_style; $($class)*);
@@ -78,6 +105,7 @@ macro_rules! make_tree {
         compile_error!(concat!(
             stringify!($what),
             " is not a valid layout tree node in this context",
+            stringify!($context)
         ))
     };
 
@@ -118,7 +146,7 @@ macro_rules! make_tree {
             ),
         ]; $($rest)*)
     };
-    (@build_all_rec $mapper: ident $context: tt $result: tt;) => { $result as [(); _] };
+    (@build_all_rec $mapper: ident $context: tt $result: tt;) => { $result as [make_tree!(@build_all_result_ty $mapper); _] };
     (@map_child $from: ident->$to: ident $value: expr) => {
         compile_error!(concat!(
             stringify!($from),
@@ -200,13 +228,11 @@ test_define_style! {
     pub .noto_color_emoji { font_family: rc_static!([NOTO_COLOR_EMOJI.family()])}
 }
 
-pub fn check_inline(
+fn check_fn(
     name: &str,
-    pos: Point2L,
     viewport_size: Vec2L,
-    align: HorizontalAlignment,
-    inline: InlineContent,
     dpi: u32,
+    fun: impl FnOnce(&mut LayoutContext, &LayoutConstraints, &mut Vec<SceneNode>),
 ) {
     let project_dir = test_util::project_dir();
     let tests_dir = project_dir.join("tests/");
@@ -224,7 +250,8 @@ pub fn check_inline(
     let width = viewport_size.x.ceil_to_inner() as u32;
     let height = viewport_size.y.ceil_to_inner() as u32;
     let mut pixels = {
-        let fragment = layout::inline::layout(
+        let mut scene = Vec::new();
+        fun(
             &mut LayoutContext {
                 dpi,
                 fonts: &mut fonts,
@@ -232,17 +259,11 @@ pub fn check_inline(
             &LayoutConstraints {
                 size: viewport_size,
             },
-            &inline,
-            align,
-        )
-        .expect("Inline layout failed");
+            &mut scene,
+        );
 
         let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
         let glyph_cache = GlyphCache::new();
-        let mut scene = Vec::new();
-
-        DisplayPass { output: &mut scene }.display_inline_content_fragment(pos, &fragment);
-
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
             rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
@@ -262,6 +283,37 @@ pub fn check_inline(
         width,
         height,
     );
+}
+
+pub fn check_inline(
+    name: &str,
+    pos: Point2L,
+    viewport_size: Vec2L,
+    dpi: u32,
+    align: HorizontalAlignment,
+    inline: InlineContent,
+) {
+    check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
+        let fragment = layout::inline::layout(lctx, constraints, &inline, align)
+            .expect("Inline layout failed");
+
+        DisplayPass { output }.display_inline_content_fragment(pos, &fragment);
+    })
+}
+
+pub fn check_block(
+    name: &str,
+    pos: Point2L,
+    viewport_size: Vec2L,
+    dpi: u32,
+    _align: HorizontalAlignment,
+    block: BlockContainer,
+) {
+    check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
+        let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
+
+        DisplayPass { output }.display_block_container_fragment(pos, &fragment);
+    })
 }
 
 macro_rules! check_one {
@@ -290,8 +342,10 @@ macro_rules! check_one {
         use $crate::layout_tests::common::make_tree;
         let tree = make_tree!($what $(.$class)+ { $($block_content)* }) ;
 
-        check_inline(&name, pos, size, align, tree, dpi);
+        check_one!(@check $what (&name, pos, size, dpi, align, tree));
     }};
+    (@check inline $args: tt) => { check_inline $args; };
+    (@check block $args: tt) => { check_block $args; };
     (@align $name: ident) => { $crate::style::computed::HorizontalAlignment::$name };
     (@align) => { check_one!(@align Left) };
     (@dpi $value: literal) => { $value };

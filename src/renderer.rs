@@ -45,10 +45,6 @@ pub struct SubtitleContext {
 }
 
 impl SubtitleContext {
-    pub fn ppi(&self) -> u32 {
-        self.dpi * 96 / 72
-    }
-
     pub fn pixel_scale(&self) -> f32 {
         self.dpi as f32 / 72.0
     }

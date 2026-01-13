@@ -156,10 +156,6 @@ impl SubtitleContextCssExt for SubtitleContext {
     }
 }
 
-fn pixels_to_points(pixels: f32) -> f32 {
-    pixels * 96.0 / 72.0
-}
-
 #[derive(Debug, Clone)]
 pub struct Srv3TextShadow {
     kind: EdgeType,
@@ -296,8 +292,7 @@ impl Segment {
     fn compute_style(&self, sctx: &SubtitleContext) -> ComputedStyle {
         let mut result = self.base_style.clone();
 
-        let mut size = pixels_to_points(font_size_to_pixels(self.font_size) * 0.75)
-            * font_scale_from_ctx(sctx);
+        let mut size = font_size_to_pixels(self.font_size) * font_scale_from_ctx(sctx);
         if matches!(self.ruby, Ruby::Over) {
             size /= 2.0;
             result

@@ -1667,9 +1667,8 @@ fn layout_run_full(
                         }
                     }
                     LineHeight::Value(value) => {
-                        // (font_size * 96 / 72) * (dpi / 72) simplifies to this
                         let computed_font_size =
-                            text.font_matcher.size() * text.font_matcher.dpi() as i32 / 54;
+                            text.font_matcher.size() * text.font_matcher.dpi() as i32 / 72;
                         let metrics = text.primary_font.metrics();
                         let half_leading = ((computed_font_size * value)
                             - (metrics.ascender - metrics.descender))

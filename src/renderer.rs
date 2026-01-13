@@ -629,7 +629,12 @@ impl Renderer<'_> {
 
             fragments = {
                 match self.layouter {
-                    Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(&mut pass)?,
+                    Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(
+                        &mut pass,
+                        &srv3::LayoutOptions {
+                            avoid_inline_block: self.sbr.debug.srv3_fully_inline,
+                        },
+                    )?,
                     Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.layout(&mut pass)?,
                     None => (),
                 }

@@ -10,7 +10,7 @@ use crate::{
     layout::{
         self,
         block::{BlockContainer, BlockContainerContent},
-        inline::{InlineContent, InlineContentBuilder},
+        inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
     log::{log_once_state, warning, LogOnceSet},
@@ -259,6 +259,12 @@ impl super::Point {
     }
 }
 
+pub struct LayoutOptions {
+    // TODO: fully inline mode could probably keep using blocks for ruby which would clean
+    //       up a sizing hack in inline layout
+    pub avoid_inline_block: bool,
+}
+
 #[derive(Debug)]
 pub struct Subtitles {
     windows: Vec<Window>,
@@ -284,6 +290,7 @@ struct VisualLine {
 
 #[derive(Debug, Clone)]
 struct Segment {
+    pen: Pen,
     base_style: ComputedStyle,
     font_size: u16,
     time_offset: u32,
@@ -293,7 +300,7 @@ struct Segment {
 }
 
 impl Segment {
-    fn compute_style(&self, sctx: &SubtitleContext) -> ComputedStyle {
+    fn compute_style(&self, sctx: &SubtitleContext, lopts: &LayoutOptions) -> ComputedStyle {
         let mut result = self.base_style.clone();
 
         let mut size = pixels_to_points(font_size_to_pixels(self.font_size) * 0.75)
@@ -305,8 +312,9 @@ impl Segment {
                 .set(OpenTypeTag::FEAT_RUBY, 1);
         }
 
-        // FIXME: This is not correct but *looks* more correct :)
-        *result.make_inline_sizing_mut() = InlineSizing::Stretch;
+        if !lopts.avoid_inline_block {
+            *result.make_inline_sizing_mut() = InlineSizing::Stretch;
+        }
 
         *result.make_font_size_mut() = I26Dot6::from(size);
 
@@ -325,6 +333,7 @@ fn segments_to_inline(
     pass: &mut FrameLayoutPass,
     event_time: u32,
     segments: &[Segment],
+    lopts: &LayoutOptions,
 ) -> InlineContent {
     let mut builder = InlineContentBuilder::new();
     // What lack of Peekable::inner() and Filter::inner() does to a language...
@@ -339,8 +348,31 @@ fn segments_to_inline(
         })
         .peekable();
 
+    struct CurrentBlock {
+        pen: Option<Pen>,
+        style: ComputedStyle,
+        builder: InlineContentBuilder,
+    }
+
+    impl CurrentBlock {
+        fn flush(&mut self, to: &mut InlineSpanBuilder<'_>) {
+            to.push_inline_block(BlockContainer {
+                style: std::mem::replace(&mut self.style, ComputedStyle::DEFAULT),
+                content: BlockContainerContent::Inline(self.builder.finish()),
+            });
+        }
+    }
+
+    // Only used if inline-block layout is enabled to coalesce structurally-same-pen
+    // segments into a single inline-block.
+    // This is what YouTube appears to do from my testing.
+    let mut current_block: CurrentBlock = CurrentBlock {
+        pen: None,
+        style: ComputedStyle::DEFAULT,
+        builder: InlineContentBuilder::new(),
+    };
     while let Some(segment) = it.next() {
-        let mut style = segment.compute_style(sctx);
+        let mut style = segment.compute_style(sctx, lopts);
 
         if next_idx == 0 {
             *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
@@ -352,27 +384,60 @@ fn segments_to_inline(
             *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
         }
 
-        match segment.ruby {
-            Ruby::None => {
-                root.push_span(style).push_text(&segment.text);
-            }
-            Ruby::Base => {
-                let mut ruby = root.push_ruby(style.create_derived());
-                ruby.push_base(style.clone()).push_text(&segment.text);
-                if let Some(next) = it.peek() {
-                    if let Ruby::Over = next.ruby {
-                        ruby.push_annotation(next.compute_style(sctx))
-                            .push_text(&next.text);
-                        _ = it.next();
+        let mut layout_to_builder =
+            |inner: &mut InlineSpanBuilder<'_>, inner_style: ComputedStyle| match segment.ruby {
+                Ruby::None => {
+                    inner.push_span(inner_style).push_text(&segment.text);
+                }
+                Ruby::Base => {
+                    let mut ruby = inner.push_ruby(inner_style.create_derived());
+                    ruby.push_base(inner_style.clone()).push_text(&segment.text);
+                    if let Some(next) = it.peek() {
+                        if let Ruby::Over = next.ruby {
+                            let mut annotation_style = next.compute_style(sctx, lopts);
+                            // If inline-block layout is enabled then background is handled by the
+                            // containing block.
+                            if !lopts.avoid_inline_block {
+                                *annotation_style.make_background_color_mut() = BGRA8::ZERO;
+                            }
+                            ruby.push_annotation(annotation_style).push_text(&next.text);
+                            _ = it.next();
+                        }
                     }
                 }
-            }
-            Ruby::Over => {
-                root.push_ruby(style.clone())
-                    .push_annotation(style)
-                    .push_text(&segment.text);
-            }
-        }
+                Ruby::Over => {
+                    inner
+                        .push_ruby(inner_style.create_derived())
+                        .push_annotation(inner_style)
+                        .push_text(&segment.text);
+                }
+            };
+
+        if lopts.avoid_inline_block {
+            layout_to_builder(&mut root, style);
+        } else {
+            let inner_style = style.create_derived();
+            let mut inner_root = if current_block
+                .pen
+                .as_ref()
+                .is_some_and(|pen| pen == &segment.pen)
+            {
+                current_block.builder.root()
+            } else {
+                if current_block.pen.is_some() {
+                    current_block.flush(&mut root);
+                }
+                current_block.pen = Some(segment.pen);
+                current_block.style = style;
+                current_block.builder.root()
+            };
+
+            layout_to_builder(&mut inner_root, inner_style);
+        };
+    }
+
+    if current_block.pen.is_some() {
+        current_block.flush(&mut root);
     }
 
     drop(root);
@@ -383,6 +448,7 @@ impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
+        lopts: &LayoutOptions,
     ) -> Result<Option<(Point2L, layout::block::BlockContainerFragment)>, layout::InlineLayoutError>
     {
         let block_style = {
@@ -399,6 +465,7 @@ impl Window {
                         pass,
                         line.range.start,
                         &line.segments,
+                        lopts,
                     )),
                 });
             }
@@ -486,6 +553,7 @@ fn convert_segment(
     base_style: &ComputedStyle,
 ) -> Segment {
     Segment {
+        pen: *segment.pen(),
         base_style: pen_to_size_independent_style(segment.pen(), false, base_style.clone()),
         font_size: segment.pen().font_size,
         time_offset: segment.time_offset,
@@ -658,13 +726,17 @@ impl Layouter {
         &self.subtitles
     }
 
-    pub fn layout(&mut self, pass: &mut FrameLayoutPass) -> Result<(), InlineLayoutError> {
+    pub fn layout(
+        &mut self,
+        pass: &mut FrameLayoutPass,
+        lopts: &LayoutOptions,
+    ) -> Result<(), InlineLayoutError> {
         for window in &self.subtitles.windows {
             if !pass.add_event_range(window.range.clone()) {
                 continue;
             }
 
-            if let Some((pos, block)) = window.layout(pass)? {
+            if let Some((pos, block)) = window.layout(pass, lopts)? {
                 pass.emit_fragment(pos, block);
             }
         }

@@ -1782,7 +1782,7 @@ unsafe fn layout_run_full<'a, 'f>(
     #[derive(Debug, Clone, Copy)]
     struct LineHeightMetrics {
         max_ascender: FixedL,
-        max_ruby_overflow_ascender: FixedL,
+        max_ruby_ascender: FixedL,
         min_descender: FixedL,
     }
 
@@ -1799,7 +1799,7 @@ unsafe fn layout_run_full<'a, 'f>(
     impl LineHeightMetrics {
         const ZERO: Self = LineHeightMetrics {
             max_ascender: FixedL::ZERO,
-            max_ruby_overflow_ascender: FixedL::ZERO,
+            max_ruby_ascender: FixedL::ZERO,
             min_descender: FixedL::ZERO,
         };
 
@@ -1859,9 +1859,9 @@ unsafe fn layout_run_full<'a, 'f>(
                             annotation_metrics.process_item(item, LineHeight::RUBY_ANNOTATION);
                         }
 
-                        self.max_ruby_overflow_ascender = self
-                            .max_ruby_overflow_ascender
-                            .max(base_metrics.max_ascender + annotation_metrics.max_ascender);
+                        self.max_ruby_ascender = self.max_ruby_ascender.max(
+                            annotation_metrics.max_ascender + annotation_metrics.min_descender,
+                        );
                         self.expand_to(base_metrics.max_ascender, base_metrics.min_descender);
                     }
                 }
@@ -2306,20 +2306,14 @@ unsafe fn layout_run_full<'a, 'f>(
                 HorizontalAlignment::Right => -line_width,
             };
 
-            // HACK: I don't know why this works... but this appears to be somewhat close to Chromium.
-            let ruby_leading = line_metrics
-                .max_ruby_overflow_ascender
-                .max(line_metrics.max_ascender)
-                - line_metrics.max_ascender;
-            let ruby_half_leading = ruby_leading / 2;
-
+            let ruby_leading = line_metrics.max_ruby_ascender;
             self.result.fbox.content_size.x = self
                 .result
                 .fbox
                 .content_size
                 .x
                 .max(line_box.fbox.size_for_layout().x);
-            self.current_y += ruby_half_leading;
+            self.current_y += ruby_leading;
             self.result.lines.push((
                 Vec2L::new(aligning_x_offset, self.current_y),
                 line_box.into(),

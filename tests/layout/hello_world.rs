@@ -37,3 +37,22 @@ check_test! {
         }
     }
 }
+
+check_test! {
+    name = explicitly_rtl,
+    direction = Rtl,
+    size = (16 * 12, 16),
+    inline.ahem {
+        span.hello {
+            text "縦 "
+        }
+        text "\u{202B}"
+        span.world {
+            text "world hi"
+        }
+        text "\u{202C}"
+        span.hello {
+            text " 横"
+        }
+    }
+}

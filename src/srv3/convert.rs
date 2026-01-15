@@ -1,5 +1,6 @@
 use std::{collections::HashMap, ops::Range};
 
+use icu_locale::{LanguageIdentifier, LocaleDirectionality};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Vec2f},
@@ -16,8 +17,8 @@ use crate::{
     srv3::{Event, RubyPosition},
     style::{
         computed::{
-            Alignment, FontSlant, HorizontalAlignment, InlineSizing, Length, Ruby, TextShadow,
-            VerticalAlignment,
+            Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, Ruby,
+            TextShadow, VerticalAlignment,
         },
         ComputedStyle,
     },
@@ -589,13 +590,22 @@ impl WindowBuilder<'_> {
     }
 }
 
-pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
+pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentifier>) -> Subtitles {
     let mut result = Subtitles {
         windows: Vec::new(),
     };
     let mut window_builder = WindowBuilder {
         sbr,
-        base_style: pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT),
+        base_style: {
+            let mut style =
+                pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);
+            if let Some(lang) = lang {
+                if LocaleDirectionality::new_common().is_right_to_left(lang) {
+                    *style.make_direction_mut() = Direction::Rtl;
+                }
+            }
+            style
+        },
         logset: LogOnceSet::new(),
     };
 

@@ -8,7 +8,7 @@ use super::{FixedL, FragmentBox, LayoutConstraints, LayoutContext, Vec2L};
 use crate::{
     layout::BoxFragmentationPart,
     style::{
-        computed::{FontSlant, HorizontalAlignment, InlineSizing},
+        computed::{self, FontSlant, HorizontalAlignment, InlineSizing},
         ComputedStyle,
     },
     text::{
@@ -1136,10 +1136,15 @@ fn shape_run_initial<'a, 'f>(
     }
 
     let run_text = &content.text_runs[run_index];
+    let default_para_level = match inner_style.direction() {
+        // TODO: `None` or `LTR_LEVEL` here? Picked `None` for now as that's the safest bet.
+        computed::Direction::Ltr => None,
+        computed::Direction::Rtl => Some(unicode_bidi::RTL_LEVEL),
+    };
     ShapedItemBuilder {
         content,
         run_text,
-        bidi: unicode_bidi::BidiInfo::new(run_text, None),
+        bidi: unicode_bidi::BidiInfo::new(run_text, default_para_level),
         grapheme_cluster_boundaries: {
             let mut result: Vec<usize> = GraphemeClusterSegmenter::new()
                 .segment_str(run_text)

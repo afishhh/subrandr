@@ -114,3 +114,9 @@ pub enum InlineSizing {
     Normal,
     Stretch,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum Direction {
+    Ltr,
+    Rtl,
+}

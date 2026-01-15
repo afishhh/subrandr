@@ -7,10 +7,11 @@ use std::{
     sync::Arc,
 };
 
+use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
 use util::rc::Rc;
 
 use crate::{
-    log::{CLogCallback, Logger},
+    log::{debug, warning, CLogCallback, Logger},
     text::Face,
     Subrandr, Subtitles,
 };
@@ -298,8 +299,29 @@ unsafe extern "C" fn sbr_load_text(
             content_len
         ))
     );
-    let _language_hint = if !language_hint.is_null() {
-        Some(CStr::from_ptr(language_hint))
+    let language_hint = if !language_hint.is_null() {
+        let cstr = CStr::from_ptr(language_hint);
+        match LanguageIdentifier::try_from_locale_bytes(cstr.to_bytes()) {
+            Ok(lang_id) => {
+                let mut locale = icu_locale::Locale {
+                    id: lang_id,
+                    extensions: icu_locale::extensions::Extensions::new(),
+                };
+                // NOTE: Locale canonicalization is performed here because YouTube uses
+                //       the obsolete "iw" language tag for Hebrew which identifies itself
+                //       as `LeftToRight` with `icu_locale::LocaleDirectionality`.
+                //       This step converts "iw" to "he" which is correctly `RightToLeft`.
+                //       There probably exist other good reasons for doing this and it avoids
+                //       special casing "iw" internally.
+                LocaleCanonicalizer::new_common().canonicalize(&mut locale);
+                debug!(sbr, "Language hint resolved to {:?}", locale.id);
+                Some(locale.id)
+            }
+            Err(error) => {
+                warning!(sbr, "Failed to parse language hint {cstr:?}: {error}");
+                None
+            }
+        }
     } else {
         None
     };
@@ -309,9 +331,13 @@ unsafe extern "C" fn sbr_load_text(
     }
 
     match format {
-        SubtitleFormat::Srv3 => Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(
-            crate::srv3::convert(sbr, ctry!(crate::srv3::parse(sbr, content))),
-        )))),
+        SubtitleFormat::Srv3 => {
+            Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(crate::srv3::convert(
+                sbr,
+                ctry!(crate::srv3::parse(sbr, content)),
+                language_hint.as_ref(),
+            )))))
+        }
         SubtitleFormat::WebVTT => {
             Box::into_raw(Box::new(Subtitles::Vtt(Rc::new(crate::vtt::convert(
                 sbr,

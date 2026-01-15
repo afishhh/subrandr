@@ -9,7 +9,7 @@ use util::rc::{rc_static, Rc};
 use crate::{
     display::DisplayPass,
     layout::{self, inline::InlineContent, LayoutConstraints, LayoutContext, Point2L, Vec2L},
-    style::computed::HorizontalAlignment,
+    style::{computed::HorizontalAlignment, ComputedStyle},
     text::{Face, FaceInfo, FontDb, GlyphCache},
     Subrandr,
 };
@@ -233,7 +233,11 @@ pub fn check_inline(
                 size: viewport_size,
             },
             &inline,
-            align,
+            &{
+                let mut style = ComputedStyle::DEFAULT;
+                *style.make_text_align_mut() = align;
+                style
+            },
         )
         .expect("Inline layout failed");
 

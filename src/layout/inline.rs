@@ -593,6 +593,7 @@ fn shape_run_initial<'a, 'f>(
     font_arena: &'f FontArena,
     compute_break_opportunities: bool,
     span_state: &mut Vec<SpanState<'a, 'f>>,
+    inner_style: &'a ComputedStyle,
 ) -> Result<InitialShapingResult<'a, 'f>, InlineLayoutError> {
     struct QueuedText<'f> {
         matcher: FontMatcher<'f>,
@@ -870,10 +871,11 @@ fn shape_run_initial<'a, 'f>(
             item_index: usize,
             end_item_index: &mut usize,
             compute_break_opportunities: bool,
+            inner_style: &'a ComputedStyle,
         ) -> Result<InitialShapingResult<'a, 'f>, InlineLayoutError> {
             let items = &self.content.items;
             let mut current_item = item_index;
-            let mut current_style = const { &ComputedStyle::DEFAULT };
+            let mut current_style = inner_style;
             let mut span_left = usize::MAX;
             let mut span_stack: Vec<SpanStackEntry> = Vec::new();
             let mut text_leaf_items = Vec::new();
@@ -958,6 +960,7 @@ fn shape_run_initial<'a, 'f>(
                                                     self.font_arena,
                                                     false,
                                                     self.span_state,
+                                                    base_style,
                                                 )?,
                                             };
                                             remaining -= 1;
@@ -986,6 +989,7 @@ fn shape_run_initial<'a, 'f>(
                                                     self.font_arena,
                                                     false,
                                                     self.span_state,
+                                                    annotation_style,
                                                 )?;
                                                 remaining -= 1;
                                                 ShapedRubyAnnotation {
@@ -1158,7 +1162,12 @@ fn shape_run_initial<'a, 'f>(
         current_span_id: usize::MAX,
         total_content_bytes_added: 0,
     }
-    .process_items(item_index, end_item_index, compute_break_opportunities)
+    .process_items(
+        item_index,
+        end_item_index,
+        compute_break_opportunities,
+        inner_style,
+    )
 }
 
 struct BreakingContext<'f, 'l, 'a, 'b> {
@@ -1372,9 +1381,9 @@ fn layout_run_full(
     run_index: usize,
     item_index: usize,
     end_item_index: &mut usize,
-    align: HorizontalAlignment,
     lctx: &mut LayoutContext,
     constraints: &LayoutConstraints,
+    inner_style: &ComputedStyle,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
@@ -2159,12 +2168,13 @@ fn layout_run_full(
         &font_arena,
         true,
         &mut span_state,
+        inner_style,
     )?;
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
         result: InlineContentFragment::EMPTY,
-        line_align: align,
+        line_align: inner_style.text_align(),
         bidi,
         text_leaf_items,
         dpi: lctx.dpi,
@@ -2238,7 +2248,7 @@ pub fn layout<'l, 'a, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l, 'a>,
     constraints: &LayoutConstraints,
     content: &'c InlineContent,
-    align: HorizontalAlignment,
+    inner_style: &ComputedStyle,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     if content.text_runs.is_empty() {
         return Ok(InlineContentFragment::EMPTY);
@@ -2249,8 +2259,8 @@ pub fn layout<'l, 'a, 'b, 'c>(
         0,
         0,
         &mut content.items.len(),
-        align,
         lctx,
         constraints,
+        inner_style,
     )
 }

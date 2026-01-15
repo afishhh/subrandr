@@ -492,7 +492,7 @@ impl Renderer<'_> {
                     lctx,
                     &LayoutConstraints::NONE,
                     &builder.finish(),
-                    HorizontalAlignment::Left,
+                    &base_style,
                 )?),
             ));
         }
@@ -546,12 +546,12 @@ impl Renderer<'_> {
 
                 drop(main);
                 drop(root);
-                let perf_text_fragment = layout::inline::layout(
-                    lctx,
-                    &LayoutConstraints::NONE,
-                    &builder.finish(),
-                    HorizontalAlignment::Right,
-                )?;
+                let perf_text_fragment =
+                    layout::inline::layout(lctx, &LayoutConstraints::NONE, &builder.finish(), &{
+                        let mut style = ComputedStyle::DEFAULT;
+                        *style.make_text_align_mut() = HorizontalAlignment::Right;
+                        style
+                    })?;
                 let graph_y = perf_text_fragment.fbox.size_for_layout().y;
                 fragments.push((
                     Point2L::new(

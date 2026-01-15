@@ -270,7 +270,8 @@ struct Window {
     //       How does a timestamp on a window work?
     //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
-    alignment: Alignment,
+    inner_style: ComputedStyle,
+    vertical_align: VerticalAlignment,
     lines: Vec<VisualLine>,
 }
 
@@ -399,8 +400,12 @@ impl Window {
             size: Vec2L::new(pass.sctx.player_width() * 96 / 100, FixedL::MAX),
         };
 
-        let fragment =
-            layout::inline::layout(pass.lctx, &constraints, &content.finish(), self.alignment.0)?;
+        let fragment = layout::inline::layout(
+            pass.lctx,
+            &constraints,
+            &content.finish(),
+            &self.inner_style,
+        )?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),
@@ -408,13 +413,13 @@ impl Window {
         );
 
         let fragment_size = fragment.fbox.size_for_layout();
-        match self.alignment.0 {
+        match self.inner_style.text_align() {
             HorizontalAlignment::Left => (),
             HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
             HorizontalAlignment::Right => pos.x -= fragment_size.x,
         }
 
-        match self.alignment.1 {
+        match self.vertical_align {
             VerticalAlignment::Top => (),
             VerticalAlignment::Center => pos.y -= fragment_size.y / 2,
             VerticalAlignment::Bottom => pos.y -= fragment_size.y,
@@ -485,6 +490,21 @@ struct WindowBuilder<'a> {
 }
 
 impl WindowBuilder<'_> {
+    fn create_window(&self, x: f32, y: f32, time: u32, duration: u32, align: Alignment) -> Window {
+        Window {
+            x,
+            y,
+            range: time..time + duration,
+            inner_style: {
+                let mut style = self.base_style.clone();
+                *style.make_text_align_mut() = align.0;
+                style
+            },
+            vertical_align: align.1,
+            lines: Vec::new(),
+        }
+    }
+
     fn extend_lines(&mut self, window: &mut Window, event: &Event) {
         let event_range = event.time..event.time + event.duration;
         let mut current_line = VisualLine {
@@ -582,13 +602,13 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
     let mut wname_to_index = HashMap::new();
     for (name, window) in document.windows() {
         wname_to_index.insert(&**name, result.windows.len());
-        result.windows.push(Window {
-            x: convert_coordinate(window.position().x as f32),
-            y: convert_coordinate(window.position().y as f32),
-            range: window.time..window.time + window.duration,
-            alignment: window.position().point.to_alignment(),
-            lines: Vec::new(),
-        });
+        result.windows.push(window_builder.create_window(
+            convert_coordinate(window.position().x as f32),
+            convert_coordinate(window.position().y as f32),
+            window.time,
+            window.duration,
+            window.position().point.to_alignment(),
+        ));
     }
 
     for event in document.events() {
@@ -610,13 +630,13 @@ pub fn convert(sbr: &Subrandr, document: Document) -> Subtitles {
         {
             window_builder.extend_lines(&mut result.windows[widx], event);
         } else {
-            let mut window = Window {
-                x: convert_coordinate(event.position().x as f32),
-                y: convert_coordinate(event.position().y as f32),
-                range: event.time..event.time + event.duration,
-                alignment: event.position().point.to_alignment(),
-                lines: Vec::new(),
-            };
+            let mut window = window_builder.create_window(
+                convert_coordinate(event.position().x as f32),
+                convert_coordinate(event.position().y as f32),
+                event.time,
+                event.duration,
+                event.position().point.to_alignment(),
+            );
             window_builder.extend_lines(&mut window, event);
             result.windows.push(window);
         }

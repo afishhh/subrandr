@@ -127,7 +127,11 @@ impl Event {
                 self.root.append_to(&mut builder.root(), font_size);
                 builder.finish()
             },
-            self.horizontal_alignment,
+            &{
+                let mut style = self.root.base_style.clone();
+                *style.make_text_align_mut() = self.horizontal_alignment;
+                style
+            },
         )?;
 
         let lines = &mut fragment.lines;

@@ -62,17 +62,22 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
             .inner
             .render_to_scene(&*ctx, t, &renderer.rasterizer));
 
-        ctry!(renderer.rasterizer.render_scene_pieces(
-            renderer.inner.scene(),
-            &mut |piece| {
-                if piece.size.x == 0 || piece.size.y == 0 {
-                    return;
-                }
+        ctry!(renderer
+            .rasterizer
+            .render_scene_pieces(
+                renderer.inner.scene(),
+                &mut |piece| {
+                    if piece.size.x == 0 || piece.size.y == 0 {
+                        return;
+                    }
 
-                renderer.output_pieces.push(piece);
-            },
-            &renderer.inner.glyph_cache
-        ));
+                    renderer.output_pieces.push(piece);
+                },
+                &renderer.inner.glyph_cache,
+            )
+            // Make sure piece buffer is cleared if rendering fails
+            // so the above assertion is not triggered in such a case.
+            .inspect_err(|_| renderer.output_pieces.clear()));
 
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,

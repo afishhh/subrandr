@@ -1,6 +1,6 @@
-//! Utilities that help with using syn as part of a more robust parser.
+//! Utilities that help with doing error recovery when using syn.
 
-pub use proc_macro2::{Span as Span2, TokenStream as TokenStream2, TokenTree as TokenTree2};
+pub use proc_macro2::{TokenStream as TokenStream2, TokenTree as TokenTree2};
 use syn::parse::{ParseStream, Parser as _};
 
 pub struct ParseContext {
@@ -17,15 +17,13 @@ impl ParseContext {
         fun: impl FnOnce(ParseStream, &mut ParseContext) -> Result<R, AlreadyReported>,
         ts: TokenStream2,
     ) -> Result<R, AlreadyReported> {
-        let syn_parser = |stream: ParseStream| -> syn::Result<R> {
-            // Make syn happy by returning a `Result<R, syn::Error>` ...
-            fun(stream, self).map_err(|_| syn::Error::new(Span2::call_site(), "dummy error"))
+        let syn_parser = |stream: ParseStream| -> syn::Result<Result<R, AlreadyReported>> {
+            Ok(fun(stream, self))
         };
 
-        match syn_parser.parse2(ts) {
-            Ok(value) => Ok(value),
-            // ... and then throw away the error because it was `AlreadyReported`.
-            Err(_) => Err(AlreadyReported),
+        match syn_parser.parse2(ts).report_in(self) {
+            Ok(Ok(result)) => Ok(result),
+            Err(AlreadyReported) | Ok(Err(AlreadyReported)) => Err(AlreadyReported),
         }
     }
 

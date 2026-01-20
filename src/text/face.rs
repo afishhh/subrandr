@@ -64,6 +64,17 @@ pub struct FontMetrics {
 }
 
 impl FontMetrics {
+    pub const ZERO: Self = Self {
+        ascender: I26Dot6::ZERO,
+        descender: I26Dot6::ZERO,
+        height: I26Dot6::ZERO,
+        max_advance: I26Dot6::ZERO,
+        underline_top_offset: I26Dot6::ZERO,
+        underline_thickness: I26Dot6::ZERO,
+        strikeout_top_offset: I26Dot6::ZERO,
+        strikeout_thickness: I26Dot6::ZERO,
+    };
+
     pub fn line_gap(&self) -> I26Dot6 {
         self.height - self.ascender + self.descender
     }

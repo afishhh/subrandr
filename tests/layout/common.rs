@@ -237,7 +237,7 @@ pub fn check_inline(
         let glyph_cache = GlyphCache::new();
         let mut scene = Vec::new();
 
-        DisplayPass { output: &mut scene }.display_inline_content_fragment(pos, &fragment);
+        DisplayPass::new(&mut scene).display_inline_content_fragment(pos, &fragment);
 
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =

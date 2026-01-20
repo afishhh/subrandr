@@ -292,7 +292,6 @@ impl TextFragment {
 #[derive(Debug)]
 pub struct RubyFragment {
     pub fbox: FragmentBox,
-    #[expect(dead_code, reason = "ruby fragment style is not used for anything yet")]
     pub style: ComputedStyle,
     pub content: Vec<(Vec2L, RubyBaseFragment, Vec2L, RubyAnnotationFragment)>,
 }
@@ -301,6 +300,7 @@ pub struct RubyFragment {
 pub struct RubyBaseFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
+    pub primary_font: Font,
     pub children: OffsetInlineItemFragmentVec,
 }
 
@@ -308,6 +308,8 @@ pub struct RubyBaseFragment {
 pub struct RubyAnnotationFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
+    pub primary_font: Font,
+    pub baseline_y: FixedL,
     pub children: OffsetInlineItemFragmentVec,
 }
 
@@ -323,18 +325,24 @@ type OffsetInlineItemFragmentVec = Vec<(Vec2L, util::rc::Rc<InlineItemFragment>)
 #[derive(Debug, Clone)]
 pub struct LineBoxFragment {
     pub fbox: FragmentBox,
+    pub baseline_y: FixedL,
     pub children: OffsetInlineItemFragmentVec,
 }
 
 #[derive(Debug, Clone)]
 pub struct InlineContentFragment {
     pub fbox: FragmentBox,
+    pub style: ComputedStyle,
+    // NOTE: due to const reasons this can't be `Font`
+    pub primary_font_metrics: FontMetrics,
     pub lines: Vec<(Vec2L, util::rc::Rc<LineBoxFragment>)>,
 }
 
 impl InlineContentFragment {
     pub const EMPTY: Self = Self {
         fbox: FragmentBox::ZERO,
+        style: ComputedStyle::DEFAULT,
+        primary_font_metrics: FontMetrics::ZERO,
         lines: Vec::new(),
     };
 }
@@ -483,6 +491,7 @@ struct ShapedRubyBase<'a, 'f> {
 #[derive(Debug)]
 struct ShapedRubyAnnotation<'a, 'f> {
     style: &'a ComputedStyle,
+    primary_font: &'f Font,
     inner: InitialShapingResult<'a, 'f>,
 }
 
@@ -508,7 +517,18 @@ fn font_matcher_from_style<'f>(
     .map_err(Into::into)
 }
 
+fn primary_font_from_style<'f>(
+    style: &ComputedStyle,
+    font_arena: &'f FontArena,
+    lctx: &mut LayoutContext,
+) -> Result<&'f Font, InlineLayoutError> {
+    font_matcher_from_style(style, font_arena, lctx)?
+        .primary(font_arena, lctx.fonts)
+        .map_err(Into::into)
+}
+
 #[derive(Debug)]
+
 struct FontFeatureEvent {
     utf8_index: usize,
     kind: FontFeatureEventKind,
@@ -1038,11 +1058,21 @@ fn shape_run_initial<'a, 'f>(
                                                 remaining -= 1;
                                                 ShapedRubyAnnotation {
                                                     style: annotation_style,
+                                                    primary_font: primary_font_from_style(
+                                                        annotation_style,
+                                                        self.font_arena,
+                                                        self.lctx,
+                                                    )?,
                                                     inner: result,
                                                 }
                                             } else {
                                                 ShapedRubyAnnotation {
                                                     style: const { &ComputedStyle::DEFAULT },
+                                                    primary_font: primary_font_from_style(
+                                                        &ComputedStyle::DEFAULT,
+                                                        self.font_arena,
+                                                        self.lctx,
+                                                    )?,
                                                     inner: InitialShapingResult::empty(),
                                                 }
                                             };
@@ -1942,6 +1972,7 @@ fn layout_run_full(
                                 base.style,
                             ),
                             style: base.style.clone(),
+                            primary_font: base.primary_font.clone(),
                             children: Vec::new(),
                         };
 
@@ -1968,6 +1999,8 @@ fn layout_run_full(
                                 annotation.style,
                             ),
                             style: annotation.style.clone(),
+                            primary_font: annotation.primary_font.clone(),
+                            baseline_y: annotation_metrics.max_ascender,
                             children: Vec::new(),
                         };
 
@@ -2101,6 +2134,7 @@ fn layout_run_full(
             let line_height = line_metrics.height();
             let mut line_box = LineBoxFragment {
                 fbox: FragmentBox::new_content_only(Vec2::new(line_width, line_height)),
+                baseline_y: line_metrics.max_ascender,
                 children: Vec::new(),
             };
 
@@ -2216,7 +2250,12 @@ fn layout_run_full(
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
-        result: InlineContentFragment::EMPTY,
+        result: InlineContentFragment {
+            style: content.root_style.clone(),
+            primary_font_metrics: *primary_font_from_style(&content.root_style, &font_arena, lctx)?
+                .metrics(),
+            ..InlineContentFragment::EMPTY
+        },
         line_align: content.root_style.text_align(),
         bidi,
         text_leaf_items,

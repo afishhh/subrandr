@@ -8,28 +8,24 @@ use util::math::{I26Dot6, Point2, Rect2};
 
 use crate::{
     layout::{
-        inline::{InlineContentFragment, InlineItemFragment, SpanFragment, TextFragment},
+        inline::{InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
         FixedL, FragmentBox, Point2L, Rect2L,
     },
     style::ComputedStyle,
-    text::{self, GlyphCache},
+    text::{self, FontMetrics, GlyphCache},
 };
+
+mod decoration;
+use decoration::*;
 
 pub struct DisplayPass<'r> {
     pub output: &'r mut Vec<SceneNode>,
+    decoration_tracker: DecorationTracker,
 }
 
-struct LineDecoration {
-    baseline_offset: FixedL,
-    thickness: FixedL,
-    color: BGRA8,
-    /// Used to determine paint order: https://drafts.csswg.org/css-text-decor/#painting-order.
-    kind: LineDecorationKind,
-}
-
-enum LineDecorationKind {
-    Underline,
-    LineThrough,
+struct DisplayContext<'c> {
+    output: &'c mut Vec<SceneNode>,
+    decoration_ctx: DecorationContext<'c>,
 }
 
 fn round_y(mut p: Point2L) -> Point2L {
@@ -37,10 +33,34 @@ fn round_y(mut p: Point2L) -> Point2L {
     p
 }
 
-impl DisplayPass<'_> {
-    pub fn push_rect_fill(&mut self, rect: Rect2L, color: BGRA8) {
-        self.output
-            .push(SceneNode::FilledRect(FilledRect { rect, color }));
+impl<'r> DisplayPass<'r> {
+    pub fn new(output: &'r mut Vec<SceneNode>) -> Self {
+        Self {
+            output,
+            decoration_tracker: DecorationTracker::new(),
+        }
+    }
+
+    fn root_ctx(&mut self) -> DisplayContext<'_> {
+        DisplayContext {
+            output: &mut *self.output,
+            decoration_ctx: self.decoration_tracker.root(),
+        }
+    }
+
+    pub fn display_inline_content_fragment(
+        &mut self,
+        pos: Point2L,
+        fragment: &InlineContentFragment,
+    ) {
+        self.root_ctx()
+            .display_inline_content_fragment(pos, fragment);
+    }
+}
+
+impl DisplayContext<'_> {
+    fn push_rect_fill(output: &mut Vec<SceneNode>, rect: Rect2L, color: BGRA8) {
+        output.push(SceneNode::FilledRect(FilledRect { rect, color }));
     }
 
     fn push_text(
@@ -88,15 +108,16 @@ impl DisplayPass<'_> {
     }
 
     fn display_line_decoration(
-        &mut self,
+        output: &mut Vec<SceneNode>,
         x0: FixedL,
         x1: FixedL,
         baseline_y: I26Dot6,
-        decoration: &LineDecoration,
+        decoration: &ActiveDecoration,
     ) {
         let decoration_y = baseline_y + decoration.baseline_offset;
 
-        self.push_rect_fill(
+        Self::push_rect_fill(
+            output,
             Rect2::new(
                 Point2::new(x0, decoration_y),
                 Point2::new(x1, decoration_y + decoration.thickness),
@@ -105,12 +126,7 @@ impl DisplayPass<'_> {
         );
     }
 
-    fn display_text(
-        &mut self,
-        pos: Point2L,
-        fragment: &TextFragment,
-        decorations: &[LineDecoration],
-    ) {
+    fn display_text(&mut self, pos: Point2L, baseline_y: FixedL, fragment: &TextFragment) {
         // TODO: This should also draw an offset underline I think and possibly strike through?
         for shadow in fragment.style.text_shadows().iter().rev() {
             if shadow.color.a > 0 {
@@ -143,11 +159,14 @@ impl DisplayPass<'_> {
             end_x
         };
 
-        for decoration in decorations
+        // Decorations are drawn in the order specified by https://drafts.csswg.org/css-text-decor/#painting-order
+        for decoration in self
+            .decoration_ctx
+            .active_decorations()
             .iter()
-            .filter(|x| matches!(x.kind, LineDecorationKind::Underline))
+            .filter(|x| matches!(x.kind, DecorationKind::Underline))
         {
-            self.display_line_decoration(pos.x, text_end_x, pos.y, decoration);
+            Self::display_line_decoration(self.output, pos.x, text_end_x, baseline_y, decoration);
         }
 
         let color = fragment.style.color();
@@ -155,11 +174,33 @@ impl DisplayPass<'_> {
             self.push_text(pos, fragment, None, color);
         }
 
-        for decoration in decorations
+        for decoration in self
+            .decoration_ctx
+            .active_decorations()
             .iter()
-            .filter(|x| matches!(x.kind, LineDecorationKind::LineThrough))
+            .filter(|x| matches!(x.kind, DecorationKind::LineThrough))
         {
-            self.display_line_decoration(pos.x, text_end_x, pos.y, decoration);
+            Self::display_line_decoration(self.output, pos.x, text_end_x, baseline_y, decoration);
+        }
+    }
+
+    fn enter_box(
+        &mut self,
+        style: &ComputedStyle,
+        font_metrics_if_inline: Option<&FontMetrics>,
+    ) -> DisplayContext<'_> {
+        DisplayContext {
+            output: &mut *self.output,
+            decoration_ctx: self
+                .decoration_ctx
+                .push_decorations(style, font_metrics_if_inline),
+        }
+    }
+
+    fn suspend_decorations(&mut self) -> DisplayContext<'_> {
+        DisplayContext {
+            output: &mut *self.output,
+            decoration_ctx: self.decoration_ctx.suspend_active(),
         }
     }
 
@@ -180,110 +221,115 @@ impl DisplayPass<'_> {
             bg.max.y = bg.max.y.round();
             bg.min.x = bg.min.x.floor();
             bg.min.y = bg.min.y.round();
-            self.push_rect_fill(bg, background);
+            Self::push_rect_fill(self.output, bg, background);
+        }
+    }
+
+    fn display_ruby_fragment(&mut self, pos: Point2L, baseline_y: FixedL, fragment: &RubyFragment) {
+        let content_pos = pos + fragment.fbox.content_offset();
+        let mut last_x = pos.x;
+        for &(base_offset, ref base, annotation_offset, ref annotation) in &fragment.content {
+            {
+                let base_pos = content_pos + base_offset;
+                self.display_background(base_pos, &base.style, &base.fbox);
+                // Careful spec reading suggests ruby containers only *propagate* decorations:
+                // https://drafts.csswg.org/css-text-decor/#line-decoration
+                let mut ruby_scope = self.enter_box(&fragment.style, None);
+                let mut base_scope =
+                    ruby_scope.enter_box(&base.style, Some(base.primary_font.metrics()));
+
+                let initial_base_padding_end =
+                    base_pos.x + base.children.first().map_or(FixedL::ZERO, |x| x.0.x);
+                for decoration in base_scope.decoration_ctx.active_decorations() {
+                    Self::display_line_decoration(
+                        base_scope.output,
+                        last_x,
+                        initial_base_padding_end,
+                        baseline_y,
+                        decoration,
+                    );
+                }
+
+                for &(base_item_offset, ref base_item) in &base.children {
+                    base_scope.display_inline_item_fragment(
+                        base_pos + base.fbox.content_offset() + base_item_offset,
+                        baseline_y,
+                        base_item,
+                    );
+                }
+
+                let final_base_padding_end =
+                    base_pos.x + base.children.last().map_or(FixedL::ZERO, |x| x.0.x);
+                let base_end_x = base_pos.x + base.fbox.size_for_layout().x;
+                for decoration in base_scope.decoration_ctx.active_decorations() {
+                    Self::display_line_decoration(
+                        base_scope.output,
+                        final_base_padding_end,
+                        base_end_x,
+                        baseline_y,
+                        decoration,
+                    );
+                }
+
+                last_x = base_end_x;
+            }
+
+            {
+                let annotation_pos = pos + fragment.fbox.content_offset() + annotation_offset;
+                let mut suspend_scope = self.suspend_decorations();
+                let mut annotation_scope = suspend_scope
+                    .enter_box(&annotation.style, Some(annotation.primary_font.metrics()));
+                annotation_scope.display_background(
+                    annotation_pos,
+                    &annotation.style,
+                    &annotation.fbox,
+                );
+                let annotation_content_offset = annotation_pos + annotation.fbox.content_offset();
+                for &(annotation_item_offset, ref annotation_item) in &annotation.children {
+                    annotation_scope.display_inline_item_fragment(
+                        annotation_content_offset + annotation_item_offset,
+                        annotation_content_offset.y + annotation.baseline_y,
+                        annotation_item,
+                    );
+                }
+            }
         }
     }
 
     fn display_inline_item_fragment(
         &mut self,
         pos: Point2L,
+        baseline_y: FixedL,
         fragment: &InlineItemFragment,
-        current_decorations: &mut Vec<LineDecoration>,
     ) {
-        let previous_decoration_count = current_decorations.len();
-        match fragment {
-            InlineItemFragment::Span(SpanFragment {
-                style,
-                primary_font,
-                ..
-            }) => {
-                let font_metrics = primary_font.metrics();
-                let decoration = style.text_decoration();
-
-                if decoration.underline {
-                    current_decorations.push(LineDecoration {
-                        baseline_offset: font_metrics.underline_top_offset,
-                        thickness: font_metrics.underline_thickness,
-                        color: decoration.underline_color,
-                        kind: LineDecorationKind::Underline,
-                    });
-                }
-
-                if decoration.line_through {
-                    current_decorations.push(LineDecoration {
-                        baseline_offset: font_metrics.strikeout_top_offset,
-                        thickness: font_metrics.strikeout_thickness,
-                        color: decoration.line_through_color,
-                        kind: LineDecorationKind::LineThrough,
-                    });
-                }
-            }
-            // TODO: Technically ruby containers can also have decorations but we don't make
-            //       use of that right now, and don't store font metrics in the fragment anyway.
-            //       Decorations on ruby bases and annotations probably have the same problem.
-            InlineItemFragment::Ruby(_) => (),
-            InlineItemFragment::Text(_) => (),
-        }
-
         match fragment {
             InlineItemFragment::Span(span) => {
                 self.display_background(pos, &span.style, &span.fbox);
 
+                let mut scope = self.enter_box(&span.style, Some(span.primary_font.metrics()));
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.display_inline_item_fragment(child_pos, child, current_decorations);
+                    scope.display_inline_item_fragment(child_pos, baseline_y, child);
                 }
             }
             InlineItemFragment::Text(text) => {
-                self.display_text(
-                    round_y(pos + text.baseline_offset),
-                    text,
-                    current_decorations,
-                );
+                self.display_text(round_y(pos + text.baseline_offset), baseline_y, text);
             }
-            InlineItemFragment::Ruby(ruby) => {
-                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    self.display_background(base_pos, &base.style, &base.fbox);
-                    for &(base_item_offset, ref base_item) in &base.children {
-                        self.display_inline_item_fragment(
-                            base_pos + base.fbox.content_offset() + base_item_offset,
-                            base_item,
-                            current_decorations,
-                        );
-                    }
-
-                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    self.display_background(annotation_pos, &annotation.style, &annotation.fbox);
-                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
-                        self.display_inline_item_fragment(
-                            annotation_pos
-                                + annotation.fbox.content_offset()
-                                + annotation_item_offset,
-                            annotation_item,
-                            &mut Vec::new(),
-                        );
-                    }
-                }
-            }
+            InlineItemFragment::Ruby(ruby) => self.display_ruby_fragment(pos, baseline_y, ruby),
         }
-
-        current_decorations.truncate(previous_decoration_count);
     }
 
-    pub fn display_inline_content_fragment(
-        &mut self,
-        pos: Point2L,
-        fragment: &InlineContentFragment,
-    ) {
-        let mut decoration_stack = Vec::new();
+    fn display_inline_content_fragment(&mut self, pos: Point2L, fragment: &InlineContentFragment) {
+        let mut scope = self.enter_box(&fragment.style, Some(&fragment.primary_font_metrics));
+
         for &(offset, ref line) in &fragment.lines {
             let current = pos + offset;
+            let baseline_y = (current.y + line.baseline_y).round();
 
             for &(offset, ref item) in &line.children {
                 let current = current + offset;
 
-                self.display_inline_item_fragment(current, item, &mut decoration_stack);
+                scope.display_inline_item_fragment(current, baseline_y, item)
             }
         }
     }

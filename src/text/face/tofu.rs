@@ -73,7 +73,7 @@ pub struct Font {
 }
 
 impl Font {
-    fn create(point_size: I26Dot6, dpi: u32) -> Self {
+    pub fn create(point_size: I26Dot6, dpi: u32) -> Self {
         let shared = Box::into_raw(Box::new({
             let dpi_scale = I16Dot16::from_quotient(dpi as i32, 72);
             let dpi_scale6 = I26Dot6::from_raw(dpi_scale.into_raw() >> 10);

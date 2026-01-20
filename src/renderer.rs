@@ -643,9 +643,7 @@ impl Renderer<'_> {
         }
 
         {
-            let mut pass = DisplayPass {
-                output: &mut self.scene,
-            };
+            let mut pass = DisplayPass::new(&mut self.scene);
 
             for &(pos, ref fragment) in &fragments {
                 pass.display_inline_content_fragment(pos, fragment);

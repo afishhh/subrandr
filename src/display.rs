@@ -163,7 +163,7 @@ impl DisplayPass<'_> {
         }
     }
 
-    fn display_inline_background(
+    fn display_background(
         &mut self,
         pos: Point2L,
         style: &ComputedStyle,
@@ -184,52 +184,7 @@ impl DisplayPass<'_> {
         }
     }
 
-    fn display_inline_item_fragment_background(
-        &mut self,
-        pos: Point2L,
-        fragment: &InlineItemFragment,
-    ) {
-        match fragment {
-            InlineItemFragment::Span(span) => {
-                self.display_inline_background(pos, &span.style, &span.fbox);
-
-                for &(offset, ref child) in &span.content {
-                    let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.display_inline_item_fragment_background(child_pos, child);
-                }
-            }
-            InlineItemFragment::Text(_) => {}
-            InlineItemFragment::Ruby(ruby) => {
-                for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
-                    let base_pos = pos + ruby.fbox.content_offset() + base_offset;
-                    self.display_inline_background(base_pos, &base.style, &base.fbox);
-                    for &(base_item_offset, ref base_item) in &base.children {
-                        self.display_inline_item_fragment_background(
-                            base_pos + base.fbox.content_offset() + base_item_offset,
-                            base_item,
-                        );
-                    }
-
-                    let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
-                    self.display_inline_background(
-                        annotation_pos,
-                        &annotation.style,
-                        &annotation.fbox,
-                    );
-                    for &(annotation_item_offset, ref annotation_item) in &annotation.children {
-                        self.display_inline_item_fragment_background(
-                            annotation_pos
-                                + annotation.fbox.content_offset()
-                                + annotation_item_offset,
-                            annotation_item,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn display_inline_item_fragment_content(
+    fn display_inline_item_fragment(
         &mut self,
         pos: Point2L,
         fragment: &InlineItemFragment,
@@ -272,13 +227,11 @@ impl DisplayPass<'_> {
 
         match fragment {
             InlineItemFragment::Span(span) => {
+                self.display_background(pos, &span.style, &span.fbox);
+
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
-                    self.display_inline_item_fragment_content(
-                        child_pos,
-                        child,
-                        current_decorations,
-                    );
+                    self.display_inline_item_fragment(child_pos, child, current_decorations);
                 }
             }
             InlineItemFragment::Text(text) => {
@@ -291,8 +244,9 @@ impl DisplayPass<'_> {
             InlineItemFragment::Ruby(ruby) => {
                 for &(base_offset, ref base, annotation_offset, ref annotation) in &ruby.content {
                     let base_pos = pos + ruby.fbox.content_offset() + base_offset;
+                    self.display_background(base_pos, &base.style, &base.fbox);
                     for &(base_item_offset, ref base_item) in &base.children {
-                        self.display_inline_item_fragment_content(
+                        self.display_inline_item_fragment(
                             base_pos + base.fbox.content_offset() + base_item_offset,
                             base_item,
                             current_decorations,
@@ -300,8 +254,9 @@ impl DisplayPass<'_> {
                     }
 
                     let annotation_pos = pos + ruby.fbox.content_offset() + annotation_offset;
+                    self.display_background(annotation_pos, &annotation.style, &annotation.fbox);
                     for &(annotation_item_offset, ref annotation_item) in &annotation.children {
-                        self.display_inline_item_fragment_content(
+                        self.display_inline_item_fragment(
                             annotation_pos
                                 + annotation.fbox.content_offset()
                                 + annotation_item_offset,
@@ -321,16 +276,6 @@ impl DisplayPass<'_> {
         pos: Point2L,
         fragment: &InlineContentFragment,
     ) {
-        for &(offset, ref line) in &fragment.lines {
-            let current = pos + offset;
-
-            for &(offset, ref item) in &line.children {
-                let current = current + offset;
-
-                self.display_inline_item_fragment_background(current, item);
-            }
-        }
-
         let mut decoration_stack = Vec::new();
         for &(offset, ref line) in &fragment.lines {
             let current = pos + offset;
@@ -338,7 +283,7 @@ impl DisplayPass<'_> {
             for &(offset, ref item) in &line.children {
                 let current = current + offset;
 
-                self.display_inline_item_fragment_content(current, item, &mut decoration_stack);
+                self.display_inline_item_fragment(current, item, &mut decoration_stack);
             }
         }
     }

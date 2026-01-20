@@ -51,7 +51,7 @@ pub struct Pen {
     pub underline: bool,
 
     pub edge_type: EdgeType,
-    pub edge_color: u32,
+    pub edge_color: Option<u32>,
 
     pub ruby_part: RubyPart,
 
@@ -67,7 +67,7 @@ impl Pen {
         italic: false,
         underline: false,
         edge_type: EdgeType::None,
-        edge_color: 0x020202,
+        edge_color: None,
         ruby_part: RubyPart::None,
         foreground_color: 0xFFFFFFFF,
         // The default opacity is 0.75
@@ -360,7 +360,7 @@ fn parse_pen(
             result.background_color |= opacity as u32;
         },
         "ec"(color: HexRGBColor) => {
-            result.edge_color = color.0;
+            result.edge_color = Some(color.0);
         },
         "sz"(size: u16) => {
             result.font_size = size;

@@ -530,7 +530,10 @@ fn convert_segment(
         text: text.into(),
         shadow: Srv3TextShadow {
             kind: segment.pen().edge_type,
-            color: BGRA8::from_argb32(segment.pen().edge_color | 0xFF000000),
+            color: BGRA8::from_argb32(segment.pen().edge_color.map_or_else(
+                || 0x222222 | (segment.pen().foreground_color << 24),
+                |c| c | 0xFF000000,
+            )),
         },
         ruby,
     }

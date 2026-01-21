@@ -2343,11 +2343,11 @@ fn layout_run_full<'a>(
 
     let InitialShapingResult {
         mut shaped,
-        break_opportunities,
+        ref break_opportunities,
         ref text_leaf_items,
         bidi,
-        font_feature_events,
-        grapheme_cluster_boundaries,
+        ref font_feature_events,
+        ref grapheme_cluster_boundaries,
     } = initial_shaping_result;
 
     // Transition block shaped items into `Fragment` state.
@@ -2375,11 +2375,11 @@ fn layout_run_full<'a>(
         let mut breaking_context = BreakingContext {
             layout: lctx,
             constraints,
-            break_opportunities: &break_opportunities,
+            break_opportunities,
             shaper: RunShaper {
                 buffer: &mut text::ShapingBuffer::new(),
-                font_feature_events: &font_feature_events,
-                grapheme_cluster_boundaries: &grapheme_cluster_boundaries,
+                font_feature_events,
+                grapheme_cluster_boundaries,
             },
         };
 

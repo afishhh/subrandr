@@ -120,3 +120,8 @@ pub enum Direction {
     Ltr,
     Rtl,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum WhiteSpaceCollapse {
+    Preserve,
+}

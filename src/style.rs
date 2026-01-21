@@ -36,6 +36,7 @@ macros::implement_style_module! {
         text_align: HorizontalAlignment = HorizontalAlignment::Left,
         inline_sizing: InlineSizing = InlineSizing::Normal,
         direction: Direction = Direction::Ltr,
+        white_space_collapse: WhiteSpaceCollapse = WhiteSpaceCollapse::Preserve,
     }
 
     rc uninherited {

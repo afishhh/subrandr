@@ -8,7 +8,7 @@ use super::{FixedL, FragmentBox, LayoutConstraints, LayoutContext, Vec2L};
 use crate::{
     layout::BoxFragmentationPart,
     style::{
-        computed::{self, FontSlant, HorizontalAlignment, InlineSizing},
+        computed::{self, FontSlant, HorizontalAlignment, InlineSizing, WhiteSpaceCollapse},
         ComputedStyle,
     },
     text::{
@@ -733,6 +733,41 @@ fn shape_run_initial<'a, 'f>(
             self.break_opportunities.push(idx);
         }
 
+        /// Compute additional break opportunities created by CSS [White Space
+        /// Collapsing and Transformation Rules].
+        ///
+        /// This is required because `icu_segmenter` only computes break opportunities
+        /// required by the Unicode Line Breaking Algorithm but CSS white space rules
+        /// can introduce ones not covered by it.
+        ///
+        /// One example is: in `&ZeroWidthSpace; &ZeroWidthSpace;` there *is* a break
+        /// opportunity after the normal space because CSS only considers `' '` and `'\t'`
+        /// for break opportunities.
+        ///
+        /// [White Space Collapsing and Transformation Rules]: https://www.w3.org/TR/css-text-3/#white-space-phase-1
+        fn compute_extra_whitespace_break_opportunities(
+            &mut self,
+            range: Range<usize>,
+            style: &ComputedStyle,
+        ) {
+            match style.white_space_collapse() {
+                WhiteSpaceCollapse::Preserve => {
+                    let bytes = self.run_text.as_bytes();
+                    let mut in_space_run = false;
+                    for i in range {
+                        if matches!(bytes[i], b' ' | b'\t') {
+                            in_space_run = true;
+                        } else {
+                            if in_space_run {
+                                self.push_break_opportunity(i);
+                            }
+                            in_space_run = false;
+                        }
+                    }
+                }
+            }
+        }
+
         fn compute_text_break_opportunities(&mut self, range: Range<usize>, style: &ComputedStyle) {
             // FIXME: This makes sense conceptually but may fall apart in the presence of
             //        dictionary line segmenters. Some testing has to be done to make sure
@@ -770,12 +805,16 @@ fn shape_run_initial<'a, 'f>(
                 .segment_str(&self.run_text[padded_start..padded_end])
                 .map(|idx| idx + padded_start);
 
+            let mut last = range.start;
             for idx in iter {
                 // The first breaks are going to be either at the start of the string or
                 // inside our "padding" look-behind character, both of which we want to ignore.
                 if idx < range.start {
                     continue;
                 }
+
+                self.compute_extra_whitespace_break_opportunities(last..idx, style);
+                last = idx;
 
                 if idx > ignore_after {
                     break;

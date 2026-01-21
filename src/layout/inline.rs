@@ -1294,7 +1294,7 @@ impl<'f> ShapedItemText<'f> {
                     .break_opportunities
                     .binary_search(&glyph_end)
                 {
-                    Ok(idx) => idx,
+                    Ok(idx) => idx + 1,
                     Err(idx) => idx,
                 }];
 

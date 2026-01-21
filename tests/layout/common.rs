@@ -424,6 +424,7 @@ test_define_style! {
     pub .red_bg { background_color: BGRA8::RED }
     pub .green_bg { background_color: BGRA8::GREEN }
     pub .blue_bg { background_color: BGRA8::BLUE }
+    pub .yellow_bg { background_color: BGRA8::YELLOW }
 
     pub .fs16 /* (default) */ { font_size: I26Dot6::new(16) }
     pub .fs20 { font_size: I26Dot6::new(20) }

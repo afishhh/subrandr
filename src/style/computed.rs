@@ -198,6 +198,11 @@ pub enum Direction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum WhiteSpaceCollapse {
+    #[cfg_attr(
+        not(all(test, feature = "_layout_tests")),
+        expect(dead_code, reason = "not exposed yet")
+    )]
+    Collapse,
     Preserve,
 }
 

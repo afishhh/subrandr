@@ -23,6 +23,7 @@ use crate::{
 
 mod glyph_string;
 pub use glyph_string::*;
+mod whitespace;
 
 // This character is used to represent opaque objects nested inside inline text content,
 // this includes ruby containers and `inline-block`s.
@@ -37,25 +38,113 @@ const OBJECT_REPLACEMENT_LENGTH: usize = OBJECT_REPLACEMENT_CHARACTER.len_utf8()
 /// performed.
 #[derive(Debug, Clone)]
 pub struct InlineContent {
-    text_runs: Vec<Rc<str>>,
-    items: Vec<InlineItem>,
+    text_runs: Box<[Rc<str>]>,
+    items: Box<[InlineItem]>,
     root_style: ComputedStyle,
 }
 
 impl Default for InlineContent {
     fn default() -> Self {
         Self {
-            text_runs: vec![Rc::from("")],
-            items: Vec::new(),
+            text_runs: Box::new([Rc::from("")]),
+            items: Box::default(),
             root_style: ComputedStyle::DEFAULT,
         }
     }
 }
 
+/// Documentation for white space collapsing implementation.
+///
+/// This doc comment documents white space collapsing because leaving it undocumented seemed
+/// unwise (and doc comments are objectively better than normal comments for this).
+///
+/// # White space collapsing
+///
+/// White space collapsing is handled by [`InlineContentBuilder`] in an on-line fashion
+/// so that the resulting [`InlineContent`] contains the already-collapsed strings.
+///
+/// This works as follows:
+/// 1. Every time some text is added the builder runs [`whitespace::collapse_text_to`].
+///    This function performs the first pass of white space collapsing, it may also
+///    end up removing some characters from the end of previous text items due to
+///    this process. This is fine since those will always be at the end of their text
+///    run (though see remark about fully removing text items below).
+/// 2. After a span that has the [`finish_run_text_on_end`] flag set ends (or when
+///    finalizing the builder) [`whitespace::finish_text_run_collapse`] is called which performs
+///    the second and final pass of white space collapsing. This also has the ability
+///    to remove characters from the end of the run.
+///
+///    The main differences between the implementation of this pass and the previous one are:
+///    1. This pass does not have to care about "buferred text" of the text item currently
+///       being constructed and only works on already-emitted text items.
+///    2. It pops all remaining text items for this collapsing run from the text item stack
+///       (while doing things like replacing all `\n`s with ` ` in ones that are `collapse`).
+///
+/// Note that the "run" term above is used very loosely because *collapsing runs*
+/// do not map 1-1 to [`text_runs`]. This is because ruby bases live in isolated *text runs*
+/// but **are not** separately isolated *collapsing runs* (i.e. they collapse with their
+/// surrounding text). I don't have a spec reference for this but browsers do it like this
+/// (though Chromium refuses to if the base has an annotation... yeah).
+///
+/// What items are part of the current *collapsing run* is tracked by [`InlineContentBuilder::text_item_stack`],
+/// specifically:
+/// 1. Each span builder keeps track of where in the stack the actual stack for its
+///    particular collapsing run starts (when pushing an isolated builder this is
+///    set to the top of the stack).
+/// 2. The operations above only operate on items above this start point to prevent
+///    interfering with other collapsing runs. The final collapsing pass truncates
+///    the stack back to this point so the parent builder may start using it again.
+/// 3. This stack contains [`TextStackItem`]s which, along with their associated text item,
+///    store some information needed during collapsing so it doesn't have to be stored in
+///    [`InlineText`] and can instead be thrown away immediately once unnecessary.
+///
+/// ### Tombstones
+///
+/// Since the above process may end up effectively removing some text items, we introduce
+/// a "tombstone" mechanism where text items whose [`content_range`] is empty are treated
+/// as "tombstones". These are removed from the final item array when finalizing the
+/// builder.
+///
+/// To ensure we know how many live items to allocate space for when finalizing, the number
+/// of dead items is tracked in [`n_dead_items`] and `debug_assert!`ed to be correct later.
+/// The above collapsing steps handle this by only ever removing bytes via
+/// [`InlineContentBuilder::pop_bytes_from_last_text_item`] which takes care of this bookkeeping.
+///
+/// [`text_runs`]: InlineContentBuilder::text_runs
+/// [`n_dead_items`]: InlineContentBuilder::n_dead_items
+/// [`content_range`]: InlineText::content_range
+/// [`finish_run_text_on_end`]: InlineSpanBuilder::finish_run_text_on_end
+#[cfg(doc)]
+struct WhiteSpaceCollapseInternalDoc;
+
 pub struct InlineContentBuilder {
     text_runs: Vec<String>,
+    // NOTE: This item list is a bit special and may contain `Text` items
+    //       with an empty `content_range`. Those are treated as "tombstones"
+    //       for deleted (collapsed) text items and get removed when finalizing
+    //       into an `InlineContent`.
     items: Vec<InlineItem>,
     root_style: ComputedStyle,
+
+    text_item_stack: Vec<TextStackItem>,
+    n_dead_items: usize,
+
+    buffered_item_text_length: usize,
+}
+
+struct TextStackItem {
+    item_index: usize,
+    run_index: usize,
+    style: ComputedStyle,
+}
+
+impl TextStackItem {
+    fn get<'a>(&self, items: &'a [InlineItem]) -> &'a InlineText {
+        match items.get(self.item_index) {
+            Some(InlineItem::Text(text)) => text,
+            _ => unreachable!("Invalid item reference in text_item_stack"),
+        }
+    }
 }
 
 impl InlineContentBuilder {
@@ -64,6 +153,9 @@ impl InlineContentBuilder {
             text_runs: Vec::new(),
             items: Vec::new(),
             root_style,
+            text_item_stack: Vec::new(),
+            n_dead_items: 0,
+            buffered_item_text_length: 0,
         }
     }
 
@@ -80,16 +172,123 @@ impl InlineContentBuilder {
             parent: self,
             run_index: 0,
             span_index: usize::MAX,
-            last_item_is_text: false,
+            run_text_item_stack_start: 0,
+            finish_run_text_on_end: false,
         }
     }
 
+    fn last_text_item_content(&self, text_stack_start: usize) -> Option<(&str, &ComputedStyle)> {
+        let stack_item = self.text_item_stack[text_stack_start..].last()?;
+        let item = stack_item.get(&self.items);
+        Some((
+            &self.text_runs[stack_item.run_index][item.content_range.clone()],
+            &stack_item.style,
+        ))
+    }
+
+    fn pop_text_item_with_content_mut(
+        &mut self,
+        text_stack_start: usize,
+    ) -> Option<(&mut String, Range<usize>, ComputedStyle)> {
+        if text_stack_start >= self.text_item_stack.len() {
+            return None;
+        }
+
+        let stack_item = self.text_item_stack.pop().unwrap();
+        let item = stack_item.get(&self.items);
+        Some((
+            &mut self.text_runs[stack_item.run_index],
+            item.content_range.clone(),
+            stack_item.style,
+        ))
+    }
+
+    fn pop_bytes_from_last_text_item(&mut self, count: usize) {
+        let stack_item = self
+            .text_item_stack
+            .last()
+            .expect("caller should ensure there is an item on the text item stack");
+        let item = match self.items.get_mut(stack_item.item_index) {
+            Some(InlineItem::Text(text)) => text,
+            _ => unreachable!("Invalid item reference in text_item_stack"),
+        };
+        let run_text = &mut self.text_runs[stack_item.run_index];
+        assert_eq!(item.content_range.end, run_text.len());
+        run_text.truncate(run_text.len() - count);
+        item.content_range.end -= count;
+        if item.content_range.is_empty() {
+            debug_assert_eq!(item.content_range.start, item.content_range.end);
+            self.n_dead_items += 1;
+            self.text_item_stack.pop();
+        }
+    }
+
+    fn finish_run(&mut self, text_stack_start: usize) {
+        whitespace::finish_text_run_collapse(self, text_stack_start);
+        assert_eq!(self.text_item_stack.len(), text_stack_start)
+    }
+
     pub fn finish(&mut self) -> InlineContent {
+        self.finish_run(0);
+
         InlineContent {
             text_runs: self.text_runs.drain(..).map(|s| s.into()).collect(),
-            items: std::mem::take(&mut self.items),
+            items: {
+                let mut result = Vec::with_capacity(self.items.len() - self.n_dead_items);
+                result.extend(self.items.drain(..).filter(|x| !x.is_tombstone()));
+                debug_assert_eq!(result.len(), result.capacity());
+                result.into_boxed_slice()
+            },
             root_style: std::mem::take(&mut self.root_style),
         }
+    }
+}
+
+struct BuilderTextSink<'a> {
+    builder: &'a mut InlineContentBuilder,
+    run_index: usize,
+    item_stack_start: usize,
+    style: ComputedStyle,
+}
+
+impl<'a> BuilderTextSink<'a> {
+    fn peek_prev(&self) -> Option<(u8, &ComputedStyle)> {
+        if self.builder.buffered_item_text_length > 0 {
+            Some((
+                self.builder.text_runs[self.run_index]
+                    .bytes()
+                    .last()
+                    .unwrap(),
+                &self.style,
+            ))
+        } else {
+            let (text, style) = self.builder.last_text_item_content(self.item_stack_start)?;
+            Some((
+                text.bytes()
+                    .next_back()
+                    .expect("inline text items on the text stack should be non-empty"),
+                style,
+            ))
+        }
+    }
+
+    fn pop_prev(&mut self) {
+        if let Some(new) = self.builder.buffered_item_text_length.checked_sub(1) {
+            self.builder.text_runs[self.run_index].pop();
+            self.builder.buffered_item_text_length = new;
+        } else {
+            assert!(self.item_stack_start < self.builder.text_item_stack.len());
+            self.builder.pop_bytes_from_last_text_item(1);
+        }
+    }
+
+    fn style(&self) -> &ComputedStyle {
+        &self.style
+    }
+
+    fn push_str(&mut self, value: &str) {
+        self.builder.text_runs[self.run_index].push_str(value);
+        self.builder.buffered_item_text_length += value.len();
     }
 }
 
@@ -97,9 +296,8 @@ pub struct InlineSpanBuilder<'a> {
     parent: &'a mut InlineContentBuilder,
     run_index: usize,
     span_index: usize,
-    // NOTE: This is necessary to distinguish text items that are last *but* are part of
-    //       a child span from text items that are last and are part of this span.
-    last_item_is_text: bool,
+    run_text_item_stack_start: usize,
+    finish_run_text_on_end: bool,
 }
 
 impl<'a> InlineSpanBuilder<'a> {
@@ -111,32 +309,50 @@ impl<'a> InlineSpanBuilder<'a> {
         &self.parent.text_runs[self.run_index]
     }
 
+    fn style(&self) -> &ComputedStyle {
+        match self.parent.items.get(self.span_index) {
+            Some(InlineItem::Span(span)) => &span.style,
+            Some(InlineItem::Text(_) | InlineItem::Block(_) | InlineItem::SpanEnd) => {
+                unreachable!()
+            }
+            // This should only happen if the split wrapped to zero so the first slice is empty and
+            // zero is less than usize::MAX.
+            None => &self.parent.root_style,
+        }
+    }
+
     pub fn push_text(&mut self, content: &str) {
-        // `shape_run_initial` assumes `QueuedText` will never end up with an empty range,
-        // so make sure we don't emit empty inline text items which could cause exactly that.
         if content.is_empty() {
             return;
         }
 
-        let text_run = &mut self.parent.text_runs[self.run_index];
-        let start = text_run.len();
-        text_run.push_str(content);
+        let sink = BuilderTextSink {
+            style: self.style().clone(),
+            builder: self.parent,
+            run_index: self.run_index,
+            item_stack_start: self.run_text_item_stack_start,
+        };
 
-        if self.last_item_is_text {
-            let Some(InlineItem::Text(text)) = self.parent.items.last_mut() else {
-                unreachable!();
-            };
-            assert_eq!(text.content_range.end, start);
-            text.content_range.end = text_run.len();
-        } else {
-            let content_range = start..text_run.len();
+        whitespace::collapse_text_to(sink, content);
+    }
 
-            self.push_child(InlineItem::Text(InlineText { content_range }));
-            self.last_item_is_text = true;
+    fn flush_text(&mut self) {
+        if self.parent.buffered_item_text_length > 0 {
+            let run_end = self.parent.text_runs[self.run_index].len();
+            self.parent.text_item_stack.push(TextStackItem {
+                item_index: self.parent.items.len(),
+                run_index: self.run_index,
+                style: self.style().clone(),
+            });
+            self.push_child(InlineItem::Text(InlineText {
+                content_range: run_end - self.parent.buffered_item_text_length..run_end,
+            }));
+            self.parent.buffered_item_text_length = 0;
         }
     }
 
     fn push_object_replacement(&mut self) -> usize {
+        self.flush_text();
         let run = &mut self.parent.text_runs[self.run_index];
         let index = run.len();
         run.push(OBJECT_REPLACEMENT_CHARACTER);
@@ -154,21 +370,28 @@ impl<'a> InlineSpanBuilder<'a> {
         style: ComputedStyle,
         kind: InlineSpanKind,
         run_index: usize,
+        collapse_isolate: bool,
     ) -> InlineSpanBuilder<'_> {
+        debug_assert_eq!(self.parent.buffered_item_text_length, 0);
         let span_index = self.parent.items.len();
         self.push_child(InlineItem::Span(InlineSpan { style, kind }));
-        self.last_item_is_text = false;
 
         InlineSpanBuilder {
-            parent: self.parent,
             run_index,
             span_index,
-            last_item_is_text: false,
+            run_text_item_stack_start: if !collapse_isolate {
+                self.run_text_item_stack_start
+            } else {
+                self.parent.text_item_stack.len()
+            },
+            finish_run_text_on_end: collapse_isolate,
+            parent: self.parent,
         }
     }
 
     pub fn push_span(&mut self, style: ComputedStyle) -> InlineSpanBuilder<'_> {
-        self.push_span_with(style, InlineSpanKind::Span, self.run_index)
+        self.flush_text();
+        self.push_span_with(style, InlineSpanKind::Span, self.run_index, false)
     }
 
     pub fn push_ruby(&mut self, style: ComputedStyle) -> InlineRubyBuilder<'_> {
@@ -178,6 +401,7 @@ impl<'a> InlineSpanBuilder<'a> {
                 style,
                 InlineSpanKind::Ruby { content_index },
                 self.run_index,
+                false,
             ),
             last_was_base: false,
         }
@@ -189,7 +413,6 @@ impl<'a> InlineSpanBuilder<'a> {
             content_index,
             block: Box::new(block),
         }));
-        self.last_item_is_text = false;
     }
 }
 
@@ -202,6 +425,12 @@ impl<'a> std::fmt::Write for InlineSpanBuilder<'a> {
 
 impl<'a> Drop for InlineSpanBuilder<'a> {
     fn drop(&mut self) {
+        self.flush_text();
+
+        if self.finish_run_text_on_end {
+            self.parent.finish_run(self.run_text_item_stack_start);
+        }
+
         if self.span_index != usize::MAX {
             self.parent.items.push(InlineItem::SpanEnd);
         }
@@ -220,6 +449,7 @@ impl<'a> InlineRubyBuilder<'a> {
         }
         self.last_was_base = !annotation;
 
+        self.span.flush_text();
         let run_index = self.span.push_run();
         self.span.push_span_with(
             style.create_derived(),
@@ -228,6 +458,7 @@ impl<'a> InlineRubyBuilder<'a> {
                 outer_style: style,
             },
             run_index,
+            annotation,
         )
     }
 
@@ -246,6 +477,16 @@ pub enum InlineItem {
     Text(InlineText),
     Block(InlineBlock),
     SpanEnd,
+}
+
+impl InlineItem {
+    fn is_tombstone(&self) -> bool {
+        if let Self::Text(InlineText { content_range }) = self {
+            content_range.is_empty()
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -922,7 +1163,7 @@ fn shape_run_initial<'a>(
             style: &ComputedStyle,
         ) {
             match style.white_space_collapse() {
-                WhiteSpaceCollapse::Preserve => {
+                WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::Preserve => {
                     let bytes = self.run_text.as_bytes();
                     let mut in_space_run = false;
                     for i in range {

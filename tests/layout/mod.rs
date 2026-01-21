@@ -8,3 +8,4 @@ mod line_break_anywhere;
 mod padding;
 mod ruby;
 mod text_shadow;
+mod whitespace;

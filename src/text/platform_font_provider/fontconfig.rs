@@ -6,17 +6,15 @@ use std::{
     path::PathBuf,
 };
 
+use log::info;
 use text_sys::fontconfig::*;
 use thiserror::Error;
 use util::math::I16Dot16;
 
 use super::PlatformFontProvider;
-use crate::{
-    log::info,
-    text::{
-        font_db::{FaceInfo, FontSource},
-        FontAxisValues, FontFallbackRequest,
-    },
+use crate::text::{
+    font_db::{FaceInfo, FontSource},
+    FontAxisValues, FontFallbackRequest,
 };
 
 mod pattern;

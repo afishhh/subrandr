@@ -152,7 +152,7 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
             std::sync::atomic::AtomicBool::new(false);
 
         if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
-            crate::log::warning!(
+            log::warning!(
                 sbr,
                 "no default fontprovider available for current platform"
             );

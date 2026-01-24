@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use log::{info, trace};
 use rasterize::{
     color::{Premultiplied, BGRA8},
     scene::{SceneNode, StrokedPolyline, Subscene},
@@ -25,7 +26,6 @@ use crate::{
         inline::{InlineContentBuilder, InlineContentFragment},
         FixedL, LayoutConstraints, LayoutContext, Point2L,
     },
-    log::{info, trace},
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},

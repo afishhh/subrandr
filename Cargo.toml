@@ -52,6 +52,7 @@ icu_locale = "2"
 icu_segmenter = "2"
 unicode-bidi = "0.3"
 
+log = { workspace = true }
 util = { workspace = true }
 rasterize = { workspace = true }
 macros = { workspace = true }
@@ -80,6 +81,7 @@ debug = true
 [workspace]
 members = [
   "sbr-test-util",
+  "sbr-log",
   "sbr-util",
   "sbr-rasterize",
   "sbr-overlay",
@@ -91,6 +93,7 @@ members = [
 wgpu = { version = "26" }
 
 test-util = { path = "sbr-test-util", package = "sbr-test-util" }
+log = { path = "sbr-log", package = "sbr-log" }
 util = { path = "sbr-util", package = "sbr-util" }
 rasterize = { path = "sbr-rasterize", package = "sbr-rasterize" }
 macros = { path = "sbr-macros", package = "sbr-macros" }

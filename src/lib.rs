@@ -7,8 +7,6 @@ use std::{cell::Cell, fmt::Debug};
 pub use rasterize;
 pub use util::math::I26Dot6;
 
-use log::Logger;
-
 pub mod srv3;
 pub mod vtt;
 
@@ -16,7 +14,6 @@ mod capi;
 mod display;
 mod html;
 mod layout;
-mod log;
 mod style;
 mod text;
 
@@ -57,7 +54,7 @@ impl DebugFlags {
 
 #[derive(Debug)]
 pub struct Subrandr {
-    logger: log::Logger,
+    root_logger: log::RootLogger,
     did_log_version: Cell<bool>,
     debug: DebugFlags,
 }
@@ -65,7 +62,7 @@ pub struct Subrandr {
 impl Subrandr {
     pub fn init() -> Self {
         Self {
-            logger: log::Logger::Default,
+            root_logger: log::RootLogger::new(),
             did_log_version: Cell::new(false),
             debug: DebugFlags::from_env(),
         }
@@ -74,8 +71,8 @@ impl Subrandr {
 
 // allows for convenient logging with log!(sbr, ...)
 impl log::AsLogger for Subrandr {
-    fn as_logger(&self) -> &Logger {
-        &self.logger
+    fn as_logger(&self) -> &impl log::Logger {
+        self.root_logger.as_logger()
     }
 }
 

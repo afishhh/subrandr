@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
+use log::{log_once_state, warning, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
@@ -14,7 +15,6 @@ use crate::{
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
-    log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     srv3::{Event, RubyPosition},
     style::{

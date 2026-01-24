@@ -8,13 +8,10 @@ use std::{
 };
 
 use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
+use log::{debug, warning};
 use util::rc::Rc;
 
-use crate::{
-    log::{debug, warning, CLogCallback, Logger},
-    text::Face,
-    Subrandr, Subtitles,
-};
+use crate::{text::Face, Subrandr, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -262,13 +259,14 @@ unsafe extern "C" fn sbr_library_version(major: *mut u32, minor: *mut u32, patch
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_set_log_callback(
     sbr: &mut Subrandr,
-    callback: CLogCallback,
+    callback: log::CLogCallback,
     user_data: *const c_void,
 ) {
-    sbr.logger = Logger::C {
-        callback,
-        user_data,
-    }
+    sbr.root_logger
+        .set_message_callback(log::MessageCallback::C {
+            callback,
+            user_data,
+        });
 }
 
 #[unsafe(no_mangle)]

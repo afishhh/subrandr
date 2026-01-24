@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
+use log::trace;
 use thiserror::Error;
 use util::math::I16Dot16;
 
 use crate::{
-    log::trace,
     text::{
         self,
         platform_font_provider::{

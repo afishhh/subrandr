@@ -1,15 +1,13 @@
 use std::{collections::HashMap, str::FromStr};
 
+use log::{log_once_state, warning, LogOnceSet};
 use quick_xml::{
     events::{attributes::Attributes, Event as XmlEvent},
     Error as XmlError,
 };
 use thiserror::Error;
 
-use crate::{
-    log::{log_once_state, warning, LogOnceSet},
-    Subrandr,
-};
+use crate::Subrandr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {

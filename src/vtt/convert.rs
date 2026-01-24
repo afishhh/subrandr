@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use log::{log_once_state, warning, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Rect2},
@@ -14,7 +15,6 @@ use crate::{
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
-    log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     style::{
         computed::{FontSlant, HorizontalAlignment, TextDecorations},

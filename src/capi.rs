@@ -262,10 +262,11 @@ unsafe extern "C" fn sbr_library_set_log_callback(
     callback: log::CLogCallback,
     user_data: *const c_void,
 ) {
-    sbr.logger.set_message_callback(log::MessageCallback::C {
-        callback,
-        user_data,
-    });
+    sbr.root_logger
+        .set_message_callback(log::MessageCallback::C {
+            callback,
+            user_data,
+        });
 }
 
 #[unsafe(no_mangle)]

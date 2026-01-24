@@ -54,7 +54,7 @@ impl DebugFlags {
 
 #[derive(Debug)]
 pub struct Subrandr {
-    logger: log::RootLogger,
+    root_logger: log::RootLogger,
     did_log_version: Cell<bool>,
     debug: DebugFlags,
 }
@@ -62,7 +62,7 @@ pub struct Subrandr {
 impl Subrandr {
     pub fn init() -> Self {
         Self {
-            logger: log::RootLogger::new(),
+            root_logger: log::RootLogger::new(),
             did_log_version: Cell::new(false),
             debug: DebugFlags::from_env(),
         }
@@ -71,8 +71,8 @@ impl Subrandr {
 
 // allows for convenient logging with log!(sbr, ...)
 impl log::AsLogger for Subrandr {
-    fn as_logger(&self) -> &log::RootLogger {
-        &self.logger
+    fn as_logger(&self) -> &log::Logger {
+        self.root_logger.as_logger()
     }
 }
 

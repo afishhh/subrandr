@@ -18,7 +18,7 @@ pub enum Level {
     Error,
 }
 
-fn log_default(level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
+fn log_default(level: Level, fmt: std::fmt::Arguments, source: &str) {
     let level_str = if std::io::stderr().is_terminal() {
         match level {
             Level::Trace => "\x1b[1;37mtrace\x1b[0m",
@@ -37,8 +37,8 @@ fn log_default(level: Level, fmt: std::fmt::Arguments, module_path: &'static str
         }
     };
 
-    let module_space = if module_path.is_empty() { "" } else { " " };
-    eprintln!("[sbr {level_str}{module_space}{module_path}] {fmt}");
+    let module_space = if source.is_empty() { "" } else { " " };
+    eprintln!("[sbr {level_str}{module_space}{source}] {fmt}");
 }
 
 pub type CLogCallback =
@@ -56,12 +56,10 @@ pub enum MessageCallback {
 unsafe impl Send for MessageCallback {}
 
 impl MessageCallback {
-    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
         const CRATE_MODULE_PREFIX: &str = concat!(env!("CARGO_PKG_NAME"), "::");
 
-        let module_rel = module_path
-            .strip_prefix(CRATE_MODULE_PREFIX)
-            .unwrap_or(module_path);
+        let module_rel = source.strip_prefix(CRATE_MODULE_PREFIX).unwrap_or(source);
 
         match self {
             Self::Default => {
@@ -106,7 +104,7 @@ struct RootLoggerImpl {
     callback: MessageCallback,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Logger {
     root: Arc<Mutex<RootLoggerImpl>>,
 }
@@ -135,6 +133,10 @@ impl RootLogger {
 
     pub fn set_message_callback(&mut self, callback: MessageCallback) {
         self.0.root.lock().unwrap().callback = callback;
+    }
+
+    pub fn new_child(&self) -> Logger {
+        self.0.clone()
     }
 }
 

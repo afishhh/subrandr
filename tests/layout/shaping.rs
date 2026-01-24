@@ -1,22 +1,8 @@
-use rasterize::color::BGRA8;
-use util::{math::I26Dot6, rc_static};
-
-use crate::style::computed::HorizontalAlignment;
+use util::rc_static;
 
 use super::common::*;
 
 test_define_style! {
-    .fs32 {
-        font_size: I26Dot6::new(32)
-    }
-
-    .red { color: BGRA8::RED }
-    .green { color: BGRA8::GREEN }
-
-    .align_right {
-        text_align: HorizontalAlignment::Right
-    }
-
     .noto_arabic_ahem_emoji {
         font_family: rc_static!([
             rc_static!(str b"Noto Sans Arabic"),

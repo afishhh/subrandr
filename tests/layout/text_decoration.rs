@@ -19,12 +19,6 @@ test_define_style! {
     .rpadding16 {
         padding_right: Length::from_pixels(FixedL::new(16)),
     }
-    .red_bg { background_color: BGRA8::RED }
-    .blue_bg { background_color: BGRA8::BLUE }
-
-    .normal { font_size: FixedL::new(16) }
-    .large { font_size: FixedL::new(24) }
-    .larger { font_size: FixedL::new(32) }
 
     .underline {
         text_decoration: TextDecorations {
@@ -84,10 +78,10 @@ check_test! {
     inline.ahem.blue_strikethrough  {
         // This strike-through should be higher than the one decorating the
         // root inline box
-        span.large.green_strikethrough  {
+        span.fs24.green_strikethrough  {
             span.underline {
                 text "LARGE"
-                span.normal {
+                span.fs16 {
                     text " world"
                 }
             }
@@ -99,14 +93,14 @@ check_test! {
     name = ruby_propagation,
     size = (360, 40),
     inline.ahem {
-        span.large.blue_strikethrough {
+        span.fs24.blue_strikethrough {
             text "LARGE"
         }
-        ruby.large.green_strikethrough {
+        ruby.fs24.green_strikethrough {
             base {
                 text "base"
             }
-            annotation.normal.yellow_strikethrough {
+            annotation.fs16.yellow_strikethrough {
                 text "annotation"
             }
         }
@@ -122,15 +116,15 @@ check_test! {
     block.ahem.blue_strikethrough {
         // The above strikethrough should propagate to this block's
         // anonymous root inline and decarate it using its metrics.
-        block.large {
+        block.fs24 {
             inline {
-                span.large { text "LARGE" }
-                span.normal.green_strikethrough {
+                span.fs24 { text "LARGE" }
+                span.fs16.green_strikethrough {
                     text " world\n"
                 }
                 text "i"
                 // Active decorations should be suspended inside an `inline-block`.
-                block.normal {
+                block.fs16 {
                     inline {
                         text "nline横"
                         span.red_strikethrough {

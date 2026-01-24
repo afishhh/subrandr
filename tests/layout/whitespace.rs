@@ -1,15 +1,9 @@
-use rasterize::color::BGRA8;
-
 use super::common::*;
 
 test_define_style! {
     .break_anywhere {
         line_break: icu_segmenter::options::LineBreakStrictness::Anywhere,
     }
-
-    .red { color: BGRA8::RED }
-    .green_bg { background_color: BGRA8::GREEN }
-    .blue { color: BGRA8::BLUE }
 }
 
 // [UAX#14 LB7] prohibits breaking before a ZWSP character in the below scenario.

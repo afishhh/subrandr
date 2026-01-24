@@ -1,5 +1,4 @@
 use rasterize::color::BGRA8;
-use util::math::I26Dot6;
 
 use crate::{layout::FixedL, style::computed::Length};
 
@@ -14,16 +13,9 @@ test_define_style! {
         padding_left: Length::from_pixels(FixedL::new(20)),
         padding_right: Length::from_pixels(FixedL::new(20)),
     }
-    .red_bg { background_color: BGRA8::RED }
+
     .transparent_red_bg { background_color: BGRA8::RED.mul_alpha(255 / 2) }
     .transparent_green_bg { background_color: BGRA8::GREEN.mul_alpha(255 / 2) }
-    .blue_bg { background_color: BGRA8::BLUE }
-    .large { font_size: I26Dot6::new(32) }
-    .larger { font_size: I26Dot6::new(20) }
-    .red { color: BGRA8::RED }
-    .green { color: BGRA8::GREEN }
-    .blue { color: BGRA8::BLUE }
-    .yellow { color: BGRA8::YELLOW }
 }
 
 check_test! {
@@ -31,8 +23,8 @@ check_test! {
     size = (32 + 140 + 16, 32),
     inline.ahem {
         span.blue_bg {
-            span.larger.transparent_red_bg {
-                span.large.transparent_green_bg { text "縦" }
+            span.fs20.transparent_red_bg {
+                span.fs32.transparent_green_bg { text "縦" }
                 block {
                     inline { text "横block横" }
                 }
@@ -48,8 +40,8 @@ check_test! {
     name = padding_only,
     size = (32 + 40 + 16, 32),
     inline.ahem {
-        span.larger.red_bg {
-            span.large { text "縦" }
+        span.fs20.red_bg {
+            span.fs32 { text "縦" }
             block.blue_bg.hpadding20.vpadding10 {}
         }
         text "縦"

@@ -1,15 +1,8 @@
-use rasterize::color::BGRA8;
-use util::math::I26Dot6;
-
 use super::common::*;
 use crate::style::computed::InlineSizing;
 
 test_define_style! {
-    .green_bg { background_color: BGRA8::GREEN }
-    .red_bg { background_color: BGRA8::RED }
     .stretch { inline_sizing: InlineSizing::Stretch }
-    .larger { font_size: I26Dot6::new(20) }
-    .normal { font_size: I26Dot6::new(16) }
 }
 
 check_test! {
@@ -68,7 +61,7 @@ check_test! {
         }
         span.green_bg {
             text "が"
-            span.larger {
+            span.fs20 {
                 text "る"
             }
         }

@@ -1,4 +1,4 @@
-pub mod common;
+mod common;
 
 mod block;
 mod font_feature_settings;

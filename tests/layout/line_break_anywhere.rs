@@ -1,24 +1,11 @@
 use rasterize::color::BGRA8;
-use util::{math::I26Dot6, rc_static};
-
-use crate::style::computed::HorizontalAlignment;
+use util::rc_static;
 
 use super::common::*;
 
 test_define_style! {
     .break_anywhere {
         line_break: icu_segmenter::options::LineBreakStrictness::Anywhere,
-    }
-    .fs32 {
-        font_size: I26Dot6::new(32)
-    }
-
-    .red { color: BGRA8::RED }
-    .green_bg { background_color: BGRA8::GREEN }
-    .blue { color: BGRA8::BLUE }
-
-    .align_right {
-        text_align: HorizontalAlignment::Right
     }
 
     .noto_arabic_and_emoji {

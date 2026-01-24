@@ -5,7 +5,10 @@ use rasterize::{
     scene::SceneNode,
     Rasterizer,
 };
-use util::rc::{rc_static, Rc};
+use util::{
+    math::I26Dot6,
+    rc::{rc_static, Rc},
+};
 
 use crate::{
     display::DisplayPass,
@@ -13,6 +16,7 @@ use crate::{
         self, block::BlockContainer, inline::InlineContent, LayoutConstraints, LayoutContext,
         Point2L, Vec2L,
     },
+    style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
 };
 
@@ -387,3 +391,22 @@ pub(crate) use check_one;
 pub(crate) use check_test;
 pub(crate) use macros::test_define_style;
 pub(crate) use make_tree;
+
+test_define_style! {
+    pub .red { color: BGRA8::RED }
+    pub .green { color: BGRA8::GREEN }
+    pub .blue { color: BGRA8::BLUE }
+    pub .yellow { color: BGRA8::YELLOW }
+
+    pub .red_bg { background_color: BGRA8::RED }
+    pub .green_bg { background_color: BGRA8::GREEN }
+    pub .blue_bg { background_color: BGRA8::BLUE }
+
+    pub .fs16 /* (default) */ { font_size: I26Dot6::new(16) }
+    pub .fs20 { font_size: I26Dot6::new(20) }
+    pub .fs24 { font_size: I26Dot6::new(24) }
+    pub .fs32 { font_size: I26Dot6::new(32) }
+    pub .fs64 { font_size: I26Dot6::new(64) }
+
+    pub .align_right { text_align: HorizontalAlignment::Right }
+}

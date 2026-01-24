@@ -1,11 +1,7 @@
-use rasterize::color::BGRA8;
-
 use super::common::*;
 use crate::{layout::FixedL, style::computed::Length};
 
 test_define_style! {
-    .green_bg { background_color: BGRA8::GREEN }
-    .red_bg { background_color: BGRA8::RED }
     .padding_left_16 { padding_left: Length::from_pixels(FixedL::new(16)) }
     .padding_right_16 { padding_right: Length::from_pixels(FixedL::new(16)) }
 }

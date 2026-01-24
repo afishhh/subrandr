@@ -22,8 +22,6 @@ test_define_style! {
         padding_left: Length::from_pixels(FixedL::new(5)),
         padding_right: Length::from_pixels(FixedL::new(5)),
     }
-    .red_bg { background_color: BGRA8::RED }
-    .blue_bg { background_color: BGRA8::BLUE }
 }
 
 check_test! {

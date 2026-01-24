@@ -1,15 +1,4 @@
-use rasterize::color::BGRA8;
-use util::math::I26Dot6;
-
 use super::common::*;
-
-test_define_style! {
-    .blue { color: BGRA8::BLUE }
-    .green_bg { background_color: BGRA8::GREEN }
-    .red_bg { background_color: BGRA8::RED }
-    .larger { font_size: I26Dot6::new(20) }
-    .much_larger { font_size: I26Dot6::new(32) }
-}
 
 check_test! {
     name = narrow,
@@ -92,7 +81,7 @@ check_test! {
                 text "い"
             }
         }
-        span.green_bg.larger { text "く\n" }
+        span.green_bg.fs20 { text "く\n" }
         ruby {
             base.green_bg {
                 text "行"
@@ -129,7 +118,7 @@ check_test! {
     inline.noto_sans_jp {
         ruby {
             base.green_bg {
-                span.larger {
+                span.fs20 {
                     text "大"
                 }
                 text "小"
@@ -149,7 +138,7 @@ check_test! {
     inline.noto_sans_jp {
         ruby {
             base.green_bg {
-                span.much_larger {
+                span.fs32 {
                     text "大"
                 }
             }

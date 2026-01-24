@@ -1276,7 +1276,7 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
         let can_break_before = *current_width != FixedL::ZERO;
         *current_width += self.padding.current_padding_left;
 
-        if *current_width >= ctx.constraints.size.x {
+        if *current_width > ctx.constraints.size.x {
             return Ok(BreakOutcome::BreakBefore);
         }
 

@@ -8,6 +8,18 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+struct Indent(u32);
+
+impl std::fmt::Display for Indent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for _ in 0..self.0 {
+            f.write_str(" ")?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Level {
@@ -99,18 +111,40 @@ impl MessageCallback {
     }
 }
 
+mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait Logger: sealed::Sealed {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str);
+}
+
 #[derive(Debug)]
 struct RootLoggerImpl {
     callback: MessageCallback,
 }
 
-#[derive(Debug, Clone)]
-pub struct Logger {
+#[derive(Debug)]
+pub struct RootLogger {
     root: Arc<Mutex<RootLoggerImpl>>,
 }
 
-impl Logger {
-    pub fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
+impl RootLogger {
+    pub fn new() -> Self {
+        Self {
+            root: Arc::new(Mutex::new(RootLoggerImpl {
+                callback: MessageCallback::Default,
+            })),
+        }
+    }
+
+    pub fn set_message_callback(&mut self, callback: MessageCallback) {
+        self.root.lock().unwrap().callback = callback;
+    }
+}
+
+impl Logger for RootLogger {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
         self.root
             .lock()
             .unwrap()
@@ -119,46 +153,21 @@ impl Logger {
     }
 }
 
-#[derive(Debug)]
-pub struct RootLogger(Logger);
-
-impl RootLogger {
-    pub fn new() -> Self {
-        Self(Logger {
-            root: Arc::new(Mutex::new(RootLoggerImpl {
-                callback: MessageCallback::Default,
-            })),
-        })
-    }
-
-    pub fn set_message_callback(&mut self, callback: MessageCallback) {
-        self.0.root.lock().unwrap().callback = callback;
-    }
-
-    pub fn new_child(&self) -> Logger {
-        self.0.clone()
-    }
-}
+impl sealed::Sealed for RootLogger {}
 
 pub trait AsLogger {
-    fn as_logger(&self) -> &Logger;
+    fn as_logger(&self) -> &impl Logger;
 }
 
 impl<T: AsLogger> AsLogger for &T {
-    fn as_logger(&self) -> &Logger {
+    fn as_logger(&self) -> &impl Logger {
         <T as AsLogger>::as_logger(*self)
     }
 }
 
-impl AsLogger for Logger {
-    fn as_logger(&self) -> &Logger {
-        self
-    }
-}
-
 impl AsLogger for RootLogger {
-    fn as_logger(&self) -> &Logger {
-        &self.0
+    fn as_logger(&self) -> &impl Logger {
+        self
     }
 }
 
@@ -271,7 +280,10 @@ macro_rules! log {
         }
     }};
     ($logger: expr, $level: expr, $($fmt: tt)*) => {
-        $crate::AsLogger::as_logger(&$logger).log($level, format_args!($($fmt)*), module_path!())
+        $crate::Logger::log(
+            $crate::AsLogger::as_logger(&$logger),
+            $level, format_args!($($fmt)*), module_path!()
+        )
     };
     (@logset_value $value: expr) => { $value };
     (@logset_value) => { () };

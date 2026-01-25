@@ -71,7 +71,7 @@ impl Subrandr {
 
 // allows for convenient logging with log!(sbr, ...)
 impl log::AsLogger for Subrandr {
-    fn as_logger(&self) -> &log::Logger {
+    fn as_logger(&self) -> &impl log::Logger {
         self.root_logger.as_logger()
     }
 }

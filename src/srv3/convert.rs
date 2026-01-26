@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
-use log::{log_once_state, warning, LogOnceSet};
+use log::{log_once_state, warn, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
@@ -581,7 +581,7 @@ impl WindowBuilder<'_> {
                         RubyPosition::Alternate => Ruby::Over,
                         RubyPosition::Over => Ruby::Over,
                         RubyPosition::Under => {
-                            warning!(
+                            warn!(
                                 self.sbr,
                                 once(ruby_under_unsupported),
                                 "`ruby-position: under`-style ruby text is not supported yet"

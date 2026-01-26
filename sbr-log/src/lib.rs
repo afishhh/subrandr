@@ -319,6 +319,6 @@ macro_rules! log_once_state {
 
 log!(@mkmacro $, trace, Trace);
 log!(@mkmacro $, debug, Debug);
-log!(@mkmacro $, warning, Warn);
+log!(@mkmacro $, warn, Warn);
 log!(@mkmacro $, info, Info);
 log!(@mkmacro $, error, Error);

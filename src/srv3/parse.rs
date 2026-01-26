@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr};
 
-use log::{log_once_state, warning, LogOnceSet};
+use log::{log_once_state, warn, LogOnceSet};
 use quick_xml::{
     events::{attributes::Attributes, Event as XmlEvent},
     Error as XmlError,
@@ -382,7 +382,7 @@ fn parse_pen(
             result.ruby_part = value;
         },
         else other => {
-            warning!(
+            warn!(
                 sbr, once(unknown_pen_attribute, other),
                 "Unknown attribute encountered on pen: {other}",
             );
@@ -427,7 +427,7 @@ fn parse_wp(
             result.row_count = rc;
         },
         else other => {
-            warning!(
+            warn!(
                 sbr, once(unknown_wp_attribute, other),
                 "Unknown attribute encountered on wp: {other}",
             );
@@ -464,7 +464,7 @@ fn parse_head(
                         wps.insert(id, wp);
                     }
                     name => {
-                        warning!(
+                        warn!(
                             sbr,
                             once(unknown_elements_head, name),
                             "Unknown element encountered in head: {}",
@@ -517,7 +517,7 @@ fn parse_body(
             if let Some(value) = $map.get($id) {
                 $dst = unsafe { &*(value as *const _) };
             } else {
-                warning!(
+                warn!(
                     sbr,
                     once($log_id, $id),
                     concat!($what, " with ID {} does not exist but was referenced"),
@@ -560,7 +560,7 @@ fn parse_body(
                                 set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
                             },
                             else other => {
-                                warning!(
+                                warn!(
                                     sbr, once(unknown_attrs, other),
                                     "Unknown window attribute {other}"
                                 )
@@ -570,7 +570,7 @@ fn parse_body(
                         if let Some(id) = result_id {
                             windows.insert(id, result);
                         } else {
-                            warning!(sbr, once(win_without_id), "Window missing id attribute");
+                            warn!(sbr, once(win_without_id), "Window missing id attribute");
                         }
                     }
                     b"p" => {
@@ -605,7 +605,7 @@ fn parse_body(
                                 result.window_id = Some(id.into());
                             },
                             else other => {
-                                warning!(
+                                warn!(
                                     sbr, once(unknown_attrs, other),
                                     "Unknown event attribute {other}"
                                 )
@@ -615,7 +615,7 @@ fn parse_body(
                         current = Some(result);
                     }
                     name => {
-                        warning!(
+                        warn!(
                             sbr,
                             once(unknown_body_elements, name),
                             "Unknown element encountered in body: {}",
@@ -648,7 +648,7 @@ fn parse_body(
                                 current_segment_time_offset = time_offset;
                             },
                             else other => {
-                                warning!(
+                                warn!(
                                     sbr, once(unknown_segment_attrs, other),
                                     "Unknown segment attribute {other}"
                                 );
@@ -656,7 +656,7 @@ fn parse_body(
                         }
                     }
                     _ if current.is_some() => {
-                        warning!(
+                        warn!(
                             sbr,
                             once(unknown_event_elements, element.local_name().into_inner()),
                             "Unknown element encountered in event: {}",
@@ -671,7 +671,7 @@ fn parse_body(
             }
             XmlEvent::Start(element) => {
                 if current.is_some() {
-                    warning!(
+                    warn!(
                         sbr,
                         once(unknown_segment_elements, element.local_name().into_inner()),
                         "Unknown element encountered in segment: {}",
@@ -800,7 +800,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                         break;
                     }
                     name => {
-                        warning!(
+                        warn!(
                             sbr,
                             once(unknown_toplevel_elements, name),
                             "Non-head element encountered: {}",
@@ -854,7 +854,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                         }
                         b"body" => break,
                         name => {
-                            warning!(
+                            warn!(
                                 sbr,
                                 once(unknown_toplevel_elements, name),
                                 "Non-body element encountered: {}",

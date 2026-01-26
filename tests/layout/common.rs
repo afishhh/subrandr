@@ -247,8 +247,9 @@ fn check_fn(
     let assets_dir = tests_dir.join("assets/");
 
     let sbr = Subrandr::init();
+    let log = sbr.root_logger.new_ctx();
     let mut fonts = FontDb::test(
-        &sbr,
+        &log,
         ALL_FONTS
             .iter()
             .map(|font| FaceInfo::from_face(&font.load(&assets_dir)))
@@ -261,6 +262,7 @@ fn check_fn(
         let mut scene = Vec::new();
         fun(
             &mut LayoutContext {
+                log: &log,
                 dpi,
                 fonts: &mut fonts,
             },

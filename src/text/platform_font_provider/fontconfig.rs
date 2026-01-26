@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use log::info;
+use log::{info, LogContext};
 use text_sys::fontconfig::*;
 use thiserror::Error;
 use util::math::I16Dot16;
@@ -226,14 +226,14 @@ impl FontconfigFontProvider {
 }
 
 impl PlatformFontProvider for FontconfigFontProvider {
-    fn update_if_changed(&mut self, sbr: &crate::Subrandr) -> Result<bool, super::UpdateError> {
+    fn update_if_changed(&mut self, log: &LogContext) -> Result<bool, super::UpdateError> {
         if unsafe { FcInitBringUptoDate() } == FcFalse as FcBool {
             return Err(UpdateError::BringUpToDate.into());
         }
 
         let current = unsafe { FcConfigGetCurrent() };
         Ok(if current != self.config {
-            info!(sbr, "Fontconfig configuration updated, reloading font list");
+            info!(log, "Fontconfig configuration updated, reloading font list");
             self.config = current;
             self.update_font_list()?;
             true
@@ -244,7 +244,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
 
     fn substitute(
         &self,
-        _sbr: &crate::Subrandr,
+        _log: &LogContext,
         request: &mut super::FaceRequest,
     ) -> Result<(), super::SubstituteError> {
         let mut pattern = Pattern::new();

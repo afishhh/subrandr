@@ -240,6 +240,7 @@ impl RootLoggerImpl {
     }
 }
 
+#[derive(Debug)]
 pub struct LogContext {
     root: Arc<Mutex<RootLoggerImpl>>,
     current_span: Cell<Option<SpanId>>,
@@ -271,6 +272,14 @@ impl LogContext {
         EnteredSpan { inner, ctx: self }
     }
 }
+
+impl Logger for LogContext {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().log(level, fmt, source);
+    }
+}
+
+impl sealed::Sealed for LogContext {}
 
 struct EnteredSpanInner {
     id: SpanId,
@@ -335,6 +344,12 @@ impl<T: AsLogger> AsLogger for &mut T {
 }
 
 impl AsLogger for RootLogger {
+    fn as_logger(&self) -> &impl Logger {
+        self
+    }
+}
+
+impl AsLogger for LogContext {
     fn as_logger(&self) -> &impl Logger {
         self
     }

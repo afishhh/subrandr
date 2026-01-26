@@ -1,5 +1,6 @@
 use std::{collections::HashMap, mem::MaybeUninit};
 
+use log::LogContext;
 use util::{
     cast_bytes,
     math::{Point2, Point2f, Rect2, Rect2f, Vec2},
@@ -1071,6 +1072,7 @@ impl super::Rasterizer for FrameRasterizer<'_> {
 
     fn render_scene(
         &mut self,
+        _log: &LogContext,
         target: &mut super::RenderTarget,
         scene: &[SceneNode],
         user_data: &(dyn std::any::Any + 'static),

@@ -10,6 +10,7 @@ wgpu = ["dep:wgpu"]
 [dependencies]
 thiserror = "1"
 
+log = { workspace = true }
 util = { workspace = true }
 wgpu = { workspace = true, optional = true }
 

@@ -70,10 +70,11 @@ pub enum MessageCallback {
 unsafe impl Send for MessageCallback {}
 
 impl MessageCallback {
-    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
-        const CRATE_MODULE_PREFIX: &str = concat!("subrandr", "::");
-
-        let module_rel = source.strip_prefix(CRATE_MODULE_PREFIX).unwrap_or(source);
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, mut source: &str) {
+        const STRIPPED_PREFIXES: &[&str] = &["subrandr::", "sbr_"];
+        for &pref in STRIPPED_PREFIXES {
+            source = source.strip_prefix(pref).unwrap_or(source);
+        }
 
         match self {
             Self::Default => {
@@ -82,7 +83,7 @@ impl MessageCallback {
                     return;
                 }
 
-                log_default(level, fmt, module_rel)
+                log_default(level, fmt, source)
             }
             &Self::C {
                 callback,
@@ -91,8 +92,8 @@ impl MessageCallback {
                 if let Some(literal) = fmt.as_str() {
                     callback(
                         level,
-                        module_rel.as_ptr().cast(),
-                        module_rel.len(),
+                        source.as_ptr().cast(),
+                        source.len(),
                         literal.as_ptr().cast(),
                         literal.len(),
                         user_data,
@@ -101,8 +102,8 @@ impl MessageCallback {
                     let string = fmt.to_string();
                     callback(
                         level,
-                        module_rel.as_ptr().cast(),
-                        module_rel.len(),
+                        source.as_ptr().cast(),
+                        source.len(),
                         string.as_ptr().cast(),
                         string.len(),
                         user_data,

@@ -1,5 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
+use log::RootLogger;
 use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::{self, FixedS},
@@ -9,6 +10,7 @@ use sbr_rasterize::{
 use util::math::{I16Dot16, Point2, Rect2, Vec2};
 
 struct DrawChecker {
+    logger: RootLogger,
     base_path: PathBuf,
     display_base_path: String,
     secondary_draw_index: u32,
@@ -24,12 +26,14 @@ struct DrawChecker {
 
 impl DrawChecker {
     fn check_immediate(name: &str, size: Vec2<u32>, scene: &[scene::SceneNode]) -> Self {
+        let logger = RootLogger::new();
+        let log = logger.new_ctx();
         let mut buffer = vec![Premultiplied(BGRA8::ZERO); (size.x * size.y) as usize];
         let mut target = sw::RenderTarget::new(&mut buffer, size.x, size.y, size.x);
 
         let mut rasterizer = sw::Rasterizer::new();
         rasterizer
-            .render_scene(&mut target.reborrow().into(), scene, &())
+            .render_scene(&log, &mut target.reborrow().into(), scene, &())
             .expect("failed to rasterize scene to framebuffer");
 
         let mut scratch = buffer.clone();
@@ -40,6 +44,7 @@ impl DrawChecker {
         test_util::check_png_snapshot(&base_path, &display_base_path, rgba, size.x, size.y);
 
         Self {
+            logger,
             base_path,
             display_base_path,
             secondary_draw_index: 0,
@@ -49,7 +54,7 @@ impl DrawChecker {
             pieces: {
                 let mut result = Vec::new();
                 rasterizer
-                    .render_scene_pieces(scene, &mut |piece| result.push(piece), &())
+                    .render_scene_pieces(&log, scene, &mut |piece| result.push(piece), &())
                     .unwrap();
                 result
             },

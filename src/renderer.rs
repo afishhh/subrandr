@@ -299,7 +299,7 @@ impl PerfStats {
 // TODO: This type has kind of become a "mainly C API abstraction".
 //       Move it into the capi?
 pub struct Renderer<'a> {
-    sbr: &'a Subrandr,
+    pub(crate) sbr: &'a Subrandr,
     pub(crate) fonts: text::FontDb,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
@@ -435,7 +435,12 @@ impl Renderer<'_> {
         t: u32,
     ) -> Result<(), RenderError> {
         self.render_to_scene(ctx, t, rasterizer)?;
-        rasterizer.render_scene(target, &self.scene, &self.glyph_cache)?;
+        rasterizer.render_scene(
+            &self.sbr.root_logger.new_ctx(),
+            target,
+            &self.scene,
+            &self.glyph_cache,
+        )?;
 
         Ok(())
     }

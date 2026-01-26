@@ -65,6 +65,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
         ctry!(renderer
             .rasterizer
             .render_scene_pieces(
+                &renderer.inner.sbr.root_logger.new_ctx(),
                 renderer.inner.scene(),
                 &mut |piece| {
                     if piece.size.x == 0 || piece.size.y == 0 {

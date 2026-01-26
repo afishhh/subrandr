@@ -278,7 +278,7 @@ fn check_fn(
             rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
 
         rasterizer
-            .render_scene(&mut render_target, &scene, &glyph_cache)
+            .render_scene(&log, &mut render_target, &scene, &glyph_cache)
             .expect("Fragment rasterization failed");
 
         pixels

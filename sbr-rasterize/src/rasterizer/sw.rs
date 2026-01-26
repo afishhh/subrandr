@@ -1,5 +1,6 @@
 use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
 
+use log::{trace_span, LogContext};
 use util::{
     math::{Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
@@ -745,6 +746,7 @@ impl super::Rasterizer for Rasterizer {
 
     fn render_scene(
         &mut self,
+        log: &LogContext,
         target: &mut super::RenderTarget,
         scene: &[SceneNode],
         user_data: &(dyn Any + 'static),
@@ -753,6 +755,7 @@ impl super::Rasterizer for Rasterizer {
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
         self.render_scene_pieces_at(
+            log,
             Vec2::ZERO,
             scene,
             &mut |r, piece| piece.content.blend_to_impl(r, target, piece.pos),
@@ -813,15 +816,18 @@ impl OutputPiece {
 impl Rasterizer {
     fn render_scene_pieces_at(
         &mut self,
+        log: &LogContext,
         offset: Vec2S,
         scene: &[SceneNode],
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
+        let _span = trace_span!(log, "Rasterizing scene with offset={offset:?}");
         let current_translation = offset;
         for node in scene {
             match node {
                 SceneNode::DeferredBitmaps(bitmaps) => {
+                    let _span = trace_span!(log, "Materializing deferred bitmaps");
                     for bitmap in (bitmaps.to_bitmaps)(self, user_data)
                         .map_err(SceneRenderErrorInner::ToBitmaps)?
                     {
@@ -857,7 +863,10 @@ impl Rasterizer {
                     );
                 }
                 SceneNode::StrokedPolyline(polyline) => {
-                    let (pos, size, strips) = polyline.to_strips(current_translation.to_point());
+                    let (pos, size, strips) = {
+                        let _span = trace_span!(log, "Rasterizing polyline to strips");
+                        polyline.to_strips(current_translation.to_point())
+                    };
                     on_piece(
                         self,
                         OutputPiece {
@@ -871,6 +880,7 @@ impl Rasterizer {
                     )
                 }
                 SceneNode::Subscene(subscene) => self.render_scene_pieces_at(
+                    log,
                     current_translation + subscene.pos.to_vec(),
                     &subscene.scene,
                     on_piece,
@@ -884,11 +894,18 @@ impl Rasterizer {
 
     pub fn render_scene_pieces(
         &mut self,
+        log: &LogContext,
         scene: &[SceneNode],
         on_piece: &mut dyn FnMut(OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_pieces_at(Vec2::ZERO, scene, &mut move |_r, p| on_piece(p), user_data)
+        self.render_scene_pieces_at(
+            log,
+            Vec2::ZERO,
+            scene,
+            &mut move |_r, p| on_piece(p),
+            user_data,
+        )
     }
 }
 

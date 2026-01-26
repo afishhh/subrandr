@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use log::{info, LogContext};
+use log::{info_span, LogContext};
 use text_sys::fontconfig::*;
 use thiserror::Error;
 use util::math::I16Dot16;
@@ -233,7 +233,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
 
         let current = unsafe { FcConfigGetCurrent() };
         Ok(if current != self.config {
-            info!(log, "Fontconfig configuration updated, reloading font list");
+            let _span = info_span!(log, "Fontconfig configuration updated, reloading font list");
             self.config = current;
             self.update_font_list()?;
             true

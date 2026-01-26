@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
-use log::{trace, LogContext};
+use log::{trace, trace_span, LogContext};
 use thiserror::Error;
 use util::math::I16Dot16;
 
@@ -234,7 +234,7 @@ impl FontDb {
     }
 
     #[cfg(all(test, feature = "_layout_tests"))]
-    pub fn test(log: &LogContext, faces: Vec<FaceInfo>) -> FontDb {
+    pub fn test(faces: Vec<FaceInfo>) -> FontDb {
         use std::sync::RwLock;
 
         use platform_font_provider::null::NullFontProvider;
@@ -370,7 +370,7 @@ impl FontDb {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
-            trace!(log, "Querying font provider for font matching {request:?}");
+            let _span = trace_span!(log, "Querying font provider for font matching {request:?}");
 
             let mut choice = self
                 .provider

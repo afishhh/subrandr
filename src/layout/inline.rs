@@ -1,6 +1,7 @@
 use std::{ops::Range, rc::Rc};
 
 use icu_segmenter::{options::LineBreakOptions, GraphemeClusterSegmenter};
+use log::trace_span;
 use thiserror::Error;
 use util::math::{I26Dot6, Vec2};
 
@@ -809,6 +810,12 @@ fn shape_run_initial<'a, 'f>(
                 let glyphs = {
                     buffer.guess_properties();
                     buffer.set_direction(direction.to_horizontal());
+                    let _span = trace_span!(
+                        lctx.log,
+                        "Shaping run[{:?}]={:?}",
+                        range,
+                        &text[range.clone()],
+                    );
                     set_buffer_content_from_range(
                         buffer,
                         &text,

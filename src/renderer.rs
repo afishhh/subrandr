@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use log::{info, trace, AsLogger};
+use log::{info, trace, trace_span, AsLogger};
 use rasterize::{
     color::{Premultiplied, BGRA8},
     scene::{SceneNode, StrokedPolyline, Subscene},
@@ -633,6 +633,7 @@ impl Renderer<'_> {
             };
 
             fragments = {
+                let _span = trace_span!(log, "Laying out {subtitle_class_name} subtitles");
                 match self.layouter {
                     Some(FormatLayouter::Srv3(ref mut layouter)) => layouter.layout(&mut pass)?,
                     Some(FormatLayouter::Vtt(ref mut layouter)) => layouter.layout(&mut pass)?,
@@ -644,6 +645,7 @@ impl Renderer<'_> {
             };
             self.perf.end_layout();
 
+            let _debug_span = trace_span!(log, "Laying out debug overlay");
             Self::layout_debug_overlay(
                 self.sbr,
                 &self.perf,
@@ -658,6 +660,7 @@ impl Renderer<'_> {
         }
 
         {
+            let _span = trace_span!(log, "Constructing rasterizer scene from fragment tree");
             let mut pass = DisplayPass::new(&mut self.scene);
 
             for &(pos, ref fragment) in &fragments {

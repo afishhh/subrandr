@@ -249,7 +249,6 @@ fn check_fn(
     let sbr = Subrandr::init();
     let log = sbr.root_logger.new_ctx();
     let mut fonts = FontDb::test(
-        &log,
         ALL_FONTS
             .iter()
             .map(|font| FaceInfo::from_face(&font.load(&assets_dir)))

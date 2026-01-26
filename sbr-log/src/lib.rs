@@ -71,7 +71,7 @@ unsafe impl Send for MessageCallback {}
 
 impl MessageCallback {
     fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
-        const CRATE_MODULE_PREFIX: &str = concat!(env!("CARGO_PKG_NAME"), "::");
+        const CRATE_MODULE_PREFIX: &str = concat!("subrandr", "::");
 
         let module_rel = source.strip_prefix(CRATE_MODULE_PREFIX).unwrap_or(source);
 
@@ -118,7 +118,15 @@ mod sealed {
 }
 
 pub trait Logger: sealed::Sealed {
+    const SUPPORTS_SPANS: bool;
+
     fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str);
+    fn span(&self, level: Level, fmt: std::fmt::Arguments, source: &str) -> EnteredSpan<'_> {
+        _ = level;
+        _ = fmt;
+        _ = source;
+        EnteredSpan::_inactive()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -149,6 +157,8 @@ struct RootLoggerImpl {
 }
 
 impl Logger for RootLoggerImpl {
+    const SUPPORTS_SPANS: bool = false;
+
     fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
         self.callback.log(level, fmt, module_path)
     }
@@ -185,6 +195,8 @@ impl RootLogger {
 }
 
 impl Logger for RootLogger {
+    const SUPPORTS_SPANS: bool = false;
+
     fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
         self.root.lock().unwrap().callback.log(level, fmt, source)
     }
@@ -246,14 +258,14 @@ pub struct LogContext {
     current_span: Cell<Option<SpanId>>,
 }
 
-impl LogContext {
-    #[doc(hidden)]
-    pub fn _enter_span(
-        &self,
-        level: Level,
-        fmt: std::fmt::Arguments,
-        source: &str,
-    ) -> EnteredSpan<'_> {
+impl Logger for LogContext {
+    const SUPPORTS_SPANS: bool = true;
+
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().log(level, fmt, source);
+    }
+
+    fn span(&self, level: Level, fmt: std::fmt::Arguments, source: &str) -> EnteredSpan<'_> {
         let start = std::time::Instant::now();
         let mut root = self.root.lock().unwrap();
         let inner = root
@@ -265,31 +277,33 @@ impl LogContext {
                 EnteredSpanInner {
                     id,
                     root: self.root.clone(),
+                    ctx: self,
                     _unsend_unsync: PhantomData,
                 }
             });
 
-        EnteredSpan { inner, ctx: self }
-    }
-}
-
-impl Logger for LogContext {
-    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
-        self.root.lock().unwrap().log(level, fmt, source);
+        EnteredSpan { inner }
     }
 }
 
 impl sealed::Sealed for LogContext {}
 
-struct EnteredSpanInner {
+struct EnteredSpanInner<'ctx> {
     id: SpanId,
     root: Arc<Mutex<RootLoggerImpl>>,
+    ctx: &'ctx LogContext,
     _unsend_unsync: PhantomData<*mut ()>,
 }
 
+#[must_use]
 pub struct EnteredSpan<'ctx> {
-    inner: Option<EnteredSpanInner>,
-    ctx: &'ctx LogContext,
+    inner: Option<EnteredSpanInner<'ctx>>,
+}
+
+impl EnteredSpan<'_> {
+    const fn _inactive() -> Self {
+        Self { inner: None }
+    }
 }
 
 impl Drop for EnteredSpan<'_> {
@@ -307,7 +321,7 @@ impl Drop for EnteredSpan<'_> {
         };
 
         let state = entry.get_mut();
-        self.ctx.current_span.set(state.parent);
+        inner.ctx.current_span.set(state.parent);
         match NonZero::new(state.refcnt.get() - 1) {
             Some(new_refcnt) => state.refcnt = new_refcnt,
             None => {
@@ -316,7 +330,7 @@ impl Drop for EnteredSpan<'_> {
                 root.log(
                     state.level,
                     format_args!(
-                        "[{}] took {}ms",
+                        "[{}] took {:.3}ms",
                         inner.id.0,
                         (end - state.start).as_secs_f32() * 1000.
                     ),
@@ -483,6 +497,25 @@ macro_rules! log {
 }
 
 #[macro_export]
+macro_rules! span {
+    ($logger: expr, $level: expr, $($fmt: tt)*) => {
+        $crate::Logger::span(
+            $crate::AsLogger::as_logger(&$logger),
+            $level, format_args!($($fmt)*), module_path!()
+        )
+    };
+    (@mkmacro $dollar: tt, $name: ident, $level: ident) => {
+        #[macro_export]
+        #[clippy::format_args]
+        macro_rules! $name {
+            ($dollar logger: expr, $dollar ($dollar rest: tt)*) => {
+                $crate::span!($dollar logger, $crate::Level::$level, $dollar ($dollar rest)*)
+            }
+        }
+    }
+}
+
+#[macro_export]
 macro_rules! log_once_state {
     (@mkkey $set: ident $ident: ident $(, $($rest: tt)*)?) => {
         let $ident = {
@@ -512,3 +545,8 @@ log!(@mkmacro $, debug, Debug);
 log!(@mkmacro $, warn, Warn);
 log!(@mkmacro $, info, Info);
 log!(@mkmacro $, error, Error);
+span!(@mkmacro $, trace_span, Trace);
+span!(@mkmacro $, debug_span, Debug);
+span!(@mkmacro $, warn_span, Warn);
+span!(@mkmacro $, info_span, Info);
+span!(@mkmacro $, error_span, Error);

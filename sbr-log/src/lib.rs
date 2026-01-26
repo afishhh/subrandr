@@ -155,11 +155,30 @@ impl Logger for RootLogger {
 
 impl sealed::Sealed for RootLogger {}
 
+impl Drop for RootLogger {
+    fn drop(&mut self) {
+        let strong = Arc::strong_count(&self.root);
+        let weak = Arc::weak_count(&self.root);
+        if strong != 1 || weak != 0 {
+            warning!(
+                self,
+                "Logger dropped with unexpected references! strong={strong} weak={weak}"
+            )
+        }
+    }
+}
+
 pub trait AsLogger {
     fn as_logger(&self) -> &impl Logger;
 }
 
 impl<T: AsLogger> AsLogger for &T {
+    fn as_logger(&self) -> &impl Logger {
+        <T as AsLogger>::as_logger(*self)
+    }
+}
+
+impl<T: AsLogger> AsLogger for &mut T {
     fn as_logger(&self) -> &impl Logger {
         <T as AsLogger>::as_logger(*self)
     }

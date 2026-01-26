@@ -342,13 +342,14 @@ impl Drop for EnteredSpan<'_> {
             None => {
                 let state = entry.remove();
                 let end = std::time::Instant::now();
+                let took = end - state.start;
                 root.log(
                     state.level,
                     format_args!(
                         "[/{}]{} Span exited in {:.3}ms",
                         inner.id.0,
                         Indent(depth),
-                        (end - state.start).as_secs_f32() * 1000.
+                        took.as_secs_f32() * 1000.
                     ),
                     &state.source,
                 );

@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
+use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit, rc::Rc};
 
 use log::{trace_span, LogContext};
 use util::{
@@ -827,7 +827,11 @@ impl Rasterizer {
         for node in scene {
             match node {
                 SceneNode::DeferredBitmaps(bitmaps) => {
-                    let _span = trace_span!(log, "Materializing deferred bitmaps");
+                    let _span = trace_span!(
+                        log,
+                        "Materializing deferred bitmaps @{:08x}",
+                        Rc::as_ptr(&bitmaps.to_bitmaps).addr()
+                    );
                     for bitmap in (bitmaps.to_bitmaps)(self, user_data)
                         .map_err(SceneRenderErrorInner::ToBitmaps)?
                     {

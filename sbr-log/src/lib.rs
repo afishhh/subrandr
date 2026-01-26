@@ -160,7 +160,7 @@ impl Drop for RootLogger {
         let strong = Arc::strong_count(&self.root);
         let weak = Arc::weak_count(&self.root);
         if strong != 1 || weak != 0 {
-            warning!(
+            warn!(
                 self,
                 "Logger dropped with unexpected references! strong={strong} weak={weak}"
             )
@@ -344,6 +344,6 @@ macro_rules! log_once_state {
 
 log!(@mkmacro $, trace, Trace);
 log!(@mkmacro $, debug, Debug);
-log!(@mkmacro $, warning, Warn);
+log!(@mkmacro $, warn, Warn);
 log!(@mkmacro $, info, Info);
 log!(@mkmacro $, error, Error);

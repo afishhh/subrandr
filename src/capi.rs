@@ -8,7 +8,7 @@ use std::{
 };
 
 use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
-use log::{debug, warning};
+use log::{debug, warn};
 use util::rc::Rc;
 
 use crate::{text::Face, Subrandr, Subtitles};
@@ -316,7 +316,7 @@ unsafe extern "C" fn sbr_load_text(
                 Some(locale.id)
             }
             Err(error) => {
-                warning!(sbr, "Failed to parse language hint {cstr:?}: {error}");
+                warn!(sbr, "Failed to parse language hint {cstr:?}: {error}");
                 None
             }
         }

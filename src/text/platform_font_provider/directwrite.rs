@@ -14,7 +14,7 @@ use windows::Win32::Graphics::DirectWrite::{
 
 use super::PlatformFontProvider;
 use crate::{
-    log::warning,
+    log::warn,
     text::{Face, FaceInfo, LoadError},
     Subrandr,
 };
@@ -287,7 +287,7 @@ impl DirectWriteFontProvider {
                     match family.GetFont(j).and_then(Self::info_from_font) {
                         Ok(face) => result.extend(face),
                         Err(err) => {
-                            warning!(
+                            warn!(
                                 sbr,
                                 "Failed to load font {j} from font family {i} in system font collection: {err}"
                             );

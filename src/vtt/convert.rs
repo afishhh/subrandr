@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use log::{log_once_state, warning, LogOnceSet};
+use log::{log_once_state, warn, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Rect2},
@@ -539,7 +539,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
     log_once_state!(in logset; region_unsupported);
 
     if !captions.stylesheets.is_empty() {
-        warning!(
+        warn!(
             sbr,
             "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
         )
@@ -547,7 +547,7 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
 
     for cue in captions.cues {
         if cue.region.is_some() && !captions.regions.is_empty() {
-            warning!(
+            warn!(
                 sbr,
                 once(region_unsupported),
                 "WebVTT file makes use of regions, which are currently not supported and will be ignored."

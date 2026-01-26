@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::PlatformFontProvider;
 use crate::{
-    log::warning,
+    log::warn,
     text::{
         font_db::{FaceInfo, FontSource},
         Face, FontFallbackRequest, FreeTypeError,
@@ -73,7 +73,7 @@ impl AndroidNdkFontProvider {
             let info = match font_info_from_afont(&font) {
                 Ok(info) => info,
                 Err(err) => {
-                    warning!(
+                    warn!(
                         sbr,
                         "Failed to inspect system font {:?}: {err}",
                         font.path()

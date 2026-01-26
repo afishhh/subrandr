@@ -2,6 +2,7 @@ use std::ffi::c_void;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use log::{warn, LogContext};
 use util::math::I16Dot16;
 use windows::core::{implement, Interface, PCWSTR};
 use windows::Win32::Graphics::DirectWrite::{
@@ -13,11 +14,7 @@ use windows::Win32::Graphics::DirectWrite::{
 };
 
 use super::PlatformFontProvider;
-use crate::{
-    log::warn,
-    text::{Face, FaceInfo, LoadError},
-    Subrandr,
-};
+use crate::text::{Face, FaceInfo, LoadError};
 
 pub type NewError = windows_core::Error;
 pub type UpdateError = windows_core::Error;
@@ -207,7 +204,7 @@ pub struct DirectWriteFontProvider {
 }
 
 impl DirectWriteFontProvider {
-    pub fn new(sbr: &Subrandr) -> Result<Self, windows::core::Error> {
+    pub fn new(log: &LogContext) -> Result<Self, windows::core::Error> {
         unsafe {
             let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED)?;
             let mut font_collection = None;
@@ -215,7 +212,7 @@ impl DirectWriteFontProvider {
             let font_collection = font_collection.unwrap();
 
             Ok(Self {
-                fonts: Self::collect_font_list(sbr, &font_collection)?,
+                fonts: Self::collect_font_list(log, &font_collection)?,
                 fallback: factory.cast::<IDWriteFactory2>()?.GetSystemFontFallback()?,
             })
         }
@@ -273,7 +270,7 @@ impl DirectWriteFontProvider {
     }
 
     fn collect_font_list(
-        sbr: &Subrandr,
+        log: &LogContext,
         collection: &IDWriteFontCollection,
     ) -> Result<Vec<FaceInfo>, UpdateError> {
         let mut result = Vec::new();
@@ -288,7 +285,7 @@ impl DirectWriteFontProvider {
                         Ok(face) => result.extend(face),
                         Err(err) => {
                             warn!(
-                                sbr,
+                                log,
                                 "Failed to load font {j} from font family {i} in system font collection: {err}"
                             );
                         }
@@ -316,7 +313,7 @@ impl DirectWriteFontProvider {
 impl PlatformFontProvider for DirectWriteFontProvider {
     fn substitute(
         &self,
-        _sbr: &crate::Subrandr,
+        _log: &LogContext,
         request: &mut crate::text::FaceRequest,
     ) -> Result<(), super::SubstituteError> {
         for family in std::mem::take(&mut request.families) {

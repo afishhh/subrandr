@@ -112,6 +112,14 @@ struct RootLoggerImpl {
     callback: MessageCallback,
 }
 
+impl Logger for RootLoggerImpl {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
+        self.callback.log(level, fmt, module_path)
+    }
+}
+
+impl sealed::Sealed for RootLoggerImpl {}
+
 #[derive(Debug)]
 pub struct RootLogger {
     root: Arc<Mutex<RootLoggerImpl>>,
@@ -129,19 +137,38 @@ impl RootLogger {
     pub fn set_message_callback(&mut self, callback: MessageCallback) {
         self.root.lock().unwrap().callback = callback;
     }
+
+    pub fn new_ctx(&self) -> LogContext<'_> {
+        LogContext { root: &self.root }
+    }
 }
 
 impl Logger for RootLogger {
-    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
-        self.root
-            .lock()
-            .unwrap()
-            .callback
-            .log(level, fmt, module_path)
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().callback.log(level, fmt, source)
+    }
+}
+
+impl AsLogger for RootLoggerImpl {
+    fn as_logger(&self) -> &impl Logger {
+        self
     }
 }
 
 impl sealed::Sealed for RootLogger {}
+
+#[derive(Debug)]
+pub struct LogContext<'a> {
+    root: &'a Mutex<RootLoggerImpl>,
+}
+
+impl Logger for LogContext<'_> {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().log(level, fmt, source);
+    }
+}
+
+impl sealed::Sealed for LogContext<'_> {}
 
 pub trait AsLogger {
     fn as_logger(&self) -> &impl Logger;
@@ -160,6 +187,12 @@ impl<T: AsLogger> AsLogger for &mut T {
 }
 
 impl AsLogger for RootLogger {
+    fn as_logger(&self) -> &impl Logger {
+        self
+    }
+}
+
+impl AsLogger for LogContext<'_> {
     fn as_logger(&self) -> &impl Logger {
         self
     }

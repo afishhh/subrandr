@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 
+use log::LogContext;
 use util::math::{I16Dot16, I26Dot6};
 
 use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontFallbackRequest, FontStyle};
@@ -129,11 +130,13 @@ fn match_faces(
 }
 
 fn match_face_for_specific_family(
+    // TODO: Move this module into inline layout and just take a LayoutContext
+    log: &LogContext,
     family: &str,
     style: &FontStyle,
     fonts: &mut FontDb,
 ) -> Result<Option<Face>, font_db::SelectError> {
-    let faces = fonts.select_family(family)?.to_vec();
+    let faces = fonts.select_family(log, family)?.to_vec();
 
     // If no matching face exists or the matched face does not contain a glyph for the character to be rendered, the next family name is selected and the previous three steps repeated. Glyphs from other faces in the family are not considered. The only exception is that user agents may optionally substitute a synthetically obliqued version of the default face if that face supports a given glyph and synthesis of these faces is permitted by the value of the ‘font-synthesis’ property. For example, a synthetic italic version of the regular face may be used if the italic face doesn't support glyphs for Arabic.
     let Some(face) = match_faces(&faces, style, fonts)? else {
@@ -154,6 +157,7 @@ pub struct FontMatcher<'f> {
 
 impl<'f> FontMatcher<'f> {
     pub fn match_all(
+        log: &LogContext,
         families: impl IntoIterator<Item = impl AsRef<str>>,
         style: FontStyle,
         size: I26Dot6,
@@ -167,7 +171,7 @@ impl<'f> FontMatcher<'f> {
         for family in families {
             let family = family.as_ref();
             copied_families.push(family.into());
-            if let Some(face) = match_face_for_specific_family(family, &style, fonts)? {
+            if let Some(face) = match_face_for_specific_family(log, family, &style, fonts)? {
                 matched.push(arena.insert(&face.with_size(size, dpi)?));
             }
         }
@@ -204,12 +208,13 @@ impl<'f> FontMatcher<'f> {
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
     pub fn primary(
         &self,
+        log: &LogContext,
         arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<&'f Font, font_db::SelectError> {
         Ok(self
             .iterator()
-            .next_with_fallback(' '.into(), arena, fonts)?
+            .next_with_fallback(log, ' '.into(), arena, fonts)?
             .unwrap_or_else(|| self.tofu(arena)))
     }
 }
@@ -231,6 +236,7 @@ impl<'f> FontMatchIterator<'_, 'f> {
 
     pub fn next_with_fallback(
         &mut self,
+        log: &LogContext,
         codepoint: u32,
         arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -245,11 +251,14 @@ impl<'f> FontMatchIterator<'_, 'f> {
                     self.index += 1;
                 }
 
-                match fonts.select_fallback(&FontFallbackRequest {
-                    families: self.matcher.families.clone(),
-                    style: self.matcher.style,
-                    codepoint,
-                }) {
+                match fonts.select_fallback(
+                    log,
+                    &FontFallbackRequest {
+                        families: self.matcher.families.clone(),
+                        style: self.matcher.style,
+                        codepoint,
+                    },
+                ) {
                     Ok(face) => Ok(Some(
                         arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
                     )),

@@ -1,18 +1,13 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
-use log::trace;
+use log::{trace, LogContext};
 use thiserror::Error;
 use util::math::I16Dot16;
 
-use crate::{
-    text::{
-        self,
-        platform_font_provider::{
-            self, FallbackError, LockedPlatformFontProvider, SubstituteError,
-        },
-        OpenTypeTag,
-    },
-    Subrandr,
+use crate::text::{
+    self,
+    platform_font_provider::{self, FallbackError, LockedPlatformFontProvider, SubstituteError},
+    OpenTypeTag,
 };
 
 use super::{ft_utils::FreeTypeError, Face};
@@ -205,8 +200,7 @@ impl From<FreeTypeError> for SelectError {
 }
 
 #[derive(Debug)]
-pub struct FontDb<'a> {
-    sbr: &'a Subrandr,
+pub struct FontDb {
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
     request_cache: HashMap<FontFallbackRequest, Option<Face>>,
@@ -222,16 +216,15 @@ pub(super) fn set_weight_if_variable(face: &mut Face, weight: I16Dot16) {
     }
 }
 
-impl<'a> FontDb<'a> {
-    pub fn new(sbr: &'a Subrandr) -> Result<FontDb<'a>, platform_font_provider::InitError> {
+impl FontDb {
+    pub fn new(log: &LogContext) -> Result<FontDb, platform_font_provider::InitError> {
         Ok({
             let mut result = Self {
-                sbr,
                 source_cache: HashMap::new(),
                 family_cache: HashMap::new(),
                 request_cache: HashMap::new(),
                 family_lookup_cache: HashMap::new(),
-                provider: platform_font_provider::platform_default(sbr)?,
+                provider: platform_font_provider::platform_default(log)?,
                 extra_faces: Vec::new(),
                 allow_extra_face_fallback: true,
             };
@@ -241,7 +234,7 @@ impl<'a> FontDb<'a> {
     }
 
     #[cfg(all(test, feature = "_layout_tests"))]
-    pub fn test(sbr: &'a Subrandr, faces: Vec<FaceInfo>) -> FontDb<'a> {
+    pub fn test(log: &LogContext, faces: Vec<FaceInfo>) -> FontDb {
         use std::sync::RwLock;
 
         use platform_font_provider::null::NullFontProvider;
@@ -249,7 +242,6 @@ impl<'a> FontDb<'a> {
         static NULL_PROVIDER: RwLock<NullFontProvider> = RwLock::new(NullFontProvider);
 
         let mut result = Self {
-            sbr,
             source_cache: HashMap::new(),
             family_cache: HashMap::new(),
             request_cache: HashMap::new(),
@@ -268,8 +260,11 @@ impl<'a> FontDb<'a> {
         self.extra_faces.push(font);
     }
 
-    pub fn update_platform_font_list(&mut self) -> Result<(), platform_font_provider::UpdateError> {
-        if self.provider.write().unwrap().update_if_changed(self.sbr)? {
+    pub fn update_platform_font_list(
+        &mut self,
+        log: &LogContext,
+    ) -> Result<(), platform_font_provider::UpdateError> {
+        if self.provider.write().unwrap().update_if_changed(log)? {
             self.family_cache.clear();
             self.request_cache.clear();
             self.rebuild_family_lookup_cache();
@@ -309,14 +304,18 @@ impl<'a> FontDb<'a> {
         }
     }
 
-    pub fn select_family(&mut self, name: &str) -> Result<&[FaceInfo], SelectError> {
+    pub fn select_family(
+        &mut self,
+        log: &LogContext,
+        name: &str,
+    ) -> Result<&[FaceInfo], SelectError> {
         // NLL problem case 3 again
         let family_cache = &raw mut self.family_cache;
         if let Some(existing) = unsafe { (*family_cache).get(name) } {
             return Ok(existing);
         }
 
-        trace!(self.sbr, "Substituting font family {name:?}");
+        trace!(log, "Substituting font family {name:?}");
 
         let mut request = FaceRequest {
             families: vec![name.into()],
@@ -326,10 +325,10 @@ impl<'a> FontDb<'a> {
         self.provider
             .read()
             .unwrap()
-            .substitute(self.sbr, &mut request)
+            .substitute(log, &mut request)
             .map_err(SelectError::Substitute)?;
 
-        trace!(self.sbr, "Substition resulted in {:?}", request.families);
+        trace!(log, "Substition resulted in {:?}", request.families);
 
         let mut result = None;
         for candidate in &request.families {
@@ -343,7 +342,7 @@ impl<'a> FontDb<'a> {
         let faces = match result {
             Some(faces) => {
                 trace!(
-                    self.sbr,
+                    log,
                     "Font family query {name:?} matched {} {:?} faces",
                     faces.len(),
                     faces[0].family_names[0]
@@ -351,7 +350,7 @@ impl<'a> FontDb<'a> {
                 faces.clone()
             }
             None => {
-                trace!(self.sbr, "Font family query {name:?} matched no faces",);
+                trace!(log, "Font family query {name:?} matched no faces",);
                 Vec::new()
             }
         };
@@ -363,14 +362,15 @@ impl<'a> FontDb<'a> {
             .into_mut())
     }
 
-    pub fn select_fallback(&mut self, request: &FontFallbackRequest) -> Result<Face, SelectError> {
+    pub fn select_fallback(
+        &mut self,
+        log: &LogContext,
+        request: &FontFallbackRequest,
+    ) -> Result<Face, SelectError> {
         if let Some(cached) = self.request_cache.get(request) {
             cached.as_ref().cloned()
         } else {
-            trace!(
-                self.sbr,
-                "Querying font provider for font matching {request:?}"
-            );
+            trace!(log, "Querying font provider for font matching {request:?}");
 
             let mut choice = self
                 .provider
@@ -401,7 +401,7 @@ impl<'a> FontDb<'a> {
                 set_weight_if_variable(face, request.style.weight);
             }
 
-            trace!(self.sbr, "Picked face {result:?}");
+            trace!(log, "Picked face {result:?}");
             self.request_cache.insert(request.clone(), result.clone());
             result
         }

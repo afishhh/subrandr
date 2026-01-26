@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 
+use log::LogContext;
 use util::{
     math::{I16Dot16, I26Dot6},
     rc::Rc,
@@ -170,10 +171,14 @@ impl FontMatcher {
 
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
-    pub fn primary(&self, fonts: &mut FontDb) -> Result<Font, font_db::SelectError> {
+    pub fn primary(
+        &self,
+        log: &LogContext,
+        fonts: &mut FontDb,
+    ) -> Result<Font, font_db::SelectError> {
         Ok(self
             .iterator()
-            .next_with_fallback(' '.into(), fonts)?
+            .next_with_fallback(log, ' '.into(), fonts)?
             .unwrap_or_else(|| self.tofu()))
     }
 }
@@ -195,6 +200,7 @@ impl FontMatchIterator<'_> {
 
     pub fn next_with_fallback(
         &mut self,
+        log: &LogContext,
         codepoint: u32,
         fonts: &mut FontDb,
     ) -> Result<Option<Font>, font_db::SelectError> {
@@ -204,7 +210,7 @@ impl FontMatchIterator<'_> {
                     self.index += 1;
 
                     let Some(matched) =
-                        fonts.match_face_for_family(family.clone(), self.matcher.style)?
+                        fonts.match_face_for_family(log, family.clone(), self.matcher.style)?
                     else {
                         continue;
                     };
@@ -218,16 +224,19 @@ impl FontMatchIterator<'_> {
                         self.index += 1;
                     }
 
-                    return match fonts.select_fallback(&FontFallbackRequest {
-                        families: self
-                            .matcher
-                            .families
-                            .iter()
-                            .map(|x| (&**x).into())
-                            .collect(),
-                        style: self.matcher.style,
-                        codepoint,
-                    }) {
+                    return match fonts.select_fallback(
+                        log,
+                        &FontFallbackRequest {
+                            families: self
+                                .matcher
+                                .families
+                                .iter()
+                                .map(|x| (&**x).into())
+                                .collect(),
+                            style: self.matcher.style,
+                            codepoint,
+                        },
+                    ) {
                         Ok(face) => Ok(Some(face.with_size(self.matcher.size, self.matcher.dpi)?)),
                         Err(super::SelectError::NotFound) => Ok(None),
                         Err(err) => Err(err),

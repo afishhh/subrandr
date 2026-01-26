@@ -657,7 +657,7 @@ fn primary_font_from_style(
     lctx: &mut LayoutContext,
 ) -> Result<Font, InlineLayoutError> {
     font_matcher_from_style(style, lctx)
-        .primary(lctx.fonts)
+        .primary(lctx.log, lctx.fonts)
         .map_err(Into::into)
 }
 
@@ -799,7 +799,7 @@ fn shape_run_initial<'a>(
                         grapheme_cluster_boundaries,
                     );
                     let mut output = GlyphString::new(text.clone(), direction);
-                    buffer.shape(&mut output, self.matcher.iterator(), lctx.fonts)?;
+                    buffer.shape(lctx.log, &mut output, self.matcher.iterator(), lctx.fonts)?;
                     output
                 };
                 buffer.clear();
@@ -808,7 +808,7 @@ fn shape_run_initial<'a>(
                     range: range.clone(),
                     kind: ShapedItemKind::Text(ShapedItemText {
                         font_matcher: self.matcher.clone(),
-                        primary_font: self.matcher.primary(lctx.fonts)?,
+                        primary_font: self.matcher.primary(lctx.log, lctx.fonts)?,
                         glyphs,
                         break_after,
                     }),
@@ -849,12 +849,12 @@ fn shape_run_initial<'a>(
         }
     }
 
-    struct ShapedItemBuilder<'a, 's, 'l, 'll, 'la> {
+    struct ShapedItemBuilder<'a, 's, 'l, 'll> {
         content: &'a InlineContent,
         run_text: &'a Rc<str>,
         bidi: unicode_bidi::BidiInfo<'a>,
         grapheme_cluster_boundaries: Vec<usize>,
-        lctx: &'l mut LayoutContext<'ll, 'la>,
+        lctx: &'l mut LayoutContext<'ll>,
 
         break_opportunities: Vec<usize>,
         shaped: Vec<ShapedItem<'a>>,
@@ -873,7 +873,7 @@ fn shape_run_initial<'a>(
         remaining_children: usize,
     }
 
-    impl<'a> ShapedItemBuilder<'a, '_, '_, '_, '_> {
+    impl<'a> ShapedItemBuilder<'a, '_, '_, '_> {
         fn push_break_opportunity(&mut self, idx: usize) {
             if let Some(&previous) = self.break_opportunities.last() {
                 if previous == idx {
@@ -1410,8 +1410,8 @@ fn shape_run_initial<'a>(
     )
 }
 
-struct BreakingContext<'l, 'a, 'b> {
-    layout: &'a mut LayoutContext<'l, 'b>,
+struct BreakingContext<'l, 'a> {
+    layout: &'a mut LayoutContext<'l>,
     constraints: &'a LayoutConstraints,
     break_opportunities: &'a [usize],
     break_buffer: text::ShapingBuffer,
@@ -1432,7 +1432,7 @@ impl<'a> ShapedItem<'a> {
     fn line_break(
         &mut self,
         current_width: &mut FixedL,
-        ctx: &mut BreakingContext<'_, '_, '_>,
+        ctx: &mut BreakingContext<'_, '_>,
     ) -> Result<BreakOutcome<'a>, InlineLayoutError> {
         let can_break_before = *current_width != FixedL::ZERO;
         *current_width += self.padding.current_padding_left;
@@ -1534,7 +1534,7 @@ impl ShapedItemText {
         range: &mut Range<usize>,
         current_width: &mut FixedL,
         can_break_before: bool,
-        ctx: &mut BreakingContext<'_, '_, '_>,
+        ctx: &mut BreakingContext<'_, '_>,
         padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a>, InlineLayoutError> {
         let initial_x = *current_width;
@@ -1580,7 +1580,7 @@ impl ShapedItemText {
                         ctx.font_feature_events,
                         ctx.grapheme_cluster_boundaries,
                         self.font_matcher.iterator(),
-                        ctx.layout.fonts,
+                        ctx.layout,
                     )? {
                         drop(glyph_it);
 
@@ -2507,8 +2507,8 @@ pub struct PartialInline<'a> {
     initial_shaping_result: InitialShapingResult<'a>,
 }
 
-pub fn shape<'l, 'a, 'b, 'c>(
-    lctx: &'b mut LayoutContext<'l, 'a>,
+pub fn shape<'l, 'b, 'c>(
+    lctx: &'b mut LayoutContext<'l>,
     content: &'c InlineContent,
 ) -> Result<PartialInline<'c>, InlineLayoutError> {
     if content.text_runs.is_empty() {
@@ -2552,9 +2552,9 @@ impl PartialInline<'_> {
         max.max(current)
     }
 
-    pub fn layout<'b, 'l, 'a>(
+    pub fn layout<'b, 'l>(
         self,
-        lctx: &'b mut LayoutContext<'l, 'a>,
+        lctx: &'b mut LayoutContext<'l>,
         constraints: &LayoutConstraints,
     ) -> Result<InlineContentFragment, InlineLayoutError> {
         layout_run_full(
@@ -2567,8 +2567,8 @@ impl PartialInline<'_> {
     }
 }
 
-pub fn layout<'l, 'a, 'b, 'c>(
-    lctx: &'b mut LayoutContext<'l, 'a>,
+pub fn layout<'l, 'b, 'c>(
+    lctx: &'b mut LayoutContext<'l>,
     constraints: &LayoutConstraints,
     content: &'c InlineContent,
 ) -> Result<InlineContentFragment, InlineLayoutError> {

@@ -4,6 +4,7 @@ use std::{
     ops::Range,
 };
 
+use log::LogContext;
 use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
@@ -226,6 +227,7 @@ pub trait ShapingSink {
 impl ShapingBuffer {
     pub fn shape(
         &mut self,
+        log: &LogContext,
         output: &mut dyn ShapingSink,
         font_iterator: FontMatchIterator<'_>,
         fonts: &mut FontDb,
@@ -240,6 +242,7 @@ impl ShapingBuffer {
         };
 
         ShapingPass {
+            log,
             buffer: RawShapingBuffer(self.raw.0),
             glyph_buffer: unsafe {
                 ManuallyDrop::new(Vec::from_raw_parts(
@@ -289,18 +292,19 @@ fn fixup_range(a: usize, b: usize) -> Range<usize> {
     }
 }
 
-struct ShapingPass<'p, 'a> {
+struct ShapingPass<'p> {
+    log: &'p LogContext<'p>,
     buffer: RawShapingBuffer,
     glyph_buffer: ManuallyDrop<Vec<Glyph>>,
     glyph_buffer_parts: &'p mut (*mut Glyph, usize),
     output: &'p mut dyn ShapingSink,
     cluster_map: &'p [ClusterEntry],
-    fonts: &'p mut FontDb<'a>,
+    fonts: &'p mut FontDb,
     properties: hb_segment_properties_t,
     features: &'p [hb_feature_t],
 }
 
-impl ShapingPass<'_, '_> {
+impl ShapingPass<'_> {
     fn retry_shaping(
         &mut self,
         range: Range<usize>,
@@ -346,7 +350,7 @@ impl ShapingPass<'_, '_> {
             font_iterator.matcher().tofu()
         } else {
             font_iterator
-                .next_with_fallback(first_codepoint as u32, self.fonts)?
+                .next_with_fallback(self.log, first_codepoint as u32, self.fonts)?
                 .unwrap_or_else(|| font_iterator.matcher().tofu())
         };
         let hb_font = font.as_harfbuzz_font()?;
@@ -536,7 +540,7 @@ impl ShapingPass<'_, '_> {
     }
 }
 
-impl Drop for ShapingPass<'_, '_> {
+impl Drop for ShapingPass<'_> {
     fn drop(&mut self) {
         *self.glyph_buffer_parts = {
             let (ptr, _, cap) = vec_parts(&mut *self.glyph_buffer);

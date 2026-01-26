@@ -114,7 +114,7 @@ impl Event {
     fn layout(
         &self,
         sctx: &SubtitleContext,
-        lctx: &mut layout::LayoutContext<'_, '_>,
+        lctx: &mut layout::LayoutContext<'_>,
         font_size: I26Dot6,
         output: &mut Vec<Rect2<FixedL>>,
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {

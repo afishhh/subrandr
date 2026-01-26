@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use log::{info, trace};
+use log::{info, trace, AsLogger};
 use rasterize::{
     color::{Premultiplied, BGRA8},
     scene::{SceneNode, StrokedPolyline, Subscene},
@@ -78,9 +78,9 @@ enum FormatLayouter {
     Vtt(vtt::Layouter),
 }
 
-pub(crate) struct FrameLayoutPass<'s, 'frame> {
+pub(crate) struct FrameLayoutPass<'frame> {
     pub sctx: &'frame SubtitleContext,
-    pub lctx: &'frame mut LayoutContext<'frame, 's>,
+    pub lctx: &'frame mut LayoutContext<'frame>,
     pub t: u32,
     unchanged_range: Range<u32>,
     fragments: Vec<(Point2L, BlockContainerFragment)>,
@@ -90,7 +90,13 @@ pub(crate) struct FrameLayoutPass<'s, 'frame> {
     pub srv3_use_inlines: bool,
 }
 
-impl FrameLayoutPass<'_, '_> {
+impl AsLogger for FrameLayoutPass<'_> {
+    fn as_logger(&self) -> &impl log::Logger {
+        self.lctx.log.as_logger()
+    }
+}
+
+impl FrameLayoutPass<'_> {
     pub fn add_event_range(&mut self, event: Range<u32>) -> bool {
         let r = self.unchanged_range.clone();
 
@@ -294,7 +300,7 @@ impl PerfStats {
 //       Move it into the capi?
 pub struct Renderer<'a> {
     sbr: &'a Subrandr,
-    pub(crate) fonts: text::FontDb<'a>,
+    pub(crate) fonts: text::FontDb,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
     scene: Vec<SceneNode>,
@@ -322,7 +328,7 @@ impl<'a> Renderer<'a> {
 
         Ok(Self {
             sbr,
-            fonts: text::FontDb::new(sbr)?,
+            fonts: text::FontDb::new(&sbr.root_logger.new_ctx())?,
             glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
             unchanged_range: 0..0,
@@ -584,8 +590,10 @@ impl Renderer<'_> {
     ) -> Result<(), RenderError> {
         self.previous_context = *ctx;
 
+        let log = self.sbr.root_logger.new_ctx();
+
         self.perf.start_frame();
-        self.fonts.update_platform_font_list()?;
+        self.fonts.update_platform_font_list(&log)?;
         self.glyph_cache.advance_generation();
         self.scene.clear();
 
@@ -614,6 +622,7 @@ impl Renderer<'_> {
             let mut pass = FrameLayoutPass {
                 sctx: &ctx,
                 lctx: &mut LayoutContext {
+                    log: &log,
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
                 },

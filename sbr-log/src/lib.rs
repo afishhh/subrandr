@@ -1,9 +1,11 @@
 use std::{
-    cell::UnsafeCell,
-    collections::HashSet,
+    cell::{Cell, UnsafeCell},
+    collections::{HashMap, HashSet},
     ffi::{c_char, c_void},
     hash::{Hash, Hasher},
     io::IsTerminal,
+    marker::PhantomData,
+    num::NonZero,
     str::FromStr,
     sync::{Arc, Mutex, OnceLock},
 };
@@ -119,10 +121,40 @@ pub trait Logger: sealed::Sealed {
     fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SpanId(NonZero<u32>);
+
+impl SpanId {
+    const ONE: Self = Self(NonZero::new(1).unwrap());
+
+    fn next(self) -> Self {
+        NonZero::new(self.0.get().wrapping_add(1)).map_or(Self::ONE, Self)
+    }
+}
+
+#[derive(Debug)]
+struct SpanState {
+    start: std::time::Instant,
+    level: Level,
+    source: Box<str>,
+    parent: Option<SpanId>,
+    refcnt: NonZero<u32>,
+}
+
 #[derive(Debug)]
 struct RootLoggerImpl {
     callback: MessageCallback,
+    spans: HashMap<SpanId, SpanState>,
+    next_span_id: SpanId,
 }
+
+impl Logger for RootLoggerImpl {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
+        self.callback.log(level, fmt, module_path)
+    }
+}
+
+impl sealed::Sealed for RootLoggerImpl {}
 
 #[derive(Debug)]
 pub struct RootLogger {
@@ -134,6 +166,8 @@ impl RootLogger {
         Self {
             root: Arc::new(Mutex::new(RootLoggerImpl {
                 callback: MessageCallback::Default,
+                spans: HashMap::new(),
+                next_span_id: SpanId::ONE,
             })),
         }
     }
@@ -141,15 +175,24 @@ impl RootLogger {
     pub fn set_message_callback(&mut self, callback: MessageCallback) {
         self.root.lock().unwrap().callback = callback;
     }
+
+    pub fn new_ctx(&self) -> LogContext {
+        LogContext {
+            root: self.root.clone(),
+            current_span: Cell::new(None),
+        }
+    }
 }
 
 impl Logger for RootLogger {
-    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
-        self.root
-            .lock()
-            .unwrap()
-            .callback
-            .log(level, fmt, module_path)
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().callback.log(level, fmt, source)
+    }
+}
+
+impl AsLogger for RootLoggerImpl {
+    fn as_logger(&self) -> &impl Logger {
+        self
     }
 }
 
@@ -164,6 +207,113 @@ impl Drop for RootLogger {
                 self,
                 "Logger dropped with unexpected references! strong={strong} weak={weak}"
             )
+        }
+    }
+}
+
+impl RootLoggerImpl {
+    fn insert_new_span(
+        &mut self,
+        start: std::time::Instant,
+        level: Level,
+        source: Box<str>,
+        parent: Option<SpanId>,
+    ) -> Option<SpanId> {
+        let id = self.next_span_id;
+        self.next_span_id = id.next();
+        match self.spans.entry(id) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                warn!(self, "Logger span id wrapped around to {id:?} and encountered live span, something is leaking spans!");
+                None
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(SpanState {
+                    start,
+                    level,
+                    source,
+                    parent,
+                    refcnt: const { NonZero::new(1).unwrap() },
+                });
+                Some(id)
+            }
+        }
+    }
+}
+
+pub struct LogContext {
+    root: Arc<Mutex<RootLoggerImpl>>,
+    current_span: Cell<Option<SpanId>>,
+}
+
+impl LogContext {
+    #[doc(hidden)]
+    pub fn _enter_span(
+        &self,
+        level: Level,
+        fmt: std::fmt::Arguments,
+        source: &str,
+    ) -> EnteredSpan<'_> {
+        let start = std::time::Instant::now();
+        let mut root = self.root.lock().unwrap();
+        let inner = root
+            .insert_new_span(start, level, source.into(), self.current_span.get())
+            .map(|id| {
+                self.current_span.set(Some(id));
+                root.log(level, format_args!("[{}] {}", id.0, fmt), source);
+
+                EnteredSpanInner {
+                    id,
+                    root: self.root.clone(),
+                    _unsend_unsync: PhantomData,
+                }
+            });
+
+        EnteredSpan { inner, ctx: self }
+    }
+}
+
+struct EnteredSpanInner {
+    id: SpanId,
+    root: Arc<Mutex<RootLoggerImpl>>,
+    _unsend_unsync: PhantomData<*mut ()>,
+}
+
+pub struct EnteredSpan<'ctx> {
+    inner: Option<EnteredSpanInner>,
+    ctx: &'ctx LogContext,
+}
+
+impl Drop for EnteredSpan<'_> {
+    fn drop(&mut self) {
+        let Some(inner) = self.inner.take() else {
+            return;
+        };
+
+        let mut root = inner.root.lock().unwrap();
+        let mut entry = match root.spans.entry(inner.id) {
+            std::collections::hash_map::Entry::Occupied(occupied) => occupied,
+            std::collections::hash_map::Entry::Vacant(_) => {
+                unreachable!("Live span must have a corresponding state in root logger")
+            }
+        };
+
+        let state = entry.get_mut();
+        self.ctx.current_span.set(state.parent);
+        match NonZero::new(state.refcnt.get() - 1) {
+            Some(new_refcnt) => state.refcnt = new_refcnt,
+            None => {
+                let state = entry.remove();
+                let end = std::time::Instant::now();
+                root.log(
+                    state.level,
+                    format_args!(
+                        "[{}] took {}ms",
+                        inner.id.0,
+                        (end - state.start).as_secs_f32() * 1000.
+                    ),
+                    &state.source,
+                );
+            }
         }
     }
 }

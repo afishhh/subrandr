@@ -191,6 +191,7 @@ impl RootLogger {
         LogContext {
             root: self.root.clone(),
             current_span: Cell::new(None),
+            current_depth: Cell::new(0),
         }
     }
 }
@@ -257,13 +258,18 @@ impl RootLoggerImpl {
 pub struct LogContext {
     root: Arc<Mutex<RootLoggerImpl>>,
     current_span: Cell<Option<SpanId>>,
+    current_depth: Cell<u32>,
 }
 
 impl Logger for LogContext {
     const SUPPORTS_SPANS: bool = true;
 
     fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
-        self.root.lock().unwrap().log(level, fmt, source);
+        self.root.lock().unwrap().log(
+            level,
+            format_args!("{}{}", Indent(self.current_depth.get()), fmt),
+            source,
+        );
     }
 
     fn span(&self, level: Level, fmt: std::fmt::Arguments, source: &str) -> EnteredSpan<'_> {
@@ -273,7 +279,13 @@ impl Logger for LogContext {
             .insert_new_span(start, level, source.into(), self.current_span.get())
             .map(|id| {
                 self.current_span.set(Some(id));
-                root.log(level, format_args!("[{}] {}", id.0, fmt), source);
+                let depth = self.current_depth.get();
+                self.current_depth.set(depth + 1);
+                root.log(
+                    level,
+                    format_args!("[ {}]{} {}", id.0, Indent(depth), fmt),
+                    source,
+                );
 
                 EnteredSpanInner {
                     id,
@@ -323,6 +335,8 @@ impl Drop for EnteredSpan<'_> {
 
         let state = entry.get_mut();
         inner.ctx.current_span.set(state.parent);
+        let depth = inner.ctx.current_depth.get() - 1;
+        inner.ctx.current_depth.set(depth);
         match NonZero::new(state.refcnt.get() - 1) {
             Some(new_refcnt) => state.refcnt = new_refcnt,
             None => {
@@ -331,8 +345,9 @@ impl Drop for EnteredSpan<'_> {
                 root.log(
                     state.level,
                     format_args!(
-                        "[{}] took {:.3}ms",
+                        "[/{}]{} Span exited in {:.3}ms",
                         inner.id.0,
+                        Indent(depth),
                         (end - state.start).as_secs_f32() * 1000.
                     ),
                     &state.source,

@@ -5,7 +5,7 @@ use super::{
     FixedL, FragmentBox, InlineLayoutError, LayoutConstraints, LayoutContext, Vec2L,
 };
 use crate::style::{
-    computed::{BaselineSource, HorizontalAlignment},
+    computed::{BaselineSource, HorizontalAlignment, ToPhysicalPixels},
     ComputedStyle,
 };
 

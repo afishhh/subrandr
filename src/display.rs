@@ -12,7 +12,7 @@ use crate::{
         inline::{InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
         FixedL, FragmentBox, Point2L, Rect2L,
     },
-    style::ComputedStyle,
+    style::{computed::ToPhysicalPixels, ComputedStyle},
     text::{self, FontMetrics, GlyphCache},
 };
 
@@ -21,11 +21,13 @@ use decoration::*;
 
 pub struct DisplayPass<'r> {
     pub output: &'r mut Vec<SceneNode>,
+    dpi: u32,
     decoration_tracker: DecorationTracker,
 }
 
 struct DisplayContext<'c> {
     output: &'c mut Vec<SceneNode>,
+    dpi: u32,
     decoration_ctx: DecorationContext<'c>,
 }
 
@@ -35,9 +37,10 @@ fn round_y(mut p: Point2L) -> Point2L {
 }
 
 impl<'r> DisplayPass<'r> {
-    pub fn new(output: &'r mut Vec<SceneNode>) -> Self {
+    pub fn new(output: &'r mut Vec<SceneNode>, dpi: u32) -> Self {
         Self {
             output,
+            dpi,
             decoration_tracker: DecorationTracker::new(),
         }
     }
@@ -45,6 +48,7 @@ impl<'r> DisplayPass<'r> {
     fn root_ctx(&mut self) -> DisplayContext<'_> {
         DisplayContext {
             output: &mut *self.output,
+            dpi: self.dpi,
             decoration_ctx: self.decoration_tracker.root(),
         }
     }
@@ -140,18 +144,19 @@ impl DisplayContext<'_> {
         // TODO: This should also draw an offset underline I think and possibly strike through?
         for shadow in fragment.style.text_shadows().iter().rev() {
             if shadow.color.a > 0 {
-                let stddev = if shadow.blur_radius > I26Dot6::from_quotient(1, 16) {
+                let blur_radius = shadow.blur_radius.to_physical_pixels(self.dpi);
+                let stddev = if blur_radius > I26Dot6::from_quotient(1, 16) {
                     // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
                     // A non-zero blur radius indicates that the resulting shadow should be blurred,
                     // ... by applying to the shadow a Gaussian blur with a standard deviation
                     // equal to half the blur radius.
-                    shadow.blur_radius / 2
+                    blur_radius / 2
                 } else {
                     FixedL::ZERO
                 };
 
                 self.push_text(
-                    round_y(pos + shadow.offset),
+                    round_y(pos + shadow.offset.to_physical_pixels(self.dpi)),
                     fragment,
                     Some(stddev.into_f32()),
                     shadow.color,
@@ -201,6 +206,7 @@ impl DisplayContext<'_> {
     ) -> DisplayContext<'_> {
         DisplayContext {
             output: &mut *self.output,
+            dpi: self.dpi,
             decoration_ctx: self
                 .decoration_ctx
                 .push_decorations(style, font_metrics_if_inline),
@@ -210,6 +216,7 @@ impl DisplayContext<'_> {
     fn suspend_decorations(&mut self) -> DisplayContext<'_> {
         DisplayContext {
             output: &mut *self.output,
+            dpi: self.dpi,
             decoration_ctx: self.decoration_ctx.suspend_active(),
         }
     }

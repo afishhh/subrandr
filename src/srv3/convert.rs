@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
 use rasterize::color::BGRA8;
 use util::{
-    math::{I16Dot16, I26Dot6, Vec2f},
+    math::{I16Dot16, I26Dot6, Vec2},
     rc::Rc,
 };
 
@@ -145,16 +145,11 @@ fn font_size_to_pixels(size: u16) -> f32 {
 trait SubtitleContextCssExt {
     // 1px = 1/96in
     fn pixels_to_css(&self, physical_pixels: f32) -> f32;
-    fn pixels_from_css(&self, css_pixels: f32) -> f32;
 }
 
 impl SubtitleContextCssExt for SubtitleContext {
     fn pixels_to_css(&self, physical_pixels: f32) -> f32 {
         physical_pixels / self.pixel_scale()
-    }
-
-    fn pixels_from_css(&self, css_pixels: f32) -> f32 {
-        css_pixels * self.pixel_scale()
     }
 }
 
@@ -166,60 +161,57 @@ pub struct Srv3TextShadow {
 
 impl Srv3TextShadow {
     pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
-        let a = font_scale_from_ctx(ctx) / 32.0;
-        let e = a.max(1.0);
-        let l = (2.0 * a).max(1.0);
-        let mut t = (3.0 * a).max(1.0);
-        let c = (5.0 * a).max(1.0);
+        let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
+        let l1 = Length::from_pixels((scale).max(FixedL::ONE));
+        let l2 = Length::from_pixels((scale * 2).max(FixedL::ONE));
+        let l3 = Length::from_pixels((scale * 3).max(FixedL::ONE));
+        let l5 = Length::from_pixels((scale * 5).max(FixedL::ONE));
 
         match self.kind {
             EdgeType::None => (),
             EdgeType::HardShadow => {
-                // NOTE: If `text-shadow` is ever updated to use logical pixels instead of device
-                //       pixels this code should be updated.
-                //       Currently this increases the step on `dpi >= 144` but in that case
-                //       it would have to do the opposite and increase it if `dpi < 144`.
-                let step = (ctx.dpi >= 144) as i32 as f32 * 0.5 + 0.5;
-                let mut x = e;
-                while x <= t {
+                let step = Length::HALF * (ctx.dpi < 144) as i32 + Length::HALF;
+                let mut x = l1;
+                while x <= l3 {
                     out.push(TextShadow {
-                        offset: Vec2f::new(ctx.pixels_from_css(x), ctx.pixels_from_css(x)),
-                        blur_radius: I26Dot6::ZERO,
+                        offset: Vec2::new(x, x),
+                        blur_radius: Length::ZERO,
                         color: self.color,
                     });
                     x += step;
                 }
             }
             EdgeType::Bevel => {
-                let offset = Vec2f::new(ctx.pixels_from_css(e), ctx.pixels_from_css(e));
+                let offset = Vec2::new(l1, l1);
                 out.push(TextShadow {
                     offset,
-                    blur_radius: I26Dot6::ZERO,
+                    blur_radius: Length::ZERO,
                     color: self.color,
                 });
                 out.push(TextShadow {
                     offset: -offset,
-                    blur_radius: I26Dot6::ZERO,
+                    blur_radius: Length::ZERO,
                     color: self.color,
                 });
             }
             EdgeType::Glow => out.extend(std::iter::repeat_n(
                 TextShadow {
-                    offset: Vec2f::ZERO,
-                    blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(l)),
+                    offset: Vec2::ZERO,
+                    blur_radius: l2,
                     color: self.color,
                 },
                 5,
             )),
             EdgeType::SoftShadow => {
-                let offset = Vec2f::new(ctx.pixels_from_css(l), ctx.pixels_from_css(l));
-                while t <= c {
+                let offset = Vec2::new(l2, l2);
+                let mut x = l3;
+                while x <= l5 {
                     out.push(TextShadow {
                         offset,
-                        blur_radius: I26Dot6::from_f32(ctx.pixels_from_css(t)),
+                        blur_radius: x,
                         color: self.color,
                     });
-                    t += a;
+                    x += Length::from_pixels(scale);
                 }
             }
         }

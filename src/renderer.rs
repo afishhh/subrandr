@@ -649,7 +649,7 @@ impl Renderer<'_> {
         }
 
         {
-            let mut pass = DisplayPass::new(&mut self.scene);
+            let mut pass = DisplayPass::new(&mut self.scene, ctx.dpi);
 
             for &(pos, ref fragment) in &fragments {
                 pass.display_block_container_fragment(pos, fragment);

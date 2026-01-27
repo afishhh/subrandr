@@ -11,7 +11,10 @@ use crate::{
         BoxFragmentationPart,
     },
     style::{
-        computed::{self, FontSlant, HorizontalAlignment, InlineSizing, WhiteSpaceCollapse},
+        computed::{
+            self, FontSlant, HorizontalAlignment, InlineSizing, ToPhysicalPixels,
+            WhiteSpaceCollapse,
+        },
         ComputedStyle,
     },
     text::{

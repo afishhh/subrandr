@@ -2,7 +2,10 @@ use std::fmt::Debug;
 
 use util::math::{BoolExt, I26Dot6, Point2, Rect2, Vec2};
 
-use crate::{style::ComputedStyle, text::FontDb};
+use crate::{
+    style::{computed::ToPhysicalPixels, ComputedStyle},
+    text::FontDb,
+};
 
 pub type FixedL = I26Dot6;
 pub type Point2L = Point2<FixedL>;

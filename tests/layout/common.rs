@@ -304,7 +304,7 @@ pub fn check_inline(
         let fragment =
             layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
 
-        DisplayPass::new(output).display_inline_content_fragment(pos, &fragment);
+        DisplayPass::new(output, dpi).display_inline_content_fragment(pos, &fragment);
     })
 }
 
@@ -318,7 +318,7 @@ pub fn check_block(
     check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
         let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
 
-        DisplayPass::new(output).display_block_container_fragment(pos, &fragment);
+        DisplayPass::new(output, dpi).display_block_container_fragment(pos, &fragment);
     })
 }
 

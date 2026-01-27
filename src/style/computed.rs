@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
 
 use rasterize::color::BGRA8;
-use util::math::{I26Dot6, Number, Signed, Vec2f};
+use util::math::{Number, Signed, Vec2};
 
 use crate::{layout::FixedL, text::OpenTypeTag};
+
+pub trait ToPhysicalPixels {
+    type Output;
+
+    fn to_physical_pixels(self, dpi: u32) -> Self::Output;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -11,9 +17,9 @@ pub struct Length(FixedL);
 
 impl Length {
     pub const ONE: Self = Self(FixedL::ONE);
+    pub const HALF: Length = Length::from_pixels(FixedL::HALF);
     pub const ZERO: Self = Self(FixedL::ZERO);
 
-    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
     pub const fn from_pixels(pixels: FixedL) -> Self {
         Self(pixels)
     }
@@ -22,8 +28,12 @@ impl Length {
         // 96 / 72 = 4/3
         Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
     }
+}
 
-    pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
+impl ToPhysicalPixels for Length {
+    type Output = FixedL;
+
+    fn to_physical_pixels(self, dpi: u32) -> Self::Output {
         self.0 * dpi as i32 / 72
     }
 }
@@ -75,6 +85,17 @@ impl Number for Length {
 
 impl Signed for Length {}
 
+impl ToPhysicalPixels for Vec2<Length> {
+    type Output = Vec2<FixedL>;
+
+    fn to_physical_pixels(self, dpi: u32) -> Self::Output {
+        Vec2::new(
+            self.x.to_physical_pixels(dpi),
+            self.y.to_physical_pixels(dpi),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
 
@@ -108,8 +129,8 @@ pub enum Ruby {
 
 #[derive(Debug, Clone)]
 pub struct TextShadow {
-    pub offset: Vec2f,
-    pub blur_radius: I26Dot6,
+    pub offset: Vec2<Length>,
+    pub blur_radius: Length,
     pub color: BGRA8,
 }
 

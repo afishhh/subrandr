@@ -2,48 +2,51 @@ use rasterize::color::BGRA8;
 use util::{math::Vec2, rc_static};
 
 use super::common::*;
-use crate::{layout::FixedL, style::computed::TextShadow};
+use crate::{
+    layout::FixedL,
+    style::computed::{Length, TextShadow},
+};
 
 test_define_style! {
     .green_shadow {
         text_shadows: rc_static![[TextShadow {
-            offset: Vec2::new(5.0, 5.0),
-            blur_radius: FixedL::ZERO,
+            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
+            blur_radius: Length::ZERO,
             color: BGRA8::GREEN,
         }]],
     }
     .green_shadow_blurred {
         text_shadows: rc_static![[TextShadow {
-            offset: Vec2::new(5.0, 5.0),
-            blur_radius: FixedL::new(3),
+            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
+            blur_radius: Length::from_pixels(FixedL::new(3)),
             color: BGRA8::GREEN,
         }]],
     }
     .blue_shadow_blurred {
         text_shadows: rc_static![[TextShadow {
-            offset: Vec2::new(5.0, 5.0),
-            blur_radius: FixedL::new(3),
+            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
+            blur_radius: Length::from_pixels(FixedL::new(3)),
             color: BGRA8::BLUE,
         }]],
     }
     .many_shadows {
         text_shadows: rc_static![[
             TextShadow {
-                offset: Vec2::new(3.0, 3.0),
-                blur_radius: FixedL::ZERO,
+                offset: Vec2::splat(Length::from_pixels(FixedL::new(3))),
+                blur_radius: Length::ZERO,
                 color: BGRA8::RED,
             },
             TextShadow {
-                offset: Vec2::new(5.0, 5.0),
-                blur_radius: FixedL::new(3),
+                offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
+                blur_radius: Length::from_pixels(FixedL::new(3)),
                 color: BGRA8::GREEN,
             },
             TextShadow {
-                offset: Vec2::new(7.0, 7.0),
-                blur_radius: FixedL::ZERO,
+                offset: Vec2::splat(Length::from_pixels(FixedL::new(7))),
+                blur_radius: Length::ZERO,
                 color: BGRA8::BLUE,
             },
-    ]],
+        ]],
     }
 }
 

@@ -125,10 +125,10 @@ fn calculate_font_scale(
 
 fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
     calculate_font_scale(
-        ctx.pixels_to_css(ctx.video_width.into_f32()),
-        ctx.pixels_to_css(ctx.video_height.into_f32()),
-        ctx.pixels_to_css(ctx.player_width().into_f32()),
-        ctx.pixels_to_css(ctx.player_height().into_f32()),
+        Length::from_physical_pixels(ctx.video_width, ctx.dpi).to_f32(),
+        Length::from_physical_pixels(ctx.video_height, ctx.dpi).to_f32(),
+        Length::from_physical_pixels(ctx.player_width(), ctx.dpi).to_f32(),
+        Length::from_physical_pixels(ctx.player_height(), ctx.dpi).to_f32(),
     )
 }
 
@@ -140,17 +140,6 @@ fn font_size_to_pixels(size: u16) -> f32 {
     //       If we start doing so the correct transformation seems to be
     //       `if of == 0 || of == 2 { c *= 0.8 }`.
     c
-}
-
-trait SubtitleContextCssExt {
-    // 1px = 1/96in
-    fn pixels_to_css(&self, physical_pixels: f32) -> f32;
-}
-
-impl SubtitleContextCssExt for SubtitleContext {
-    fn pixels_to_css(&self, physical_pixels: f32) -> f32 {
-        physical_pixels / self.pixel_scale()
-    }
 }
 
 #[derive(Debug, Clone)]

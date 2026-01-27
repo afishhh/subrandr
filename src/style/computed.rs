@@ -20,6 +20,10 @@ impl Length {
     pub const HALF: Length = Length::from_pixels(FixedL::HALF);
     pub const ZERO: Self = Self(FixedL::ZERO);
 
+    pub fn from_physical_pixels(pixels: FixedL, dpi: u32) -> Self {
+        Self(pixels * 72 / dpi as i32)
+    }
+
     pub const fn from_pixels(pixels: FixedL) -> Self {
         Self(pixels)
     }
@@ -27,6 +31,10 @@ impl Length {
     pub const fn from_points(pixels: FixedL) -> Self {
         // 96 / 72 = 4/3
         Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
+    }
+
+    pub const fn to_f32(self) -> f32 {
+        self.0.into_f32()
     }
 }
 

@@ -46,13 +46,12 @@ jobs:
         include:
           - name: x86_64 Linux
             image: ubuntu-latest
-          # FIXME: Started to fail all of a sudden https://github.com/afishhh/subrandr/actions/runs/16400428460/job/46339036503?pr=35#step:5:74
-          # - name: i686 Linux
-          #   image: ubuntu-latest
-          #   cross-arch: i686
-          #   rustc-cross-target: i686-unknown-linux-gnu
-          #   extra-cflags: -m32
-          #   extra-packages: gcc-multilib
+          - name: i686 Linux
+            image: ubuntu-latest
+            cross-arch: i686
+            rustc-cross-target: i686-unknown-linux-gnu
+            extra-cflags: -m32
+            extra-packages: gcc-multilib
           - name: aarch64 Linux
             image: ubuntu-24.04-arm
     steps:
@@ -122,10 +121,9 @@ jobs:
           - name: x86_64 Windows
             image: windows-latest
             msystem: MINGW64
-          # FIXME: aarch64 is broken because implib produces garbage implibs for it
-          # - name: aarch64 Windows
-          #   image: windows-11-arm
-          #   msystem: CLANGARM64
+          - name: aarch64 Windows
+            image: windows-11-arm
+            msystem: CLANGARM64
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
@@ -141,6 +139,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
       - shell: msys2 {0}
-        run: cargo clippy --workspace --exclude sbr-overlay --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude sbr-overlay --exclude xtask --all-features -- -D warnings
+      - shell: msys2 {0}
+        # Similar to above but it can't be tested with `--all-features` because ring doesn't
+        # even compile on aarch64 Windows apparently.
+        run: cargo clippy -p xtask --all-targets -- -D warnings
       - shell: msys2 {0}
         run: ./ci/c_sanity_check.sh

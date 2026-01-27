@@ -1,9 +1,79 @@
-use std::{collections::BTreeMap, ops::Add};
+use std::collections::BTreeMap;
 
 use rasterize::color::BGRA8;
-use util::math::{I26Dot6, Vec2f};
+use util::math::{I26Dot6, Number, Signed, Vec2f};
 
 use crate::{layout::FixedL, text::OpenTypeTag};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Length(FixedL);
+
+impl Length {
+    pub const ONE: Self = Self(FixedL::ONE);
+    pub const ZERO: Self = Self(FixedL::ZERO);
+
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+    pub const fn from_pixels(pixels: FixedL) -> Self {
+        Self(pixels)
+    }
+
+    pub const fn from_points(pixels: FixedL) -> Self {
+        // 96 / 72 = 4/3
+        Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
+    }
+
+    pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
+        self.0 * dpi as i32 / 72
+    }
+}
+
+macro_rules! impl_length_op {
+    ($trait: ident, $fun: ident, $trait_assign: ident, $fun_assign: ident, $op: tt, $op_assign: tt, $rhs_ty: ty, $($rhs_field: tt)*) => {
+        impl std::ops::$trait<$rhs_ty> for Length {
+            type Output = Self;
+
+            #[track_caller]
+            fn $fun(self, rhs: $rhs_ty) -> Self::Output {
+                Self(self.0 $op rhs $($rhs_field)*)
+            }
+        }
+
+        impl std::ops::$trait_assign<$rhs_ty> for Length {
+            #[track_caller]
+            fn $fun_assign(&mut self, rhs: $rhs_ty) {
+                self.0 $op_assign rhs $($rhs_field)*;
+            }
+        }
+    };
+}
+
+impl_length_op!(Add, add, AddAssign, add_assign, +, +=, Self, .0);
+impl_length_op!(Sub, sub, SubAssign, sub_assign, -, -=, Self, .0);
+impl_length_op!(Mul, mul, MulAssign, mul_assign, *, *=, Self, .0);
+impl_length_op!(Div, div, DivAssign, div_assign, /, /=, Self, .0);
+impl_length_op!(Mul, mul, MulAssign, mul_assign, *, *=, i32,);
+impl_length_op!(Div, div, DivAssign, div_assign, /, /=, i32,);
+impl_length_op!(Mul, mul, MulAssign, mul_assign, *, *=, f32,);
+impl_length_op!(Div, div, DivAssign, div_assign, /, /=, f32,);
+
+impl std::ops::Neg for Length {
+    type Output = Self;
+
+    #[track_caller]
+    fn neg(self) -> Self::Output {
+        Self(-self.0)
+    }
+}
+
+impl Number for Length {
+    const MIN: Self = Self(FixedL::MIN);
+    const MAX: Self = Self(FixedL::MAX);
+    const ONE: Self = Self::ONE;
+    const ZERO: Self = Self::ZERO;
+}
+
+impl Signed for Length {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
@@ -63,36 +133,6 @@ impl TextDecorations {
 impl Default for TextDecorations {
     fn default() -> Self {
         Self::NONE
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-pub struct Length(FixedL);
-
-impl Length {
-    pub const ZERO: Self = Self(FixedL::ZERO);
-
-    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
-    pub const fn from_pixels(pixels: FixedL) -> Self {
-        Self(pixels)
-    }
-
-    pub const fn from_points(pixels: FixedL) -> Self {
-        // 96 / 72 = 4/3
-        Self(FixedL::from_raw(pixels.into_raw() + pixels.into_raw() / 3))
-    }
-
-    pub fn to_physical_pixels(self, dpi: u32) -> FixedL {
-        self.0 * dpi as i32 / 72
-    }
-}
-
-impl Add for Length {
-    type Output = Length;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
     }
 }
 

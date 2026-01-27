@@ -79,10 +79,12 @@ macro_rules! define_fixed_for_type {
                 Self(value << P)
             }
 
+            #[track_caller]
             pub const fn from_quotient(numerator: $type, denominator: $type) -> Self {
                 Self::from_wide_quotient(numerator as $wide, denominator as $wide)
             }
 
+            #[track_caller]
             pub const fn from_wide_quotient(numerator: $wide, denominator: $wide) -> Self {
                 Self(((numerator << P) / denominator) as $type)
             }

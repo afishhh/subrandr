@@ -7,7 +7,10 @@ use std::{
     sync::Arc,
 };
 
-use rasterize::{PixelFormat, Rasterizer};
+use rasterize::{
+    color::{Premultiplied, BGRA8},
+    PixelFormat, Rasterizer,
+};
 use text_sys::*;
 use thiserror::Error;
 use util::math::{I16Dot16, I26Dot6, Vec2};
@@ -643,6 +646,8 @@ pub enum GlyphRenderError {
     ConversionToBitmapFailed(FT_Glyph_Format),
     #[error("Unsupported pixel mode {0}")]
     UnsupportedBitmapFormat(std::ffi::c_uchar),
+    #[error("Unsupported (negative) bitmap pitch {0}")]
+    NegativePitch(std::ffi::c_int),
 }
 
 impl FontImpl for Font {
@@ -735,17 +740,13 @@ impl FontImpl for Font {
             } else {
                 I26Dot6::ONE
             };
-            let scale6 = scale.into_raw();
 
             // I don't think this can happen but let's be safe
             if (*glyph).format != FT_GLYPH_FORMAT_BITMAP {
                 return Err(GlyphRenderError::ConversionToBitmapFailed((*glyph).format));
             }
 
-            let mut bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
             let bitmap = &(*glyph).bitmap;
-            let scaled_width = (bitmap.width * scale6 as u32) >> 6;
-            let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
 
             if bitmap.width == 0 || bitmap.rows == 0 {
                 return Ok(SingleGlyphBitmap {
@@ -758,55 +759,90 @@ impl FontImpl for Font {
                 });
             };
 
-            // FIXME: This isn't really fully accurate since we don't adjust
-            //        our billinear scaling for the lost fractional part here.
-            if scale6 != 64 {
-                bitmap_offset.x *= scale6;
-                bitmap_offset.x /= 64;
-                bitmap_offset.y *= scale6;
-                bitmap_offset.y /= 64;
+            let scaled_width = (bitmap.width * scale.into_raw() as u32) >> 6;
+            let scaled_height = (bitmap.rows * scale.into_raw() as u32) >> 6;
+            let mut bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
+            bitmap_offset.x = (bitmap_offset.x * scale.into_raw()) / 64;
+            bitmap_offset.y = (bitmap_offset.y * scale.into_raw()) / 64;
+
+            enum PixelMode {
+                Mono8,
+                Bgra8,
             }
 
             let pixel_mode = match bitmap.pixel_mode.into() {
-                FT_PIXEL_MODE_GRAY => CopyPixelMode::Mono8,
-                FT_PIXEL_MODE_BGRA => CopyPixelMode::Bgra32,
+                FT_PIXEL_MODE_GRAY => PixelMode::Mono8,
+                FT_PIXEL_MODE_BGRA => PixelMode::Bgra8,
                 _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
             };
 
+            // I have never seen this and have no idea how it works.
+            // Better to error out than do garbage memory access and likely crash.
+            if bitmap.pitch < 0 {
+                return Err(GlyphRenderError::NegativePitch(bitmap.pitch));
+            }
+
             let texture = rasterizer.create_packed_texture_mapped(
                 Vec2::new(scaled_width, scaled_height),
-                if matches!(pixel_mode, CopyPixelMode::Bgra32) {
+                if matches!(pixel_mode, PixelMode::Bgra8) {
                     PixelFormat::Bgra
                 } else {
                     PixelFormat::Mono
                 },
                 Box::new(|mut target| {
-                    // TODO: The software rasterizer now supports texture scaling.
-                    //       However that cannot really be used by this code because it expects
-                    //       sane textures with a positive stride (and FreeType's can be negative).
-                    //       I think I will defer switching to that here until we start using
-                    //       skrifa for parsing fonts.
-                    let stride = target.stride() as usize;
-                    macro_rules! copy_font_bitmap_with {
-                        ($pixel_mode: expr) => {
-                            copy_font_bitmap::<$pixel_mode>(
-                                bitmap.buffer.cast_const(),
-                                bitmap.pitch as isize,
-                                bitmap.width as u32,
-                                bitmap.rows as u32,
-                                target.buffer_mut(),
-                                stride,
-                                scale,
-                                scaled_width,
-                                scaled_height,
-                            )
-                        };
-                    }
+                    let mut src_stride = bitmap.pitch.unsigned_abs() as usize;
+                    let src_width = bitmap.width;
+                    let src_height = bitmap.rows;
+                    let src_off = Vec2::ZERO;
+                    let src_size = Vec2::new(src_width as i32, src_height as i32);
+                    let src = std::slice::from_raw_parts(
+                        bitmap.buffer.cast_const(),
+                        src_stride * src_height as usize,
+                    );
 
+                    let sw = rasterize::sw::Rasterizer::new();
                     match pixel_mode {
-                        CopyPixelMode::Mono8 => copy_font_bitmap_with!(COPY_PIXEL_MODE_MONO8),
-                        CopyPixelMode::Bgra32 => copy_font_bitmap_with!(COPY_PIXEL_MODE_BGRA32),
-                    }
+                        PixelMode::Mono8 => {
+                            sw.scale_mono_raw(
+                                target, src, src_width, src_height, src_stride, src_off, src_size,
+                            );
+                        }
+                        PixelMode::Bgra8 => {
+                            assert!(
+                                bitmap.buffer.cast::<BGRA8>().is_aligned(),
+                                "FreeType gave us an unaligned BGRA8 bitmap"
+                            );
+                            assert!(
+                                src_stride % 4 == 0,
+                                "FreeType gave us a BGRA8 bitmap with an unaligned stride"
+                            );
+                            src_stride /= 4;
+
+                            let width = target.width() / 4;
+                            let height = target.height();
+                            let stride = target.stride() / 4;
+                            let target = rasterize::sw::RenderTargetView::new(
+                                std::slice::from_raw_parts_mut(
+                                    target
+                                        .buffer_mut()
+                                        .as_mut_ptr()
+                                        .cast::<MaybeUninit<Premultiplied<BGRA8>>>(),
+                                    height as usize * stride as usize,
+                                ),
+                                width,
+                                height,
+                                stride,
+                            );
+                            let src = std::slice::from_raw_parts(
+                                src.as_ptr().cast::<Premultiplied<BGRA8>>(),
+                                src.len() / 4,
+                            );
+
+                            sw.scale_bgra_raw(
+                                target, src, src_width, src_height, src_stride, src_off, src_size,
+                            );
+                        }
+                    };
                 }),
             );
 
@@ -814,120 +850,6 @@ impl FontImpl for Font {
                 offset: bitmap_offset,
                 texture,
             })
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum CopyPixelMode {
-    Mono8 = 0,
-    Bgra32 = 1,
-}
-
-const COPY_PIXEL_MODE_MONO8: u8 = CopyPixelMode::Mono8 as u8;
-const COPY_PIXEL_MODE_BGRA32: u8 = CopyPixelMode::Bgra32 as u8;
-
-fn copy_font_bitmap<const PIXEL_MODE: u8>(
-    input_data: *const u8,
-    input_stride: isize,
-    input_width: u32,
-    input_height: u32,
-    out_data: &mut [MaybeUninit<u8>],
-    out_stride: usize,
-    scale: I26Dot6,
-    out_width: u32,
-    out_height: u32,
-) {
-    const { assert!(PIXEL_MODE < 2) };
-
-    let pixel_width: u8 = match PIXEL_MODE {
-        COPY_PIXEL_MODE_MONO8 => 1,
-        COPY_PIXEL_MODE_BGRA32 => 4,
-        _ => unreachable!(),
-    };
-
-    let scale6 = scale.into_raw() as u32;
-    for biy in 0..out_height {
-        for bix in 0..out_width {
-            // TODO: replace with a macro?
-            let get_pixel_values = |x: u32, y: u32| -> [u8; 4] {
-                match PIXEL_MODE {
-                    COPY_PIXEL_MODE_MONO8 => [
-                        unsafe {
-                            input_data
-                                .offset(y as isize * input_stride + x as isize)
-                                .read()
-                        },
-                        0,
-                        0,
-                        0,
-                    ],
-                    COPY_PIXEL_MODE_BGRA32 => unsafe {
-                        input_data
-                            .offset(y as isize * input_stride + (x as isize) * 4)
-                            .cast::<[u8; 4]>()
-                            .read()
-                    },
-                    _ => unreachable!(),
-                }
-            };
-
-            let interpolate_pixel_values = |a: [u8; 4], fa: u32, b: [u8; 4], fb: u32| {
-                let mut r = [0; 4];
-                for i in 0..pixel_width as usize {
-                    r[i] = (((a[i] as u32 * fa) + (b[i] as u32 * fb)) >> 6) as u8;
-                }
-                r
-            };
-
-            let pixel_data = if scale6 == 64 {
-                get_pixel_values(bix, biy)
-            } else {
-                // bilinear scaling
-                let source_pixel_x6 = (bix << 12) / scale6;
-                let source_pixel_y6 = (biy << 12) / scale6;
-
-                let floor_x = source_pixel_x6 >> 6;
-                let floor_y = source_pixel_y6 >> 6;
-                let next_x = floor_x + 1;
-                let next_y = floor_y + 1;
-
-                let factor_floor_x = 64 - (source_pixel_x6 & 0x3F);
-                let factor_next_x = source_pixel_x6 & 0x3F;
-                let factor_floor_y = 64 - (source_pixel_y6 & 0x3F);
-                let factor_next_y = source_pixel_y6 & 0x3F;
-
-                if next_x >= input_width {
-                    if next_y >= input_height {
-                        get_pixel_values(floor_x, floor_y)
-                    } else {
-                        let a = get_pixel_values(floor_x, floor_y);
-                        let b = get_pixel_values(floor_x, next_y);
-                        interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                    }
-                } else if next_y >= input_height {
-                    let a = get_pixel_values(floor_x, floor_y);
-                    let b = get_pixel_values(next_x, floor_y);
-                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                } else {
-                    let a = {
-                        let a = get_pixel_values(floor_x, floor_y);
-                        let b = get_pixel_values(next_x, floor_y);
-                        interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
-                    };
-                    let b = {
-                        let a = get_pixel_values(floor_x, next_y);
-                        let b = get_pixel_values(next_x, next_y);
-                        interpolate_pixel_values(a, factor_floor_x, b, factor_next_x)
-                    };
-                    interpolate_pixel_values(a, factor_floor_y, b, factor_next_y)
-                }
-            };
-
-            let i = bix as usize * pixel_width as usize + biy as usize * out_stride;
-            out_data[i..i + pixel_width as usize].copy_from_slice(unsafe {
-                std::mem::transmute(&pixel_data[..pixel_width as usize])
-            });
         }
     }
 }

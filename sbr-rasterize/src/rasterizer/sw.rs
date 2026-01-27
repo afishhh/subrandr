@@ -648,6 +648,36 @@ impl Rasterizer {
         }
     }
 
+    pub fn scale_mono_raw(
+        &self,
+        target: RenderTargetView<'_, MaybeUninit<u8>>,
+        src: &[u8],
+        src_width: u32,
+        src_height: u32,
+        src_stride: usize,
+        src_off: Vec2<i32>,
+        src_size: Vec2<i32>,
+    ) {
+        scale::scale_mono(
+            target, src, src_stride, src_width, src_height, src_off, src_size,
+        );
+    }
+
+    pub fn scale_bgra_raw(
+        &self,
+        target: RenderTargetView<'_, MaybeUninit<Premultiplied<BGRA8>>>,
+        src: &[Premultiplied<BGRA8>],
+        src_width: u32,
+        src_height: u32,
+        src_stride: usize,
+        src_off: Vec2<i32>,
+        src_size: Vec2<i32>,
+    ) {
+        scale::scale_bgra(
+            target, src, src_stride, src_width, src_height, src_off, src_size,
+        );
+    }
+
     pub fn scale_texture(
         &self,
         texture: &Texture,

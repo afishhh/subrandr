@@ -6,51 +6,214 @@ pub fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
     (((2.0 * PI).sqrt() * 0.375) * sigma).round() as usize
 }
 
-const PADDING_RADIUS: usize = 2;
+pub enum BlurKernel {
+    Box(BoxBlurKernel),
+    Gaussian(GaussianBlurKernel),
+}
 
-#[inline(always)]
-unsafe fn sliding_sum(
-    front: *const f32,
-    back: *mut f32,
-    stride: usize,
-    length: usize,
+pub struct BoxBlurKernel {
     radius: usize,
-    iextent: f32,
-) {
-    let mut sum = 0.0;
-    let mut x = 0;
-    for _ in 0..radius {
-        sum += unsafe { *front.add(x * stride) };
+    reciprocal_extent: f32,
+}
+
+impl BoxBlurKernel {
+    pub fn new(radius: usize) -> Self {
+        Self {
+            radius,
+            reciprocal_extent: ((2 * radius + 1) as f32).recip(),
+        }
     }
 
-    while x < radius {
-        sum += unsafe { *front.add((x + radius) * stride) };
-        unsafe { back.add(x * stride).write(sum * iextent) };
-        x += 1;
+    pub fn from_gaussian_stddev(stddev: f32) -> Self {
+        Self::new(gaussian_sigma_to_box_radius(stddev))
     }
 
-    while x < length - radius {
-        sum += unsafe { *front.add((x + radius) * stride) };
-        unsafe { back.add(x * stride).write(sum * iextent) };
-        sum -= unsafe { *front.add((x - radius) * stride) };
-        x += 1;
-    }
+    #[inline(always)]
+    unsafe fn run(&self, front: *const f32, back: *mut f32, stride: usize, length: usize) {
+        let mut sum = 0.0;
+        let mut x = 0;
+        for _ in 0..self.radius {
+            sum += unsafe { *front.add(x * stride) };
+        }
 
-    while x < length {
-        unsafe { back.add(x * stride).write(sum * iextent) };
-        sum -= unsafe { *front.add((x - radius) * stride) };
-        x += 1;
+        while x < self.radius {
+            sum += unsafe { *front.add((x + self.radius) * stride) };
+            unsafe { back.add(x * stride).write(sum * self.reciprocal_extent) };
+            x += 1;
+        }
+
+        while x < length - self.radius {
+            sum += unsafe { *front.add((x + self.radius) * stride) };
+            unsafe { back.add(x * stride).write(sum * self.reciprocal_extent) };
+            sum -= unsafe { *front.add((x - self.radius) * stride) };
+            x += 1;
+        }
+
+        while x < length {
+            unsafe { back.add(x * stride).write(sum * self.reciprocal_extent) };
+            sum -= unsafe { *front.add((x - self.radius) * stride) };
+            x += 1;
+        }
     }
 }
 
-// TODO: Is using fixed point arithmetic here worth it?
+pub struct GaussianBlurKernel {
+    values: Vec<f32>,
+}
+
+impl GaussianBlurKernel {
+    pub fn new(stddev: f32) -> Self {
+        let radius = (3. * stddev).ceil() as usize;
+        let mut values = Vec::with_capacity(radius + 1);
+
+        let stddev_sq = stddev * stddev;
+        let scale = (2. * PI * stddev_sq).sqrt().recip();
+        let exponent_scale = -(2. * stddev_sq).recip();
+        let sample = |x: f32| scale * (x * x * exponent_scale).exp();
+
+        // We center the kernel at the midpoint of the center pixel so
+        // the first pixel's argument range is going to be [-0.5, 0.5].
+        // Subsequent pixels will follow the same pattern.
+        let mut last = -0.5;
+        let mut last_sample = sample(last);
+        let mut sum = 0.0;
+        for _ in 0..values.capacity() {
+            const TRAPEZOID_INTEGRATION_STEPS: u32 = 2;
+            const STEP: f32 = 1.0 / (TRAPEZOID_INTEGRATION_STEPS as f32);
+            const HALF_STEP: f32 = STEP / 2.;
+
+            let mut result = 0.0;
+            // Do an approximate integration by summing up the area of two trapezoids
+            for _ in 0..TRAPEZOID_INTEGRATION_STEPS {
+                let end = last + STEP;
+                let end_sample = sample(end);
+
+                result += (last_sample + end_sample) * HALF_STEP;
+
+                last_sample = end_sample;
+                last = end;
+            }
+
+            values.push(result);
+            sum += result;
+        }
+
+        // Normalize the kernel to make sure everything sums to one.
+        // Note that we only store one half (as the kernel is symmetrical) so
+        // account for that when calculating our sum.
+        let sum_recip = (sum - values[0] + sum).recip();
+        for value in values.iter_mut() {
+            *value *= sum_recip;
+        }
+
+        Self { values }
+    }
+
+    pub fn radius(&self) -> usize {
+        self.values.len() - 1
+    }
+
+    #[inline(always)]
+    unsafe fn run(&self, front: *const f32, back: *mut f32, stride: usize, length: usize) {
+        let radius = self.radius();
+        let mut cx = 0;
+
+        while cx < radius {
+            let mut result = 0.0;
+            let mut x = 0;
+            let mut vi = cx;
+
+            while vi > 0 {
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+                vi -= 1;
+                x += 1;
+            }
+            result += unsafe { *front.add(x * stride) } * self.values[0];
+            while vi < radius {
+                vi += 1;
+                x += 1;
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+            }
+
+            unsafe { back.add(cx * stride).write(result) };
+            cx += 1;
+        }
+
+        while cx < length - radius {
+            let mut result = 0.0;
+            let mut x = cx;
+            let mut vi = 0;
+
+            while vi < radius {
+                vi += 1;
+                x -= 1;
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+            }
+            x = cx;
+            vi = 0;
+            result += unsafe { *front.add(x * stride) } * self.values[0];
+            while vi < radius {
+                vi += 1;
+                x += 1;
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+            }
+
+            unsafe { back.add(cx * stride).write(result) };
+            cx += 1;
+        }
+
+        while cx < length {
+            let mut result = 0.0;
+            let mut x = cx;
+            let mut vi = 0;
+
+            while vi < radius {
+                vi += 1;
+                x -= 1;
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+            }
+            x = cx;
+            vi = 1;
+            result += unsafe { *front.add(x * stride) } * self.values[0];
+            while vi < length - cx {
+                x += 1;
+                result += unsafe { *front.add(x * stride) } * self.values[vi];
+                vi += 1;
+            }
+
+            unsafe { back.add(cx * stride).write(result) };
+            cx += 1;
+        }
+    }
+}
+
+impl BlurKernel {
+    pub fn radius(&self) -> usize {
+        match self {
+            Self::Box(box_kernel) => box_kernel.radius,
+            Self::Gaussian(gaussian_kernel) => gaussian_kernel.radius(),
+        }
+    }
+
+    pub fn padding(&self) -> usize {
+        2 * self.radius()
+    }
+
+    #[inline(always)]
+    unsafe fn run(&self, front: *const f32, back: *mut f32, stride: usize, length: usize) {
+        match self {
+            Self::Box(box_kernel) => box_kernel.run(front, back, stride, length),
+            Self::Gaussian(gaussian_kernel) => gaussian_kernel.run(front, back, stride, length),
+        }
+    }
+}
+
 pub struct Blurer {
     front: Vec<f32>,
     back: Vec<MaybeUninit<f32>>,
     width: usize,
     height: usize,
-    radius: usize,
-    iextent: f32,
+    kernel: BlurKernel,
 }
 
 impl Blurer {
@@ -60,14 +223,13 @@ impl Blurer {
             back: Vec::new(),
             width: 0,
             height: 0,
-            radius: 0,
-            iextent: 0.0,
+            kernel: BlurKernel::Box(BoxBlurKernel::new(0)),
         }
     }
 
-    pub fn prepare(&mut self, width: usize, height: usize, radius: usize) {
-        let twidth = width + 2 * PADDING_RADIUS * radius;
-        let theight = height + 2 * PADDING_RADIUS * radius;
+    pub fn prepare(&mut self, width: usize, height: usize, kernel: BlurKernel) {
+        let twidth = width + 2 * kernel.padding();
+        let theight = height + 2 * kernel.padding();
         let size = twidth * theight;
 
         self.front.clear();
@@ -76,8 +238,7 @@ impl Blurer {
 
         self.width = twidth;
         self.height = theight;
-        self.radius = radius;
-        self.iextent = ((radius * 2 + 1) as f32).recip();
+        self.kernel = kernel;
     }
 
     unsafe fn swap_buffers(&mut self) {
@@ -97,16 +258,14 @@ impl Blurer {
         );
     }
 
-    pub fn box_blur_horizontal(&mut self) {
+    pub fn blur_horizontal(&mut self) {
         for y in 0..self.height {
             unsafe {
-                sliding_sum(
+                self.kernel.run(
                     self.front.as_ptr().add(y * self.width),
                     self.back.as_mut_ptr().add(y * self.width).cast(),
                     1,
                     self.width,
-                    self.radius,
-                    self.iextent,
                 );
             }
         }
@@ -114,16 +273,14 @@ impl Blurer {
         unsafe { self.swap_buffers() };
     }
 
-    pub fn box_blur_vertical(&mut self) {
+    pub fn blur_vertical(&mut self) {
         for x in 0..self.width {
             unsafe {
-                sliding_sum(
+                self.kernel.run(
                     self.front.as_ptr().add(x),
                     self.back.as_mut_ptr().add(x).cast(),
                     self.width,
                     self.height,
-                    self.radius,
-                    self.iextent,
                 );
             }
         }
@@ -140,7 +297,7 @@ impl Blurer {
     }
 
     pub fn padding(&self) -> usize {
-        PADDING_RADIUS * self.radius
+        self.kernel.padding()
     }
 
     pub fn width(&self) -> usize {

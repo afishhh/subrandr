@@ -15,8 +15,8 @@ use crate::{
 
 mod blit;
 pub(super) mod blur;
+use blur::*;
 mod scale;
-use blur::gaussian_sigma_to_box_radius;
 mod strip;
 pub use strip::*;
 
@@ -689,11 +689,10 @@ impl super::Rasterizer for Rasterizer {
     fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {
         let texture = unwrap_sw_texture(texture);
 
-        self.blurer.prepare(
-            texture.width as usize,
-            texture.height as usize,
-            gaussian_sigma_to_box_radius(blur_sigma),
-        );
+        let kernel = BlurKernel::Box(BoxBlurKernel::from_gaussian_stddev(blur_sigma));
+
+        self.blurer
+            .prepare(texture.width as usize, texture.height as usize, kernel);
 
         let dx = self.blurer.padding() as i32;
         let dy = self.blurer.padding() as i32;
@@ -726,12 +725,12 @@ impl super::Rasterizer for Rasterizer {
             ),
         }
 
-        self.blurer.box_blur_horizontal();
-        self.blurer.box_blur_horizontal();
-        self.blurer.box_blur_horizontal();
-        self.blurer.box_blur_vertical();
-        self.blurer.box_blur_vertical();
-        self.blurer.box_blur_vertical();
+        self.blurer.blur_horizontal();
+        self.blurer.blur_horizontal();
+        self.blurer.blur_horizontal();
+        self.blurer.blur_vertical();
+        self.blurer.blur_vertical();
+        self.blurer.blur_vertical();
 
         let result = Texture::new_with(Vec2::new(width as u32, height as u32), |target| {
             blit::copy_float_to_mono(target, self.blurer.front(), width, width, height, 0, 0);

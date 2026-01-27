@@ -142,71 +142,6 @@ fn font_size_to_pixels(size: u16) -> f32 {
     c
 }
 
-#[derive(Debug, Clone)]
-pub struct Srv3TextShadow {
-    kind: EdgeType,
-    color: BGRA8,
-}
-
-impl Srv3TextShadow {
-    pub(crate) fn to_css(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
-        let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
-        let l1 = Length::from_pixels((scale).max(FixedL::ONE));
-        let l2 = Length::from_pixels((scale * 2).max(FixedL::ONE));
-        let l3 = Length::from_pixels((scale * 3).max(FixedL::ONE));
-        let l5 = Length::from_pixels((scale * 5).max(FixedL::ONE));
-
-        match self.kind {
-            EdgeType::None => (),
-            EdgeType::HardShadow => {
-                let step = Length::HALF * (ctx.dpi < 144) as i32 + Length::HALF;
-                let mut x = l1;
-                while x <= l3 {
-                    out.push(TextShadow {
-                        offset: Vec2::new(x, x),
-                        blur_radius: Length::ZERO,
-                        color: self.color,
-                    });
-                    x += step;
-                }
-            }
-            EdgeType::Bevel => {
-                let offset = Vec2::new(l1, l1);
-                out.push(TextShadow {
-                    offset,
-                    blur_radius: Length::ZERO,
-                    color: self.color,
-                });
-                out.push(TextShadow {
-                    offset: -offset,
-                    blur_radius: Length::ZERO,
-                    color: self.color,
-                });
-            }
-            EdgeType::Glow => out.extend(std::iter::repeat_n(
-                TextShadow {
-                    offset: Vec2::ZERO,
-                    blur_radius: l2,
-                    color: self.color,
-                },
-                5,
-            )),
-            EdgeType::SoftShadow => {
-                let offset = Vec2::new(l2, l2);
-                let mut x = l3;
-                while x <= l5 {
-                    out.push(TextShadow {
-                        offset,
-                        blur_radius: x,
-                        color: self.color,
-                    });
-                    x += Length::from_pixels(scale);
-                }
-            }
-        }
-    }
-}
-
 impl super::Point {
     pub fn to_alignment(self) -> Alignment {
         match self {
@@ -265,18 +200,86 @@ struct VisualLine {
 struct Segment {
     pen: Pen,
     base_style: ComputedStyle,
-    font_size: u16,
     time_offset: u32,
     text: std::rc::Rc<str>,
-    shadow: Srv3TextShadow,
     ruby: Ruby,
 }
 
 impl Segment {
+    fn compute_shadows(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
+        let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
+        let l1 = Length::from_pixels((scale).max(FixedL::ONE));
+        let l2 = Length::from_pixels((scale * 2).max(FixedL::ONE));
+        let l3 = Length::from_pixels((scale * 3).max(FixedL::ONE));
+        let l5 = Length::from_pixels((scale * 5).max(FixedL::ONE));
+        let primary_color = BGRA8::from_argb32(self.pen.edge_color.map_or_else(
+            || 0x222222 | (self.pen.foreground_color << 24),
+            |c| c | 0xFF000000,
+        ));
+
+        match self.pen.edge_type {
+            EdgeType::None => (),
+            EdgeType::HardShadow => {
+                let step = Length::HALF * (ctx.dpi < 144) as i32 + Length::HALF;
+                let mut x = l1;
+                while x <= l3 {
+                    out.push(TextShadow {
+                        offset: Vec2::new(x, x),
+                        blur_radius: Length::ZERO,
+                        color: primary_color,
+                    });
+                    x += step;
+                }
+            }
+            EdgeType::Bevel => {
+                // If there is no explicit edge color set then `Bevel` will use two
+                // distinct colors for the positive-offset and negative-offset shadow.
+                // The "inner" shadow will end up with a very light gray but the "outer" one
+                // will be the usual black.
+                let secondary_color = if self.pen.edge_color.is_none() {
+                    BGRA8::from_argb32(0xCCCCCC | (self.pen.foreground_color << 24))
+                } else {
+                    primary_color
+                };
+                let offset = Vec2::new(l1, l1);
+                out.push(TextShadow {
+                    offset,
+                    blur_radius: Length::ZERO,
+                    color: secondary_color,
+                });
+                out.push(TextShadow {
+                    offset: -offset,
+                    blur_radius: Length::ZERO,
+                    color: primary_color,
+                });
+            }
+            EdgeType::Glow => out.extend(std::iter::repeat_n(
+                TextShadow {
+                    offset: Vec2::ZERO,
+                    blur_radius: l2,
+                    color: primary_color,
+                },
+                5,
+            )),
+            EdgeType::SoftShadow => {
+                let offset = Vec2::new(l2, l2);
+                let mut x = l3;
+                while x <= l5 {
+                    out.push(TextShadow {
+                        offset,
+                        blur_radius: x,
+                        color: primary_color,
+                    });
+                    x += Length::from_pixels(scale);
+                }
+            }
+        }
+    }
+
     fn compute_style(&self, sctx: &SubtitleContext, use_inlines: bool) -> ComputedStyle {
         let mut result = self.base_style.clone();
 
-        let mut size = font_size_to_pixels(self.font_size) * font_scale_from_ctx(sctx);
+        let mut size = font_size_to_pixels(self.pen.font_size) * font_scale_from_ctx(sctx);
         if matches!(self.ruby, Ruby::Over) {
             size /= 2.0;
             result
@@ -291,7 +294,7 @@ impl Segment {
         *result.make_font_size_mut() = I26Dot6::from(size);
 
         let mut shadows = vec![];
-        self.shadow.to_css(sctx, &mut shadows);
+        self.compute_shadows(sctx, &mut shadows);
 
         if !shadows.is_empty() {
             *result.make_text_shadows_mut() = shadows.into();
@@ -525,16 +528,8 @@ fn convert_segment(
     Segment {
         pen: *segment.pen(),
         base_style: pen_to_size_independent_style(segment.pen(), false, base_style.clone()),
-        font_size: segment.pen().font_size,
         time_offset: segment.time_offset,
         text: text.into(),
-        shadow: Srv3TextShadow {
-            kind: segment.pen().edge_type,
-            color: BGRA8::from_argb32(segment.pen().edge_color.map_or_else(
-                || 0x222222 | (segment.pen().foreground_color << 24),
-                |c| c | 0xFF000000,
-            )),
-        },
         ruby,
     }
 }

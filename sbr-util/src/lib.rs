@@ -1,6 +1,7 @@
 use std::{borrow::Borrow, hash::Hash, mem::MaybeUninit, ops::Deref, ptr::NonNull};
 
 pub mod cache;
+pub mod const_tagged_enum;
 pub mod math;
 pub mod rc;
 pub mod rev_if;

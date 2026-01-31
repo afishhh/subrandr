@@ -4,7 +4,7 @@ use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::{self, FixedS},
     sw::{self, InstancedOutputBuilder, OutputPiece},
-    Rasterizer as _,
+    PixelFormat, Rasterizer as _,
 };
 use util::math::{I16Dot16, Point2, Rect2, Vec2};
 
@@ -313,4 +313,67 @@ fn antialiased_rectangle() {
     checker.check_instanced(Rect2::new(Point2::new(2, 2), Point2::new(8, 8)), false);
     checker.check_instanced(Rect2::new(Point2::new(1, 3), Point2::new(5, 6)), false);
     checker.check_instanced(Rect2::new(Point2::new(0, 0), Point2::new(5, 10)), false);
+}
+
+#[test]
+fn blurred_triangle() {
+    let mut r = sw::Rasterizer::new();
+    let triangle = unsafe {
+        r.create_texture_mapped(
+            Vec2::splat(90),
+            PixelFormat::Mono,
+            Box::new(|mut target| {
+                target.buffer_mut().fill(std::mem::MaybeUninit::new(0));
+                let mut sr = sw::StripRasterizer::new();
+                sr.stroke_polyline(
+                    [
+                        Point2::new(9.0, 81.0),
+                        Point2::new(81.0, 81.0),
+                        Point2::new(45.0, 9.0),
+                        Point2::new(9.0, 81.0),
+                        Point2::new(81.0, 81.0),
+                    ]
+                    .into_iter(),
+                    7.5,
+                );
+                let strips = sr.rasterize();
+                strips.blend_to(target, |p, v| {
+                    p.write(v);
+                });
+            }),
+        )
+    };
+
+    let triangle_blurred_09 = r.blur_texture(&triangle, 0.9);
+    let triangle_blurred_25 = r.blur_texture(&triangle, 2.5);
+    let scene = &[
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(20, 20)
+                - Vec2::new(
+                    triangle_blurred_25.padding.x as i32,
+                    triangle_blurred_25.padding.y as i32,
+                ),
+            texture: triangle_blurred_25.texture,
+            filter: None,
+            color: BGRA8::MAGENTA,
+        }),
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(20, 20)
+                - Vec2::new(
+                    triangle_blurred_09.padding.x as i32,
+                    triangle_blurred_09.padding.y as i32,
+                ),
+            texture: triangle_blurred_09.texture,
+            filter: None,
+            color: BGRA8::YELLOW,
+        }),
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(20, 20),
+            texture: triangle,
+            filter: None,
+            color: BGRA8::BLACK,
+        }),
+    ];
+
+    _ = DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), scene);
 }

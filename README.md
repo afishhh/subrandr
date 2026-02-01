@@ -23,8 +23,7 @@ Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConv
 
 The most notable limitations for this format currently are:
 - No vertical text[^2] or justification support.
-- Segments are laid out as `inline`s instead of `inline-block`s. This mostly manifests in background boxes that are too short vertically.
-- Some attributes seen in auto-generated subtitles that seem to vastly change how the HTML tree is generated are unsupported.
+- Some attributes seen in auto-generated subtitles are unsupported.
 
 [^2]: I have never encountered a YouTube video with subtitles which actually use SRV3 vertical text, so it is not very high-priority.
 

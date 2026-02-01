@@ -90,8 +90,11 @@ unsafe fn scale_generic<W: WrapMode, S: Copy, D: Copy>(
     let dx = I16Dot16::from_quotient(src_size.x, dst_width as i32);
     let dy = I16Dot16::from_quotient(src_size.y, dst_height as i32);
 
-    let src_initial_x = I16Dot16::new(src_off.x);
-    let mut src_y = I16Dot16::new(src_off.y);
+    // In Vulkan the input coordinates are normalized and expected to point to the pixel's center.
+    // Therefore we add half a step to the starting coordinates to account for this. Then we apply
+    // the shift from "unnormalized to integer" coordinate conversion just once here.
+    let src_initial_x = I16Dot16::new(src_off.x) + dx / 2 - I16Dot16::HALF;
+    let mut src_y = I16Dot16::new(src_off.y) + dy / 2 - I16Dot16::HALF;
     while dst < dst_end {
         let mut src_pos = Vec2::new(src_initial_x, src_y);
         for _ in 0..dst_width {
@@ -107,7 +110,7 @@ unsafe fn scale_generic<W: WrapMode, S: Copy, D: Copy>(
             let r0 = src.add(cy0 * src_stride);
             let r1 = src.add(cy1 * src_stride);
 
-            let weights = Vec2::new(src_pos.x.fract(), src_pos.y.fract());
+            let weights = Vec2::new(src_pos.x - x0, src_pos.y - y0);
             let samples = [(r0, [cx0, cx1]), (r1, [cx0, cx1])].map(|(r, xs)| xs.map(|x| *r.add(x)));
             let d = unsafe { &mut *dst };
 

@@ -747,6 +747,17 @@ impl FontImpl for Font {
             let scaled_width = (bitmap.width * scale6 as u32) >> 6;
             let scaled_height = (bitmap.rows * scale6 as u32) >> 6;
 
+            if bitmap.width == 0 || bitmap.rows == 0 {
+                return Ok(SingleGlyphBitmap {
+                    offset: Vec2::ZERO,
+                    texture: rasterizer.create_texture_mapped(
+                        Vec2::ZERO,
+                        PixelFormat::Mono,
+                        Box::new(|mut target| target.buffer_mut().fill(MaybeUninit::new(0))),
+                    ),
+                });
+            };
+
             // FIXME: This isn't really fully accurate since we don't adjust
             //        our billinear scaling for the lost fractional part here.
             if scale6 != 64 {

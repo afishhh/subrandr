@@ -377,3 +377,58 @@ fn blurred_triangle() {
 
     _ = DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), scene);
 }
+
+#[test]
+fn bilinear_scaling() {
+    #[rustfmt::skip]
+    const RECTANGLE_TEXTURE_DATA: &[u8] = &[
+        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xFF, 0xFF, 0xFF, 0x00,
+        0x00, 0xFF, 0x00, 0xFF, 0x00,
+        0x00, 0xFF, 0xFF, 0xFF, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let r = sw::Rasterizer::new();
+    let t = sw::Texture::new_borrowed_mono(RECTANGLE_TEXTURE_DATA, 5, 5);
+
+    let full_to_16 = r.scale_texture(&t, Vec2::splat(16), Vec2::ZERO, t.size());
+    let part_off = Vec2::new(2, 1);
+    let part_to_16 = r.scale_texture(&t, Vec2::splat(16), part_off, t.size() - part_off);
+
+    // This output has been painstakingly confirmed to match Gimp, ImageMagick and WebGL in shadertoy.
+    // (WebGL only for `part_to_16` since I don't know if you can do this sort of operation with the others)
+    let scene_size = Vec2::new(50, 20);
+    let scene = &[
+        scene::SceneNode::FilledRect(scene::FilledRect {
+            rect: Rect2::new(
+                Point2::ZERO,
+                Point2::new(
+                    FixedS::new(scene_size.x as i32),
+                    FixedS::new(scene_size.y as i32),
+                ),
+            ),
+            color: BGRA8::BLACK,
+        }),
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(2, 7),
+            texture: t.into(),
+            filter: None,
+            color: BGRA8::WHITE,
+        }),
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(10, 2),
+            texture: full_to_16.into(),
+            filter: None,
+            color: BGRA8::WHITE,
+        }),
+        scene::SceneNode::Bitmap(scene::Bitmap {
+            pos: Point2::new(30, 2),
+            texture: part_to_16.into(),
+            filter: None,
+            color: BGRA8::WHITE,
+        }),
+    ];
+
+    _ = DrawChecker::check_defaults("bilinear_scaling", scene_size, scene);
+}

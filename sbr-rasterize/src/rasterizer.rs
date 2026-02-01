@@ -66,6 +66,12 @@ impl<'a> From<sw::RenderTarget<'a>> for RenderTarget<'a> {
     }
 }
 
+impl From<sw::Texture<'static>> for Texture {
+    fn from(value: sw::Texture<'static>) -> Self {
+        Self(TextureInner::Software(value))
+    }
+}
+
 #[derive(Clone)]
 enum TextureInner {
     Software(sw::Texture<'static>),

@@ -215,6 +215,27 @@ fn fill_rect<B: BlendMode<P>, P: DrawPixel>(
     }
 }
 
+#[track_caller]
+fn check_pixel_buffer_dimensions(
+    buffer_len: usize,
+    width: u32,
+    height: u32,
+    stride: u32,
+    name: &std::fmt::Arguments,
+) {
+    let Some(n_pixels) = (height as usize).checked_mul(stride as usize) else {
+        panic!("Size passed to {name} overflows `height * stride`",);
+    };
+    assert!(
+        buffer_len >= n_pixels,
+        "Buffer passed to {name} is too small",
+    );
+    assert!(
+        width <= stride,
+        "width passed to {name} is larger than stride",
+    );
+}
+
 pub struct RenderTargetView<'a, P> {
     buffer: &'a mut [P],
     width: u32,
@@ -224,17 +245,12 @@ pub struct RenderTargetView<'a, P> {
 
 impl<'a, P> RenderTargetView<'a, P> {
     pub fn new(buffer: &'a mut [P], width: u32, height: u32, stride: u32) -> Self {
-        let self_name = std::any::type_name::<Self>();
-        let Some(n_pixels) = (height as usize).checked_mul(stride as usize) else {
-            panic!("Size passed to {self_name}::new overflows `height * stride`",);
-        };
-        assert!(
-            buffer.len() >= n_pixels,
-            "Buffer passed to {self_name}::new is too small",
-        );
-        assert!(
-            width <= stride,
-            "width passed to {self_name}::new is larger than stride",
+        check_pixel_buffer_dimensions(
+            buffer.len(),
+            width,
+            height,
+            stride,
+            &format_args!("{}::new", std::any::type_name::<Self>()),
         );
 
         Self {
@@ -394,9 +410,9 @@ impl TexturePixel for u8 {
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Texture<'a> {
+    data: TextureData<'a>,
     width: u32,
     height: u32,
-    data: TextureData<'a>,
 }
 
 impl Texture<'static> {
@@ -440,7 +456,23 @@ impl Texture<'static> {
     };
 }
 
-impl Texture<'_> {
+impl<'a> Texture<'a> {
+    pub fn new_borrowed_mono(data: &'a [u8], width: u32, height: u32) -> Self {
+        check_pixel_buffer_dimensions(
+            data.len(),
+            width,
+            height,
+            width,
+            &format_args!("{}::new_borrowed_mono", std::any::type_name::<Self>()),
+        );
+
+        Self {
+            data: TextureData::BorrowedMono(data),
+            width,
+            height,
+        }
+    }
+
     pub fn size(&self) -> Vec2<u32> {
         Vec2::new(self.width, self.height)
     }

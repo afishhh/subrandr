@@ -1,13 +1,11 @@
 use std::{collections::HashMap, str::FromStr};
 
-use log::{log_once_state, warn, LogOnceSet};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use quick_xml::{
     events::{attributes::Attributes, Event as XmlEvent},
     Error as XmlError,
 };
 use thiserror::Error;
-
-use crate::Subrandr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
@@ -327,7 +325,7 @@ impl FromStr for Point {
 }
 
 fn parse_pen(
-    sbr: &Subrandr,
+    log: &LogContext,
     attributes: Attributes,
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, Pen), Error> {
@@ -383,7 +381,7 @@ fn parse_pen(
         },
         else other => {
             warn!(
-                sbr, once(unknown_pen_attribute, other),
+                log, once(unknown_pen_attribute, other),
                 "Unknown attribute encountered on pen: {other}",
             );
         }
@@ -397,7 +395,7 @@ fn parse_pen(
 }
 
 fn parse_wp(
-    sbr: &Subrandr,
+    log: &LogContext,
     attributes: Attributes,
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, WindowPos), Error> {
@@ -428,7 +426,7 @@ fn parse_wp(
         },
         else other => {
             warn!(
-                sbr, once(unknown_wp_attribute, other),
+                log, once(unknown_wp_attribute, other),
                 "Unknown attribute encountered on wp: {other}",
             );
         }
@@ -441,7 +439,7 @@ fn parse_wp(
 }
 
 fn parse_head(
-    sbr: &Subrandr,
+    log: &LogContext,
     reader: &mut quick_xml::Reader<&[u8]>,
 ) -> Result<(HashMap<Box<str>, Pen>, HashMap<Box<str>, WindowPos>), Error> {
     let (mut pens, mut wps) = (HashMap::new(), HashMap::new());
@@ -456,16 +454,16 @@ fn parse_head(
                 match element.local_name().into_inner() {
                     // TODO: Warn on text content in pen or wp
                     b"pen" => {
-                        let (id, pen) = parse_pen(sbr, element.attributes(), &logset)?;
+                        let (id, pen) = parse_pen(log, element.attributes(), &logset)?;
                         pens.insert(id, pen);
                     }
                     b"wp" => {
-                        let (id, wp) = parse_wp(sbr, element.attributes(), &logset)?;
+                        let (id, wp) = parse_wp(log, element.attributes(), &logset)?;
                         wps.insert(id, wp);
                     }
                     name => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_elements_head, name),
                             "Unknown element encountered in head: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
@@ -494,7 +492,7 @@ fn parse_head(
 }
 
 fn parse_body(
-    sbr: &Subrandr,
+    log: &LogContext,
     pens: &HashMap<Box<str>, Pen>,
     wps: &HashMap<Box<str>, WindowPos>,
     windows: &mut HashMap<Box<str>, Window>,
@@ -518,7 +516,7 @@ fn parse_body(
                 $dst = unsafe { &*(value as *const _) };
             } else {
                 warn!(
-                    sbr,
+                    log,
                     once($log_id, $id),
                     concat!($what, " with ID {} does not exist but was referenced"),
                     $id
@@ -561,7 +559,7 @@ fn parse_body(
                             },
                             else other => {
                                 warn!(
-                                    sbr, once(unknown_attrs, other),
+                                    log, once(unknown_attrs, other),
                                     "Unknown window attribute {other}"
                                 )
                             }
@@ -570,7 +568,7 @@ fn parse_body(
                         if let Some(id) = result_id {
                             windows.insert(id, result);
                         } else {
-                            warn!(sbr, once(win_without_id), "Window missing id attribute");
+                            warn!(log, once(win_without_id), "Window missing id attribute");
                         }
                     }
                     b"p" => {
@@ -606,7 +604,7 @@ fn parse_body(
                             },
                             else other => {
                                 warn!(
-                                    sbr, once(unknown_attrs, other),
+                                    log, once(unknown_attrs, other),
                                     "Unknown event attribute {other}"
                                 )
                             }
@@ -616,7 +614,7 @@ fn parse_body(
                     }
                     name => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_body_elements, name),
                             "Unknown element encountered in body: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
@@ -649,7 +647,7 @@ fn parse_body(
                             },
                             else other => {
                                 warn!(
-                                    sbr, once(unknown_segment_attrs, other),
+                                    log, once(unknown_segment_attrs, other),
                                     "Unknown segment attribute {other}"
                                 );
                             }
@@ -657,7 +655,7 @@ fn parse_body(
                     }
                     _ if current.is_some() => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_event_elements, element.local_name().into_inner()),
                             "Unknown element encountered in event: {}",
                             unsafe {
@@ -672,7 +670,7 @@ fn parse_body(
             XmlEvent::Start(element) => {
                 if current.is_some() {
                     warn!(
-                        sbr,
+                        log,
                         once(unknown_segment_elements, element.local_name().into_inner()),
                         "Unknown element encountered in segment: {}",
                         unsafe { std::str::from_utf8_unchecked(element.local_name().into_inner()) }
@@ -734,7 +732,7 @@ pub fn probe(text: &str) -> bool {
     text.contains("<timedtext") && text.contains("format=\"3\"")
 }
 
-pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
+pub fn parse(log: &LogContext, text: &str) -> Result<Document, Error> {
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().check_comments = false;
     reader.config_mut().expand_empty_elements = true;
@@ -801,7 +799,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                     }
                     name => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_toplevel_elements, name),
                             "Non-head element encountered: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
@@ -831,7 +829,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     }
 
     let (pens, wps) = if has_head {
-        parse_head(sbr, &mut reader)?
+        parse_head(log, &mut reader)?
     } else {
         (HashMap::new(), HashMap::new())
     };
@@ -855,7 +853,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
                         b"body" => break,
                         name => {
                             warn!(
-                                sbr,
+                                log,
                                 once(unknown_toplevel_elements, name),
                                 "Non-body element encountered: {}",
                                 unsafe { std::str::from_utf8_unchecked(name) }
@@ -890,7 +888,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
     }
 
     parse_body(
-        sbr,
+        log,
         &doc.pens,
         &doc.wps,
         &mut doc.windows,

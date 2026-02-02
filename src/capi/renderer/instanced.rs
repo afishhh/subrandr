@@ -57,10 +57,11 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
 
     if !clip_rect.is_empty() {
         let renderer = &mut (*renderer);
+        let log = &renderer.lib.root_logger.new_ctx();
 
         ctry!(renderer
             .inner
-            .render_to_scene(&*ctx, t, &renderer.rasterizer));
+            .render_to_scene(log, &*ctx, t, &renderer.rasterizer));
 
         ctry!(renderer
             .rasterizer
@@ -185,7 +186,8 @@ unsafe extern "C" fn sbr_output_image_rasterize_into(
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_instanced_raster_pass_finish(renderer: *mut CRenderer) {
-    (*renderer).inner.end_raster();
+    let log = &(*renderer).lib.root_logger.new_ctx();
+    (*renderer).inner.end_raster(log);
     (*renderer).output_instances.clear();
     (*renderer).output_images.clear();
     (*renderer).output_pieces.clear();

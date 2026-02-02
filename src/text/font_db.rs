@@ -234,7 +234,7 @@ impl FontDb {
     }
 
     #[cfg(all(test, feature = "_layout_tests"))]
-    pub fn test(log: &LogContext, faces: Vec<FaceInfo>) -> FontDb {
+    pub fn test(faces: Vec<FaceInfo>) -> FontDb {
         use std::sync::RwLock;
 
         use platform_font_provider::null::NullFontProvider;

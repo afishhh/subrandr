@@ -1,16 +1,18 @@
 use std::ffi::c_int;
 
+use log::info;
 use rasterize::{
     color::{Premultiplied, BGRA8},
     sw::OutputPiece,
 };
 
-use crate::{Renderer, Subrandr, SubtitleContext, Subtitles};
+use crate::{capi::library::CLibrary, Renderer, SubtitleContext, Subtitles};
 
 mod instanced;
 
-pub struct CRenderer {
-    pub(super) inner: Renderer<'static>,
+pub struct CRenderer<'lib> {
+    lib: &'lib CLibrary,
+    pub(super) inner: Renderer,
     rasterizer: rasterize::sw::Rasterizer,
     output_pieces: Vec<OutputPiece>,
     output_images: Vec<instanced::COutputImage<'static>>,
@@ -18,9 +20,26 @@ pub struct CRenderer {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_create(sbr: *mut Subrandr) -> *mut CRenderer {
+unsafe extern "C" fn sbr_renderer_create(lib: &CLibrary) -> *mut CRenderer<'_> {
+    if !lib.did_log_version.get() {
+        lib.did_log_version.set(true);
+        info!(
+            lib.root_logger,
+            concat!(
+                "subrandr version ",
+                env!("CARGO_PKG_VERSION"),
+                env!("BUILD_REV_SUFFIX"),
+                env!("BUILD_DIRTY")
+            )
+        );
+    }
+
     Box::into_raw(Box::new(CRenderer {
-        inner: ctry!(Renderer::new(&*sbr)),
+        lib,
+        inner: ctry!(Renderer::new(
+            &lib.root_logger.new_ctx(),
+            lib.debug_flags.clone()
+        )),
         rasterizer: rasterize::sw::Rasterizer::new(),
         output_pieces: Vec::new(),
         output_images: Vec::new(),
@@ -56,9 +75,10 @@ unsafe extern "C" fn sbr_renderer_render(
     stride: u32,
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
+    let log = &(*renderer).lib.root_logger.new_ctx();
     ctry!((*renderer)
         .inner
-        .render(&*ctx, t, buffer, width, height, stride));
+        .render(log, &*ctx, t, buffer, width, height, stride));
     0
 }
 

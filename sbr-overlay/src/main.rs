@@ -7,9 +7,10 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches};
+use log::{error, info, LogContext};
 #[cfg(feature = "wgpu")]
 use pollster::FutureExt as _;
-use subrandr::{Renderer, Subrandr, SubtitleContext, Subtitles};
+use subrandr::{DebugFlags, Renderer, SubtitleContext, Subtitles};
 use winit::{
     event::StartCause,
     event_loop::{self, ControlFlow, EventLoop},
@@ -125,15 +126,17 @@ impl FromStr for OverlayMode {
     }
 }
 
-struct App<'a> {
+struct App {
     args: Args,
+
+    root_logger: log::RootLogger,
 
     player_connection: Option<Box<dyn ipc::PlayerConnection>>,
     overlay_window_id: Option<u32>,
 
     start: std::time::Instant,
     subs: Option<Subtitles>,
-    renderer: Renderer<'a>,
+    renderer: Renderer,
     frame_valid_inside: Range<u32>,
 
     display_handle: Option<DisplayHandle>,
@@ -210,7 +213,7 @@ impl WindowState {
     }
 }
 
-impl winit::application::ApplicationHandler for App<'_> {
+impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window = event_loop
             .create_window(
@@ -376,6 +379,7 @@ impl winit::application::ApplicationHandler for App<'_> {
             winit::event::WindowEvent::RedrawRequested => match &mut self.state {
                 Some(state) => {
                     let frame_start = Instant::now();
+                    let log = &self.root_logger.new_ctx();
 
                     let geometry = if let Some(id) = self.overlay_window_id {
                         let size = match &self.display_handle {
@@ -451,8 +455,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                                 .context("Failed to get stream path from player")
                                 .unwrap()
                             {
-                                self.subs =
-                                    find_subs_near_path(self.renderer.library(), &path).unwrap();
+                                self.subs = find_subs_near_path(log, &path).unwrap();
                             };
                         }
 
@@ -498,6 +501,7 @@ impl winit::application::ApplicationHandler for App<'_> {
                                     self.renderer.set_subtitles(Some(subs));
                                     self.renderer
                                         .render(
+                                            log,
                                             &ctx,
                                             t,
                                             unsafe {
@@ -539,10 +543,10 @@ impl winit::application::ApplicationHandler for App<'_> {
 
                                     let mut frame_rasterizer = wgpu.rasterizer.begin_frame();
                                     self.renderer
-                                        .render_to(&mut frame_rasterizer, &mut target, &ctx, t)
+                                        .render_to(log, &mut frame_rasterizer, &mut target, &ctx, t)
                                         .unwrap();
                                     frame_rasterizer.end_frame();
-                                    self.renderer.end_raster();
+                                    self.renderer.end_raster(log);
 
                                     surface_texture.present();
                                 }
@@ -584,27 +588,27 @@ impl winit::application::ApplicationHandler for App<'_> {
     }
 }
 
-fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitles> {
+fn load_subs_from_file(log: &LogContext, path: &Path) -> Result<subrandr::Subtitles> {
     Ok(match path.extension().and_then(|x| x.to_str()) {
         Some("srv3" | "ytt") => {
-            let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
+            let document = subrandr::srv3::parse(log, &std::fs::read_to_string(path).unwrap())?;
             Subtitles::Srv3(util::rc::Rc::new(subrandr::srv3::convert(
-                sbr, document, None,
+                log, document, None,
             )))
         }
         Some("vtt") => {
             let text = std::fs::read_to_string(path).unwrap();
             let captions = subrandr::vtt::parse(&text).unwrap();
-            Subtitles::Vtt(util::rc::Rc::new(subrandr::vtt::convert(sbr, captions)))
+            Subtitles::Vtt(util::rc::Rc::new(subrandr::vtt::convert(log, captions)))
         }
         _ => bail!("Unrecognised subtitle file extension"),
     })
 }
 
-fn find_subs_near_path(sbr: &Subrandr, path: &Path) -> Result<Option<subrandr::Subtitles>> {
+fn find_subs_near_path(log: &LogContext, path: &Path) -> Result<Option<subrandr::Subtitles>> {
     const ATTEMPTED_EXTENSIONS: &[&[u8]] = &[b"srv3".as_slice(), b"ytt", b"vtt"];
 
-    println!("Looking for subtitles files near {}", path.display());
+    info!(log, "Looking for subtitles files near {}", path.display());
 
     let mut candidates = Vec::new();
     for entry in path.parent().unwrap().read_dir().unwrap() {
@@ -626,10 +630,10 @@ fn find_subs_near_path(sbr: &Subrandr, path: &Path) -> Result<Option<subrandr::S
     candidates.sort_by_key(|(_, index)| *index);
 
     if let Some((found, _)) = candidates.first() {
-        println!("Using {}", found.display());
-        Ok(Some(load_subs_from_file(sbr, found)?))
+        info!(log, "Using {}", found.display());
+        Ok(Some(load_subs_from_file(log, found)?))
     } else {
-        println!("No subtitles found");
+        error!(log, "No subtitles found");
         Ok(None)
     }
 }
@@ -703,22 +707,26 @@ fn main() {
         None
     };
 
-    let sbr = Subrandr::init();
-    let subs = if let Some(file) = args.file.as_ref() {
-        Some(load_subs_from_file(&sbr, file).unwrap())
-    } else if let Some(path) = player_connection
-        .as_mut()
-        .and_then(|x| x.get_stream_path().transpose())
-        .transpose()
-        .context("Failed to get stream path from player")
-        .unwrap()
-    {
-        find_subs_near_path(&sbr, &path).unwrap()
-    } else {
-        println!(
-            "No subtitle file was provided and one couldn't be acquired via player connection"
-        );
-        None
+    let root_logger = log::RootLogger::new();
+    let subs = {
+        let log = &root_logger.new_ctx();
+        if let Some(file) = args.file.as_ref() {
+            Some(load_subs_from_file(log, file).unwrap())
+        } else if let Some(path) = player_connection
+            .as_mut()
+            .and_then(|x| x.get_stream_path().transpose())
+            .transpose()
+            .context("Failed to get stream path from player")
+            .unwrap()
+        {
+            find_subs_near_path(log, &path).unwrap()
+        } else {
+            error!(
+                log,
+                "No subtitle file was provided and one couldn't be acquired via player connection"
+            );
+            None
+        }
     };
 
     #[cfg(target_os = "linux")]
@@ -764,9 +772,11 @@ fn main() {
 
             args,
             subs,
-            renderer: Renderer::new(&sbr).unwrap(),
+            renderer: Renderer::new(&root_logger.new_ctx(), DebugFlags::from_env()).unwrap(),
             frame_valid_inside: 0..0,
             state: None,
+
+            root_logger,
         })
         .unwrap()
 }

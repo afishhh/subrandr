@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use log::{log_once_state, warn, LogOnceSet};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Rect2},
@@ -21,7 +21,7 @@ use crate::{
         ComputedStyle,
     },
     text::OpenTypeTag,
-    vtt, Subrandr, SubtitleContext,
+    vtt, SubtitleContext,
 };
 
 #[derive(Debug)]
@@ -523,7 +523,7 @@ pub struct Subtitles {
     events: Vec<Event>,
 }
 
-pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
+pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
     let base_style = {
         let mut result = ComputedStyle::DEFAULT;
 
@@ -540,17 +540,17 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
 
     if !captions.stylesheets.is_empty() {
         warn!(
-            sbr,
-            "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
+            log,
+            "WebVTT file makes use of stylesheets which are currently not supported and will be ignored."
         )
     }
 
     for cue in captions.cues {
         if cue.region.is_some() && !captions.regions.is_empty() {
             warn!(
-                sbr,
+                log,
                 once(region_unsupported),
-                "WebVTT file makes use of regions, which are currently not supported and will be ignored."
+                "WebVTT file makes use of regions which are currently not supported and will be ignored."
             )
         }
 

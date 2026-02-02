@@ -14,7 +14,6 @@ use crate::{
         Point2L, Vec2L,
     },
     text::{Face, FaceInfo, FontDb, GlyphCache},
-    Subrandr,
 };
 
 macro_rules! make_tree {
@@ -246,23 +245,22 @@ fn check_fn(
     let tests_dir = project_dir.join("tests/");
     let assets_dir = tests_dir.join("assets/");
 
-    let sbr = Subrandr::init();
-    let log = sbr.root_logger.new_ctx();
+    let root_logger = log::RootLogger::new();
     let mut fonts = FontDb::test(
-        &log,
         ALL_FONTS
             .iter()
             .map(|font| FaceInfo::from_face(&font.load(&assets_dir)))
             .collect(),
     );
 
+    let log = &root_logger.new_ctx();
     let width = viewport_size.x.ceil_to_inner() as u32;
     let height = viewport_size.y.ceil_to_inner() as u32;
     let mut pixels = {
         let mut scene = Vec::new();
         fun(
             &mut LayoutContext {
-                log: &log,
+                log,
                 dpi,
                 fonts: &mut fonts,
             },

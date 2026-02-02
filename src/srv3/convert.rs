@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
-use log::{log_once_state, warn, LogOnceSet};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
@@ -25,7 +25,7 @@ use crate::{
         ComputedStyle,
     },
     text::OpenTypeTag,
-    Subrandr, SubtitleContext,
+    SubtitleContext,
 };
 
 use super::{EdgeType, Pen, RubyPart};
@@ -560,7 +560,7 @@ fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedSt
 }
 
 struct WindowBuilder<'a> {
-    sbr: &'a Subrandr,
+    log: &'a LogContext<'a>,
     base_style: ComputedStyle,
     logset: LogOnceSet,
 }
@@ -615,7 +615,7 @@ impl WindowBuilder<'_> {
                         RubyPosition::Alternate | RubyPosition::Over => (),
                         RubyPosition::Under => {
                             warn!(
-                                self.sbr,
+                                self.log,
                                 once(ruby_under_unsupported),
                                 "`ruby-position: under`-style ruby text is not supported yet"
                             );
@@ -668,7 +668,7 @@ impl WindowBuilder<'_> {
 }
 
 pub fn convert(
-    sbr: &Subrandr,
+    log: &LogContext,
     mut parser: BodyParser,
     lang: Option<&LanguageIdentifier>,
 ) -> Result<Subtitles, super::parse::Error> {
@@ -676,7 +676,7 @@ pub fn convert(
         windows: Vec::new(),
     };
     let mut window_builder = WindowBuilder {
-        sbr,
+        log,
         base_style: {
             let mut style =
                 pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);
@@ -691,7 +691,7 @@ pub fn convert(
     };
 
     let mut wname_to_index = HashMap::new();
-    while let Some(element) = parser.read_next(sbr)? {
+    while let Some(element) = parser.read_next(log)? {
         match element {
             crate::srv3::BodyElement::Window(id, window) => {
                 wname_to_index.insert(id, result.windows.len());

@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use log::{info, trace, AsLogger};
+use log::{trace, AsLogger, LogContext};
 use rasterize::{
     color::{Premultiplied, BGRA8},
     scene::{SceneNode, StrokedPolyline, Subscene},
@@ -29,7 +29,7 @@ use crate::{
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},
-    vtt, Subrandr,
+    vtt, DebugFlags,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -296,10 +296,8 @@ impl PerfStats {
     }
 }
 
-// TODO: This type has kind of become a "mainly C API abstraction".
-//       Move it into the capi?
-pub struct Renderer<'a> {
-    sbr: &'a Subrandr,
+pub struct Renderer {
+    debug_flags: DebugFlags,
     pub(crate) fonts: text::FontDb,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
@@ -311,24 +309,14 @@ pub struct Renderer<'a> {
     layouter: Option<FormatLayouter>,
 }
 
-impl<'a> Renderer<'a> {
-    pub fn new(sbr: &'a Subrandr) -> Result<Self, platform_font_provider::InitError> {
-        if !sbr.did_log_version.get() {
-            sbr.did_log_version.set(true);
-            info!(
-                sbr,
-                concat!(
-                    "subrandr version ",
-                    env!("CARGO_PKG_VERSION"),
-                    env!("BUILD_REV_SUFFIX"),
-                    env!("BUILD_DIRTY")
-                )
-            );
-        }
-
+impl Renderer {
+    pub fn new(
+        log: &LogContext,
+        debug_flags: DebugFlags,
+    ) -> Result<Self, platform_font_provider::InitError> {
         Ok(Self {
-            sbr,
-            fonts: text::FontDb::new(&sbr.root_logger.new_ctx())?,
+            debug_flags,
+            fonts: text::FontDb::new(log)?,
             glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
             unchanged_range: 0..0,
@@ -344,10 +332,6 @@ impl<'a> Renderer<'a> {
             scene: Vec::new(),
             layouter: None,
         })
-    }
-
-    pub fn library(&self) -> &'a Subrandr {
-        self.sbr
     }
 
     pub fn invalidate_subtitles(&mut self) {
@@ -408,9 +392,10 @@ enum DebugContentFragment {
     Subscene(Arc<[SceneNode]>),
 }
 
-impl Renderer<'_> {
+impl Renderer {
     pub fn render(
         &mut self,
+        log: &LogContext,
         ctx: &SubtitleContext,
         t: u32,
         buffer: &mut [Premultiplied<BGRA8>],
@@ -419,29 +404,31 @@ impl Renderer<'_> {
         stride: u32,
     ) -> Result<(), RenderError> {
         self.render_to(
+            log,
             &mut rasterize::sw::Rasterizer::new(),
             &mut rasterize::sw::RenderTarget::new(buffer, width, height, stride).into(),
             ctx,
             t,
         )
-        .inspect(|_| self.end_raster())
+        .inspect(|_| self.end_raster(log))
     }
 
     pub fn render_to(
         &mut self,
+        log: &LogContext,
         rasterizer: &mut dyn rasterize::Rasterizer,
         target: &mut rasterize::RenderTarget,
         ctx: &SubtitleContext,
         t: u32,
     ) -> Result<(), RenderError> {
-        self.render_to_scene(ctx, t, rasterizer)?;
+        self.render_to_scene(log, ctx, t, rasterizer)?;
         rasterizer.render_scene(target, &self.scene, &self.glyph_cache)?;
 
         Ok(())
     }
 
     fn layout_debug_overlay(
-        sbr: &Subrandr,
+        debug_flags: &DebugFlags,
         perf: &PerfStats,
         lctx: &mut LayoutContext,
         ctx: &SubtitleContext,
@@ -456,7 +443,7 @@ impl Renderer<'_> {
             result
         };
 
-        if sbr.debug.draw_version_string {
+        if debug_flags.draw_version_string {
             let mut builder = InlineContentBuilder::new(base_style.clone());
             let mut root = builder.root();
 
@@ -501,7 +488,7 @@ impl Renderer<'_> {
             ));
         }
 
-        if sbr.debug.draw_perf_info {
+        if debug_flags.draw_perf_info {
             let mut builder = InlineContentBuilder::new({
                 let mut style = base_style.clone();
                 *style.make_text_align_mut() = HorizontalAlignment::Right;
@@ -584,21 +571,20 @@ impl Renderer<'_> {
 
     pub(crate) fn render_to_scene(
         &mut self,
+        log: &LogContext,
         ctx: &SubtitleContext,
         t: u32,
         rasterizer: &dyn Rasterizer,
     ) -> Result<(), RenderError> {
         self.previous_context = *ctx;
 
-        let log = self.sbr.root_logger.new_ctx();
-
         self.perf.start_frame();
-        self.fonts.update_platform_font_list(&log)?;
+        self.fonts.update_platform_font_list(log)?;
         self.glyph_cache.advance_generation();
         self.scene.clear();
 
         let ctx = SubtitleContext {
-            dpi: self.sbr.debug.dpi_override.unwrap_or(ctx.dpi),
+            dpi: self.debug_flags.dpi_override.unwrap_or(ctx.dpi),
             ..*ctx
         };
 
@@ -611,7 +597,7 @@ impl Renderer<'_> {
                 });
 
         trace!(
-            self.sbr,
+            log,
             "rendering frame (class={subtitle_class_name} ctx={ctx:?} t={t}ms)",
         );
 
@@ -622,14 +608,14 @@ impl Renderer<'_> {
             let mut pass = FrameLayoutPass {
                 sctx: &ctx,
                 lctx: &mut LayoutContext {
-                    log: &log,
+                    log,
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
                 },
                 t,
                 unchanged_range: 0..u32::MAX,
                 fragments: Vec::new(),
-                srv3_use_inlines: self.sbr.debug.srv3_use_inlines,
+                srv3_use_inlines: self.debug_flags.srv3_use_inlines,
             };
 
             fragments = {
@@ -645,7 +631,7 @@ impl Renderer<'_> {
             self.perf.end_layout();
 
             Self::layout_debug_overlay(
-                self.sbr,
+                &self.debug_flags,
                 &self.perf,
                 pass.lctx,
                 &ctx,
@@ -687,8 +673,8 @@ impl Renderer<'_> {
         &self.scene
     }
 
-    pub fn end_raster(&mut self) {
+    pub fn end_raster(&mut self, log: &LogContext) {
         let time = self.perf.end_frame();
-        trace!(self.sbr, "frame took {time:.2}ms to render");
+        trace!(log, "frame took {time:.2}ms to render");
     }
 }

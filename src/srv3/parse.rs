@@ -1,13 +1,11 @@
 use std::{collections::HashMap, str::FromStr};
 
-use log::{log_once_state, warn, LogOnceSet};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use quick_xml::{
     events::{attributes::Attributes, Event as XmlEvent},
     Error as XmlError,
 };
 use thiserror::Error;
-
-use crate::Subrandr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
@@ -311,7 +309,7 @@ impl FromStr for Point {
 }
 
 fn parse_pen(
-    sbr: &Subrandr,
+    log: &LogContext,
     attributes: Attributes,
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, Pen), Error> {
@@ -367,7 +365,7 @@ fn parse_pen(
         },
         else other => {
             warn!(
-                sbr, once(unknown_pen_attribute, other),
+                log, once(unknown_pen_attribute, other),
                 "Unknown attribute encountered on pen: {other}",
             );
         }
@@ -381,7 +379,7 @@ fn parse_pen(
 }
 
 fn parse_wp(
-    sbr: &Subrandr,
+    log: &LogContext,
     attributes: Attributes,
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, WindowPos), Error> {
@@ -406,7 +404,7 @@ fn parse_wp(
         },
         else other => {
             warn!(
-                sbr, once(unknown_wp_attribute, other),
+                log, once(unknown_wp_attribute, other),
                 "Unknown attribute encountered on wp: {other}",
             );
         }
@@ -419,7 +417,7 @@ fn parse_wp(
 }
 
 fn parse_ws(
-    sbr: &Subrandr,
+    log: &LogContext,
     attributes: Attributes,
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, WindowStyle), Error> {
@@ -438,7 +436,7 @@ fn parse_ws(
         },
         else other => {
             warn!(
-                sbr, once(unknown_ws_attribute, other),
+                log, once(unknown_ws_attribute, other),
                 "Unknown attribute encountered on ws: {other}",
             );
         }
@@ -468,7 +466,7 @@ impl Head {
 }
 
 fn parse_head(
-    sbr: &Subrandr,
+    log: &LogContext,
     reader: &mut quick_xml::Reader<&[u8]>,
     head: &mut Head,
 ) -> Result<(), Error> {
@@ -482,20 +480,20 @@ fn parse_head(
                 match element.local_name().into_inner() {
                     // TODO: Warn on text content in pen or wp
                     b"pen" => {
-                        let (id, pen) = parse_pen(sbr, element.attributes(), &logset)?;
+                        let (id, pen) = parse_pen(log, element.attributes(), &logset)?;
                         head.pens.insert(id, pen);
                     }
                     b"wp" => {
-                        let (id, wp) = parse_wp(sbr, element.attributes(), &logset)?;
+                        let (id, wp) = parse_wp(log, element.attributes(), &logset)?;
                         head.wps.insert(id, wp);
                     }
                     b"ws" => {
-                        let (id, ws) = parse_ws(sbr, element.attributes(), &logset)?;
+                        let (id, ws) = parse_ws(log, element.attributes(), &logset)?;
                         head.wss.insert(id, ws);
                     }
                     name => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_elements_head, name),
                             "Unknown element encountered in head: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
@@ -537,7 +535,7 @@ pub struct BodyParser<'rs> {
 }
 
 impl<'rs> BodyParser<'rs> {
-    pub fn read_next(&mut self, sbr: &Subrandr) -> Result<Option<BodyElement<'_>>, Error> {
+    pub fn read_next(&mut self, log: &LogContext) -> Result<Option<BodyElement<'_>>, Error> {
         log_once_state!(
             in &self.logset;
             unknown_attrs,
@@ -557,7 +555,7 @@ impl<'rs> BodyParser<'rs> {
                     $dst = value;
                 } else {
                     warn!(
-                        sbr,
+                        log,
                         once($log_id, $id),
                         concat!($what, " with ID {} does not exist but was referenced"),
                         $id
@@ -604,7 +602,7 @@ impl<'rs> BodyParser<'rs> {
                                 },
                                 else other => {
                                     warn!(
-                                        sbr, once(unknown_attrs, other),
+                                        log, once(unknown_attrs, other),
                                         "Unknown window attribute {other}"
                                     )
                                 }
@@ -613,7 +611,7 @@ impl<'rs> BodyParser<'rs> {
                             if let Some(id) = result_id {
                                 current = Some(BodyElement::Window(id, result));
                             } else {
-                                warn!(sbr, once(win_without_id), "Window missing id attribute");
+                                warn!(log, once(win_without_id), "Window missing id attribute");
                             }
                         }
                         b"p" => {
@@ -653,7 +651,7 @@ impl<'rs> BodyParser<'rs> {
                                 },
                                 else other => {
                                     warn!(
-                                        sbr, once(unknown_attrs, other),
+                                        log, once(unknown_attrs, other),
                                         "Unknown event attribute {other}"
                                     )
                                 }
@@ -663,7 +661,7 @@ impl<'rs> BodyParser<'rs> {
                         }
                         name => {
                             warn!(
-                                sbr,
+                                log,
                                 once(unknown_body_elements, name),
                                 "Unknown element encountered in body: {}",
                                 unsafe { std::str::from_utf8_unchecked(name) }
@@ -703,7 +701,7 @@ impl<'rs> BodyParser<'rs> {
                                 },
                                 else other => {
                                     warn!(
-                                        sbr, once(unknown_segment_attrs, other),
+                                        log, once(unknown_segment_attrs, other),
                                         "Unknown segment attribute {other}"
                                     );
                                 }
@@ -711,7 +709,7 @@ impl<'rs> BodyParser<'rs> {
                         }
                         _ if current.is_some() => {
                             warn!(
-                                sbr,
+                                log,
                                 once(unknown_event_elements, element.local_name().into_inner()),
                                 "Unknown element encountered in event: {}",
                                 unsafe {
@@ -726,7 +724,7 @@ impl<'rs> BodyParser<'rs> {
                 XmlEvent::Start(element) => {
                     if current.is_some() {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_segment_elements, element.local_name().into_inner()),
                             "Unknown element encountered in segment: {}",
                             unsafe {
@@ -801,7 +799,7 @@ pub fn probe(text: &str) -> bool {
     text.contains("<timedtext") && text.contains("format=\"3\"")
 }
 
-pub fn parse<'s>(sbr: &Subrandr, text: &'s str) -> Result<BodyParser<'s>, Error> {
+pub fn parse<'s>(log: &LogContext, text: &'s str) -> Result<BodyParser<'s>, Error> {
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().check_comments = false;
     reader.config_mut().expand_empty_elements = true;
@@ -868,7 +866,7 @@ pub fn parse<'s>(sbr: &Subrandr, text: &'s str) -> Result<BodyParser<'s>, Error>
                     }
                     name => {
                         warn!(
-                            sbr,
+                            log,
                             once(unknown_toplevel_elements, name),
                             "Non-head element encountered: {}",
                             unsafe { std::str::from_utf8_unchecked(name) }
@@ -899,7 +897,7 @@ pub fn parse<'s>(sbr: &Subrandr, text: &'s str) -> Result<BodyParser<'s>, Error>
 
     let mut head = Head::empty();
     if has_head {
-        parse_head(sbr, &mut reader, &mut head)?;
+        parse_head(log, &mut reader, &mut head)?;
     }
 
     if has_head {
@@ -914,7 +912,7 @@ pub fn parse<'s>(sbr: &Subrandr, text: &'s str) -> Result<BodyParser<'s>, Error>
                         b"body" => break,
                         name => {
                             warn!(
-                                sbr,
+                                log,
                                 once(unknown_toplevel_elements, name),
                                 "Non-body element encountered: {}",
                                 unsafe { std::str::from_utf8_unchecked(name) }

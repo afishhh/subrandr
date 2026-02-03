@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Point2, Rect2},
@@ -14,14 +15,13 @@ use crate::{
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
-    log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     style::{
         computed::{FontSlant, HorizontalAlignment, TextDecorations},
         ComputedStyle,
     },
     text::OpenTypeTag,
-    vtt, Subrandr, SubtitleContext,
+    vtt, SubtitleContext,
 };
 
 #[derive(Debug)]
@@ -114,7 +114,7 @@ impl Event {
     fn layout(
         &self,
         sctx: &SubtitleContext,
-        lctx: &mut layout::LayoutContext<'_, '_>,
+        lctx: &mut layout::LayoutContext<'_>,
         font_size: I26Dot6,
         output: &mut Vec<Rect2<FixedL>>,
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
@@ -523,7 +523,7 @@ pub struct Subtitles {
     events: Vec<Event>,
 }
 
-pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
+pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
     let base_style = {
         let mut result = ComputedStyle::DEFAULT;
 
@@ -539,18 +539,18 @@ pub fn convert(sbr: &Subrandr, captions: vtt::Captions) -> Subtitles {
     log_once_state!(in logset; region_unsupported);
 
     if !captions.stylesheets.is_empty() {
-        warning!(
-            sbr,
-            "WebVTT file makes use of stylesheets, which are currently not supported and will be ignored."
+        warn!(
+            log,
+            "WebVTT file makes use of stylesheets which are currently not supported and will be ignored."
         )
     }
 
     for cue in captions.cues {
         if cue.region.is_some() && !captions.regions.is_empty() {
-            warning!(
-                sbr,
+            warn!(
+                log,
                 once(region_unsupported),
-                "WebVTT file makes use of regions, which are currently not supported and will be ignored."
+                "WebVTT file makes use of regions which are currently not supported and will be ignored."
             )
         }
 

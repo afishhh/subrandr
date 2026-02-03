@@ -2,12 +2,10 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::missing_transmute_annotations)]
 
-use std::{cell::Cell, fmt::Debug};
+use std::fmt::Debug;
 
 pub use rasterize;
 pub use util::math::I26Dot6;
-
-use log::Logger;
 
 pub mod srv3;
 pub mod vtt;
@@ -16,12 +14,11 @@ mod capi;
 mod display;
 mod html;
 mod layout;
-mod log;
 mod style;
 mod text;
 
 #[derive(Default, Debug, Clone)]
-struct DebugFlags {
+pub struct DebugFlags {
     draw_version_string: bool,
     draw_perf_info: bool,
     dpi_override: Option<u32>,
@@ -29,7 +26,7 @@ struct DebugFlags {
 }
 
 impl DebugFlags {
-    fn from_env() -> Self {
+    pub fn from_env() -> Self {
         let mut result = Self::default();
 
         if let Ok(s) = std::env::var("SBR_DEBUG") {
@@ -52,30 +49,6 @@ impl DebugFlags {
         }
 
         result
-    }
-}
-
-#[derive(Debug)]
-pub struct Subrandr {
-    logger: log::Logger,
-    did_log_version: Cell<bool>,
-    debug: DebugFlags,
-}
-
-impl Subrandr {
-    pub fn init() -> Self {
-        Self {
-            logger: log::Logger::Default,
-            did_log_version: Cell::new(false),
-            debug: DebugFlags::from_env(),
-        }
-    }
-}
-
-// allows for convenient logging with log!(sbr, ...)
-impl log::AsLogger for Subrandr {
-    fn as_logger(&self) -> &Logger {
-        &self.logger
     }
 }
 

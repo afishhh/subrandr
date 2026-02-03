@@ -1,14 +1,12 @@
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
 
+use log::{warn, LogContext};
 use thiserror::Error;
 
 use super::PlatformFontProvider;
-use crate::{
-    log::warning,
-    text::{
-        font_db::{FaceInfo, FontSource},
-        Face, FontFallbackRequest, FreeTypeError,
-    },
+use crate::text::{
+    font_db::{FaceInfo, FontSource},
+    Face, FontFallbackRequest, FreeTypeError,
 };
 
 mod bindings;
@@ -41,10 +39,10 @@ pub enum FallbackError {
 }
 
 impl AndroidNdkFontProvider {
-    pub fn new(sbr: &crate::Subrandr) -> Result<Self, NewError> {
+    pub fn new(log: &LogContext) -> Result<Self, NewError> {
         Ok({
             let mut result = Self { fonts: Vec::new() };
-            result.update_font_list(sbr)?;
+            result.update_font_list(log)?;
             result
         })
     }
@@ -66,15 +64,15 @@ fn font_info_from_afont(afont: &AFont) -> Result<FaceInfo, FreeTypeError> {
 }
 
 impl AndroidNdkFontProvider {
-    fn update_font_list(&mut self, sbr: &crate::Subrandr) -> Result<(), UpdateError> {
+    fn update_font_list(&mut self, log: &LogContext) -> Result<(), UpdateError> {
         self.fonts.clear();
 
         for font in ASystemFontIterator::open()? {
             let info = match font_info_from_afont(&font) {
                 Ok(info) => info,
                 Err(err) => {
-                    warning!(
-                        sbr,
+                    warn!(
+                        log,
                         "Failed to inspect system font {:?}: {err}",
                         font.path()
                     );
@@ -90,7 +88,7 @@ impl AndroidNdkFontProvider {
 }
 
 impl PlatformFontProvider for AndroidNdkFontProvider {
-    fn update_if_changed(&mut self, _sbr: &crate::Subrandr) -> Result<bool, super::UpdateError> {
+    fn update_if_changed(&mut self, _log: &LogContext) -> Result<bool, super::UpdateError> {
         // The NDK does not seem to provide a mechanism for detecting changes
         // to the system font list.
         Ok(false)
@@ -98,7 +96,7 @@ impl PlatformFontProvider for AndroidNdkFontProvider {
 
     fn substitute(
         &self,
-        _sbr: &crate::Subrandr,
+        _log: &LogContext,
         _request: &mut super::FaceRequest,
     ) -> Result<(), super::SubstituteError> {
         // The NDK does not seem to provide any substitution functionality.

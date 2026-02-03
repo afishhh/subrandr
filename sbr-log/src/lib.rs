@@ -5,7 +5,7 @@ use std::{
     hash::{Hash, Hasher},
     io::IsTerminal,
     str::FromStr,
-    sync::OnceLock,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -18,45 +18,51 @@ pub enum Level {
     Error,
 }
 
+fn log_default(level: Level, fmt: std::fmt::Arguments, source: &str) {
+    let level_str = if std::io::stderr().is_terminal() {
+        match level {
+            Level::Trace => "\x1b[1;37mtrace\x1b[0m",
+            Level::Debug => "\x1b[1;35mdebug\x1b[0m",
+            Level::Info => "\x1b[1;34m info\x1b[0m",
+            Level::Warn => "\x1b[1;33m warn\x1b[0m",
+            Level::Error => "\x1b[1;31merror\x1b[0m",
+        }
+    } else {
+        match level {
+            Level::Trace => "trace",
+            Level::Debug => "debug",
+            Level::Info => " info",
+            Level::Warn => " warn",
+            Level::Error => "error",
+        }
+    };
+
+    let module_space = if source.is_empty() { "" } else { " " };
+    eprintln!("[sbr {level_str}{module_space}{source}] {fmt}");
+}
+
 pub type CLogCallback =
     extern "C" fn(Level, *const c_char, usize, *const c_char, usize, *const c_void);
 
 #[derive(Debug)]
-pub enum Logger {
+pub enum MessageCallback {
     Default,
     C {
         callback: CLogCallback,
         user_data: *const c_void,
     },
-    // possible future variant: rust's log crate for rust projects
 }
 
-pub trait AsLogger {
-    fn as_logger(&self) -> &Logger;
-}
+unsafe impl Send for MessageCallback {}
 
-impl<T: AsLogger> AsLogger for &T {
-    fn as_logger(&self) -> &Logger {
-        <T as AsLogger>::as_logger(*self)
-    }
-}
+impl MessageCallback {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        const CRATE_MODULE_PREFIX: &str = "subrandr::";
 
-impl AsLogger for Logger {
-    fn as_logger(&self) -> &Logger {
-        self
-    }
-}
-
-impl Logger {
-    pub fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
-        const CRATE_MODULE_PREFIX: &str = concat!(env!("CARGO_PKG_NAME"), "::");
-
-        let module_rel = module_path
-            .strip_prefix(CRATE_MODULE_PREFIX)
-            .unwrap_or(module_path);
+        let module_rel = source.strip_prefix(CRATE_MODULE_PREFIX).unwrap_or(source);
 
         match self {
-            Logger::Default => {
+            Self::Default => {
                 let filter = ENV_LOG_FILTER.get_or_init(|| parse_log_env_var().unwrap_or_default());
                 if !filter.filter(level) {
                     return;
@@ -64,7 +70,7 @@ impl Logger {
 
                 log_default(level, fmt, module_rel)
             }
-            &Logger::C {
+            &Self::C {
                 callback,
                 user_data,
             } => {
@@ -90,6 +96,105 @@ impl Logger {
                 }
             }
         }
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait Logger: sealed::Sealed {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str);
+}
+
+#[derive(Debug)]
+struct RootLoggerImpl {
+    callback: MessageCallback,
+}
+
+impl Logger for RootLoggerImpl {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, module_path: &str) {
+        self.callback.log(level, fmt, module_path)
+    }
+}
+
+impl sealed::Sealed for RootLoggerImpl {}
+
+#[derive(Debug)]
+pub struct RootLogger {
+    root: Arc<Mutex<RootLoggerImpl>>,
+}
+
+impl RootLogger {
+    pub fn new() -> Self {
+        Self {
+            root: Arc::new(Mutex::new(RootLoggerImpl {
+                callback: MessageCallback::Default,
+            })),
+        }
+    }
+
+    pub fn set_message_callback(&mut self, callback: MessageCallback) {
+        self.root.lock().unwrap().callback = callback;
+    }
+
+    pub fn new_ctx(&self) -> LogContext<'_> {
+        LogContext { root: &self.root }
+    }
+}
+
+impl Logger for RootLogger {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().callback.log(level, fmt, source)
+    }
+}
+
+impl AsLogger for RootLoggerImpl {
+    fn as_logger(&self) -> &impl Logger {
+        self
+    }
+}
+
+impl sealed::Sealed for RootLogger {}
+
+#[derive(Debug)]
+pub struct LogContext<'a> {
+    root: &'a Mutex<RootLoggerImpl>,
+}
+
+impl Logger for LogContext<'_> {
+    fn log(&self, level: Level, fmt: std::fmt::Arguments, source: &str) {
+        self.root.lock().unwrap().log(level, fmt, source);
+    }
+}
+
+impl sealed::Sealed for LogContext<'_> {}
+
+pub trait AsLogger {
+    fn as_logger(&self) -> &impl Logger;
+}
+
+impl<T: AsLogger> AsLogger for &T {
+    fn as_logger(&self) -> &impl Logger {
+        <T as AsLogger>::as_logger(*self)
+    }
+}
+
+impl<T: AsLogger> AsLogger for &mut T {
+    fn as_logger(&self) -> &impl Logger {
+        <T as AsLogger>::as_logger(*self)
+    }
+}
+
+impl AsLogger for RootLogger {
+    fn as_logger(&self) -> &impl Logger {
+        self
+    }
+}
+
+impl AsLogger for LogContext<'_> {
+    fn as_logger(&self) -> &impl Logger {
+        self
     }
 }
 
@@ -156,29 +261,6 @@ fn parse_log_env_var() -> Option<LogFilter> {
 
 static ENV_LOG_FILTER: OnceLock<LogFilter> = OnceLock::new();
 
-fn log_default(level: Level, fmt: std::fmt::Arguments, module_path: &'static str) {
-    let level_str = if std::io::stderr().is_terminal() {
-        match level {
-            Level::Trace => "\x1b[1;37mtrace\x1b[0m",
-            Level::Debug => "\x1b[1;35mdebug\x1b[0m",
-            Level::Info => "\x1b[1;34m info\x1b[0m",
-            Level::Warn => "\x1b[1;33m warn\x1b[0m",
-            Level::Error => "\x1b[1;31merror\x1b[0m",
-        }
-    } else {
-        match level {
-            Level::Trace => "trace",
-            Level::Debug => "debug",
-            Level::Info => " info",
-            Level::Warn => " warn",
-            Level::Error => "error",
-        }
-    };
-
-    let module_space = if module_path.is_empty() { "" } else { " " };
-    eprintln!("[sbr {level_str}{module_space}{module_path}] {fmt}");
-}
-
 #[doc(hidden)]
 pub trait LogOnceKey: Sized + 'static {}
 
@@ -214,63 +296,62 @@ impl LogOnceSet {
 #[doc(hidden)]
 pub struct LogOnceRef<'a, K: LogOnceKey>(pub &'a LogOnceSet, pub K);
 
+#[macro_export]
 macro_rules! log {
     ($logger: expr, $level: expr, once($set: expr $(, $value: expr)?), $($fmt: tt)*) => {{
         let set = &$set;
-        let value = $crate::log::log!(@logset_value $($value)?);
+        let value = $crate::log!(@logset_value $($value)?);
         if !set.0.contains(set.1 , value) {
-            $crate::log::log!($logger, $level, $($fmt)*);
+            $crate::log!($logger, $level, $($fmt)*);
             set.0.insert(set.1, value);
         }
     }};
     ($logger: expr, $level: expr, $($fmt: tt)*) => {
-        $crate::log::AsLogger::as_logger(&$logger).log($level, format_args!($($fmt)*), module_path!())
+        $crate::Logger::log(
+            $crate::AsLogger::as_logger(&$logger),
+            $level, format_args!($($fmt)*), module_path!()
+        )
     };
     (@logset_value $value: expr) => { $value };
     (@logset_value) => { () };
     (@mkmacro $dollar: tt, $name: ident, $level: ident) => {
-        #[allow(unused_macros)]
+        #[macro_export]
         #[clippy::format_args]
         macro_rules! $name {
             ($dollar logger: expr, $dollar ($dollar rest: tt)*) => {
-                $crate::log::log!($dollar logger, $crate::log::Level::$level, $dollar ($dollar rest)*)
+                $crate::log!($dollar logger, $crate::Level::$level, $dollar ($dollar rest)*)
             }
         }
     }
 }
 
+#[macro_export]
 macro_rules! log_once_state {
     (@mkkey $set: ident $ident: ident $(, $($rest: tt)*)?) => {
         let $ident = {
             #[derive(Clone, Copy)]
-            struct K; impl $crate::log::LogOnceKey for K {}
-            $crate::log::LogOnceRef(
+            struct K; impl $crate::LogOnceKey for K {}
+            $crate::LogOnceRef(
                 &$set,
                 K,
             )
         };
-        $($crate::log::log_once_state!(@mkkey $set $($rest)*))?
+        $($crate::log_once_state!(@mkkey $set $($rest)*))?
     };
     (@mkkey $($rest: tt)*) => {
         compile_error!("log_once_state: invalid syntax")
     };
     (in $set: expr; $($tokens: tt)*) => {
         let set = $set;
-        $crate::log::log_once_state!(@mkkey set $($tokens)*)
+        $crate::log_once_state!(@mkkey set $($tokens)*)
     };
     ($($tokens: tt)*) => {
-        $crate::log::log_once_state!(in $crate::log::LogOnceSet::new(); $($tokens)*)
+        $crate::log_once_state!(in $crate::LogOnceSet::new(); $($tokens)*)
     };
 }
 
-pub(crate) use {log, log_once_state};
-
 log!(@mkmacro $, trace, Trace);
 log!(@mkmacro $, debug, Debug);
-log!(@mkmacro $, warning, Warn);
+log!(@mkmacro $, warn, Warn);
 log!(@mkmacro $, info, Info);
 log!(@mkmacro $, error, Error);
-
-#[rustfmt::skip]
-#[allow(unused_imports, clippy::single_component_path_imports)]
-pub(crate) use {trace, debug, warning, info, error};

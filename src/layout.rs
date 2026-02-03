@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use log::{AsLogger, LogContext};
 use util::math::{BoolExt, I26Dot6, Point2, Rect2, Vec2};
 
 use crate::{
@@ -179,9 +180,16 @@ impl FragmentBox {
 }
 
 #[derive(Debug)]
-pub struct LayoutContext<'l, 'a> {
+pub struct LayoutContext<'l> {
+    pub log: &'l LogContext<'l>,
     pub dpi: u32,
-    pub fonts: &'l mut FontDb<'a>,
+    pub fonts: &'l mut FontDb,
+}
+
+impl AsLogger for LayoutContext<'_> {
+    fn as_logger(&self) -> &impl log::Logger {
+        self.log.as_logger()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

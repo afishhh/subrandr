@@ -3,11 +3,8 @@ use std::{alloc::Layout, sync::Arc};
 use rasterize::color::BGRA8;
 use util::math::I16Dot16;
 
-use super::renderer::CRenderer;
-use crate::{
-    text::{Face, FaceInfo, FontAxisValues, OpenTypeTag},
-    Subrandr,
-};
+use super::{library::CLibrary, renderer::CRenderer};
+use crate::text::{Face, FaceInfo, FontAxisValues, OpenTypeTag};
 
 #[no_mangle]
 pub unsafe extern "C" fn sbr_wasm_copy_convert_to_rgba(
@@ -49,7 +46,7 @@ pub unsafe extern "C" fn sbr_wasm_destroy_arc(ptr: *const u8, len: usize) {
 
 #[no_mangle]
 pub unsafe extern "C" fn sbr_wasm_library_create_font(
-    _sbr: *mut Subrandr,
+    _lib: *mut CLibrary,
     data_ptr: *const u8,
     data_len: usize,
 ) -> *mut Face {

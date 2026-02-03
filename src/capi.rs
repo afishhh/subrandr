@@ -1,20 +1,17 @@
 use std::{
     borrow::Cow,
     cell::UnsafeCell,
-    ffi::{c_char, c_void, CStr, CString},
+    ffi::{c_char, CStr, CString},
     fmt::Formatter,
     mem::MaybeUninit,
     sync::Arc,
 };
 
 use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
+use log::{debug, warn};
 use util::rc::Rc;
 
-use crate::{
-    log::{debug, warning, CLogCallback, Logger},
-    text::Face,
-    Subrandr, Subtitles,
-};
+use crate::{capi::library::CLibrary, text::Face, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -231,45 +228,10 @@ macro_rules! ctrywrap {
     };
 }
 
+mod library;
 mod renderer;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_init() -> *mut Subrandr {
-    Box::into_raw(Box::new(Subrandr::init()))
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_fini(sbr: *mut Subrandr) {
-    drop(Box::from_raw(sbr));
-}
-
-const fn const_parse_u32(value: &str) -> u32 {
-    match u32::from_str_radix(value, 10) {
-        Ok(result) => result,
-        Err(_) => panic!("const value is not an integer"),
-    }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_version(major: *mut u32, minor: *mut u32, patch: *mut u32) {
-    major.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MAJOR")) });
-    minor.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_MINOR")) });
-    patch.write(const { const_parse_u32(env!("CARGO_PKG_VERSION_PATCH")) });
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_set_log_callback(
-    sbr: &mut Subrandr,
-    callback: CLogCallback,
-    user_data: *const c_void,
-) {
-    sbr.logger = Logger::C {
-        callback,
-        user_data,
-    }
-}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_probe_text(content: *const c_char, content_len: usize) -> SubtitleFormat {
@@ -285,7 +247,7 @@ unsafe extern "C" fn sbr_probe_text(content: *const c_char, content_len: usize) 
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_load_text(
-    sbr: &Subrandr,
+    lib: &CLibrary,
     content: *const c_char,
     content_len: usize,
     format: i16,
@@ -299,6 +261,7 @@ unsafe extern "C" fn sbr_load_text(
             content_len
         ))
     );
+    let log = lib.root_logger.new_ctx();
     let language_hint = if !language_hint.is_null() {
         let cstr = CStr::from_ptr(language_hint);
         match LanguageIdentifier::try_from_locale_bytes(cstr.to_bytes()) {
@@ -314,11 +277,11 @@ unsafe extern "C" fn sbr_load_text(
                 //       There probably exist other good reasons for doing this and it avoids
                 //       special casing "iw" internally.
                 LocaleCanonicalizer::new_common().canonicalize(&mut locale);
-                debug!(sbr, "Language hint resolved to {:?}", locale.id);
+                debug!(log, "Language hint resolved to {:?}", locale.id);
                 Some(locale.id)
             }
             Err(error) => {
-                warning!(sbr, "Failed to parse language hint {cstr:?}: {error}");
+                warn!(log, "Failed to parse language hint {cstr:?}: {error}");
                 None
             }
         }
@@ -333,14 +296,14 @@ unsafe extern "C" fn sbr_load_text(
     match format {
         SubtitleFormat::Srv3 => {
             Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(crate::srv3::convert(
-                sbr,
-                ctry!(crate::srv3::parse(sbr, content)),
+                &log,
+                ctry!(crate::srv3::parse(&log, content)),
                 language_hint.as_ref(),
             )))))
         }
         SubtitleFormat::WebVTT => {
             Box::into_raw(Box::new(Subtitles::Vtt(Rc::new(crate::vtt::convert(
-                sbr,
+                &log,
                 match crate::vtt::parse(content) {
                     Some(captions) => captions,
                     None => cthrow!(Other, "Invalid WebVTT"),
@@ -374,7 +337,7 @@ unsafe extern "C" fn sbr_get_last_error_code() -> u32 {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_library_open_font_from_memory(
-    _sbr: *mut Subrandr,
+    _lib: *mut CLibrary,
     data: *const u8,
     data_len: usize,
 ) -> *mut Face {
@@ -390,6 +353,6 @@ unsafe extern "C" fn sbr_library_open_font_from_memory(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_close_font(_sbr: *mut Subrandr, font: *mut Face) {
+unsafe extern "C" fn sbr_library_close_font(_lib: *mut CLibrary, font: *mut Face) {
     std::mem::forget((*font).clone());
 }

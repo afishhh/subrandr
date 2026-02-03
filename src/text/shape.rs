@@ -4,6 +4,7 @@ use std::{
     ops::Range,
 };
 
+use log::LogContext;
 use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
@@ -214,6 +215,7 @@ impl ShapingBuffer {
 
     pub fn shape<'f>(
         &mut self,
+        log: &LogContext,
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -229,6 +231,7 @@ impl ShapingBuffer {
 
         let mut result = Vec::with_capacity(self.cluster_map.len());
         ShapingPass {
+            log,
             buffer: RawShapingBuffer(self.raw.0),
             glyph_buffer: unsafe {
                 ManuallyDrop::new(Vec::from_raw_parts(
@@ -279,19 +282,20 @@ fn fixup_range(a: usize, b: usize) -> Range<usize> {
     }
 }
 
-struct ShapingPass<'p, 'f, 'a> {
+struct ShapingPass<'p, 'f> {
+    log: &'p LogContext<'p>,
     buffer: RawShapingBuffer,
     glyph_buffer: ManuallyDrop<Vec<Glyph<'f>>>,
     glyph_buffer_parts: &'p mut (*mut Glyph<'static>, usize),
     result: &'p mut Vec<Glyph<'f>>,
     cluster_map: &'p [ClusterEntry],
     font_arena: &'f FontArena,
-    fonts: &'p mut FontDb<'a>,
+    fonts: &'p mut FontDb,
     properties: hb_segment_properties_t,
     features: &'p [hb_feature_t],
 }
 
-impl<'f> ShapingPass<'_, 'f, '_> {
+impl<'f> ShapingPass<'_, 'f> {
     fn retry_shaping(
         &mut self,
         range: Range<usize>,
@@ -337,7 +341,12 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             font_iterator.matcher().tofu(self.font_arena)
         } else {
             font_iterator
-                .next_with_fallback(first_codepoint as u32, self.font_arena, self.fonts)?
+                .next_with_fallback(
+                    self.log,
+                    first_codepoint as u32,
+                    self.font_arena,
+                    self.fonts,
+                )?
                 .unwrap_or_else(|| font_iterator.matcher().tofu(self.font_arena))
         };
         let hb_font = font.as_harfbuzz_font()?;
@@ -501,7 +510,7 @@ impl<'f> ShapingPass<'_, 'f, '_> {
     }
 }
 
-impl Drop for ShapingPass<'_, '_, '_> {
+impl Drop for ShapingPass<'_, '_> {
     fn drop(&mut self) {
         *self.glyph_buffer_parts = {
             let (ptr, _, cap) = vec_parts(&mut *self.glyph_buffer);

@@ -1,6 +1,7 @@
 use std::{
     alloc::{Layout, LayoutError},
     fmt::{Debug, Display},
+    hash::Hash,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -378,11 +379,23 @@ impl<R: Refcount, T: PartialEq + ?Sized> PartialEq for RcBase<R, T> {
             return true;
         }
 
-        *self == *other
+        T::eq(self, other)
     }
 }
 
 impl<R: Refcount, T: Eq + ?Sized> Eq for RcBase<R, T> {}
+
+impl<R: Refcount, T: Hash + ?Sized> Hash for RcBase<R, T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        <T as Hash>::hash(&**self, state)
+    }
+}
+
+impl<R: Refcount, T: Hash + ?Sized> std::borrow::Borrow<T> for RcBase<R, T> {
+    fn borrow(&self) -> &T {
+        self
+    }
+}
 
 impl<R: Refcount, T: Debug + ?Sized> Debug for RcBase<R, T> {
     #[inline]

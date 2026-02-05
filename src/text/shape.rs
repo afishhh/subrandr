@@ -214,7 +214,7 @@ impl ShapingBuffer {
 
     pub fn shape<'f>(
         &mut self,
-        font_iterator: FontMatchIterator<'_, 'f>,
+        font_iterator: FontMatchIterator<'_>,
         font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Vec<Glyph<'f>>, ShapingError> {
@@ -295,7 +295,7 @@ impl<'f> ShapingPass<'_, 'f, '_> {
     fn retry_shaping(
         &mut self,
         range: Range<usize>,
-        font_iterator: FontMatchIterator<'_, 'f>,
+        font_iterator: FontMatchIterator<'_>,
         force_tofu: bool,
     ) -> Result<(), ShapingError> {
         unsafe {
@@ -317,7 +317,7 @@ impl<'f> ShapingPass<'_, 'f, '_> {
     fn shape_layer(
         &mut self,
         cluster_range: Range<usize>,
-        mut font_iterator: FontMatchIterator<'_, 'f>,
+        mut font_iterator: FontMatchIterator<'_>,
         force_tofu: bool,
     ) -> Result<(), ShapingError> {
         let Some(&ClusterEntry {

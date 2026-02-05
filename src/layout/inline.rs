@@ -493,7 +493,7 @@ enum ShapedItemKind<'a, 'f> {
 
 #[derive(Debug)]
 struct ShapedItemText<'f> {
-    font_matcher: FontMatcher<'f>,
+    font_matcher: FontMatcher,
     primary_font: &'f Font,
     glyphs: GlyphString<'f>,
     break_after: bool,
@@ -647,13 +647,12 @@ fn finish_block_layout_in_shaped_items(
     Ok(())
 }
 
-fn font_matcher_from_style<'f>(
+fn font_matcher_from_style(
     style: &ComputedStyle,
-    font_arena: &'f FontArena,
     lctx: &mut LayoutContext,
-) -> Result<FontMatcher<'f>, InlineLayoutError> {
-    text::FontMatcher::match_all(
-        style.font_family().iter(),
+) -> Result<FontMatcher, InlineLayoutError> {
+    text::FontMatcher::new(
+        style.font_family().clone(),
         text::FontStyle {
             weight: style.font_weight(),
             italic: match style.font_slant() {
@@ -663,8 +662,6 @@ fn font_matcher_from_style<'f>(
         },
         style.font_size(),
         lctx.dpi,
-        font_arena,
-        lctx.fonts,
     )
     .map_err(Into::into)
 }
@@ -674,7 +671,7 @@ fn primary_font_from_style<'f>(
     font_arena: &'f FontArena,
     lctx: &mut LayoutContext,
 ) -> Result<&'f Font, InlineLayoutError> {
-    font_matcher_from_style(style, font_arena, lctx)?
+    font_matcher_from_style(style, lctx)?
         .primary(font_arena, lctx.fonts)
         .map_err(Into::into)
 }
@@ -772,13 +769,13 @@ fn shape_run_initial<'a, 'f>(
     span_state: &mut Vec<SpanState<'a, 'f>>,
     inner_style: &'a ComputedStyle,
 ) -> Result<InitialShapingResult<'a, 'f>, InlineLayoutError> {
-    struct QueuedText<'f> {
-        matcher: FontMatcher<'f>,
+    struct QueuedText {
+        matcher: FontMatcher,
         range: Range<usize>,
     }
 
-    impl<'f> QueuedText<'f> {
-        fn flush(
+    impl QueuedText {
+        fn flush<'f>(
             self,
             text: Rc<str>,
             bidi: &unicode_bidi::BidiInfo,
@@ -879,7 +876,7 @@ fn shape_run_initial<'a, 'f>(
         shaped: Vec<ShapedItem<'a, 'f>>,
         span_state: &'s mut Vec<SpanState<'a, 'f>>,
         shaping_buffer: ShapingBuffer,
-        queued_text: Option<QueuedText<'f>>,
+        queued_text: Option<QueuedText>,
         font_feature_events: Vec<FontFeatureEvent>,
         queued_padding: FixedL,
         current_span_id: usize,
@@ -1027,7 +1024,7 @@ fn shape_run_initial<'a, 'f>(
             let next_span_id = self.span_state.len();
             self.span_state.push(SpanState::new(
                 style,
-                font_matcher_from_style(style, self.font_arena, self.lctx)?
+                font_matcher_from_style(style, self.lctx)?
                     .primary(self.font_arena, self.lctx.fonts)?,
                 self.current_span_id,
             ));
@@ -1159,9 +1156,7 @@ fn shape_run_initial<'a, 'f>(
                                             let base = ShapedRubyBase {
                                                 style: base_style,
                                                 primary_font: font_matcher_from_style(
-                                                    base_style,
-                                                    self.font_arena,
-                                                    self.lctx,
+                                                    base_style, self.lctx,
                                                 )?
                                                 .primary(self.font_arena, self.lctx.fonts)?,
                                                 inner: shape_run_initial(
@@ -1254,8 +1249,7 @@ fn shape_run_initial<'a, 'f>(
                         }
                     },
                     InlineItem::Text(text) => {
-                        let font_matcher =
-                            font_matcher_from_style(current_style, self.font_arena, self.lctx)?;
+                        let font_matcher = font_matcher_from_style(current_style, self.lctx)?;
 
                         match self.queued_text {
                             Some(ref mut queued)

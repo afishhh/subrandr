@@ -2496,6 +2496,7 @@ unsafe fn layout_run_full<'a, 'f>(
         available_width: constraints.size.x,
     };
 
+    let mut shaped = &mut shaped[..];
     if constraints.size.x != FixedL::MAX && !break_opportunities.is_empty() {
         let mut breaking_context = BreakingContext {
             layout: lctx,
@@ -2524,17 +2525,17 @@ unsafe fn layout_run_full<'a, 'f>(
                 unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
 
                 if let Some(remaining) = remaining {
-                    shaped.drain(..i);
+                    shaped = &mut shaped[i..];
                     *shaped.first_mut().unwrap() = remaining;
                 } else {
-                    shaped.drain(..i + 1);
+                    shaped = &mut shaped[i + 1..];
                 }
 
                 continue 'break_loop;
             }
 
             if !shaped.is_empty() {
-                unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+                unsafe { builder.push_line(shaped, font_arena.clone())? };
             }
             break;
         }
@@ -2543,13 +2544,13 @@ unsafe fn layout_run_full<'a, 'f>(
             for i in 0..shaped.len() {
                 if shaped[i].forces_line_break_after() {
                     unsafe { builder.push_line(&mut shaped[..=i], font_arena.clone())? };
-                    shaped.drain(..=i);
+                    shaped = &mut shaped[i + 1..];
                     continue 'break_loop;
                 }
             }
 
             if !shaped.is_empty() {
-                unsafe { builder.push_line(&mut shaped, font_arena.clone())? };
+                unsafe { builder.push_line(shaped, font_arena.clone())? };
             }
             break;
         }

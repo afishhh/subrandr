@@ -1599,10 +1599,6 @@ impl<'f> ShapedItemText<'f> {
                     .take(3)
                     .take_while(|&&i| i > range.start)
                 {
-                    if opportunity == range.end {
-                        return Ok(BreakOutcome::BreakAfter);
-                    }
-
                     // FIXME: This takes care of collapsing whitespace in text, but
                     //        if text with a space at the end is followed by a ruby
                     //        container then that space will remain after line-breaking.

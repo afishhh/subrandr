@@ -358,6 +358,8 @@ impl<'f> ShapingPass<'_, 'f, '_> {
 
         let first_cluster = infos[0].cluster as usize;
         let is_reverse = first_cluster != cluster_range.start;
+        let is_dir_reverse =
+            Direction::try_from_hb(self.properties.direction).is_some_and(|d| d.is_reverse());
         // NOTE: `start_cluster` isn't always equal to `first_cluster`!
         //       This is because `first_cluster` is the first cluster that *emitted a glyph*
         //       while `start_cluster` is the directionally-first cluster in this `cluster_range`.
@@ -379,7 +381,7 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             Glyph::from_info_and_position(
                 info,
                 position,
-                if !is_reverse {
+                if !is_dir_reverse {
                     cluster.utf8_index
                 } else {
                     cluster.utf8_index + cluster.codepoint.len_utf8() - 1

@@ -22,7 +22,7 @@ use computed::*;
 // too difficult to change.
 macros::implement_style_module! {
     rc font {
-        #[copy(no)] font_family: [Rc<str>] = rc_static!([rc_static!(str b"serif")]),
+        #[copy(no)] font_family: Rc<[Rc<str>]> = rc_static!([rc_static!(str b"serif")]),
         font_weight: I16Dot16 = I16Dot16::new(400),
         font_size: I26Dot6 = I26Dot6::new(16),
         font_slant: FontSlant = FontSlant::Regular,
@@ -30,7 +30,7 @@ macros::implement_style_module! {
     }
 
     rc text_inherited {
-        #[copy(no)] text_shadows: [TextShadow] = rc_static!([]),
+        #[copy(no)] text_shadows: Rc<[TextShadow]> = rc_static!([]),
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: HorizontalAlignment = HorizontalAlignment::Left,

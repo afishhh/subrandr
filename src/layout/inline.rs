@@ -653,7 +653,7 @@ fn font_matcher_from_style<'f>(
     lctx: &mut LayoutContext,
 ) -> Result<FontMatcher<'f>, InlineLayoutError> {
     text::FontMatcher::match_all(
-        style.font_family(),
+        style.font_family().iter(),
         text::FontStyle {
             weight: style.font_weight(),
             italic: match style.font_slant() {

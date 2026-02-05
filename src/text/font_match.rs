@@ -1,6 +1,9 @@
 use std::cmp::Reverse;
 
-use util::math::{I16Dot16, I26Dot6};
+use util::{
+    math::{I16Dot16, I26Dot6},
+    rc::Rc,
+};
 
 use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontFallbackRequest, FontStyle};
 
@@ -102,7 +105,7 @@ fn match_faces_for_weight(
     Ok(None)
 }
 
-fn match_faces(
+pub(super) fn match_faces(
     faces: &[FaceInfo],
     style: &FontStyle,
     fonts: &mut FontDb,
@@ -128,67 +131,32 @@ fn match_faces(
     Ok(None)
 }
 
-fn match_face_for_specific_family(
-    family: &str,
-    style: &FontStyle,
-    fonts: &mut FontDb,
-) -> Result<Option<Face>, font_db::SelectError> {
-    let faces = fonts.select_family(family)?.to_vec();
-
-    // If no matching face exists or the matched face does not contain a glyph for the character to be rendered, the next family name is selected and the previous three steps repeated. Glyphs from other faces in the family are not considered. The only exception is that user agents may optionally substitute a synthetically obliqued version of the default face if that face supports a given glyph and synthesis of these faces is permitted by the value of the ‘font-synthesis’ property. For example, a synthetic italic version of the regular face may be used if the italic face doesn't support glyphs for Arabic.
-    let Some(face) = match_faces(&faces, style, fonts)? else {
-        return Ok(None);
-    };
-
-    Ok(Some(face))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FontMatcher<'f> {
-    families: Vec<Box<str>>,
+pub struct FontMatcher {
+    families: Rc<[Rc<str>]>,
     style: FontStyle,
     size: I26Dot6,
     dpi: u32,
-    matched: Vec<&'f Font>,
 }
 
-impl<'f> FontMatcher<'f> {
-    pub fn match_all(
-        families: impl IntoIterator<Item = impl AsRef<str>>,
-        style: FontStyle,
-        size: I26Dot6,
-        dpi: u32,
-        arena: &'f FontArena,
-        fonts: &mut FontDb,
-    ) -> Result<Self, font_db::SelectError> {
-        let mut copied_families = Vec::new();
-        let mut matched = Vec::new();
-
-        for family in families {
-            let family = family.as_ref();
-            copied_families.push(family.into());
-            if let Some(face) = match_face_for_specific_family(family, &style, fonts)? {
-                matched.push(arena.insert(&face.with_size(size, dpi)?));
-            }
-        }
-
-        Ok(Self {
-            families: copied_families,
+impl FontMatcher {
+    pub fn new(families: Rc<[Rc<str>]>, style: FontStyle, size: I26Dot6, dpi: u32) -> Self {
+        Self {
+            families,
             style,
             size,
             dpi,
-            matched,
-        })
+        }
     }
 
-    pub fn iterator(&self) -> FontMatchIterator<'_, 'f> {
+    pub fn iterator(&self) -> FontMatchIterator<'_> {
         FontMatchIterator {
             matcher: self,
             index: 0,
         }
     }
 
-    pub fn tofu(&self, arena: &'f FontArena) -> &'f Font {
+    pub fn tofu<'f>(&self, arena: &'f FontArena) -> &'f Font {
         arena.insert(&Face::tofu().with_size(self.size, self.dpi).unwrap())
     }
 
@@ -202,7 +170,7 @@ impl<'f> FontMatcher<'f> {
 
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
-    pub fn primary(
+    pub fn primary<'f>(
         &self,
         arena: &'f FontArena,
         fonts: &mut FontDb,
@@ -215,46 +183,62 @@ impl<'f> FontMatcher<'f> {
 }
 
 #[derive(Debug, Clone)]
-pub struct FontMatchIterator<'a, 'f> {
-    matcher: &'a FontMatcher<'f>,
+pub struct FontMatchIterator<'a> {
+    matcher: &'a FontMatcher,
     index: usize,
 }
 
-impl<'f> FontMatchIterator<'_, 'f> {
-    pub fn matcher(&self) -> &FontMatcher<'f> {
+impl FontMatchIterator<'_> {
+    pub fn matcher(&self) -> &FontMatcher {
         self.matcher
     }
 
     pub fn did_system_fallback(&self) -> bool {
-        self.index > self.matcher.matched.len()
+        self.index > self.matcher.families.len()
     }
 
-    pub fn next_with_fallback(
+    pub fn next_with_fallback<'f>(
         &mut self,
         codepoint: u32,
         arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Option<&'f Font>, font_db::SelectError> {
-        match self.matcher.matched.get(self.index) {
-            Some(&result) => {
-                self.index += 1;
-                Ok(Some(result))
-            }
-            None => {
-                if self.index == self.matcher.matched.len() {
+        loop {
+            match self.matcher.families.get(self.index) {
+                Some(family) => {
                     self.index += 1;
-                }
 
-                match fonts.select_fallback(&FontFallbackRequest {
-                    families: self.matcher.families.clone(),
-                    style: self.matcher.style,
-                    codepoint,
-                }) {
-                    Ok(face) => Ok(Some(
-                        arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
-                    )),
-                    Err(super::SelectError::NotFound) => Ok(None),
-                    Err(err) => Err(err),
+                    let Some(matched) =
+                        fonts.match_face_for_family(family.clone(), self.matcher.style)?
+                    else {
+                        continue;
+                    };
+
+                    return Ok(Some(
+                        arena.insert(&matched.with_size(self.matcher.size, self.matcher.dpi)?),
+                    ));
+                }
+                None => {
+                    if self.index == self.matcher.families.len() {
+                        self.index += 1;
+                    }
+
+                    return match fonts.select_fallback(&FontFallbackRequest {
+                        families: self
+                            .matcher
+                            .families
+                            .iter()
+                            .map(|x| (&**x).into())
+                            .collect(),
+                        style: self.matcher.style,
+                        codepoint,
+                    }) {
+                        Ok(face) => Ok(Some(
+                            arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
+                        )),
+                        Err(super::SelectError::NotFound) => Ok(None),
+                        Err(err) => Err(err),
+                    };
                 }
             }
         }

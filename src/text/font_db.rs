@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
 use thiserror::Error;
-use util::math::I16Dot16;
+use util::{math::I16Dot16, rc::Rc};
 
 use crate::{
     log::trace,
@@ -209,6 +209,7 @@ pub struct FontDb<'a> {
     sbr: &'a Subrandr,
     source_cache: HashMap<FontSource, Face>,
     family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
+    family_match_cache: HashMap<(Rc<str>, FontStyle), Option<Face>>,
     request_cache: HashMap<FontFallbackRequest, Option<Face>>,
     provider: &'static LockedPlatformFontProvider,
     extra_faces: Vec<FaceInfo>,
@@ -229,6 +230,7 @@ impl<'a> FontDb<'a> {
                 sbr,
                 source_cache: HashMap::new(),
                 family_cache: HashMap::new(),
+                family_match_cache: HashMap::new(),
                 request_cache: HashMap::new(),
                 family_lookup_cache: HashMap::new(),
                 provider: platform_font_provider::platform_default(sbr)?,
@@ -252,6 +254,7 @@ impl<'a> FontDb<'a> {
             sbr,
             source_cache: HashMap::new(),
             family_cache: HashMap::new(),
+            family_match_cache: HashMap::new(),
             request_cache: HashMap::new(),
             family_lookup_cache: HashMap::new(),
             provider: &NULL_PROVIDER,
@@ -406,5 +409,22 @@ impl<'a> FontDb<'a> {
             result
         }
         .ok_or(SelectError::NotFound)
+    }
+
+    pub fn match_face_for_family(
+        &mut self,
+        family: Rc<str>,
+        style: FontStyle,
+    ) -> Result<Option<Face>, SelectError> {
+        match self.family_match_cache.entry((family.clone(), style)) {
+            std::collections::hash_map::Entry::Occupied(occupied) => Ok(occupied.get().clone()),
+            std::collections::hash_map::Entry::Vacant(_) => {
+                let faces = self.select_family(&family)?.to_vec();
+                let face = super::font_match::match_faces(&faces, &style, self)?;
+                self.family_match_cache
+                    .insert((family.clone(), style), face.clone());
+                Ok(face)
+            }
+        }
     }
 }

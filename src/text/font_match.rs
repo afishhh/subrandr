@@ -5,7 +5,7 @@ use util::{
     rc::Rc,
 };
 
-use super::{font_db, Face, FaceInfo, Font, FontArena, FontDb, FontFallbackRequest, FontStyle};
+use super::{font_db, Face, FaceInfo, Font, FontDb, FontFallbackRequest, FontStyle};
 
 // This function actually implements the logic from level 4
 // https://drafts.csswg.org/css-fonts/#font-style-matching
@@ -156,8 +156,8 @@ impl FontMatcher {
         }
     }
 
-    pub fn tofu<'f>(&self, arena: &'f FontArena) -> &'f Font {
-        arena.insert(&Face::tofu().with_size(self.size, self.dpi).unwrap())
+    pub fn tofu(&self) -> Font {
+        Face::tofu().with_size(self.size, self.dpi).unwrap()
     }
 
     pub fn size(&self) -> I26Dot6 {
@@ -170,15 +170,11 @@ impl FontMatcher {
 
     // TODO: Note: it does not matter whether that font actually has a glyph for the space character.
     //       ^^^^ The current implementation might not interact well with font fallback in this regard
-    pub fn primary<'f>(
-        &self,
-        arena: &'f FontArena,
-        fonts: &mut FontDb,
-    ) -> Result<&'f Font, font_db::SelectError> {
+    pub fn primary(&self, fonts: &mut FontDb) -> Result<Font, font_db::SelectError> {
         Ok(self
             .iterator()
-            .next_with_fallback(' '.into(), arena, fonts)?
-            .unwrap_or_else(|| self.tofu(arena)))
+            .next_with_fallback(' '.into(), fonts)?
+            .unwrap_or_else(|| self.tofu()))
     }
 }
 
@@ -197,12 +193,11 @@ impl FontMatchIterator<'_> {
         self.index > self.matcher.families.len()
     }
 
-    pub fn next_with_fallback<'f>(
+    pub fn next_with_fallback(
         &mut self,
         codepoint: u32,
-        arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<Option<&'f Font>, font_db::SelectError> {
+    ) -> Result<Option<Font>, font_db::SelectError> {
         loop {
             match self.matcher.families.get(self.index) {
                 Some(family) => {
@@ -215,7 +210,7 @@ impl FontMatchIterator<'_> {
                     };
 
                     return Ok(Some(
-                        arena.insert(&matched.with_size(self.matcher.size, self.matcher.dpi)?),
+                        matched.with_size(self.matcher.size, self.matcher.dpi)?,
                     ));
                 }
                 None => {
@@ -233,9 +228,7 @@ impl FontMatchIterator<'_> {
                         style: self.matcher.style,
                         codepoint,
                     }) {
-                        Ok(face) => Ok(Some(
-                            arena.insert(&face.with_size(self.matcher.size, self.matcher.dpi)?),
-                        )),
+                        Ok(face) => Ok(Some(face.with_size(self.matcher.size, self.matcher.dpi)?)),
                         Err(super::SelectError::NotFound) => Ok(None),
                         Err(err) => Err(err),
                     };

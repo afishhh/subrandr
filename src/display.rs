@@ -99,7 +99,7 @@ impl DisplayContext<'_> {
                         pos.x.fract(),
                         pos.y.fract(),
                         shadow.unwrap_or(0.0),
-                        &mut fragment.glyphs().iter_glyphs_visual(),
+                        &mut fragment.glyphs.iter_glyphs_visual(),
                     )?;
 
                     let base_pos = Point2::new(pos.x.floor_to_inner(), pos.y.floor_to_inner());
@@ -167,7 +167,7 @@ impl DisplayContext<'_> {
         let text_end_x = {
             let mut end_x = pos.x;
 
-            for glyph in fragment.glyphs().iter_glyphs_visual() {
+            for (_, glyph) in fragment.glyphs.iter_glyphs_visual() {
                 end_x += glyph.x_advance;
             }
 

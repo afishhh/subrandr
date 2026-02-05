@@ -8,9 +8,9 @@ use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
 
-use crate::text::OpenTypeTag;
+use crate::text::{Font, OpenTypeTag};
 
-use super::{Direction, FontArena, FontDb, FontMatchIterator, Glyph};
+use super::{Direction, FontDb, FontMatchIterator, Glyph};
 
 struct RawShapingBuffer(*mut hb_buffer_t);
 
@@ -70,6 +70,12 @@ pub struct ClusterEntry {
     is_grapheme_start: bool,
 }
 
+impl ClusterEntry {
+    fn end_utf8_index(&self) -> usize {
+        self.utf8_index + self.codepoint.len_utf8()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct FeatureState {
     start_cluster: u32,
@@ -92,7 +98,7 @@ pub struct ShapingBuffer {
     raw: RawShapingBuffer,
     features: Vec<hb_feature_t>,
     cluster_map: Vec<ClusterEntry>,
-    glyph_scratch_buffer_parts: (*mut Glyph<'static>, usize),
+    glyph_scratch_buffer_parts: (*mut Glyph, usize),
 }
 
 #[derive(Debug, Error)]
@@ -211,13 +217,19 @@ impl ShapingBuffer {
         self.features.clear();
         self.cluster_map.clear();
     }
+}
 
-    pub fn shape<'f>(
+pub trait ShapingSink {
+    fn append(&mut self, text_range: Range<usize>, font: &Font, glyphs: &[Glyph]);
+}
+
+impl ShapingBuffer {
+    pub fn shape(
         &mut self,
+        output: &mut dyn ShapingSink,
         font_iterator: FontMatchIterator<'_>,
-        font_arena: &'f FontArena,
         fonts: &mut FontDb,
-    ) -> Result<Vec<Glyph<'f>>, ShapingError> {
+    ) -> Result<(), ShapingError> {
         self.reset_features();
 
         let properties = unsafe {
@@ -227,7 +239,6 @@ impl ShapingBuffer {
             buf.assume_init()
         };
 
-        let mut result = Vec::with_capacity(self.cluster_map.len());
         ShapingPass {
             buffer: RawShapingBuffer(self.raw.0),
             glyph_buffer: unsafe {
@@ -238,9 +249,8 @@ impl ShapingBuffer {
                 ))
             },
             glyph_buffer_parts: &mut self.glyph_scratch_buffer_parts,
-            result: &mut result,
+            output,
             cluster_map: &self.cluster_map,
-            font_arena,
             fonts,
             properties,
             features: &self.features,
@@ -249,7 +259,7 @@ impl ShapingBuffer {
 
         self.clear();
 
-        Ok(result)
+        Ok(())
     }
 }
 
@@ -279,19 +289,18 @@ fn fixup_range(a: usize, b: usize) -> Range<usize> {
     }
 }
 
-struct ShapingPass<'p, 'f, 'a> {
+struct ShapingPass<'p, 'a> {
     buffer: RawShapingBuffer,
-    glyph_buffer: ManuallyDrop<Vec<Glyph<'f>>>,
-    glyph_buffer_parts: &'p mut (*mut Glyph<'static>, usize),
-    result: &'p mut Vec<Glyph<'f>>,
+    glyph_buffer: ManuallyDrop<Vec<Glyph>>,
+    glyph_buffer_parts: &'p mut (*mut Glyph, usize),
+    output: &'p mut dyn ShapingSink,
     cluster_map: &'p [ClusterEntry],
-    font_arena: &'f FontArena,
     fonts: &'p mut FontDb<'a>,
     properties: hb_segment_properties_t,
     features: &'p [hb_feature_t],
 }
 
-impl<'f> ShapingPass<'_, 'f, '_> {
+impl ShapingPass<'_, '_> {
     fn retry_shaping(
         &mut self,
         range: Range<usize>,
@@ -334,11 +343,11 @@ impl<'f> ShapingPass<'_, 'f, '_> {
         );
 
         let font = if force_tofu {
-            font_iterator.matcher().tofu(self.font_arena)
+            font_iterator.matcher().tofu()
         } else {
             font_iterator
-                .next_with_fallback(first_codepoint as u32, self.font_arena, self.fonts)?
-                .unwrap_or_else(|| font_iterator.matcher().tofu(self.font_arena))
+                .next_with_fallback(first_codepoint as u32, self.fonts)?
+                .unwrap_or_else(|| font_iterator.matcher().tofu())
         };
         let hb_font = font.as_harfbuzz_font()?;
 
@@ -384,9 +393,9 @@ impl<'f> ShapingPass<'_, 'f, '_> {
                 if !is_dir_reverse {
                     cluster.utf8_index
                 } else {
-                    cluster.utf8_index + cluster.codepoint.len_utf8() - 1
+                    cluster.end_utf8_index() - 1
                 },
-                font,
+                &font,
             )
         };
 
@@ -467,6 +476,27 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             successful_ranges.push((cluster_subrange_start, cluster_subrange_end, len));
         }
 
+        let text_utf8_start = self.cluster_map[cluster_range.start].utf8_index;
+        let text_utf8_end = self.cluster_map.get(cluster_range.end).map_or_else(
+            || self.cluster_map.last().unwrap().end_utf8_index(),
+            |x| x.utf8_index,
+        );
+        let cluster_range_to_utf8 = |range: Range<usize>| {
+            if !is_reverse {
+                self.cluster_map[range.start].utf8_index..(if range.end == END_CLUSTER_EXCLUDED {
+                    text_utf8_end
+                } else {
+                    self.cluster_map[range.end].utf8_index
+                })
+            } else {
+                (if range.end == END_CLUSTER_EXCLUDED {
+                    text_utf8_start
+                } else {
+                    self.cluster_map[range.end].end_utf8_index()
+                })..self.cluster_map[range.start].end_utf8_index()
+            }
+        };
+
         let mut broken_subrange_start = first_cluster;
         for (cluster_subrange_start, cluster_subrange_end, len) in successful_ranges {
             if broken_subrange_start != cluster_subrange_start {
@@ -478,8 +508,11 @@ impl<'f> ShapingPass<'_, 'f, '_> {
             }
             broken_subrange_start = cluster_subrange_end;
 
-            self.result
-                .extend_from_slice(&self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len]);
+            self.output.append(
+                cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end),
+                &font.clone(),
+                &self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len],
+            );
             glyph_buffer_last += len;
         }
 
@@ -503,7 +536,7 @@ impl<'f> ShapingPass<'_, 'f, '_> {
     }
 }
 
-impl Drop for ShapingPass<'_, '_, '_> {
+impl Drop for ShapingPass<'_, '_> {
     fn drop(&mut self) {
         *self.glyph_buffer_parts = {
             let (ptr, _, cap) = vec_parts(&mut *self.glyph_buffer);

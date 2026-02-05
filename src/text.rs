@@ -1,15 +1,8 @@
-use std::{
-    cell::UnsafeCell,
-    collections::HashSet,
-    fmt::{Debug, Display},
-};
+use std::fmt::{Debug, Display};
 
 use rasterize::{Rasterizer, Texture};
 use text_sys::*;
-use util::{
-    math::{I26Dot6, Vec2},
-    ReadonlyAliasableBox,
-};
+use util::math::{I26Dot6, Vec2};
 
 mod face;
 mod ft_utils;
@@ -116,38 +109,9 @@ impl Direction {
     }
 }
 
-// This arena holds fonts and allows `Glyph` to safely store references
-// to its fonts instead of having to do reference counting.
-#[derive(Debug)]
-pub struct FontArena {
-    fonts: UnsafeCell<HashSet<ReadonlyAliasableBox<Font>>>,
-}
-
-impl FontArena {
-    pub fn new() -> Self {
-        Self {
-            fonts: UnsafeCell::new(HashSet::new()),
-        }
-    }
-
-    pub fn insert<'f>(&'f self, font: &Font) -> &'f Font {
-        let fonts = unsafe { &mut *self.fonts.get() };
-        if fonts.contains(font) {
-            unsafe { fonts.get(font).unwrap_unchecked() }
-        } else {
-            let boxed = ReadonlyAliasableBox::new(font.clone());
-            let ptr = ReadonlyAliasableBox::as_nonnull(&boxed);
-            unsafe {
-                fonts.insert(boxed);
-                ptr.as_ref()
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 // FIXME: If this isn't `(crate)` pub then a bunch of stuff is considered public, why?
-pub(crate) struct Glyph<'f> {
+pub(crate) struct Glyph {
     pub index: hb_codepoint_t,
     /// Position of the directionally-first byte where this glyph starts in the original UTF-8 string.
     /// If left-to-right, this will be the first byte of the relevant codepoint.
@@ -157,16 +121,15 @@ pub(crate) struct Glyph<'f> {
     pub y_advance: I26Dot6,
     pub x_offset: I26Dot6,
     pub y_offset: I26Dot6,
-    pub font: &'f Font,
     flags: hb_glyph_flags_t,
 }
 
-impl<'f> Glyph<'f> {
+impl Glyph {
     fn from_info_and_position(
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
         original_cluster: usize,
-        font: &'f Font,
+        font: &Font,
     ) -> Self {
         // Fix up incorrect metrics for scaled bitmap glyphs which HarfBuzz sees as unscaled.
         let scale = font.harfbuzz_scale_factor_for(info.codepoint);
@@ -178,7 +141,6 @@ impl<'f> Glyph<'f> {
             y_advance: I26Dot6::from_raw(position.y_advance) * scale,
             x_offset: I26Dot6::from_raw(position.x_offset) * scale,
             y_offset: I26Dot6::from_raw(position.y_offset) * scale,
-            font,
             flags: unsafe { hb_glyph_info_get_glyph_flags(info) },
         }
     }
@@ -197,13 +159,13 @@ pub struct GlyphBitmap {
     pub texture: Texture,
 }
 
-pub fn render<'g, 'f: 'g>(
+pub fn render<'g>(
     cache: &GlyphCache,
     rasterizer: &mut dyn Rasterizer,
     xf: I26Dot6,
     yf: I26Dot6,
     blur_sigma: f32,
-    glyphs: &mut dyn Iterator<Item = &'g Glyph<'f>>,
+    glyphs: &mut dyn Iterator<Item = (&'g Font, &'g Glyph)>,
 ) -> Result<Vec<GlyphBitmap>, GlyphRenderError> {
     let mut result = Vec::new();
 
@@ -212,7 +174,7 @@ pub fn render<'g, 'f: 'g>(
 
     let mut x = xf;
     let mut y = yf;
-    for shaped_glyph in glyphs {
+    for (font, glyph) in glyphs {
         // TODO: Once vertical text is supported, this should change depending on main axis
         let subpixel_offset = if x < 0 {
             I26Dot6::ONE - x.abs().fract()
@@ -220,11 +182,10 @@ pub fn render<'g, 'f: 'g>(
             x.fract()
         };
 
-        let font = shaped_glyph.font;
         let bitmap = font.render_glyph(
             cache,
             rasterizer,
-            shaped_glyph.index,
+            glyph.index,
             blur_sigma,
             subpixel_offset,
             false,
@@ -232,14 +193,14 @@ pub fn render<'g, 'f: 'g>(
 
         result.push(GlyphBitmap {
             offset: Vec2::new(
-                (x + bitmap.offset.x + shaped_glyph.x_offset).floor_to_inner(),
-                (y + bitmap.offset.y + shaped_glyph.y_offset).floor_to_inner(),
+                (x + bitmap.offset.x + glyph.x_offset).floor_to_inner(),
+                (y + bitmap.offset.y + glyph.y_offset).floor_to_inner(),
             ),
             texture: bitmap.texture.clone(),
         });
 
-        x += shaped_glyph.x_advance;
-        y += shaped_glyph.y_advance;
+        x += glyph.x_advance;
+        y += glyph.y_advance;
     }
 
     Ok(result)

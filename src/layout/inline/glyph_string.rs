@@ -9,19 +9,19 @@ use util::{math::I26Dot6, rev_if::RevIf};
 
 use super::FontFeatureEvent;
 use crate::text::{
-    Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
+    Direction, Font, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError, ShapingSink,
 };
 
 #[derive(Clone)]
-pub struct GlyphString<'f> {
+pub struct GlyphString {
     /// Always refers to the original string that contains the whole context
     /// of this string.
     text: Rc<str>,
-    segments: LinkedList<GlyphStringSegment<'f>>,
+    segments: LinkedList<GlyphStringSegment>,
     direction: Direction,
 }
 
-impl Debug for GlyphString<'_> {
+impl Debug for GlyphString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "GlyphString(direction: {:?}) ", self.direction)?;
         let mut list = f.debug_list();
@@ -29,6 +29,7 @@ impl Debug for GlyphString<'_> {
             list.entry(&util::fmt_from_fn(|f| {
                 f.debug_struct("GlyphStringSegment")
                     .field("text", &&self.text[segment.text_range.clone()])
+                    .field("font", &&segment.font)
                     .field(
                         "glyphs",
                         &util::fmt_from_fn(|f| f.debug_list().finish_non_exhaustive()),
@@ -41,42 +42,36 @@ impl Debug for GlyphString<'_> {
 }
 
 #[derive(Debug, Clone)]
-struct GlyphStringSegment<'f> {
+struct GlyphStringSegment {
     /// Some glyph slice which resulted from shaping the entirety or some subslice
     /// of the text in `text`. [`Glyph::cluster`] will be a valid index into `text`.
-    storage: Rc<[Glyph<'f>]>,
+    storage: Rc<[Glyph]>,
     /// The subslice of `storage` this segment actually represents.
     glyph_range: Range<usize>,
     /// The subslice of [`GlyphString::text`] this segment was shaped from.
     text_range: Range<usize>,
+    /// The font this segment was shaped with.
+    font: Font,
 }
 
-impl<'f> Deref for GlyphStringSegment<'f> {
-    type Target = [Glyph<'f>];
+impl Deref for GlyphStringSegment {
+    type Target = [Glyph];
 
     fn deref(&self) -> &Self::Target {
         &self.storage[self.glyph_range.clone()]
     }
 }
 
-impl<'s, 'f> IntoIterator for &'s GlyphStringSegment<'f> {
-    type Item = &'s Glyph<'f>;
-    type IntoIter = std::slice::Iter<'s, Glyph<'f>>;
+impl<'s> IntoIterator for &'s GlyphStringSegment {
+    type Item = &'s Glyph;
+    type IntoIter = std::slice::Iter<'s, Glyph>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'f> GlyphStringSegment<'f> {
-    fn from_glyphs(text_range: Range<usize>, glyphs: Vec<Glyph<'f>>) -> Self {
-        Self {
-            glyph_range: 0..glyphs.len(),
-            text_range,
-            storage: glyphs.into(),
-        }
-    }
-
+impl GlyphStringSegment {
     fn subslice(&self, range: Range<usize>, direction: Direction) -> Self {
         assert!(
             range.start < range.end,
@@ -100,6 +95,7 @@ impl<'f> GlyphStringSegment<'f> {
                         ..self[range.start].cluster + 1
                 }
             },
+            font: self.font.clone(),
         }
     }
 
@@ -164,22 +160,29 @@ impl<'f> GlyphStringSegment<'f> {
     fn try_concat_with_half(
         &self,
         pivot: usize,
-        other: Self,
+        mut other: LinkedList<Self>,
         direction: Direction,
         forward: bool,
     ) -> Option<LinkedList<Self>> {
         match direction.is_reverse() ^ forward {
-            false if other.first().is_none_or(|first| !first.unsafe_to_concat()) => {
-                Some(LinkedList::from([
-                    self.subslice(0..pivot + 1, direction),
-                    other,
-                ]))
+            false
+                if other
+                    .iter()
+                    .next()
+                    .and_then(|x| x.first())
+                    .is_none_or(|first| !first.unsafe_to_concat()) =>
+            {
+                other.push_front(self.subslice(0..pivot + 1, direction));
+                Some(other)
             }
-            true if other.last().is_none_or(|last| !last.unsafe_to_concat()) => {
-                Some(LinkedList::from([
-                    other,
-                    self.subslice(pivot..self.len(), direction),
-                ]))
+            true if other
+                .iter()
+                .next_back()
+                .and_then(|x| x.last())
+                .is_none_or(|last| !last.unsafe_to_concat()) =>
+            {
+                other.push_back(self.subslice(pivot..self.len(), direction));
+                Some(other)
             }
             _ => None,
         }
@@ -194,7 +197,6 @@ impl<'f> GlyphStringSegment<'f> {
         font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_>,
-        font_arena: &'f FontArena,
         fonts: &mut FontDb,
         direction: Direction,
     ) -> Result<LinkedList<Self>, ShapingError> {
@@ -223,16 +225,14 @@ impl<'f> GlyphStringSegment<'f> {
                     super::set_buffer_content_from_range(
                         buffer,
                         text.as_ref(),
-                        reshape_range.clone(),
+                        reshape_range,
                         font_feature_events,
                         grapheme_cluster_boundaries,
                     );
-                    let other = GlyphStringSegment::from_glyphs(
-                        reshape_range,
-                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
-                    );
+                    let mut other = GlyphStringSegmentSink::new();
+                    buffer.shape(&mut other, font_iterator.clone(), fonts)?;
 
-                    if let Some(result) = self.try_concat_with_half(i, other, direction, false) {
+                    if let Some(result) = self.try_concat_with_half(i, other.0, direction, false) {
                         return Ok(result);
                     }
                 }
@@ -246,14 +246,13 @@ impl<'f> GlyphStringSegment<'f> {
         super::set_buffer_content_from_range(
             buffer,
             text.as_ref(),
-            reshape_range.clone(),
+            reshape_range,
             font_feature_events,
             grapheme_cluster_boundaries,
         );
-        Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
-            reshape_range,
-            buffer.shape(font_iterator, font_arena, fonts)?,
-        )]))
+        let mut result = GlyphStringSegmentSink::new();
+        buffer.shape(&mut result, font_iterator, fonts)?;
+        Ok(result.0)
     }
 
     // Analogous to `break_after` but returns the part logically after `break_index` (inclusive).
@@ -266,10 +265,9 @@ impl<'f> GlyphStringSegment<'f> {
         font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_>,
-        font_arena: &'f FontArena,
         fonts: &mut FontDb,
         direction: Direction,
-    ) -> Result<LinkedList<GlyphStringSegment<'f>>, ShapingError> {
+    ) -> Result<LinkedList<GlyphStringSegment>, ShapingError> {
         let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
         if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
             if !direction.is_reverse() {
@@ -289,16 +287,14 @@ impl<'f> GlyphStringSegment<'f> {
                     super::set_buffer_content_from_range(
                         buffer,
                         text.as_ref(),
-                        reshape_range.clone(),
+                        reshape_range,
                         font_feature_events,
                         grapheme_cluster_boundaries,
                     );
-                    let other = GlyphStringSegment::from_glyphs(
-                        reshape_range,
-                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
-                    );
+                    let mut other = GlyphStringSegmentSink::new();
+                    buffer.shape(&mut other, font_iterator.clone(), fonts)?;
 
-                    if let Some(result) = self.try_concat_with_half(i, other, direction, true) {
+                    if let Some(result) = self.try_concat_with_half(i, other.0, direction, true) {
                         return Ok(result);
                     }
                 }
@@ -312,14 +308,13 @@ impl<'f> GlyphStringSegment<'f> {
         super::set_buffer_content_from_range(
             buffer,
             text.as_ref(),
-            reshape_range.clone(),
+            reshape_range,
             font_feature_events,
             grapheme_cluster_boundaries,
         );
-        Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
-            reshape_range,
-            buffer.shape(font_iterator, font_arena, fonts)?,
-        )]))
+        let mut result = GlyphStringSegmentSink::new();
+        buffer.shape(&mut result, font_iterator, fonts)?;
+        Ok(result.0)
     }
 
     fn glyph_at_utf8_index(&self, index: usize, direction: Direction) -> Option<usize> {
@@ -349,27 +344,46 @@ impl<'f> GlyphStringSegment<'f> {
     }
 }
 
-// TODO: linked_list_cursors feature would improve some of this code significantly
-impl<'f> GlyphString<'f> {
-    pub fn from_glyphs(
-        text: Rc<str>,
-        text_range: Range<usize>,
-        glyphs: Vec<Glyph<'f>>,
-        direction: Direction,
-    ) -> Self {
-        assert!(text_range.start <= text_range.end);
-        GlyphString::from_array(
-            text,
-            [GlyphStringSegment::from_glyphs(text_range, glyphs)],
-            direction,
-        )
+impl GlyphString {
+    pub fn new(text: Rc<str>, direction: Direction) -> Self {
+        GlyphString::from_array(text, [], direction)
     }
+}
 
+struct GlyphStringSegmentSink(LinkedList<GlyphStringSegment>);
+
+impl GlyphStringSegmentSink {
+    fn new() -> Self {
+        Self(LinkedList::new())
+    }
+}
+
+impl ShapingSink for GlyphStringSegmentSink {
+    fn append(&mut self, text_range: Range<usize>, font: &Font, glyphs: &[Glyph]) {
+        self.0.push_back(GlyphStringSegment {
+            storage: glyphs.into(),
+            glyph_range: 0..glyphs.len(),
+            text_range,
+            font: font.clone(),
+        });
+    }
+}
+
+impl ShapingSink for GlyphString {
+    fn append(&mut self, text_range: Range<usize>, font: &Font, glyphs: &[Glyph]) {
+        let mut sink = GlyphStringSegmentSink(std::mem::take(&mut self.segments));
+        ShapingSink::append(&mut sink, text_range, font, glyphs);
+        self.segments = sink.0;
+    }
+}
+
+// TODO: linked_list_cursors feature would improve some of this code significantly
+impl GlyphString {
     fn from_array<const N: usize>(
         text: Rc<str>,
-        segments: [GlyphStringSegment<'f>; N],
+        segments: [GlyphStringSegment; N],
         direction: Direction,
-    ) -> GlyphString<'f> {
+    ) -> GlyphString {
         GlyphString {
             text,
             segments: LinkedList::from_iter(
@@ -379,13 +393,21 @@ impl<'f> GlyphString<'f> {
         }
     }
 
-    pub fn iter_glyphs_visual(&self) -> impl DoubleEndedIterator<Item = &Glyph<'f>> {
-        self.segments.iter().flat_map(|s| s.iter())
+    pub fn iter_fonts_visual(&self) -> impl DoubleEndedIterator<Item = &Font> {
+        self.segments.iter().map(|s| &s.font)
     }
 
-    pub fn iter_glyphs_logical(&self) -> impl DoubleEndedIterator<Item = &Glyph<'f>> {
+    pub fn iter_glyphs_visual(&self) -> impl DoubleEndedIterator<Item = (&Font, &Glyph)> {
+        self.segments
+            .iter()
+            .flat_map(|s| s.iter().map(|g| (&s.font, g)))
+    }
+
+    pub fn iter_glyphs_logical(&self) -> impl DoubleEndedIterator<Item = (&Font, &Glyph)> {
         RevIf::new(
-            self.segments.iter().flat_map(|s| s.iter()),
+            self.segments
+                .iter()
+                .flat_map(|s| s.iter().map(|g| (&s.font, g))),
             self.direction.is_reverse(),
         )
     }
@@ -462,7 +484,6 @@ impl<'f> GlyphString<'f> {
         font_feature_events: &[FontFeatureEvent],
         grapheme_cluster_boundaries: &[usize],
         font_iter: FontMatchIterator<'_>,
-        font_arena: &'f FontArena,
         fonts: &mut FontDb,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         assert!(!self.is_empty());
@@ -471,16 +492,15 @@ impl<'f> GlyphString<'f> {
         let mut current_x = I26Dot6::ZERO;
         let mut it = RevIf::new(self.segments.iter(), self.direction.is_reverse());
         let mut next = it.next();
-        let push = |list: &mut LinkedList<GlyphStringSegment<'f>>,
-                    segment: GlyphStringSegment<'f>| {
-            if self.direction.is_reverse() {
-                list.push_front(segment);
-            } else {
+        let push = |list: &mut LinkedList<GlyphStringSegment>, segment: GlyphStringSegment| {
+            if !self.direction.is_reverse() {
                 list.push_back(segment);
+            } else {
+                list.push_front(segment);
             }
         };
-        let append = |list: &mut LinkedList<GlyphStringSegment<'f>>,
-                      other: &mut LinkedList<GlyphStringSegment<'f>>| {
+        let append = |list: &mut LinkedList<GlyphStringSegment>,
+                      other: &mut LinkedList<GlyphStringSegment>| {
             if !self.direction.is_reverse() {
                 list.append(other);
             } else {
@@ -505,7 +525,6 @@ impl<'f> GlyphString<'f> {
                     font_feature_events,
                     grapheme_cluster_boundaries,
                     font_iter.clone(),
-                    font_arena,
                     fonts,
                     self.direction,
                 )?;
@@ -550,14 +569,15 @@ impl<'f> GlyphString<'f> {
                     font_feature_events,
                     grapheme_cluster_boundaries,
                     font_iter,
-                    font_arena,
                     fonts,
                     self.direction,
                 )?;
 
                 append(
                     &mut right_segments,
-                    &mut it.cloned().collect::<LinkedList<_>>(),
+                    // NOTE: For this to be correct we need to go back to iterating in visual order
+                    //       so `RevIf::into_inner` first.
+                    &mut it.into_inner().cloned().collect::<LinkedList<_>>(),
                 );
 
                 return Ok(Some((

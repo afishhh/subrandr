@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.2.0]
+
 - Implemented `inline-block` layout for SRV3 subtitles.
 - SRV3 subtitles now have their `text-align` default to their horizontal alignment.
 - Fixed occasional extraneous line break before zero-width item at the end of a line.
@@ -12,6 +14,8 @@
 - SRV3 shadows without an explicit edge color now correctly use foreground alpha.
 - SRV3 shadows of type `2` without an explicit edge color now use correct default colors.
 - Small blurs ($\sigma \le 2$) now use a real gaussian convolution. Larger blurs keep using the current approximation of repeated box blur with radius $\text{round}(0.375 \sigma \sqrt{2 \pi})$.
+- Fixed scaling of FreeType bitmaps to use a proper implementation of bilinear interpolation.
+- Scaling of FreeType bitmaps is now skipped if they're zero-sized. This means an error will no longer be triggered if such a bitmap has an unsupported pixel format.
 
 ## [v1.1.0]
 
@@ -62,7 +66,8 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.2.0...HEAD
+[v1.2.0]: https://github.com/afishhh/subrandr/compare/v1.1.0...v1.2.0
 [v1.1.0]: https://github.com/afishhh/subrandr/compare/v1.0.1...v1.1.0
 [v1.0.1]: https://github.com/afishhh/subrandr/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/afishhh/subrandr/compare/v0.2.2...v1.0.0

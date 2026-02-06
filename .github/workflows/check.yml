@@ -47,7 +47,10 @@ jobs:
           - name: x86_64 Linux
             image: ubuntu-latest
           - name: i686 Linux
-            image: ubuntu-latest
+            # On ubuntu-latest every time I enabled this check it eventually started
+            # failing with apt complaining it can't install some packages.
+            # So try with an older ubuntu image, surely it won't break itself right?
+            image: ubuntu-22.04
             cross-arch: i686
             rustc-cross-target: i686-unknown-linux-gnu
             extra-cflags: -m32

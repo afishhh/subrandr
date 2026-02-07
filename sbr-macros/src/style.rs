@@ -203,18 +203,11 @@ impl Input {
 }
 
 impl Property {
-    fn rcified_type(&self) -> syn::Type {
-        match &self.value_type {
-            syn::Type::Slice(slice) => syn::Type::Path(syn::parse_quote!(::util::rc::Rc<#slice>)),
-            _ => self.value_type.clone(),
-        }
-    }
-
     fn effective_default(&self) -> syn::Expr {
         if let Some(default) = &self.default {
             default.clone()
         } else {
-            let type_ = self.rcified_type();
+            let type_ = &self.value_type;
             syn::parse_quote! { <#type_>::DEFAULT }
         }
     }
@@ -250,7 +243,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         let mut default_result = TokenStream2::new();
         for prop in &group.properties {
             let name = &prop.name;
-            let type_ = prop.rcified_type();
+            let type_ = &prop.value_type;
             inner_result.extend(quote! { #name: #type_, });
             let default_expr = prop.effective_default();
             default_result.extend(quote! { #name: #default_expr, });
@@ -303,7 +296,6 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             let type_name = snake_case_to_pascal_case(&prop.name);
             let make_mut_name = syn::Ident::new(&format!("make_{name}_mut"), name.span());
             let type_ = &prop.value_type;
-            let rc_type_ = &prop.rcified_type();
 
             let ampersand = proc_macro2::Punct::new('&', proc_macro2::Spacing::Alone);
             let ampersand_if_not_copy = if prop.copy {
@@ -317,7 +309,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                     #ampersand_if_not_copy self.#group_name.#name
                 }
 
-                pub fn #make_mut_name(&mut self) -> &mut #rc_type_ {
+                pub fn #make_mut_name(&mut self) -> &mut #type_ {
                     &mut ::util::rc::Rc::make_mut(&mut self.#group_name).#name
                 }
             });

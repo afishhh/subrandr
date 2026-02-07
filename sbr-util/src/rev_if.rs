@@ -12,6 +12,10 @@ impl<I: DoubleEndedIterator> RevIf<I> {
             reverse,
         }
     }
+
+    pub fn into_inner(self) -> I {
+        self.inner
+    }
 }
 
 impl<I: DoubleEndedIterator> Iterator for RevIf<I> {

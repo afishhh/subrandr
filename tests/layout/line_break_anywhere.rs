@@ -1,5 +1,5 @@
 use rasterize::color::BGRA8;
-use util::math::I26Dot6;
+use util::{math::I26Dot6, rc_static};
 
 use crate::style::computed::HorizontalAlignment;
 
@@ -19,6 +19,13 @@ test_define_style! {
 
     .align_right {
         text_align: HorizontalAlignment::Right
+    }
+
+    .noto_arabic_and_emoji {
+        font_family: rc_static!([
+            rc_static!(str b"Noto Sans Arabic"),
+            rc_static!(str b"Noto Color Emoji")
+        ])
     }
 }
 
@@ -217,6 +224,52 @@ check_test! {
         }
         span.g2 {
             text "ع"
+        }
+    }
+}
+
+check_test! {
+    name = arabic_rtl_interspersed_emoji,
+    size = (16 * 13, 64 * 4 + 5),
+    inline.noto_arabic_and_emoji.align_right.fs32.break_anywhere {
+        span.g1 {
+            text "لمّا ⭕️كا ا⭕️لاترا"
+        }
+        span.g2 {
+            text "ف ب😀لك"
+        }
+        span.g3 {
+            text "رامة🧱 العأصلة"
+        }
+        span.g4 {
+            text "في جميع"
+        }
+    }
+}
+
+check_test! {
+    name = arabic_rtl_interspersed_emoji_spans,
+    size = (16 * 13, 64 * 4 + 5),
+    inline.noto_sans_arabic.align_right.fs32.break_anywhere {
+        span.g1 {
+            text "لمّا "
+            span.noto_color_emoji { text "⭕️" }
+            text "كا ا"
+            span.noto_color_emoji { text "⭕️" }
+            text "لاترا"
+        }
+        span.g2 {
+            text "ف ب"
+            span.noto_color_emoji { text "😀" }
+            text "لك"
+        }
+        span.g3 {
+            text "رامة"
+            span.noto_color_emoji { text "🧱" }
+            text " العأصلة"
+        }
+        span.g4 {
+            text "في جميع"
         }
     }
 }

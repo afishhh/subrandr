@@ -1,12 +1,10 @@
 use std::{fmt::Debug, sync::RwLock};
 
+use log::LogContext;
 use once_cell::sync::OnceCell as OnceLock;
 use thiserror::Error;
 
-use crate::{
-    text::{FaceInfo, FaceRequest, FontFallbackRequest},
-    Subrandr,
-};
+use crate::text::{FaceInfo, FaceRequest, FontFallbackRequest};
 
 #[non_exhaustive]
 #[derive(Error, Debug)]
@@ -64,12 +62,16 @@ pub enum FallbackError {
 //       It's probably best if `FontSource::Memory` just stores an `Arc<[u8]>` instead of
 //       a `Face`.
 pub trait PlatformFontProvider: Debug + Send + Sync {
-    fn update_if_changed(&mut self, sbr: &Subrandr) -> Result<bool, UpdateError> {
-        _ = sbr;
+    fn update_if_changed(&mut self, log: &LogContext) -> Result<bool, UpdateError> {
+        _ = log;
         Ok(false)
     }
 
-    fn substitute(&self, sbr: &Subrandr, request: &mut FaceRequest) -> Result<(), SubstituteError>;
+    fn substitute(
+        &self,
+        log: &LogContext,
+        request: &mut FaceRequest,
+    ) -> Result<(), SubstituteError>;
     fn fonts(&self) -> &[FaceInfo];
     fn fallback(&self, request: &FontFallbackRequest) -> Result<Option<FaceInfo>, FallbackError>;
 }
@@ -92,13 +94,13 @@ pub mod null {
     pub struct NullFontProvider;
 
     impl PlatformFontProvider for NullFontProvider {
-        fn update_if_changed(&mut self, _sbr: &Subrandr) -> Result<bool, UpdateError> {
+        fn update_if_changed(&mut self, _log: &LogContext) -> Result<bool, UpdateError> {
             Ok(false)
         }
 
         fn substitute(
             &self,
-            _sbr: &Subrandr,
+            _log: &LogContext,
             _request: &mut FaceRequest,
         ) -> Result<(), SubstituteError> {
             Ok(())
@@ -121,8 +123,8 @@ pub type LockedPlatformFontProvider = RwLock<dyn PlatformFontProvider>;
 
 static PLATFORM_FONT_SOURCE: OnceLock<Box<LockedPlatformFontProvider>> = OnceLock::new();
 
-fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvider>, InitError> {
-    _ = sbr;
+fn init_platform_default(log: &LogContext) -> Result<Box<LockedPlatformFontProvider>, InitError> {
+    _ = log;
 
     #[cfg(all(font_provider = "fontconfig", not(font_provider = "android-ndk")))]
     {
@@ -132,13 +134,13 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
     }
     #[cfg(font_provider = "directwrite")]
     {
-        directwrite::DirectWriteFontProvider::new(sbr)
+        directwrite::DirectWriteFontProvider::new(log)
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }
     #[cfg(font_provider = "android-ndk")]
     {
-        ndk::AndroidNdkFontProvider::new(sbr)
+        ndk::AndroidNdkFontProvider::new(log)
             .map(|x| Box::new(RwLock::new(x)) as Box<LockedPlatformFontProvider>)
             .map_err(Into::into)
     }
@@ -152,8 +154,8 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
             std::sync::atomic::AtomicBool::new(false);
 
         if !LOGGED_UNAVAILABLE.fetch_or(true, std::sync::atomic::Ordering::Relaxed) {
-            crate::log::warning!(
-                sbr,
+            log::warn!(
+                log,
                 "no default fontprovider available for current platform"
             );
         }
@@ -162,8 +164,10 @@ fn init_platform_default(sbr: &Subrandr) -> Result<Box<LockedPlatformFontProvide
     }
 }
 
-pub fn platform_default(sbr: &Subrandr) -> Result<&'static LockedPlatformFontProvider, InitError> {
+pub fn platform_default(
+    log: &LogContext,
+) -> Result<&'static LockedPlatformFontProvider, InitError> {
     PLATFORM_FONT_SOURCE
-        .get_or_try_init(|| init_platform_default(sbr))
+        .get_or_try_init(|| init_platform_default(log))
         .map(|x| &**x)
 }

@@ -8,8 +8,9 @@ use std::{
 use util::{math::I26Dot6, rev_if::RevIf};
 
 use super::FontFeatureEvent;
-use crate::text::{
-    Direction, FontArena, FontDb, FontMatchIterator, Glyph, ShapingBuffer, ShapingError,
+use crate::{
+    layout::LayoutContext,
+    text::{Direction, FontArena, FontMatchIterator, Glyph, ShapingBuffer, ShapingError},
 };
 
 #[derive(Clone)]
@@ -195,7 +196,7 @@ impl<'f> GlyphStringSegment<'f> {
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fonts: &mut FontDb,
+        lctx: &mut LayoutContext,
         direction: Direction,
     ) -> Result<LinkedList<Self>, ShapingError> {
         // If the break is within a glyph (like a long ligature), we must
@@ -229,7 +230,7 @@ impl<'f> GlyphStringSegment<'f> {
                     );
                     let other = GlyphStringSegment::from_glyphs(
                         reshape_range,
-                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
+                        buffer.shape(lctx.log, font_iterator.clone(), font_arena, lctx.fonts)?,
                     );
 
                     if let Some(result) = self.try_concat_with_half(i, other, direction, false) {
@@ -252,7 +253,7 @@ impl<'f> GlyphStringSegment<'f> {
         );
         Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
             reshape_range,
-            buffer.shape(font_iterator, font_arena, fonts)?,
+            buffer.shape(lctx.log, font_iterator, font_arena, lctx.fonts)?,
         )]))
     }
 
@@ -267,7 +268,7 @@ impl<'f> GlyphStringSegment<'f> {
         grapheme_cluster_boundaries: &[usize],
         font_iterator: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fonts: &mut FontDb,
+        lctx: &mut LayoutContext,
         direction: Direction,
     ) -> Result<LinkedList<GlyphStringSegment<'f>>, ShapingError> {
         let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
@@ -295,7 +296,7 @@ impl<'f> GlyphStringSegment<'f> {
                     );
                     let other = GlyphStringSegment::from_glyphs(
                         reshape_range,
-                        buffer.shape(font_iterator.clone(), font_arena, fonts)?,
+                        buffer.shape(lctx.log, font_iterator.clone(), font_arena, lctx.fonts)?,
                     );
 
                     if let Some(result) = self.try_concat_with_half(i, other, direction, true) {
@@ -318,7 +319,7 @@ impl<'f> GlyphStringSegment<'f> {
         );
         Ok(LinkedList::from([GlyphStringSegment::from_glyphs(
             reshape_range,
-            buffer.shape(font_iterator, font_arena, fonts)?,
+            buffer.shape(lctx.log, font_iterator, font_arena, lctx.fonts)?,
         )]))
     }
 
@@ -463,7 +464,7 @@ impl<'f> GlyphString<'f> {
         grapheme_cluster_boundaries: &[usize],
         font_iter: FontMatchIterator<'_, 'f>,
         font_arena: &'f FontArena,
-        fonts: &mut FontDb,
+        lctx: &mut LayoutContext,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         assert!(!self.is_empty());
 
@@ -506,7 +507,7 @@ impl<'f> GlyphString<'f> {
                     grapheme_cluster_boundaries,
                     font_iter.clone(),
                     font_arena,
-                    fonts,
+                    lctx,
                     self.direction,
                 )?;
 
@@ -551,7 +552,7 @@ impl<'f> GlyphString<'f> {
                     grapheme_cluster_boundaries,
                     font_iter,
                     font_arena,
-                    fonts,
+                    lctx,
                     self.direction,
                 )?;
 

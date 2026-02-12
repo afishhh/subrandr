@@ -15,6 +15,7 @@ _serde = ["dep:serde"]
 
 [dependencies]
 subrandr = { path = ".." }
+log = { workspace = true }
 util = { workspace = true }
 
 anyhow = "1.0.97"

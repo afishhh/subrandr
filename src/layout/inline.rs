@@ -653,6 +653,7 @@ fn font_matcher_from_style<'f>(
     lctx: &mut LayoutContext,
 ) -> Result<FontMatcher<'f>, InlineLayoutError> {
     text::FontMatcher::match_all(
+        lctx.log,
         style.font_family(),
         text::FontStyle {
             weight: style.font_weight(),
@@ -675,7 +676,7 @@ fn primary_font_from_style<'f>(
     lctx: &mut LayoutContext,
 ) -> Result<&'f Font, InlineLayoutError> {
     font_matcher_from_style(style, font_arena, lctx)?
-        .primary(font_arena, lctx.fonts)
+        .primary(lctx.log, font_arena, lctx.fonts)
         .map_err(Into::into)
 }
 
@@ -818,7 +819,7 @@ fn shape_run_initial<'a, 'f>(
                         font_features_events,
                         grapheme_cluster_boundaries,
                     );
-                    buffer.shape(self.matcher.iterator(), font_arena, lctx.fonts)?
+                    buffer.shape(lctx.log, self.matcher.iterator(), font_arena, lctx.fonts)?
                 };
                 buffer.clear();
 
@@ -826,7 +827,7 @@ fn shape_run_initial<'a, 'f>(
                     range: range.clone(),
                     kind: ShapedItemKind::Text(ShapedItemText {
                         font_matcher: self.matcher.clone(),
-                        primary_font: self.matcher.primary(font_arena, lctx.fonts)?,
+                        primary_font: self.matcher.primary(lctx.log, font_arena, lctx.fonts)?,
                         glyphs: GlyphString::from_glyphs(text.clone(), range, glyphs, direction),
                         break_after,
                     }),
@@ -867,12 +868,12 @@ fn shape_run_initial<'a, 'f>(
         }
     }
 
-    struct ShapedItemBuilder<'a, 'f, 's, 'l, 'll, 'la> {
+    struct ShapedItemBuilder<'a, 'f, 's, 'l, 'll> {
         content: &'a InlineContent,
         run_text: &'a Rc<str>,
         bidi: unicode_bidi::BidiInfo<'a>,
         grapheme_cluster_boundaries: Vec<usize>,
-        lctx: &'l mut LayoutContext<'ll, 'la>,
+        lctx: &'l mut LayoutContext<'ll>,
         font_arena: &'f FontArena,
 
         break_opportunities: Vec<usize>,
@@ -892,7 +893,7 @@ fn shape_run_initial<'a, 'f>(
         remaining_children: usize,
     }
 
-    impl<'a, 'f> ShapedItemBuilder<'a, 'f, '_, '_, '_, '_> {
+    impl<'a, 'f> ShapedItemBuilder<'a, 'f, '_, '_, '_> {
         fn push_break_opportunity(&mut self, idx: usize) {
             if let Some(&previous) = self.break_opportunities.last() {
                 if previous == idx {
@@ -1027,8 +1028,7 @@ fn shape_run_initial<'a, 'f>(
             let next_span_id = self.span_state.len();
             self.span_state.push(SpanState::new(
                 style,
-                font_matcher_from_style(style, self.font_arena, self.lctx)?
-                    .primary(self.font_arena, self.lctx.fonts)?,
+                primary_font_from_style(style, self.font_arena, self.lctx)?,
                 self.current_span_id,
             ));
             self.current_span_id = next_span_id;
@@ -1158,12 +1158,11 @@ fn shape_run_initial<'a, 'f>(
 
                                             let base = ShapedRubyBase {
                                                 style: base_style,
-                                                primary_font: font_matcher_from_style(
+                                                primary_font: primary_font_from_style(
                                                     base_style,
                                                     self.font_arena,
                                                     self.lctx,
-                                                )?
-                                                .primary(self.font_arena, self.lctx.fonts)?,
+                                                )?,
                                                 inner: shape_run_initial(
                                                     self.content,
                                                     run_index,
@@ -1445,8 +1444,8 @@ fn shape_run_initial<'a, 'f>(
     )
 }
 
-struct BreakingContext<'f, 'l, 'a, 'b> {
-    layout: &'a mut LayoutContext<'l, 'b>,
+struct BreakingContext<'f, 'l, 'a> {
+    layout: &'a mut LayoutContext<'l>,
     constraints: &'a LayoutConstraints,
     font_arena: &'f FontArena,
     break_opportunities: &'a [usize],
@@ -1468,7 +1467,7 @@ impl<'a, 'f> ShapedItem<'a, 'f> {
     fn line_break(
         &mut self,
         current_width: &mut FixedL,
-        ctx: &mut BreakingContext<'f, '_, '_, '_>,
+        ctx: &mut BreakingContext<'f, '_, '_>,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
         let can_break_before = *current_width != FixedL::ZERO;
         *current_width += self.padding.current_padding_left;
@@ -1570,7 +1569,7 @@ impl<'f> ShapedItemText<'f> {
         range: &mut Range<usize>,
         current_width: &mut FixedL,
         can_break_before: bool,
-        ctx: &mut BreakingContext<'f, '_, '_, '_>,
+        ctx: &mut BreakingContext<'f, '_, '_>,
         padding: &mut ShapedItemPadding,
     ) -> Result<BreakOutcome<'a, 'f>, InlineLayoutError> {
         let initial_x = *current_width;
@@ -1621,7 +1620,7 @@ impl<'f> ShapedItemText<'f> {
                         ctx.grapheme_cluster_boundaries,
                         self.font_matcher.iterator(),
                         ctx.font_arena,
-                        ctx.layout.fonts,
+                        ctx.layout,
                     )? {
                         drop(glyph_it);
 
@@ -2565,8 +2564,8 @@ pub struct PartialInline<'a> {
     initial_shaping_result: InitialShapingResult<'a, 'static>,
 }
 
-pub fn shape<'l, 'a, 'b, 'c>(
-    lctx: &'b mut LayoutContext<'l, 'a>,
+pub fn shape<'l, 'b, 'c>(
+    lctx: &'b mut LayoutContext<'l>,
     content: &'c InlineContent,
 ) -> Result<PartialInline<'c>, InlineLayoutError> {
     let font_arena = util::rc::Rc::new(FontArena::new());
@@ -2615,9 +2614,9 @@ impl PartialInline<'_> {
         max.max(current)
     }
 
-    pub fn layout<'b, 'l, 'a>(
+    pub fn layout<'b, 'l>(
         self,
-        lctx: &'b mut LayoutContext<'l, 'a>,
+        lctx: &'b mut LayoutContext<'l>,
         constraints: &LayoutConstraints,
     ) -> Result<InlineContentFragment, InlineLayoutError> {
         unsafe {
@@ -2633,8 +2632,8 @@ impl PartialInline<'_> {
     }
 }
 
-pub fn layout<'l, 'a, 'b, 'c>(
-    lctx: &'b mut LayoutContext<'l, 'a>,
+pub fn layout<'l, 'b, 'c>(
+    lctx: &'b mut LayoutContext<'l>,
     constraints: &LayoutConstraints,
     content: &'c InlineContent,
 ) -> Result<InlineContentFragment, InlineLayoutError> {

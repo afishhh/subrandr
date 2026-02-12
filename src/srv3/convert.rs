@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
@@ -14,7 +15,6 @@ use crate::{
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
-    log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
     srv3::{Event, RubyPosition},
     style::{
@@ -25,7 +25,7 @@ use crate::{
         ComputedStyle,
     },
     text::OpenTypeTag,
-    Subrandr, SubtitleContext,
+    SubtitleContext,
 };
 
 use super::{Document, EdgeType, Pen, RubyPart};
@@ -535,7 +535,7 @@ fn convert_segment(
 }
 
 struct WindowBuilder<'a> {
-    sbr: &'a Subrandr,
+    log: &'a LogContext<'a>,
     base_style: ComputedStyle,
     logset: LogOnceSet,
 }
@@ -581,8 +581,8 @@ impl WindowBuilder<'_> {
                         RubyPosition::Alternate => Ruby::Over,
                         RubyPosition::Over => Ruby::Over,
                         RubyPosition::Under => {
-                            warning!(
-                                self.sbr,
+                            warn!(
+                                self.log,
                                 once(ruby_under_unsupported),
                                 "`ruby-position: under`-style ruby text is not supported yet"
                             );
@@ -640,12 +640,16 @@ impl WindowBuilder<'_> {
     }
 }
 
-pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentifier>) -> Subtitles {
+pub fn convert(
+    log: &LogContext,
+    document: Document,
+    lang: Option<&LanguageIdentifier>,
+) -> Subtitles {
     let mut result = Subtitles {
         windows: Vec::new(),
     };
     let mut window_builder = WindowBuilder {
-        sbr,
+        log,
         base_style: {
             let mut style =
                 pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);

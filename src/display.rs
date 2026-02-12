@@ -228,7 +228,7 @@ impl DisplayContext<'_> {
         fragment_box: &FragmentBox,
     ) {
         let background = style.background_color();
-        if background.a > 0 {
+        if style.visibility().is_visible() && background.a > 0 {
             // This seems like reasonable rounding for inline backgrounds because:
             // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.
             // 2. It rounds the background box to whole integers avoiding conflation artifacts.
@@ -255,16 +255,18 @@ impl DisplayContext<'_> {
                 let mut base_scope =
                     ruby_scope.enter_box(&base.style, Some(base.primary_font.metrics()));
 
-                let initial_base_padding_end =
-                    base_pos.x + base.children.first().map_or(FixedL::ZERO, |x| x.0.x);
-                for decoration in base_scope.decoration_ctx.active_decorations() {
-                    Self::display_line_decoration(
-                        base_scope.output,
-                        last_x,
-                        initial_base_padding_end,
-                        baseline_y,
-                        decoration,
-                    );
+                if base.style.visibility().is_visible() {
+                    let initial_base_padding_end =
+                        base_pos.x + base.children.first().map_or(FixedL::ZERO, |x| x.0.x);
+                    for decoration in base_scope.decoration_ctx.active_decorations() {
+                        Self::display_line_decoration(
+                            base_scope.output,
+                            last_x,
+                            initial_base_padding_end,
+                            baseline_y,
+                            decoration,
+                        );
+                    }
                 }
 
                 for &(base_item_offset, ref base_item) in &base.children {
@@ -275,17 +277,19 @@ impl DisplayContext<'_> {
                     );
                 }
 
-                let final_base_padding_end =
-                    base_pos.x + base.children.last().map_or(FixedL::ZERO, |x| x.0.x);
                 let base_end_x = base_pos.x + base.fbox.size_for_layout().x;
-                for decoration in base_scope.decoration_ctx.active_decorations() {
-                    Self::display_line_decoration(
-                        base_scope.output,
-                        final_base_padding_end,
-                        base_end_x,
-                        baseline_y,
-                        decoration,
-                    );
+                if base.style.visibility().is_visible() {
+                    let final_base_padding_end =
+                        base_pos.x + base.children.last().map_or(FixedL::ZERO, |x| x.0.x);
+                    for decoration in base_scope.decoration_ctx.active_decorations() {
+                        Self::display_line_decoration(
+                            base_scope.output,
+                            final_base_padding_end,
+                            base_end_x,
+                            baseline_y,
+                            decoration,
+                        );
+                    }
                 }
 
                 last_x = base_end_x;
@@ -330,7 +334,9 @@ impl DisplayContext<'_> {
                 }
             }
             InlineItemFragment::Text(text) => {
-                self.display_text(round_y(pos), baseline_y, text);
+                if text.style.visibility().is_visible() {
+                    self.display_text(round_y(pos), baseline_y, text);
+                }
             }
             InlineItemFragment::Ruby(ruby) => self.display_ruby_fragment(pos, baseline_y, ruby),
             InlineItemFragment::Block(block) => self.display_block_container_fragment(pos, block),

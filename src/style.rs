@@ -51,5 +51,6 @@ macros::implement_style_module! {
 
     rc misc {
         color: BGRA8 = BGRA8::WHITE,
+        visibility: Visibility = Visibility::Visible,
     }
 }

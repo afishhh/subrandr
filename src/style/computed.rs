@@ -207,3 +207,18 @@ pub enum Direction {
 pub enum WhiteSpaceCollapse {
     Preserve,
 }
+
+// https://drafts.csswg.org/css-display-3/#visibility
+#[derive(Default, Debug, Clone, Copy)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    #[expect(dead_code)]
+    Hidden,
+}
+
+impl Visibility {
+    pub fn is_visible(&self) -> bool {
+        matches!(self, Self::Visible)
+    }
+}

@@ -128,13 +128,6 @@ pub enum FontSlant {
     Italic,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Ruby {
-    None,
-    Base,
-    Over,
-}
-
 #[derive(Debug, Clone)]
 pub struct TextShadow {
     pub offset: Vec2<Length>,
@@ -209,11 +202,10 @@ pub enum WhiteSpaceCollapse {
 }
 
 // https://drafts.csswg.org/css-display-3/#visibility
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     #[default]
     Visible,
-    #[expect(dead_code)]
     Hidden,
 }
 

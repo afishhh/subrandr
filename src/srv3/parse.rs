@@ -114,11 +114,48 @@ impl Default for WindowPos {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct WindowStyle {
+    pub mode_hint: ModeHint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeHint {
+    // NOTE: ModeHint=0 is *not* the same as ModeHint=1 as some sources say.
+    //       For example while experimenting with the `t` attribute on ruby I
+    //       accidentally left `mh=0` and got different results.
+    Default = 1,
+    Scroll = 2,
+}
+
+impl FromStr for ModeHint {
+    type Err = AnyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "1" => Self::Default,
+            "2" => Self::Scroll,
+            _ => return Err("Unknown mode hint".into()),
+        })
+    }
+}
+
+const DEFAULT_WINDOW_STYLE: WindowStyle = WindowStyle {
+    mode_hint: ModeHint::Default,
+};
+
+impl Default for WindowStyle {
+    fn default() -> Self {
+        DEFAULT_WINDOW_STYLE
+    }
+}
+
 // POV: you want to self reference but Rust says "no"
 #[derive(Debug)]
 pub struct Document {
     pens: HashMap<Box<str>, Pen>,
     wps: HashMap<Box<str>, WindowPos>,
+    wss: HashMap<Box<str>, WindowStyle>,
     windows: HashMap<Box<str>, Window>,
     events: Vec<Event>,
 }
@@ -129,6 +166,10 @@ impl Document {
     }
 
     pub fn wps(&self) -> &HashMap<Box<str>, WindowPos> {
+        &self.wps
+    }
+
+    pub fn wss(&self) -> &HashMap<Box<str>, WindowPos> {
         &self.wps
     }
 
@@ -159,6 +200,7 @@ pub struct Event {
     pub time: u32,
     pub duration: u32,
     position: &'static WindowPos,
+    style: &'static WindowStyle,
     pub window_id: Option<Box<str>>,
     pub segments: Vec<Segment>,
 }
@@ -167,6 +209,10 @@ impl Event {
     pub fn position(&self) -> &WindowPos {
         self.position
     }
+
+    pub fn style(&self) -> &WindowStyle {
+        self.style
+    }
 }
 
 #[derive(Debug)]
@@ -174,11 +220,16 @@ pub struct Window {
     pub time: u32,
     pub duration: u32,
     position: &'static WindowPos,
+    style: &'static WindowStyle,
 }
 
 impl Window {
     pub fn position(&self) -> &WindowPos {
         self.position
+    }
+
+    pub fn style(&self) -> &WindowStyle {
+        self.style
     }
 }
 
@@ -427,11 +478,50 @@ fn parse_wp(
     }
 }
 
+fn parse_ws(
+    sbr: &Subrandr,
+    attributes: Attributes,
+    logset: &LogOnceSet,
+) -> Result<(Box<str>, WindowStyle), Error> {
+    let mut result_id = None;
+    let mut result = WindowStyle::default();
+
+    log_once_state!(in logset; unknown_ws_attribute);
+
+    match_attributes! {
+        attributes,
+        "id"(id: &str) => {
+            result_id = Some(id.into());
+        },
+        "mh"(mh: ModeHint) => {
+            result.mode_hint = mh;
+        },
+        else other => {
+            warning!(
+                sbr, once(unknown_ws_attribute, other),
+                "Unknown attribute encountered on ws: {other}",
+            );
+        }
+    }
+
+    match result_id {
+        None => Err(Error::MissingAttribute("ws", "id")),
+        Some(id) => Ok((id, result)),
+    }
+}
+
 fn parse_head(
     sbr: &Subrandr,
     reader: &mut quick_xml::Reader<&[u8]>,
-) -> Result<(HashMap<Box<str>, Pen>, HashMap<Box<str>, WindowPos>), Error> {
-    let (mut pens, mut wps) = (HashMap::new(), HashMap::new());
+) -> Result<
+    (
+        HashMap<Box<str>, Pen>,
+        HashMap<Box<str>, WindowPos>,
+        HashMap<Box<str>, WindowStyle>,
+    ),
+    Error,
+> {
+    let (mut pens, mut wps, mut wss) = (HashMap::new(), HashMap::new(), HashMap::new());
 
     let logset = LogOnceSet::new();
     log_once_state!(in &logset; unknown_elements_head);
@@ -449,6 +539,10 @@ fn parse_head(
                     b"wp" => {
                         let (id, wp) = parse_wp(sbr, element.attributes(), &logset)?;
                         wps.insert(id, wp);
+                    }
+                    b"ws" => {
+                        let (id, ws) = parse_ws(sbr, element.attributes(), &logset)?;
+                        wss.insert(id, ws);
                     }
                     name => {
                         warning!(
@@ -477,13 +571,14 @@ fn parse_head(
         }
     }
 
-    Ok((pens, wps))
+    Ok((pens, wps, wss))
 }
 
 fn parse_body(
     sbr: &Subrandr,
     pens: &HashMap<Box<str>, Pen>,
     wps: &HashMap<Box<str>, WindowPos>,
+    wss: &HashMap<Box<str>, WindowStyle>,
     windows: &mut HashMap<Box<str>, Window>,
     events: &mut Vec<Event>,
     reader: &mut quick_xml::Reader<&[u8]>,
@@ -496,6 +591,7 @@ fn parse_body(
         unknown_segment_elements,
         non_existant_pen,
         non_existant_wp,
+        non_existant_ws,
         win_without_id
     );
 
@@ -530,6 +626,7 @@ fn parse_body(
                             time: 0,
                             duration: u32::MAX,
                             position: &DEFAULT_WINDOW_POS,
+                            style: &DEFAULT_WINDOW_STYLE,
                         };
 
                         match_attributes! {
@@ -545,6 +642,9 @@ fn parse_body(
                             },
                             "wp"(id: &str) => {
                                 set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
+                            },
+                            "ws"(id: &str) => {
+                                set_or_log!(result.style, wss, id, non_existant_ws, "Window style");
                             },
                             else other => {
                                 warning!(
@@ -568,6 +668,7 @@ fn parse_body(
                             time: 0,
                             duration: 0,
                             position: &DEFAULT_WINDOW_POS,
+                            style: &DEFAULT_WINDOW_STYLE,
                             window_id: None,
                             segments: vec![],
                         };
@@ -587,6 +688,9 @@ fn parse_body(
                             },
                             "wp"(id: &str) => {
                                 set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
+                            },
+                            "ws"(id: &str) => {
+                                set_or_log!(result.style, wss, id, non_existant_ws, "Window style");
                             },
                             "w"(id: &str) => {
                                 result.window_id = Some(id.into());
@@ -817,15 +921,16 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         }
     }
 
-    let (pens, wps) = if has_head {
+    let (pens, wps, wss) = if has_head {
         parse_head(sbr, &mut reader)?
     } else {
-        (HashMap::new(), HashMap::new())
+        (HashMap::new(), HashMap::new(), HashMap::new())
     };
 
     let mut doc = Document {
         pens,
         wps,
+        wss,
         windows: HashMap::new(),
         events: { vec![] },
     };
@@ -880,6 +985,7 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         sbr,
         &doc.pens,
         &doc.wps,
+        &doc.wss,
         &mut doc.windows,
         &mut doc.events,
         &mut reader,

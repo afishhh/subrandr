@@ -16,11 +16,11 @@ use crate::{
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
-    srv3::{Event, RubyPosition},
+    srv3::{Event, ModeHint, RubyPosition},
     style::{
         computed::{
-            Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, Ruby,
-            TextShadow, VerticalAlignment,
+            Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, TextShadow,
+            VerticalAlignment, Visibility,
         },
         ComputedStyle,
     },
@@ -188,12 +188,13 @@ struct Window {
     segment_style: ComputedStyle,
     vertical_align: VerticalAlignment,
     lines: Vec<VisualLine>,
+    mode_hint: ModeHint,
 }
 
 #[derive(Debug)]
 struct VisualLine {
     range: Range<u32>,
-    segments: Vec<Segment>,
+    segments: Vec<LineSegment>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,7 +203,12 @@ struct Segment {
     base_style: ComputedStyle,
     time_offset: u32,
     text: std::rc::Rc<str>,
-    ruby: Ruby,
+}
+
+#[derive(Debug, Clone)]
+struct LineSegment {
+    inner: Segment,
+    annotation: Option<Segment>,
 }
 
 impl Segment {
@@ -275,55 +281,59 @@ impl Segment {
             }
         }
     }
+}
 
-    fn compute_style(&self, sctx: &SubtitleContext, use_inlines: bool) -> ComputedStyle {
-        let mut result = self.base_style.clone();
-
-        let mut size = font_size_to_pixels(self.pen.font_size) * font_scale_from_ctx(sctx);
-        if matches!(self.ruby, Ruby::Over) {
-            size /= 2.0;
-            result
-                .make_font_feature_settings_mut()
-                .set(OpenTypeTag::FEAT_RUBY, 1);
+impl VisualLine {
+    fn compute_segment_style(
+        &self,
+        pass: &mut FrameLayoutPass,
+        segment: &Segment,
+        mh: ModeHint,
+    ) -> Option<ComputedStyle> {
+        let mut result = segment.base_style.clone();
+        pass.add_animation_point(self.range.start + segment.time_offset);
+        if segment.time_offset > pass.t - self.range.start {
+            match mh {
+                ModeHint::Default => {
+                    *result.make_visibility_mut() = Visibility::Hidden;
+                }
+                ModeHint::Scroll => return None,
+            }
         }
 
-        if use_inlines {
+        if pass.srv3_use_inlines {
             *result.make_inline_sizing_mut() = InlineSizing::Stretch;
         }
 
-        *result.make_font_size_mut() = I26Dot6::from(size);
+        *result.make_font_size_mut() = I26Dot6::from(
+            font_size_to_pixels(segment.pen.font_size) * font_scale_from_ctx(pass.sctx),
+        );
 
         let mut shadows = vec![];
-        self.compute_shadows(sctx, &mut shadows);
+        segment.compute_shadows(pass.sctx, &mut shadows);
 
         if !shadows.is_empty() {
             *result.make_text_shadows_mut() = shadows.into();
         }
 
-        result
+        Some(result)
     }
-}
 
-impl VisualLine {
     fn to_inline_content(
         &self,
         pass: &mut FrameLayoutPass,
         root_inline_style: ComputedStyle,
+        mh: ModeHint,
     ) -> InlineContent {
         let mut builder = InlineContentBuilder::new(root_inline_style);
-        // What lack of Peekable::inner() and Filter::inner() does to a language...
-        let mut next_idx = 0;
-        let sctx = pass.sctx;
-        let use_inlines = pass.srv3_use_inlines;
         let mut root = builder.root();
-        let mut it = self
-            .segments
-            .iter()
-            .filter(|segment| {
-                pass.add_animation_point(self.range.start + segment.time_offset);
-                segment.time_offset <= pass.t - self.range.start
-            })
-            .peekable();
+        let mut it = self.segments.iter();
+        let mut take_next = move |pass: &mut FrameLayoutPass| loop {
+            let segment = it.next()?;
+            if let Some(style) = self.compute_segment_style(pass, &segment.inner, mh) {
+                break Some((segment, style));
+            }
+        };
 
         struct CurrentBlock {
             pen: Option<Pen>,
@@ -343,71 +353,90 @@ impl VisualLine {
         // Only used if inline-block layout is enabled to coalesce structurally-same-pen
         // segments into a single inline-block.
         // This is what YouTube appears to do from my testing.
-        let mut current_block: CurrentBlock = CurrentBlock {
+        let mut current_block = CurrentBlock {
             pen: None,
             style: ComputedStyle::DEFAULT,
             builder: InlineContentBuilder::new(ComputedStyle::DEFAULT),
         };
-        while let Some(segment) = it.next() {
-            let mut style = segment.compute_style(sctx, use_inlines);
+        let mut first = true;
+        let mut next = take_next(pass);
+        while let Some((segment, mut style)) = next {
+            next = take_next(pass);
 
-            if next_idx == 0 {
+            if first {
                 *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+                first = false;
             }
-            next_idx += 1;
-            // NOTE: This purposefully ignores whether or not the next segment is
-            //       currently visible as that is what YouTube seems to do.
-            if self.segments.get(next_idx).is_none() {
-                *style.make_padding_right_mut() = Length::from_points(style.font_size() / 4);
-            }
+            let right_padding = if next.is_none() {
+                Some(Length::from_points(style.font_size() / 4))
+            } else {
+                None
+            };
 
-            let mut layout_to_builder =
-                |inner: &mut InlineSpanBuilder<'_>, inner_style: ComputedStyle| match segment.ruby {
-                    Ruby::None => {
-                        inner.push_span(inner_style).push_text(&segment.text);
+            let layout_to_builder =
+                |pass: &mut FrameLayoutPass,
+                 inner: &mut InlineSpanBuilder<'_>,
+                 inner_style: ComputedStyle| match &segment.annotation {
+                    None => {
+                        inner.push_span(inner_style).push_text(&segment.inner.text);
                     }
-                    Ruby::Base => {
+                    Some(annotation_segment) => {
                         let mut ruby = inner.push_ruby(inner_style.create_derived());
-                        ruby.push_base(inner_style.clone()).push_text(&segment.text);
-                        if let Some(next) = it.peek() {
-                            if let Ruby::Over = next.ruby {
-                                let mut annotation_style = next.compute_style(sctx, use_inlines);
+                        ruby.push_base(inner_style.clone())
+                            .push_text(&segment.inner.text);
+
+                        if let Some(annotation_style) = self
+                            .compute_segment_style(pass, annotation_segment, mh)
+                            .map(|mut style| {
                                 // If inline-block layout is enabled then background is handled by the
                                 // containing block.
-                                if !use_inlines {
-                                    *annotation_style.make_background_color_mut() = BGRA8::ZERO;
+                                if !pass.srv3_use_inlines {
+                                    *style.make_background_color_mut() = BGRA8::ZERO;
                                 }
-                                ruby.push_annotation(annotation_style).push_text(&next.text);
-                                _ = it.next();
-                            }
+                                *style.make_font_size_mut() /= 2.0;
+                                style
+                                    .make_font_feature_settings_mut()
+                                    .set(OpenTypeTag::FEAT_RUBY, 1);
+                                style
+                            })
+                        {
+                            ruby.push_annotation(annotation_style)
+                                .push_text(&annotation_segment.text);
                         }
-                    }
-                    Ruby::Over => {
-                        inner
-                            .push_ruby(inner_style.create_derived())
-                            .push_annotation(inner_style)
-                            .push_text(&segment.text);
                     }
                 };
 
-            if use_inlines {
-                layout_to_builder(&mut root, style);
+            if pass.srv3_use_inlines {
+                if let Some(right_padding) = right_padding {
+                    *style.make_padding_right_mut() = right_padding;
+                }
+
+                layout_to_builder(pass, &mut root, style);
             } else {
                 let inner_style = style.create_derived();
                 if current_block
                     .pen
                     .as_ref()
-                    .is_none_or(|pen| pen != &segment.pen)
+                    .is_none_or(|pen| pen != &segment.inner.pen)
+                    || current_block.style.visibility() != style.visibility()
                 {
                     if current_block.pen.is_some() {
                         current_block.flush(&mut root);
                     }
-                    current_block.pen = Some(segment.pen);
+                    current_block.pen = Some(segment.inner.pen);
                     current_block.builder.set_root_style(style.create_derived());
                     current_block.style = style;
                 };
 
-                layout_to_builder(&mut current_block.builder.root(), inner_style);
+                if let Some(right_padding) = right_padding {
+                    *current_block.style.make_padding_right_mut() = right_padding;
+                }
+
+                layout_to_builder(pass, &mut current_block.builder.root(), inner_style);
+
+                if right_padding.is_some() {
+                    current_block.flush(&mut root);
+                }
             };
         }
 
@@ -436,9 +465,11 @@ impl Window {
             if pass.add_event_range(line.range.clone()) {
                 lines.push(BlockContainer {
                     style: inner_style.clone(),
-                    content: BlockContainerContent::Inline(
-                        line.to_inline_content(pass, self.segment_style.clone()),
-                    ),
+                    content: BlockContainerContent::Inline(line.to_inline_content(
+                        pass,
+                        self.segment_style.clone(),
+                        self.mode_hint,
+                    )),
                 });
             }
         }
@@ -519,18 +550,12 @@ fn pen_to_size_independent_style(
     base
 }
 
-fn convert_segment(
-    segment: &super::Segment,
-    text: &str,
-    ruby: Ruby,
-    base_style: &ComputedStyle,
-) -> Segment {
+fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedStyle) -> Segment {
     Segment {
         pen: *segment.pen(),
         base_style: pen_to_size_independent_style(segment.pen(), false, base_style.clone()),
         time_offset: segment.time_offset,
         text: text.into(),
-        ruby,
     }
 }
 
@@ -541,7 +566,15 @@ struct WindowBuilder<'a> {
 }
 
 impl WindowBuilder<'_> {
-    fn create_window(&self, x: f32, y: f32, time: u32, duration: u32, align: Alignment) -> Window {
+    fn create_window(
+        &self,
+        x: f32,
+        y: f32,
+        time: u32,
+        duration: u32,
+        align: Alignment,
+        mode_hint: ModeHint,
+    ) -> Window {
         Window {
             x,
             y,
@@ -553,6 +586,7 @@ impl WindowBuilder<'_> {
             },
             vertical_align: align.1,
             lines: Vec::new(),
+            mode_hint,
         }
     }
 
@@ -577,9 +611,8 @@ impl WindowBuilder<'_> {
                         break 'ruby_failed;
                     };
 
-                    let ruby = match part.position {
-                        RubyPosition::Alternate => Ruby::Over,
-                        RubyPosition::Over => Ruby::Over,
+                    match part.position {
+                        RubyPosition::Alternate | RubyPosition::Over => (),
                         RubyPosition::Under => {
                             warning!(
                                 self.sbr,
@@ -590,20 +623,12 @@ impl WindowBuilder<'_> {
                         }
                     };
 
-                    current_line.segments.push(convert_segment(
-                        segment,
-                        &segment.text,
-                        Ruby::Base,
-                        &window.segment_style,
-                    ));
                     _ = it.next().unwrap();
                     let next = it.next().unwrap();
-                    current_line.segments.push(convert_segment(
-                        next,
-                        &next.text,
-                        ruby,
-                        &window.segment_style,
-                    ));
+                    current_line.segments.push(LineSegment {
+                        inner: convert_segment(segment, &segment.text, &window.segment_style),
+                        annotation: Some(convert_segment(next, &next.text, &window.segment_style)),
+                    });
                     _ = it.next().unwrap();
 
                     continue 'segment_loop;
@@ -616,12 +641,14 @@ impl WindowBuilder<'_> {
                     .find('\n')
                     .map_or(segment.text.len(), |i| last + i);
 
-                current_line.segments.push(convert_segment(
-                    segment,
-                    &segment.text[last..end],
-                    Ruby::None,
-                    &window.segment_style,
-                ));
+                current_line.segments.push(LineSegment {
+                    inner: convert_segment(
+                        segment,
+                        &segment.text[last..end],
+                        &window.segment_style,
+                    ),
+                    annotation: None,
+                });
 
                 if end == segment.text.len() {
                     break;
@@ -668,6 +695,7 @@ pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentif
             window.time,
             window.duration,
             window.position().point.to_alignment(),
+            window.style().mode_hint,
         ));
     }
 
@@ -696,6 +724,7 @@ pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentif
                 event.time,
                 event.duration,
                 event.position().point.to_alignment(),
+                event.style().mode_hint,
             );
             window_builder.extend_lines(&mut window, event);
             result.windows.push(window);

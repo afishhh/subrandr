@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+- Added more caching to font matching to improve performance in cases that use a lot of spans.
+- Implemented support for the SRV3 `mh` (mode hint) attribute on window style. Supported values are:
+  - `1`: default, has been changed to emit inactive segments as `visibility: hidden` instead of skipping
+  - `2`: scroll, skips inactive segments
+- Fixed SRV3 `right-padding` not being applied if the segment it was supposed to be applied to is merged into the preceeding one.
+
 ## [v1.2.0]
 
 - Implemented `inline-block` layout for SRV3 subtitles.

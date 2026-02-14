@@ -150,87 +150,29 @@ impl Default for WindowStyle {
     }
 }
 
-// POV: you want to self reference but Rust says "no"
-#[derive(Debug)]
-pub struct Document {
-    pens: HashMap<Box<str>, Pen>,
-    wps: HashMap<Box<str>, WindowPos>,
-    wss: HashMap<Box<str>, WindowStyle>,
-    windows: HashMap<Box<str>, Window>,
-    events: Vec<Event>,
-}
-
-impl Document {
-    pub fn pens(&self) -> &HashMap<Box<str>, Pen> {
-        &self.pens
-    }
-
-    pub fn wps(&self) -> &HashMap<Box<str>, WindowPos> {
-        &self.wps
-    }
-
-    pub fn wss(&self) -> &HashMap<Box<str>, WindowPos> {
-        &self.wps
-    }
-
-    pub fn windows(&self) -> &HashMap<Box<str>, Window> {
-        &self.windows
-    }
-
-    pub fn events(&self) -> &[Event] {
-        &self.events
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct Segment {
-    pen: &'static Pen,
+pub struct Segment<'h> {
+    pub pen: &'h Pen,
     pub time_offset: u32,
     pub text: String,
 }
 
-impl Segment {
-    pub const fn pen(&self) -> &Pen {
-        self.pen
-    }
-}
-
 #[derive(Debug)]
-pub struct Event {
+pub struct Event<'h> {
     pub time: u32,
     pub duration: u32,
-    position: &'static WindowPos,
-    style: &'static WindowStyle,
+    pub position: &'h WindowPos,
+    pub style: &'h WindowStyle,
     pub window_id: Option<Box<str>>,
-    pub segments: Vec<Segment>,
-}
-
-impl Event {
-    pub fn position(&self) -> &WindowPos {
-        self.position
-    }
-
-    pub fn style(&self) -> &WindowStyle {
-        self.style
-    }
+    pub segments: Vec<Segment<'h>>,
 }
 
 #[derive(Debug)]
-pub struct Window {
+pub struct Window<'h> {
     pub time: u32,
     pub duration: u32,
-    position: &'static WindowPos,
-    style: &'static WindowStyle,
-}
-
-impl Window {
-    pub fn position(&self) -> &WindowPos {
-        self.position
-    }
-
-    pub fn style(&self) -> &WindowStyle {
-        self.style
-    }
+    pub position: &'h WindowPos,
+    pub style: &'h WindowStyle,
 }
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -510,19 +452,28 @@ fn parse_ws(
     }
 }
 
+#[derive(Debug)]
+pub struct Head {
+    pens: HashMap<Box<str>, Pen>,
+    wps: HashMap<Box<str>, WindowPos>,
+    wss: HashMap<Box<str>, WindowStyle>,
+}
+
+impl Head {
+    fn empty() -> Self {
+        Self {
+            pens: HashMap::new(),
+            wps: HashMap::new(),
+            wss: HashMap::new(),
+        }
+    }
+}
+
 fn parse_head(
     sbr: &Subrandr,
     reader: &mut quick_xml::Reader<&[u8]>,
-) -> Result<
-    (
-        HashMap<Box<str>, Pen>,
-        HashMap<Box<str>, WindowPos>,
-        HashMap<Box<str>, WindowStyle>,
-    ),
-    Error,
-> {
-    let (mut pens, mut wps, mut wss) = (HashMap::new(), HashMap::new(), HashMap::new());
-
+    head: &mut Head,
+) -> Result<(), Error> {
     let logset = LogOnceSet::new();
     log_once_state!(in &logset; unknown_elements_head);
 
@@ -534,15 +485,15 @@ fn parse_head(
                     // TODO: Warn on text content in pen or wp
                     b"pen" => {
                         let (id, pen) = parse_pen(sbr, element.attributes(), &logset)?;
-                        pens.insert(id, pen);
+                        head.pens.insert(id, pen);
                     }
                     b"wp" => {
                         let (id, wp) = parse_wp(sbr, element.attributes(), &logset)?;
-                        wps.insert(id, wp);
+                        head.wps.insert(id, wp);
                     }
                     b"ws" => {
                         let (id, ws) = parse_ws(sbr, element.attributes(), &logset)?;
-                        wss.insert(id, ws);
+                        head.wss.insert(id, ws);
                     }
                     name => {
                         warning!(
@@ -571,261 +522,288 @@ fn parse_head(
         }
     }
 
-    Ok((pens, wps, wss))
+    Ok(())
 }
 
-fn parse_body(
-    sbr: &Subrandr,
-    pens: &HashMap<Box<str>, Pen>,
-    wps: &HashMap<Box<str>, WindowPos>,
-    wss: &HashMap<Box<str>, WindowStyle>,
-    windows: &mut HashMap<Box<str>, Window>,
-    events: &mut Vec<Event>,
-    reader: &mut quick_xml::Reader<&[u8]>,
-) -> Result<(), Error> {
-    log_once_state!(
-        unknown_attrs,
-        unknown_body_elements,
-        unknown_event_elements,
-        unknown_segment_attrs,
-        unknown_segment_elements,
-        non_existant_pen,
-        non_existant_wp,
-        non_existant_ws,
-        win_without_id
-    );
+#[derive(Debug)]
+pub enum BodyElement<'h> {
+    Event(Event<'h>),
+    Window(Box<str>, Window<'h>),
+}
 
-    macro_rules! set_or_log {
-        ($dst: expr, $map: expr, $id: expr, $log_id: expr, $what: literal) => {
-            if let Some(value) = $map.get($id) {
-                $dst = unsafe { &*(value as *const _) };
-            } else {
-                warning!(
-                    sbr,
-                    once($log_id, $id),
-                    concat!($what, " with ID {} does not exist but was referenced"),
-                    $id
-                )
-            }
-        };
-    }
+pub struct BodyParser<'rs> {
+    logset: LogOnceSet,
+    // NOTE: this could borrow these but that would result in a weird API (currently)
+    head: Head,
+    reader: quick_xml::Reader<&'rs [u8]>,
+}
 
-    let mut current_event_pen = &Pen::DEFAULT;
-    let mut current_segment_pen = current_event_pen;
-    let mut current_segment_time_offset = 0;
-    let mut current_text = String::new();
-    let mut current = None;
-    let mut depth = 0;
-    loop {
-        match reader.read_event()? {
-            XmlEvent::Start(element) if depth == 0 => {
-                match element.local_name().into_inner() {
-                    b"w" => {
-                        let mut result_id = None;
-                        let mut result = Window {
-                            time: 0,
-                            duration: u32::MAX,
-                            position: &DEFAULT_WINDOW_POS,
-                            style: &DEFAULT_WINDOW_STYLE,
-                        };
+impl<'rs> BodyParser<'rs> {
+    pub fn read_next(&mut self, sbr: &Subrandr) -> Result<Option<BodyElement<'_>>, Error> {
+        log_once_state!(
+            in &self.logset;
+            unknown_attrs,
+            unknown_body_elements,
+            unknown_event_elements,
+            unknown_segment_attrs,
+            unknown_segment_elements,
+            non_existant_pen,
+            non_existant_wp,
+            non_existant_ws,
+            win_without_id
+        );
 
-                        match_attributes! {
-                            element.attributes(),
-                            "id"(id: &str) => {
-                                result_id = Some(id.into());
-                            },
-                            "t"(time: u32) => {
-                                result.time = time;
-                            },
-                            "d"(duration: u32) => {
-                                result.duration = duration;
-                            },
-                            "wp"(id: &str) => {
-                                set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
-                            },
-                            "ws"(id: &str) => {
-                                set_or_log!(result.style, wss, id, non_existant_ws, "Window style");
-                            },
-                            else other => {
-                                warning!(
-                                    sbr, once(unknown_attrs, other),
-                                    "Unknown window attribute {other}"
-                                )
-                            }
-                        }
-
-                        if let Some(id) = result_id {
-                            windows.insert(id, result);
-                        } else {
-                            warning!(sbr, once(win_without_id), "Window missing id attribute");
-                        }
-                    }
-                    b"p" => {
-                        // time=0 and duration=0 are defaults YouTube uses
-                        // duration=0 events should probably be stripped during conversion
-                        // since they're effectively no-ops unless I'm missing some subtle behaviour
-                        let mut result = Event {
-                            time: 0,
-                            duration: 0,
-                            position: &DEFAULT_WINDOW_POS,
-                            style: &DEFAULT_WINDOW_STYLE,
-                            window_id: None,
-                            segments: vec![],
-                        };
-
-                        current_event_pen = &Pen::DEFAULT;
-
-                        match_attributes! {
-                            element.attributes(),
-                            "t"(time: u32) => {
-                                result.time = time;
-                            },
-                            "d"(duration: u32) => {
-                                result.duration = duration;
-                            },
-                            "p"(id: &str) => {
-                                set_or_log!(current_event_pen, pens, id, non_existant_pen, "Pen");
-                            },
-                            "wp"(id: &str) => {
-                                set_or_log!(result.position, wps, id, non_existant_wp, "Window position");
-                            },
-                            "ws"(id: &str) => {
-                                set_or_log!(result.style, wss, id, non_existant_ws, "Window style");
-                            },
-                            "w"(id: &str) => {
-                                result.window_id = Some(id.into());
-                            },
-                            else other => {
-                                warning!(
-                                    sbr, once(unknown_attrs, other),
-                                    "Unknown event attribute {other}"
-                                )
-                            }
-                        }
-
-                        current = Some(result);
-                    }
-                    name => {
-                        warning!(
-                            sbr,
-                            once(unknown_body_elements, name),
-                            "Unknown element encountered in body: {}",
-                            unsafe { std::str::from_utf8_unchecked(name) }
-                        );
-                    }
+        macro_rules! set_or_log {
+            ($dst: expr, $map: expr, $id: expr, $log_id: expr, $what: literal) => {
+                if let Some(value) = $map.get($id) {
+                    $dst = value;
+                } else {
+                    warning!(
+                        sbr,
+                        once($log_id, $id),
+                        concat!($what, " with ID {} does not exist but was referenced"),
+                        $id
+                    )
                 }
-                depth += 1;
-            }
-            XmlEvent::Start(element) if depth == 1 => {
-                match element.local_name().into_inner() {
-                    b"s" => {
-                        if !current_text.is_empty() {
-                            current.as_mut().unwrap().segments.push(Segment {
-                                pen: current_event_pen,
-                                time_offset: current_segment_time_offset,
-                                text: std::mem::take(&mut current_text),
-                            });
-                        }
+            };
+        }
 
-                        current_segment_pen = current_event_pen;
-                        current_segment_time_offset = 0;
+        let mut current_event_pen = &Pen::DEFAULT;
+        let mut current_segment_pen = current_event_pen;
+        let mut current_segment_time_offset = 0;
+        let mut current_text = String::new();
+        let mut current = None;
+        let mut depth = 0;
+        loop {
+            match self.reader.read_event()? {
+                XmlEvent::Start(element) if depth == 0 => {
+                    match element.local_name().into_inner() {
+                        b"w" => {
+                            let mut result_id = None;
+                            let mut result = Window {
+                                time: 0,
+                                duration: u32::MAX,
+                                position: &DEFAULT_WINDOW_POS,
+                                style: &DEFAULT_WINDOW_STYLE,
+                            };
 
-                        match_attributes! {
-                            element.attributes(),
-                            "p"(id: &str) => {
-                                set_or_log!(current_segment_pen, pens, id, non_existant_pen, "Pen");
-                            },
-                            "t"(time_offset: u32) => {
-                                current_segment_time_offset = time_offset;
-                            },
-                            else other => {
-                                warning!(
-                                    sbr, once(unknown_segment_attrs, other),
-                                    "Unknown segment attribute {other}"
-                                );
+                            match_attributes! {
+                                element.attributes(),
+                                "id"(id: &str) => {
+                                    result_id = Some(id.into());
+                                },
+                                "t"(time: u32) => {
+                                    result.time = time;
+                                },
+                                "d"(duration: u32) => {
+                                    result.duration = duration;
+                                },
+                                "wp"(id: &str) => {
+                                    set_or_log!(result.position, self.head.wps, id, non_existant_wp, "Window position");
+                                },
+                                "ws"(id: &str) => {
+                                    set_or_log!(result.style, self.head.wss, id, non_existant_ws, "Window style");
+                                },
+                                else other => {
+                                    warning!(
+                                        sbr, once(unknown_attrs, other),
+                                        "Unknown window attribute {other}"
+                                    )
+                                }
+                            }
+
+                            if let Some(id) = result_id {
+                                current = Some(BodyElement::Window(id, result));
+                            } else {
+                                warning!(sbr, once(win_without_id), "Window missing id attribute");
                             }
                         }
+                        b"p" => {
+                            // time=0 and duration=0 are defaults YouTube uses
+                            // duration=0 events should probably be stripped during conversion
+                            // since they're effectively no-ops unless I'm missing some subtle behaviour
+                            let mut result = Event {
+                                time: 0,
+                                duration: 0,
+                                position: &DEFAULT_WINDOW_POS,
+                                style: &DEFAULT_WINDOW_STYLE,
+                                window_id: None,
+                                segments: vec![],
+                            };
+
+                            current_event_pen = &Pen::DEFAULT;
+
+                            match_attributes! {
+                                element.attributes(),
+                                "t"(time: u32) => {
+                                    result.time = time;
+                                },
+                                "d"(duration: u32) => {
+                                    result.duration = duration;
+                                },
+                                "p"(id: &str) => {
+                                    set_or_log!(current_event_pen, self.head.pens, id, non_existant_pen, "Pen");
+                                },
+                                "wp"(id: &str) => {
+                                    set_or_log!(result.position, self.head.wps, id, non_existant_wp, "Window position");
+                                },
+                                "ws"(id: &str) => {
+                                    set_or_log!(result.style, self.head.wss, id, non_existant_ws, "Window style");
+                                },
+                                "w"(id: &str) => {
+                                    result.window_id = Some(id.into());
+                                },
+                                else other => {
+                                    warning!(
+                                        sbr, once(unknown_attrs, other),
+                                        "Unknown event attribute {other}"
+                                    )
+                                }
+                            }
+
+                            current = Some(BodyElement::Event(result));
+                        }
+                        name => {
+                            warning!(
+                                sbr,
+                                once(unknown_body_elements, name),
+                                "Unknown element encountered in body: {}",
+                                unsafe { std::str::from_utf8_unchecked(name) }
+                            );
+                        }
                     }
-                    _ if current.is_some() => {
+                    depth += 1;
+                }
+                XmlEvent::Start(element) if depth == 1 => {
+                    match element.local_name().into_inner() {
+                        b"s" => {
+                            if !current_text.is_empty() {
+                                match &mut current {
+                                    Some(BodyElement::Event(event)) => {
+                                        event.segments.push(Segment {
+                                            pen: current_event_pen,
+                                            time_offset: current_segment_time_offset,
+                                            text: std::mem::take(&mut current_text),
+                                        });
+                                    }
+                                    _ => {
+                                        unreachable!("non-empty text with empty or Window current")
+                                    }
+                                }
+                            }
+
+                            current_segment_pen = current_event_pen;
+                            current_segment_time_offset = 0;
+
+                            match_attributes! {
+                                element.attributes(),
+                                "p"(id: &str) => {
+                                    set_or_log!(current_segment_pen, self.head.pens, id, non_existant_pen, "Pen");
+                                },
+                                "t"(time_offset: u32) => {
+                                    current_segment_time_offset = time_offset;
+                                },
+                                else other => {
+                                    warning!(
+                                        sbr, once(unknown_segment_attrs, other),
+                                        "Unknown segment attribute {other}"
+                                    );
+                                }
+                            }
+                        }
+                        _ if current.is_some() => {
+                            warning!(
+                                sbr,
+                                once(unknown_event_elements, element.local_name().into_inner()),
+                                "Unknown element encountered in event: {}",
+                                unsafe {
+                                    std::str::from_utf8_unchecked(element.local_name().into_inner())
+                                }
+                            );
+                        }
+                        _ => (),
+                    }
+                    depth += 1;
+                }
+                XmlEvent::Start(element) => {
+                    if current.is_some() {
                         warning!(
                             sbr,
-                            once(unknown_event_elements, element.local_name().into_inner()),
-                            "Unknown element encountered in event: {}",
+                            once(unknown_segment_elements, element.local_name().into_inner()),
+                            "Unknown element encountered in segment: {}",
                             unsafe {
                                 std::str::from_utf8_unchecked(element.local_name().into_inner())
                             }
                         );
                     }
-                    _ => (),
+                    depth += 1;
                 }
-                depth += 1;
-            }
-            XmlEvent::Start(element) => {
-                if current.is_some() {
-                    warning!(
-                        sbr,
-                        once(unknown_segment_elements, element.local_name().into_inner()),
-                        "Unknown element encountered in segment: {}",
-                        unsafe { std::str::from_utf8_unchecked(element.local_name().into_inner()) }
-                    );
-                }
-                depth += 1;
-            }
-            XmlEvent::End(_) if current.is_some() && depth == 2 => {
-                if !current_text.is_empty() {
-                    current.as_mut().unwrap().segments.push(Segment {
-                        pen: current_segment_pen,
-                        time_offset: current_segment_time_offset,
-                        text: std::mem::take(&mut current_text),
-                    });
-                }
-                depth = 1;
-            }
-            XmlEvent::End(_) if depth == 1 => {
-                if !current_text.is_empty() {
-                    current.as_mut().unwrap().segments.push(Segment {
-                        pen: current_event_pen,
-                        time_offset: current_segment_time_offset,
-                        text: std::mem::take(&mut current_text),
-                    });
-                }
-
-                if let Some(event) = current.take() {
-                    if !event.segments.is_empty() {
-                        events.push(event);
+                XmlEvent::End(_) if current.is_some() && depth == 2 => {
+                    if !current_text.is_empty() {
+                        match &mut current {
+                            Some(BodyElement::Event(event)) => {
+                                event.segments.push(Segment {
+                                    pen: current_segment_pen,
+                                    time_offset: current_segment_time_offset,
+                                    text: std::mem::take(&mut current_text),
+                                });
+                            }
+                            _ => unreachable!("non-empty text with empty or Window current"),
+                        }
                     }
+                    depth = 1;
                 }
+                XmlEvent::End(_) if depth == 1 => {
+                    if !current_text.is_empty() {
+                        match &mut current {
+                            Some(BodyElement::Event(event)) => {
+                                event.segments.push(Segment {
+                                    pen: current_event_pen,
+                                    time_offset: current_segment_time_offset,
+                                    text: std::mem::take(&mut current_text),
+                                });
+                            }
+                            _ => unreachable!("non-empty text with empty or Window current"),
+                        }
+                    }
 
-                depth = 0;
+                    if let Some(element) = current.take() {
+                        return Ok(Some(element));
+                    }
+
+                    depth = 0;
+                }
+                XmlEvent::End(_) if depth > 0 => {
+                    depth -= 1;
+                }
+                XmlEvent::End(_) => return Ok(None),
+                XmlEvent::Empty(_) => unreachable!(),
+                XmlEvent::Text(x) if current.is_some() && (depth > 0 && depth <= 2) => {
+                    current_text.push_str(&x.unescape()?);
+                }
+                XmlEvent::Text(x)
+                    if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {
+                }
+                XmlEvent::Text(_) | XmlEvent::CData(_) => {
+                    return Err(Error::InvalidStructure(
+                        "Unrecognized text content inside body element",
+                    ));
+                }
+                XmlEvent::Comment(_)
+                | XmlEvent::Decl(_)
+                | XmlEvent::PI(_)
+                | XmlEvent::DocType(_) => (),
+                XmlEvent::Eof => return Err(Error::UnexpectedEof),
             }
-            XmlEvent::End(_) if depth > 0 => {
-                depth -= 1;
-            }
-            XmlEvent::End(_) => break,
-            XmlEvent::Empty(_) => unreachable!(),
-            XmlEvent::Text(x) if current.is_some() && (depth > 0 && depth <= 2) => {
-                current_text.push_str(&x.unescape()?);
-            }
-            XmlEvent::Text(x)
-                if depth > 0 || x.borrow().into_inner().iter().all(u8::is_ascii_whitespace) => {}
-            XmlEvent::Text(_) | XmlEvent::CData(_) => {
-                return Err(Error::InvalidStructure(
-                    "Unrecognized text content inside body element",
-                ));
-            }
-            XmlEvent::Comment(_) | XmlEvent::Decl(_) | XmlEvent::PI(_) | XmlEvent::DocType(_) => (),
-            XmlEvent::Eof => return Err(Error::UnexpectedEof),
         }
     }
-
-    Ok(())
 }
 
 pub fn probe(text: &str) -> bool {
     text.contains("<timedtext") && text.contains("format=\"3\"")
 }
 
-pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
+pub fn parse<'s>(sbr: &Subrandr, text: &'s str) -> Result<BodyParser<'s>, Error> {
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().check_comments = false;
     reader.config_mut().expand_empty_elements = true;
@@ -921,19 +899,10 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         }
     }
 
-    let (pens, wps, wss) = if has_head {
-        parse_head(sbr, &mut reader)?
-    } else {
-        (HashMap::new(), HashMap::new(), HashMap::new())
-    };
-
-    let mut doc = Document {
-        pens,
-        wps,
-        wss,
-        windows: HashMap::new(),
-        events: { vec![] },
-    };
+    let mut head = Head::empty();
+    if has_head {
+        parse_head(sbr, &mut reader, &mut head)?;
+    }
 
     if has_head {
         let mut depth = 0;
@@ -981,15 +950,9 @@ pub fn parse(sbr: &Subrandr, text: &str) -> Result<Document, Error> {
         }
     }
 
-    parse_body(
-        sbr,
-        &doc.pens,
-        &doc.wps,
-        &doc.wss,
-        &mut doc.windows,
-        &mut doc.events,
-        &mut reader,
-    )?;
-
-    Ok(doc)
+    Ok(BodyParser {
+        logset: LogOnceSet::new(),
+        head,
+        reader,
+    })
 }

@@ -586,12 +586,11 @@ impl winit::application::ApplicationHandler for App<'_> {
 
 fn load_subs_from_file(sbr: &Subrandr, path: &Path) -> Result<subrandr::Subtitles> {
     Ok(match path.extension().and_then(|x| x.to_str()) {
-        Some("srv3" | "ytt") => {
-            let document = subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?;
-            Subtitles::Srv3(util::rc::Rc::new(subrandr::srv3::convert(
-                sbr, document, None,
-            )))
-        }
+        Some("srv3" | "ytt") => Subtitles::Srv3(util::rc::Rc::new(subrandr::srv3::convert(
+            sbr,
+            subrandr::srv3::parse(sbr, &std::fs::read_to_string(path).unwrap())?,
+            None,
+        )?)),
         Some("vtt") => {
             let text = std::fs::read_to_string(path).unwrap();
             let captions = subrandr::vtt::parse(&text).unwrap();

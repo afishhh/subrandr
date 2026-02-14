@@ -16,7 +16,7 @@ use crate::{
     },
     log::{log_once_state, warning, LogOnceSet},
     renderer::FrameLayoutPass,
-    srv3::{Event, ModeHint, RubyPosition},
+    srv3::{BodyParser, Event, ModeHint, RubyPosition},
     style::{
         computed::{
             Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, TextShadow,
@@ -28,7 +28,7 @@ use crate::{
     Subrandr, SubtitleContext,
 };
 
-use super::{Document, EdgeType, Pen, RubyPart};
+use super::{EdgeType, Pen, RubyPart};
 
 macro_rules! static_rc_of_static_strings {
     [$($values: literal),* $(,)?] => {
@@ -552,8 +552,8 @@ fn pen_to_size_independent_style(
 
 fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedStyle) -> Segment {
     Segment {
-        pen: *segment.pen(),
-        base_style: pen_to_size_independent_style(segment.pen(), false, base_style.clone()),
+        pen: *segment.pen,
+        base_style: pen_to_size_independent_style(segment.pen, false, base_style.clone()),
         time_offset: segment.time_offset,
         text: text.into(),
     }
@@ -602,11 +602,11 @@ impl WindowBuilder<'_> {
         let mut it = event.segments.iter();
         'segment_loop: while let Some(segment) = it.next() {
             'ruby_failed: {
-                if segment.pen().ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
+                if segment.pen.ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
                     let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
 
                     let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
-                        ruby_block.each_ref().map(|s| s.pen().ruby_part)
+                        ruby_block.each_ref().map(|s| s.pen.ruby_part)
                     else {
                         break 'ruby_failed;
                     };
@@ -667,7 +667,11 @@ impl WindowBuilder<'_> {
     }
 }
 
-pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentifier>) -> Subtitles {
+pub fn convert(
+    sbr: &Subrandr,
+    mut parser: BodyParser,
+    lang: Option<&LanguageIdentifier>,
+) -> Result<Subtitles, super::parse::Error> {
     let mut result = Subtitles {
         windows: Vec::new(),
     };
@@ -687,51 +691,54 @@ pub fn convert(sbr: &Subrandr, document: Document, lang: Option<&LanguageIdentif
     };
 
     let mut wname_to_index = HashMap::new();
-    for (name, window) in document.windows() {
-        wname_to_index.insert(&**name, result.windows.len());
-        result.windows.push(window_builder.create_window(
-            convert_coordinate(window.position().x as f32),
-            convert_coordinate(window.position().y as f32),
-            window.time,
-            window.duration,
-            window.position().point.to_alignment(),
-            window.style().mode_hint,
-        ));
+    while let Some(element) = parser.read_next(sbr)? {
+        match element {
+            crate::srv3::BodyElement::Window(id, window) => {
+                wname_to_index.insert(id, result.windows.len());
+                result.windows.push(window_builder.create_window(
+                    convert_coordinate(window.position.x as f32),
+                    convert_coordinate(window.position.y as f32),
+                    window.time,
+                    window.duration,
+                    window.position.point.to_alignment(),
+                    window.style.mode_hint,
+                ));
+            }
+            crate::srv3::BodyElement::Event(event) => {
+                // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
+                // Don't know what the exact rule is but this at least fixes auto-generated subs.
+                if event.segments.iter().all(|segment| {
+                    segment
+                        .text
+                        .bytes()
+                        .all(|byte| matches!(byte, b'\r' | b'\n'))
+                }) {
+                    continue;
+                }
+
+                if let Some(&widx) = event
+                    .window_id
+                    .as_ref()
+                    .and_then(|wname| wname_to_index.get(&**wname))
+                {
+                    window_builder.extend_lines(&mut result.windows[widx], &event);
+                } else {
+                    let mut window = window_builder.create_window(
+                        convert_coordinate(event.position.x as f32),
+                        convert_coordinate(event.position.y as f32),
+                        event.time,
+                        event.duration,
+                        event.position.point.to_alignment(),
+                        event.style.mode_hint,
+                    );
+                    window_builder.extend_lines(&mut window, &event);
+                    result.windows.push(window);
+                }
+            }
+        }
     }
 
-    for event in document.events() {
-        // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
-        // Don't know what the exact rule is but this at least fixes auto-generated subs.
-        if event.segments.iter().all(|segment| {
-            segment
-                .text
-                .bytes()
-                .all(|byte| matches!(byte, b'\r' | b'\n'))
-        }) {
-            continue;
-        }
-
-        if let Some(&widx) = event
-            .window_id
-            .as_ref()
-            .and_then(|wname| wname_to_index.get(&**wname))
-        {
-            window_builder.extend_lines(&mut result.windows[widx], event);
-        } else {
-            let mut window = window_builder.create_window(
-                convert_coordinate(event.position().x as f32),
-                convert_coordinate(event.position().y as f32),
-                event.time,
-                event.duration,
-                event.position().point.to_alignment(),
-                event.style().mode_hint,
-            );
-            window_builder.extend_lines(&mut window, event);
-            result.windows.push(window);
-        }
-    }
-
-    result
+    Ok(result)
 }
 
 pub(crate) struct Layouter {

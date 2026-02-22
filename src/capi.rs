@@ -331,13 +331,13 @@ unsafe extern "C" fn sbr_load_text(
     }
 
     match format {
-        SubtitleFormat::Srv3 => {
-            Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(crate::srv3::convert(
+        SubtitleFormat::Srv3 => Box::into_raw(Box::new(Subtitles::Srv3(Rc::new(ctry!(
+            crate::srv3::convert(
                 sbr,
                 ctry!(crate::srv3::parse(sbr, content)),
                 language_hint.as_ref(),
-            )))))
-        }
+            )
+        ))))),
         SubtitleFormat::WebVTT => {
             Box::into_raw(Box::new(Subtitles::Vtt(Rc::new(crate::vtt::convert(
                 sbr,

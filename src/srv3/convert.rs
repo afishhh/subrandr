@@ -211,6 +211,31 @@ struct LineSegment {
     annotation: Option<Segment>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum LayoutMode {
+    InlineBlock,
+    // TODO: fully inline mode could probably keep using blocks for ruby which would clean
+    //       up a sizing hack in inline layout
+    Inline,
+}
+
+impl crate::config::OptionFromStr for LayoutMode {
+    fn from_str(s: &str) -> Result<Self, util::AnyError> {
+        Ok(match s {
+            "inline-block" => Self::InlineBlock,
+            "inline" => Self::Inline,
+            _ => return Err("must be either \"inline-block\" or \"inline\"".into()),
+        })
+    }
+}
+
+crate::config::define_option_group! {
+    pub(crate) struct Options {
+        #[option(name = "layout-mode")]
+        layout_mode: LayoutMode = LayoutMode::InlineBlock,
+    }
+}
+
 impl Segment {
     fn compute_shadows(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
         let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
@@ -301,7 +326,7 @@ impl VisualLine {
             }
         }
 
-        if pass.srv3_use_inlines {
+        if matches!(pass.cfg.srv3.layout_mode, LayoutMode::Inline) {
             *result.make_inline_sizing_mut() = InlineSizing::Stretch;
         }
 
@@ -390,7 +415,7 @@ impl VisualLine {
                             .map(|mut style| {
                                 // If inline-block layout is enabled then background is handled by the
                                 // containing block.
-                                if !pass.srv3_use_inlines {
+                                if matches!(pass.cfg.srv3.layout_mode, LayoutMode::InlineBlock) {
                                     *style.make_background_color_mut() = BGRA8::ZERO;
                                 }
                                 *style.make_font_size_mut() /= 2.0;
@@ -406,7 +431,7 @@ impl VisualLine {
                     }
                 };
 
-            if pass.srv3_use_inlines {
+            if matches!(pass.cfg.srv3.layout_mode, LayoutMode::Inline) {
                 if let Some(right_padding) = right_padding {
                     *style.make_padding_right_mut() = right_padding;
                 }

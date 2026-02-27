@@ -10,7 +10,7 @@ use clap::{CommandFactory, FromArgMatches};
 use log::{error, info, LogContext};
 #[cfg(feature = "wgpu")]
 use pollster::FutureExt as _;
-use subrandr::{DebugFlags, Renderer, SubtitleContext, Subtitles};
+use subrandr::{Renderer, SubtitleContext, Subtitles};
 use winit::{
     event::StartCause,
     event_loop::{self, ControlFlow, EventLoop},
@@ -136,6 +136,7 @@ struct App {
 
     start: std::time::Instant,
     subs: Option<Subtitles>,
+    config: subrandr::Config,
     renderer: Renderer,
     frame_valid_inside: Range<u32>,
 
@@ -503,6 +504,7 @@ impl winit::application::ApplicationHandler for App {
                                         .render(
                                             log,
                                             &ctx,
+                                            &self.config,
                                             t,
                                             unsafe {
                                                 std::mem::transmute::<&mut [u32], &mut [_]>(
@@ -543,7 +545,14 @@ impl winit::application::ApplicationHandler for App {
 
                                     let mut frame_rasterizer = wgpu.rasterizer.begin_frame();
                                     self.renderer
-                                        .render_to(log, &mut frame_rasterizer, &mut target, &ctx, t)
+                                        .render_to(
+                                            log,
+                                            &mut frame_rasterizer,
+                                            &mut target,
+                                            &ctx,
+                                            &self.config,
+                                            t,
+                                        )
                                         .unwrap();
                                     frame_rasterizer.end_frame();
                                     self.renderer.end_raster(log);
@@ -751,6 +760,7 @@ fn main() {
         (OverlayMode::Window(window), true) => Some(window),
     };
 
+    let log = &root_logger.new_ctx();
     event_loop
         .run_app(&mut App {
             start: std::time::Instant::now(),
@@ -771,7 +781,8 @@ fn main() {
 
             args,
             subs,
-            renderer: Renderer::new(&root_logger.new_ctx(), DebugFlags::from_env()).unwrap(),
+            config: subrandr::Config::from_env(log),
+            renderer: Renderer::new(log).unwrap(),
             frame_valid_inside: 0..0,
             state: None,
 

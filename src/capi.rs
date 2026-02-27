@@ -85,7 +85,11 @@ impl CError {
     }
 
     pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
-        let mut root_cause = &error as &dyn std::error::Error;
+        Self::from_dyn_error(Box::new(error))
+    }
+
+    pub fn from_dyn_error(error: Box<dyn std::error::Error + Sync + 'static>) -> Self {
+        let mut root_cause = &*error as &dyn std::error::Error;
         while let Some(cause) = root_cause.source() {
             root_cause = cause;
         }
@@ -98,7 +102,7 @@ impl CError {
 
         Self {
             kind,
-            context: Some(Box::new(error)),
+            context: Some(error),
             message: None,
         }
     }
@@ -228,6 +232,7 @@ macro_rules! ctrywrap {
     };
 }
 
+mod config;
 mod library;
 mod renderer;
 #[cfg(target_arch = "wasm32")]

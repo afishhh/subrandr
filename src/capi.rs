@@ -52,6 +52,7 @@ enum ErrorKind {
     Other = -1,
     InvalidArgument = -2,
 
+    OptionNotFound = -10,
     UnrecognizedFormat = -11,
 }
 
@@ -84,9 +85,13 @@ impl CError {
     }
 
     pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
+        Self::from_dyn_error(Box::new(error))
+    }
+
+    pub fn from_dyn_error(error: Box<dyn std::error::Error + Sync + 'static>) -> Self {
         Self {
             kind: ErrorKind::Other,
-            context: Some(Box::new(error)),
+            context: Some(error),
             message: None,
         }
     }
@@ -218,6 +223,7 @@ macro_rules! ctrywrap {
     };
 }
 
+mod config;
 mod library;
 mod renderer;
 #[cfg(target_arch = "wasm32")]

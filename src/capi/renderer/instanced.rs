@@ -58,10 +58,11 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
     if !clip_rect.is_empty() {
         let renderer = &mut (*renderer);
         let log = &renderer.lib.root_logger.new_ctx();
+        let cfg = CRenderer::get_or_init_config(renderer, log);
 
         ctry!(renderer
             .inner
-            .render_to_scene(log, &*ctx, t, &renderer.rasterizer));
+            .render_to_scene(log, &*ctx, cfg, t, &renderer.rasterizer));
 
         ctry!(renderer
             .rasterizer

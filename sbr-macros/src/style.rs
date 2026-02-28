@@ -9,11 +9,8 @@ use crate::{
 #[derive(Debug, Clone)]
 struct Property {
     name: syn::Ident,
-    // Assumed to be `value_type` if not provided.
-    specified_type: Option<syn::Type>,
     value_type: syn::Type,
     inherit: bool,
-    append: bool,
     copy: bool,
     default: Option<syn::Expr>,
 }
@@ -34,7 +31,6 @@ impl Group {
 
         while !buffer.is_empty() {
             let mut inherit = true;
-            let mut append = None;
             let mut copy = true;
 
             if let Ok(attrs) = buffer.call(syn::Attribute::parse_outer) {
@@ -45,13 +41,6 @@ impl Group {
                             .report_in_and_set(ctx, &mut errored)
                         {
                             inherit = value;
-                        }
-                    } else if attr.path().is_ident("append") {
-                        if let Ok(value) = attr
-                            .parse_args_with(parse_yes_no)
-                            .report_in_and_set(ctx, &mut errored)
-                        {
-                            append = Some(value);
                         }
                     } else if attr.path().is_ident("copy") {
                         if let Ok(value) = attr
@@ -86,29 +75,10 @@ impl Group {
                 continue;
             };
 
-            let Ok(first_type_) = buffer.parse::<syn::Type>().report_in(ctx) else {
+            let Ok(value_type) = buffer.parse::<syn::Type>().report_in(ctx) else {
                 errored = true;
                 advance_past_punct(buffer, ',');
                 continue;
-            };
-
-            let Ok(arrow) = buffer.parse::<Option<Token![->]>>().report_in(ctx) else {
-                errored = true;
-                advance_past_punct(buffer, ',');
-                continue;
-            };
-
-            let (specified_type, value_type) = match arrow {
-                Some(_) => {
-                    let Ok(value_type_) = buffer.parse::<syn::Type>().report_in(ctx) else {
-                        errored = true;
-                        advance_past_punct(buffer, ',');
-                        continue;
-                    };
-
-                    (Some(first_type_), value_type_)
-                }
-                None => (None, first_type_),
             };
 
             let default = if buffer.parse::<Token![=]>().is_ok() {
@@ -125,10 +95,8 @@ impl Group {
 
             result.push(Property {
                 name,
-                append: append.unwrap_or(matches!(value_type, syn::Type::Slice(..))),
                 inherit,
                 copy,
-                specified_type,
                 value_type,
                 default,
             });
@@ -250,7 +218,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         }
 
         result.extend(quote! {
-            #[derive(Debug, Clone)]
+            #[derive(Clone)]
             struct #group_type_name {
                 #inner_result
             }
@@ -287,13 +255,10 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         });
 
         let inherit_whole_group = group.properties.iter().all(|prop| prop.inherit);
-        let mut group_apply_vars = TokenStream2::new();
-        let mut group_apply_fields = TokenStream2::new();
         let mut group_create_child_impl = TokenStream2::new();
 
         for prop in &group.properties {
             let name = &prop.name;
-            let type_name = snake_case_to_pascal_case(&prop.name);
             let make_mut_name = syn::Ident::new(&format!("make_{name}_mut"), name.span());
             let type_ = &prop.value_type;
 
@@ -325,38 +290,6 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             if !inherit_whole_group {
                 group_create_child_impl.extend(quote! {
                     #name: #inherit_expr,
-                })
-            }
-
-            group_apply_vars.extend(quote! {
-                let #name = map.get::<#type_name>();
-            });
-
-            if let Some(specified_type) = prop.specified_type.as_ref() {
-                group_apply_fields.extend(quote! {
-                    #name: if let Some(value) = #name {
-                        <#specified_type>::compute(ctx, self, value)
-                    } else {
-                        #inherit_expr
-                    },
-                })
-            } else if prop.append {
-                group_apply_fields.extend(quote! {
-                    #name: if let Some(value) = #name {
-                        let inherited = self.#group_name.#name.iter();
-                        let new = value.iter();
-                        inherited.chain(new).cloned().collect()
-                    } else {
-                        #inherit_expr
-                    },
-                })
-            } else {
-                group_apply_fields.extend(quote! {
-                    #name: if let Some(value) = #name {
-                        ::std::clone::Clone::clone(value)
-                    } else {
-                        #inherit_expr
-                    },
                 })
             }
 

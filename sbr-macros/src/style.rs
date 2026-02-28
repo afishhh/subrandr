@@ -15,6 +15,59 @@ struct Property {
     default: Option<syn::Expr>,
 }
 
+impl Property {
+    fn try_parse(buffer: ParseStream, ctx: &mut ParseContext) -> Result<Self, AlreadyReported> {
+        let mut inherit = true;
+        let mut copy = true;
+
+        let mut errored = false;
+        for attr in buffer.call(syn::Attribute::parse_outer).report_in(ctx)? {
+            if attr.path().is_ident("inherit") {
+                if let Ok(value) = attr
+                    .parse_args_with(parse_yes_no)
+                    .report_in_and_set(ctx, &mut errored)
+                {
+                    inherit = value;
+                }
+            } else if attr.path().is_ident("copy") {
+                if let Ok(value) = attr
+                    .parse_args_with(parse_yes_no)
+                    .report_in_and_set(ctx, &mut errored)
+                {
+                    copy = value;
+                }
+            } else {
+                errored = true;
+                ctx.report(syn::Error::new(
+                    attr.path().span(),
+                    "unrecognized attribute",
+                ));
+            }
+        }
+
+        let name = buffer.parse::<syn::Ident>().report_in(ctx)?;
+        buffer.parse::<Token![:]>().report_in(ctx)?;
+        let value_type = buffer.parse::<syn::Type>().report_in(ctx)?;
+        let default = if buffer.parse::<Token![=]>().is_ok() {
+            Some(buffer.parse::<syn::Expr>().report_in(ctx)?)
+        } else {
+            None
+        };
+
+        if !errored {
+            Ok(Property {
+                name,
+                inherit,
+                copy,
+                value_type,
+                default,
+            })
+        } else {
+            Err(AlreadyReported)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Group {
     name: syn::Ident,
@@ -25,81 +78,18 @@ impl Group {
     fn parse_properties(
         buffer: ParseStream,
         ctx: &mut ParseContext,
-        result: &mut Vec<Property>,
-    ) -> Result<(), AlreadyReported> {
+    ) -> Result<Vec<Property>, AlreadyReported> {
         let mut errored = false;
+        let mut result = Vec::new();
 
         while !buffer.is_empty() {
-            let mut inherit = true;
-            let mut copy = true;
-
-            if let Ok(attrs) = buffer.call(syn::Attribute::parse_outer) {
-                for attr in attrs {
-                    if attr.path().is_ident("inherit") {
-                        if let Ok(value) = attr
-                            .parse_args_with(parse_yes_no)
-                            .report_in_and_set(ctx, &mut errored)
-                        {
-                            inherit = value;
-                        }
-                    } else if attr.path().is_ident("copy") {
-                        if let Ok(value) = attr
-                            .parse_args_with(parse_yes_no)
-                            .report_in_and_set(ctx, &mut errored)
-                        {
-                            copy = value;
-                        }
-                    } else {
-                        errored = true;
-                        ctx.report(syn::Error::new(
-                            attr.path().span(),
-                            "unrecognized attribute",
-                        ));
-                    }
-                }
-            } else {
-                errored = true;
-                advance_past_punct(buffer, ',');
-                continue;
-            }
-
-            let Ok(name) = buffer.parse::<syn::Ident>().report_in(ctx) else {
+            let Ok(property) = Property::try_parse(buffer, ctx) else {
                 errored = true;
                 advance_past_punct(buffer, ',');
                 continue;
             };
 
-            let Ok(_) = buffer.parse::<Token![:]>().report_in(ctx) else {
-                errored = true;
-                advance_past_punct(buffer, ',');
-                continue;
-            };
-
-            let Ok(value_type) = buffer.parse::<syn::Type>().report_in(ctx) else {
-                errored = true;
-                advance_past_punct(buffer, ',');
-                continue;
-            };
-
-            let default = if buffer.parse::<Token![=]>().is_ok() {
-                let Ok(default) = buffer.parse::<syn::Expr>().report_in(ctx) else {
-                    errored = true;
-                    advance_past_punct(buffer, ',');
-                    continue;
-                };
-
-                Some(default)
-            } else {
-                None
-            };
-
-            result.push(Property {
-                name,
-                inherit,
-                copy,
-                value_type,
-                default,
-            });
+            result.push(property);
 
             errored |= buffer.parse::<Token![,]>().report_in(ctx).is_err();
         }
@@ -107,7 +97,7 @@ impl Group {
         if errored {
             Err(AlreadyReported)
         } else {
-            Ok(())
+            Ok(result)
         }
     }
 }
@@ -127,13 +117,13 @@ impl Input {
         let mut result = Self { groups: Vec::new() };
 
         while !buffer.is_empty() {
-            let Ok(_) = buffer
+            if let Err(AlreadyReported) = buffer
                 .parse::<kw::rc>()
                 .report_in_and_set(ctx, &mut errored)
-            else {
+            {
                 _ = buffer.parse::<TokenTree2>();
                 continue;
-            };
+            }
 
             let Ok(name) = buffer
                 .parse::<syn::Ident>()
@@ -150,16 +140,12 @@ impl Input {
                 continue;
             };
 
-            let mut group = Group {
-                name,
-                properties: Vec::new(),
+            let Ok(properties) = Group::parse_properties(&inner, ctx) else {
+                errored = true;
+                continue;
             };
 
-            if let Ok(()) = Group::parse_properties(&inner, ctx, &mut group.properties) {
-                result.groups.push(group);
-            } else {
-                errored = true;
-            }
+            result.groups.push(Group { name, properties });
         }
 
         if errored {

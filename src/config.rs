@@ -14,6 +14,37 @@ impl OptionFromStr for bool {
     }
 }
 
+macro_rules! impl_from_str_parser {
+    ($($type: ty),*) => {
+        $(impl OptionFromStr for $type {
+            fn from_str(s: &str) -> Result<Self, util::AnyError> {
+                <$type as std::str::FromStr>::from_str(s).map_err(Into::into)
+            }
+        })*
+    };
+}
+
+impl_from_str_parser!(u8, u16, u32, u64, u128);
+impl_from_str_parser!(i8, i16, i32, i64, i128);
+
+impl OptionFromStr for BGRA8 {
+    fn from_str(s: &str) -> Result<Self, util::AnyError> {
+        const ERROR: &str = "must be a color in #RRGGBB(AA) form";
+
+        let hex = s.strip_prefix("#").ok_or(ERROR)?;
+        if hex.len() != 6 && hex.len() != 8 {
+            return Err(ERROR.into());
+        }
+
+        let mut value = u32::from_str_radix(hex, 16)?;
+        if hex.len() == 6 {
+            value <<= 8;
+            value |= 0xFF;
+        }
+        Ok(Self::from_rgba32(value))
+    }
+}
+
 macro_rules! define_option_group {
     ($vis: vis struct $name: ident {
         $(
@@ -47,6 +78,7 @@ macro_rules! define_option_group {
 }
 
 pub(crate) use define_option_group;
+use rasterize::color::BGRA8;
 
 macro_rules! define_config_struct {
     (pub struct Config {$(

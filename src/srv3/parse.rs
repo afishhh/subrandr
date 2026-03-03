@@ -37,44 +37,81 @@ pub enum RubyPosition {
     Under,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Pen {
-    pub font_size: u16,
-    pub font_style: u32,
+macro_rules! make_masked_struct {
+    (
+        $(#[$attr: meta])*
+        $vis: vis struct $name: ident {
+            $(#[setter = $fsname: ident] $fname: ident: $ftype: ty,)*
+        }
+    ) => {
+        $(#[$attr])*
+        $vis struct $name {
+            mask: u16,
+            $($fname: std::mem::MaybeUninit<$ftype>,)*
+        }
 
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
+        impl $name {
+            $vis const EMPTY: Self = Self {
+                mask: 0,
+                $($fname: std::mem::MaybeUninit::uninit(),)*
+            };
 
-    pub edge_type: EdgeType,
-    pub edge_color: Option<u32>,
+            make_masked_struct!(@mkaccessors [1] $($fsname $fname: $ftype,)*);
+        }
 
-    pub ruby_part: RubyPart,
-
-    pub foreground_color: u32,
-    pub background_color: u32,
-}
-
-impl Pen {
-    pub const DEFAULT: Self = Self {
-        font_size: 100,
-        font_style: 0,
-        bold: false,
-        italic: false,
-        underline: false,
-        edge_type: EdgeType::None,
-        edge_color: None,
-        ruby_part: RubyPart::None,
-        foreground_color: 0xFFFFFFFF,
-        // The default opacity is 0.75
-        // round(0.75 * 255) = 0xBF
-        background_color: 0x080808BF,
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                self.mask == other.mask $(&& self.$fname() == other.$fname())*
+            }
+        }
     };
+    // this operates on an index and shifts later so that overflow is detected
+    (@mkaccessors [$i: expr] $fsname: ident $fname: ident: $ftype: ty, $($rest: tt)*) => {
+        pub const fn $fname(&self) -> Option<$ftype> {
+            // but just to be sure
+            const { assert!($i < 16); }
+
+            if self.mask & const { 1 << $i } != 0 {
+                Some(unsafe { self.$fname.assume_init() })
+            } else {
+                None
+            }
+        }
+
+        pub const fn $fsname(&mut self, value: $ftype) {
+            const {
+                const fn assert_is_copy<T: Copy>() {}
+                assert_is_copy::<$ftype>();
+            }
+
+            self.mask |= const { 1 << $i };
+            self.$fname.write(value);
+        }
+
+        make_masked_struct!(@mkaccessors [$i + 1] $($rest)*);
+    };
+    (@mkaccessors [$mask: expr]) => {};
 }
 
-impl Default for Pen {
-    fn default() -> Self {
-        Self::DEFAULT
+make_masked_struct! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct Pen {
+        #[setter = set_font_size] font_size: u16,
+        #[setter = set_font_style] font_style: u32,
+
+        #[setter = set_bold] bold: bool,
+        #[setter = set_italic] italic: bool,
+        #[setter = set_underline] underline: bool,
+
+        #[setter = set_edge_type] edge_type: EdgeType,
+        #[setter = set_edge_color] edge_color: u32,
+
+        #[setter = set_ruby_part] ruby_part: RubyPart,
+
+        #[setter = set_foreground_color] foreground_color: u32,
+        #[setter = set_foreground_opacity] foreground_opacity: u8,
+        #[setter = set_background_color] background_color: u32,
+        #[setter = set_background_opacity] background_opacity: u8,
     }
 }
 
@@ -91,28 +128,13 @@ pub enum Point {
     BottomRight = 8,
 }
 
-#[derive(Debug, Clone)]
-pub struct WindowPos {
-    pub point: Point,
-    pub x: u32,
-    pub y: u32,
-}
-
-const DEFAULT_WINDOW_POS: WindowPos = WindowPos {
-    point: Point::BottomCenter,
-    x: 50,
-    y: 100,
-};
-
-impl Default for WindowPos {
-    fn default() -> Self {
-        DEFAULT_WINDOW_POS.clone()
+make_masked_struct! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct WindowPos {
+        #[setter = set_point] point: Point,
+        #[setter = set_x] x: u32,
+        #[setter = set_y] y: u32,
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct WindowStyle {
-    pub mode_hint: ModeHint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,13 +158,10 @@ impl FromStr for ModeHint {
     }
 }
 
-const DEFAULT_WINDOW_STYLE: WindowStyle = WindowStyle {
-    mode_hint: ModeHint::Default,
-};
-
-impl Default for WindowStyle {
-    fn default() -> Self {
-        DEFAULT_WINDOW_STYLE
+make_masked_struct! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct WindowStyle {
+        #[setter = set_mode_hint] mode_hint: ModeHint,
     }
 }
 
@@ -314,7 +333,7 @@ fn parse_pen(
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, Pen), Error> {
     let mut result_id = None;
-    let mut result = Pen::default();
+    let mut result = Pen::EMPTY;
 
     log_once_state!(in logset; unknown_pen_attribute);
 
@@ -324,44 +343,40 @@ fn parse_pen(
             result_id = Some(id.into());
         },
         "fc"(color: HexRGBColor) => {
-            result.foreground_color &= 0x000000FF;
-            result.foreground_color |= color.0 << 8;
+            result.set_foreground_color(color.0);
         },
         "fo"(opacity: u8) => {
-            result.foreground_color &= 0xFFFFFF00;
-            result.foreground_color |= opacity as u32;
+            result.set_foreground_opacity(opacity);
         },
         "bc"(color: HexRGBColor) => {
-            result.background_color &= 0x000000FF;
-            result.background_color |= color.0 << 8;
+            result.set_background_color(color.0);
         },
         "bo"(opacity: u8) => {
-            result.background_color &= 0xFFFFFF00;
-            result.background_color |= opacity as u32;
+            result.set_background_opacity(opacity);
         },
         "ec"(color: HexRGBColor) => {
-            result.edge_color = Some(color.0);
+            result.set_edge_color(color.0);
         },
         "sz"(size: u16) => {
-            result.font_size = size;
+            result.set_font_size(size);
         },
         "fs"(style: u32) => {
-            result.font_style = style;
+            result.set_font_style(style);
         },
         "et"(et: EdgeType) => {
-            result.edge_type = et;
+            result.set_edge_type(et);
         },
         "i"(value: Bool01) => {
-            result.italic = value.0;
+            result.set_italic(value.0);
         },
         "b"(value: Bool01) => {
-            result.bold = value.0;
+            result.set_bold(value.0);
         },
         "u"(value: Bool01) => {
-            result.underline = value.0;
+            result.set_underline(value.0);
         },
         "rb"(value: RubyPart) => {
-            result.ruby_part = value;
+            result.set_ruby_part(value);
         },
         else other => {
             warn!(
@@ -384,7 +399,7 @@ fn parse_wp(
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, WindowPos), Error> {
     let mut result_id = None;
-    let mut result = WindowPos::default();
+    let mut result = WindowPos::EMPTY;
 
     log_once_state!(in logset; unknown_wp_attribute);
 
@@ -394,13 +409,13 @@ fn parse_wp(
             result_id = Some(id.into());
         },
         "ap"(point: Point) => {
-            result.point = point;
+            result.set_point(point);
         },
         "ah"(x: u32) => {
-            result.x = x;
+            result.set_x(x);
         },
         "av"(y: u32) => {
-            result.y = y;
+            result.set_y(y);
         },
         else other => {
             warn!(
@@ -422,7 +437,7 @@ fn parse_ws(
     logset: &LogOnceSet,
 ) -> Result<(Box<str>, WindowStyle), Error> {
     let mut result_id = None;
-    let mut result = WindowStyle::default();
+    let mut result = WindowStyle::EMPTY;
 
     log_once_state!(in logset; unknown_ws_attribute);
 
@@ -432,7 +447,7 @@ fn parse_ws(
             result_id = Some(id.into());
         },
         "mh"(mh: ModeHint) => {
-            result.mode_hint = mh;
+            result.set_mode_hint(mh);
         },
         else other => {
             warn!(
@@ -564,7 +579,7 @@ impl<'rs> BodyParser<'rs> {
             };
         }
 
-        let mut current_event_pen = &Pen::DEFAULT;
+        let mut current_event_pen = &Pen::EMPTY;
         let mut current_segment_pen = current_event_pen;
         let mut current_segment_time_offset = 0;
         let mut current_text = String::new();
@@ -579,8 +594,8 @@ impl<'rs> BodyParser<'rs> {
                             let mut result = Window {
                                 time: 0,
                                 duration: u32::MAX,
-                                position: &DEFAULT_WINDOW_POS,
-                                style: &DEFAULT_WINDOW_STYLE,
+                                position: &WindowPos::EMPTY,
+                                style: &WindowStyle::EMPTY,
                             };
 
                             match_attributes! {
@@ -621,13 +636,13 @@ impl<'rs> BodyParser<'rs> {
                             let mut result = Event {
                                 time: 0,
                                 duration: 0,
-                                position: &DEFAULT_WINDOW_POS,
-                                style: &DEFAULT_WINDOW_STYLE,
+                                position: &WindowPos::EMPTY,
+                                style: &WindowStyle::EMPTY,
                                 window_id: None,
                                 segments: vec![],
                             };
 
-                            current_event_pen = &Pen::DEFAULT;
+                            current_event_pen = &Pen::EMPTY;
 
                             match_attributes! {
                                 element.attributes(),

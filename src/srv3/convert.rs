@@ -9,6 +9,7 @@ use util::{
 };
 
 use crate::{
+    config::Config,
     layout::{
         self,
         block::{BlockContainer, BlockContainerContent},
@@ -227,10 +228,75 @@ impl crate::config::OptionFromStr for LayoutMode {
     }
 }
 
+fn parse_font_style(s: &str) -> Result<u32, util::AnyError> {
+    let value = s.parse::<u32>()?;
+    if value == 0 || value as usize > SRV3_FONTS.len() {
+        return Err(format!("must be a number between 1..{}", SRV3_FONTS.len()).into());
+    }
+    Ok(value)
+}
+
+fn parse_edge_type(s: &str) -> Result<EdgeType, util::AnyError> {
+    Ok(match s {
+        "none" => EdgeType::None,
+        "hard-shadow" => EdgeType::HardShadow,
+        "bevel" => EdgeType::Bevel,
+        "glow" => EdgeType::Glow,
+        "soft-shadow" => EdgeType::SoftShadow,
+        _ => return Err("not a valid edge type".into()),
+    })
+}
+
+fn parse_edge_color(s: &str) -> Result<Option<u32>, util::AnyError> {
+    const ERROR: &str = "must be a color in #RRGGBB form or \"none\"";
+
+    if s == "none" {
+        return Ok(None);
+    }
+
+    let hex = s.strip_prefix("#").ok_or(ERROR)?;
+    if hex.len() != 6 {
+        return Err(ERROR.into());
+    }
+
+    Ok(Some(u32::from_str_radix(hex, 16)?))
+}
+
+// `pen` attribute defaults
+pub const DEFAULT_PEN_FONT_SIZE: u16 = 100;
+pub const DEFAULT_PEN_FONT_STYLE: u32 = 0;
+pub const DEFAULT_PEN_BOLD: bool = false;
+pub const DEFAULT_PEN_ITALIC: bool = false;
+pub const DEFAULT_PEN_UNDERLINE: bool = false;
+pub const DEFAULT_PEN_EDGE_TYPE: EdgeType = EdgeType::None;
+pub const DEFAULT_PEN_RUBY_PART: RubyPart = RubyPart::None;
+pub const DEFAULT_PEN_FOREGROUND_COLOR: BGRA8 = BGRA8::from_rgba32(0xFFFFFFFF);
+// The default opacity is 0.75, round(0.75 * 255) = 0xBF
+pub const DEFAULT_PEN_BACKGROUND_COLOR: BGRA8 = BGRA8::from_rgba32(0x080808BF);
+
+// `wp` attribute defaults
+pub const DEFAULT_WIN_POINT: Point = Point::BottomCenter;
+pub const DEFAULT_WIN_X: u32 = 50;
+pub const DEFAULT_WIN_Y: u32 = 100;
+// `ws` attribute defaults
+pub const DEFAULT_WIN_MODE_HINT: ModeHint = ModeHint::Default;
+
 crate::config::define_option_group! {
     pub(crate) struct Options {
         #[option(name = "layout-mode")]
         layout_mode: LayoutMode = LayoutMode::InlineBlock,
+        #[option(name = "default-font-size")]
+        default_font_size: u16 = DEFAULT_PEN_FONT_SIZE,
+        #[option(name = "default-font-style", parse_with = parse_font_style)]
+        default_font_style: u32 = DEFAULT_PEN_FONT_STYLE,
+        #[option(name = "default-fg-color")]
+        default_foreground_color: BGRA8 = DEFAULT_PEN_FOREGROUND_COLOR,
+        #[option(name = "default-bg-color")]
+        default_background_color: BGRA8 = DEFAULT_PEN_BACKGROUND_COLOR,
+        #[option(name = "default-edge-type", parse_with = parse_edge_type)]
+        default_edge_type: EdgeType = EdgeType::None,
+        #[option(name = "default-edge-color", parse_with = parse_edge_color)]
+        default_edge_color: Option<u32> = None,
     }
 }
 
@@ -250,48 +316,28 @@ struct ComputedPen {
     background_color: rasterize::color::BGRA8,
 }
 
-// `pen` attribute defaults
-pub const DEFAULT_PEN_FONT_SIZE: u16 = 100;
-pub const DEFAULT_PEN_FONT_STYLE: u32 = 0;
-pub const DEFAULT_PEN_BOLD: bool = false;
-pub const DEFAULT_PEN_ITALIC: bool = false;
-pub const DEFAULT_PEN_UNDERLINE: bool = false;
-pub const DEFAULT_PEN_EDGE_TYPE: EdgeType = EdgeType::None;
-pub const DEFAULT_PEN_RUBY_PART: RubyPart = RubyPart::None;
-pub const DEFAULT_PEN_FOREGROUND_COLOR: u32 = 0xFFFFFFFF;
-// The default opacity is 0.75, round(0.75 * 255) = 0xBF
-pub const DEFAULT_PEN_BACKGROUND_COLOR: u32 = 0x080808BF;
-
-// `wp` attribute defaults
-pub const DEFAULT_WIN_POINT: Point = Point::BottomCenter;
-pub const DEFAULT_WIN_X: u32 = 50;
-pub const DEFAULT_WIN_Y: u32 = 100;
-// `ws` attribute defaults
-pub const DEFAULT_WIN_MODE_HINT: ModeHint = ModeHint::Default;
-
 impl Segment {
-    fn compute_pen(&self, pen: &Pen) -> ComputedPen {
+    fn compute_pen(&self, pen: &Pen, cfg: &Config) -> ComputedPen {
         fn compute_color(default: u32, color: Option<u32>, opacity: Option<u8>) -> BGRA8 {
             BGRA8::from_argb32(
                 color.unwrap_or(default >> 8) | u32::from(opacity.unwrap_or(default as u8)) << 24,
             )
         }
-
         ComputedPen {
-            font_size: pen.font_size().unwrap_or(DEFAULT_PEN_FONT_SIZE),
-            font_style: pen.font_style().unwrap_or(DEFAULT_PEN_FONT_STYLE),
+            font_size: pen.font_size().unwrap_or(cfg.srv3.default_font_size),
+            font_style: pen.font_style().unwrap_or(cfg.srv3.default_font_style),
             bold: pen.bold().unwrap_or(DEFAULT_PEN_BOLD),
             italic: pen.italic().unwrap_or(DEFAULT_PEN_ITALIC),
             underline: pen.underline().unwrap_or(DEFAULT_PEN_UNDERLINE),
-            edge_type: pen.edge_type().unwrap_or(DEFAULT_PEN_EDGE_TYPE),
-            edge_color: pen.edge_color(),
+            edge_type: pen.edge_type().unwrap_or(cfg.srv3.default_edge_type),
+            edge_color: pen.edge_color().or(cfg.srv3.default_edge_color),
             foreground_color: compute_color(
-                DEFAULT_PEN_FOREGROUND_COLOR,
+                cfg.srv3.default_foreground_color.to_rgba32(),
                 pen.foreground_color(),
                 pen.foreground_opacity(),
             ),
             background_color: compute_color(
-                DEFAULT_PEN_BACKGROUND_COLOR,
+                cfg.srv3.default_background_color.to_rgba32(),
                 pen.background_color(),
                 pen.background_opacity(),
             ),
@@ -397,7 +443,7 @@ impl VisualLine {
             *result.make_inline_sizing_mut() = InlineSizing::Stretch;
         }
 
-        let pen = segment.compute_pen(&segment.pen);
+        let pen = segment.compute_pen(&segment.pen, pass.cfg);
         *result.make_font_size_mut() =
             I26Dot6::from(font_size_to_pixels(pen.font_size) * font_scale_from_ctx(pass.sctx));
         *result.make_font_family_mut() = font_style_to_families(pen.font_style).clone();

@@ -37,6 +37,8 @@ typedef uint32_t sbr_bgra8;
 
 typedef struct sbr_library sbr_library;
 typedef struct sbr_subtitles sbr_subtitles;
+// TODO: bikeshed, options or config?
+typedef struct sbr_config sbr_config;
 typedef struct sbr_renderer sbr_renderer;
 typedef struct sbr_subtitle_context {
   uint32_t dpi;
@@ -89,6 +91,7 @@ sbr_subtitles *sbr_load_text(sbr_library *, char const *content,
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);
+void sbr_renderer_set_config(sbr_renderer *, sbr_config *);
 void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
 bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
                              uint32_t t);

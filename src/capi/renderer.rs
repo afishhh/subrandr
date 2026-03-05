@@ -1,22 +1,40 @@
 use std::ffi::c_int;
 
-use log::info;
+use log::{info, LogContext};
 use rasterize::{
     color::{Premultiplied, BGRA8},
     sw::OutputPiece,
 };
 
-use crate::{capi::library::CLibrary, Renderer, SubtitleContext, Subtitles};
+use crate::{capi::library::CLibrary, Config, Renderer, SubtitleContext, Subtitles};
 
 mod instanced;
 
 pub struct CRenderer<'lib> {
     lib: &'lib CLibrary,
+    config: *const Config,
+    // checked in `sbr_renderer_did_change`
+    // TODO: should this work like this??
+    config_updated_since_render: bool,
     pub(super) inner: Renderer,
     rasterizer: rasterize::sw::Rasterizer,
     output_pieces: Vec<OutputPiece>,
     output_images: Vec<instanced::COutputImage<'static>>,
     output_instances: Vec<instanced::COutputInstance<'static>>,
+}
+
+impl CRenderer<'_> {
+    unsafe fn get_config_for_render<'a>(
+        renderer: *mut CRenderer<'a>,
+        log: &LogContext,
+    ) -> &'a Config {
+        (*renderer).config_updated_since_render = false;
+        if !(*renderer).config.is_null() {
+            &*(*renderer).config
+        } else {
+            (*renderer).lib.get_or_init_config(log)
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -36,10 +54,9 @@ unsafe extern "C" fn sbr_renderer_create(lib: &CLibrary) -> *mut CRenderer<'_> {
 
     Box::into_raw(Box::new(CRenderer {
         lib,
-        inner: ctry!(Renderer::new(
-            &lib.root_logger.new_ctx(),
-            lib.debug_flags.clone()
-        )),
+        config: std::ptr::null_mut(),
+        config_updated_since_render: false,
+        inner: ctry!(Renderer::new(&lib.root_logger.new_ctx())),
         rasterizer: rasterize::sw::Rasterizer::new(),
         output_pieces: Vec::new(),
         output_images: Vec::new(),
@@ -53,6 +70,15 @@ unsafe extern "C" fn sbr_renderer_set_subtitles(
     subtitles: *const Subtitles,
 ) {
     (*renderer).inner.set_subtitles(subtitles.as_ref());
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_set_config(
+    renderer: *mut CRenderer,
+    config: *const crate::Config,
+) {
+    (*renderer).config = config;
+    (*renderer).config_updated_since_render = true;
 }
 
 #[unsafe(no_mangle)]
@@ -76,9 +102,10 @@ unsafe extern "C" fn sbr_renderer_render(
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
     let log = &(*renderer).lib.root_logger.new_ctx();
+    let cfg = CRenderer::get_config_for_render(renderer, log);
     ctry!((*renderer)
         .inner
-        .render(log, &*ctx, t, buffer, width, height, stride));
+        .render(log, &*ctx, cfg, t, buffer, width, height, stride));
     0
 }
 

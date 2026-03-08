@@ -47,13 +47,12 @@ macro_rules! c_enum {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i16)]
 enum ErrorKind {
-    Other = 1,
-    InvalidArgument = 2,
-    Io = 3,
+    Other = -1,
+    InvalidArgument = -2,
 
-    UnrecognizedFormat = 10,
+    UnrecognizedFormat = -11,
 }
 
 #[derive(Debug)]
@@ -85,19 +84,8 @@ impl CError {
     }
 
     pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
-        let mut root_cause = &error as &dyn std::error::Error;
-        while let Some(cause) = root_cause.source() {
-            root_cause = cause;
-        }
-
-        let kind = if root_cause.is::<std::io::Error>() {
-            ErrorKind::Io
-        } else {
-            ErrorKind::Other
-        };
-
         Self {
-            kind,
+            kind: ErrorKind::Other,
             context: Some(Box::new(error)),
             message: None,
         }
@@ -122,7 +110,6 @@ impl std::fmt::Display for CError {
 impl std::error::Error for CError {}
 
 struct LastError {
-    error: CError,
     string: CString,
 }
 
@@ -134,40 +121,39 @@ fn fill_last_error(error: CError) {
     LAST_ERROR.with(|x| unsafe {
         (*x.get()) = Some(LastError {
             string: CString::new(error.to_string()).unwrap(),
-            error,
         });
     })
 }
 
-struct CErrorValue;
+struct CErrorValue<'e>(&'e CError);
 
-impl<T> From<CErrorValue> for *mut T {
+impl<T> From<CErrorValue<'_>> for *mut T {
     fn from(_: CErrorValue) -> Self {
         std::ptr::null_mut()
     }
 }
 
-impl<T> From<CErrorValue> for *const T {
+impl<T> From<CErrorValue<'_>> for *const T {
     fn from(_: CErrorValue) -> Self {
         std::ptr::null()
     }
 }
 
-impl From<CErrorValue> for i64 {
-    fn from(_: CErrorValue) -> Self {
-        -1
+impl From<CErrorValue<'_>> for i64 {
+    fn from(CErrorValue(e): CErrorValue) -> Self {
+        e.kind as _
     }
 }
 
-impl From<CErrorValue> for i32 {
-    fn from(_: CErrorValue) -> Self {
-        -1
+impl From<CErrorValue<'_>> for i32 {
+    fn from(CErrorValue(e): CErrorValue) -> Self {
+        e.kind as _
     }
 }
 
-impl From<CErrorValue> for i16 {
-    fn from(_: CErrorValue) -> Self {
-        -1
+impl From<CErrorValue<'_>> for i16 {
+    fn from(CErrorValue(e): CErrorValue) -> Self {
+        e.kind as _
     }
 }
 
@@ -195,8 +181,12 @@ fn probe(content: &str) -> SubtitleFormat {
 
 macro_rules! cthrow {
     ($error: expr) => {{
-        $crate::capi::fill_last_error($error);
-        return $crate::capi::CErrorValue.into();
+        return {
+            let error = $error;
+            let ret = $crate::capi::CErrorValue(&error).into();
+            $crate::capi::fill_last_error(error);
+            ret
+        };
     }};
     ($kind: ident, $message: expr) => {
         cthrow!($crate::capi::CError::new(
@@ -328,11 +318,6 @@ unsafe extern "C" fn sbr_get_last_error_string() -> *const c_char {
             .as_ref()
             .map_or(std::ptr::null(), |e| e.string.as_ptr())
     })
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_get_last_error_code() -> u32 {
-    LAST_ERROR.with(|x| (*x.get()).as_ref().map_or(0, |e| e.error.kind as u32))
 }
 
 #[unsafe(no_mangle)]

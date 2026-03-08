@@ -12,22 +12,6 @@ extern "C" {
 #include <stdint.h>
 #endif
 
-#ifdef SBR_ALLOW_UNSTABLE
-#define SBR_UNSTABLE
-// clang implements this attribute sensibly and doesn't cause unavailable errors
-// if an unavailable type is only used in other unavailable declarations.
-// GCC does not have these semantics and I'm scared of what other compilers
-// might do here.
-#elif defined(__has_attribute) && defined(__clang__)
-#if __has_attribute(unavailable)
-#define SBR_UNSTABLE                                                           \
-  __attribute__((                                                              \
-      unavailable("This item is not part of subrandr's stable API yet. "       \
-                  "Define SBR_ALLOW_UNSTABLE before including subrandr.h if "  \
-                  "you still want to use it.")))
-#endif
-#endif
-
 #define SUBRANDR_MAJOR SUBRANDR_MAJOR_PLACEHOLDER
 #define SUBRANDR_MINOR SUBRANDR_MINOR_PLACEHOLDER
 #define SUBRANDR_PATCH SUBRANDR_PATCH_PLACEHOLDER
@@ -205,20 +189,11 @@ void sbr_instanced_raster_pass_finish(sbr_instanced_raster_pass *);
 
 void sbr_renderer_destroy(sbr_renderer *);
 
-#ifdef SBR_UNSTABLE
-typedef uint32_t SBR_UNSTABLE sbr_error_code;
-#define SBR_ERR_OTHER (sbr_error_code)1
-#define SBR_ERR_IO (sbr_error_code)2
-#define SBR_ERR_INVALID_ARGUMENT (sbr_error_code)3
-#define SBR_ERR_UNRECOGNIZED_FORMAT (sbr_error_code)10
-#endif
-
+// Get the error message of the last error that occurred on the current thread.
+// The returned string will be valid until another error occurs on this thread.
+//
+// Returns `NULL` if no error has occurred on this thread yet.
 char const *sbr_get_last_error_string(void);
-#ifdef SBR_UNSTABLE
-SBR_UNSTABLE uint32_t sbr_get_last_error_code(void);
-#endif
-
-#undef SBR_UNSTABLE
 
 #ifdef __cplusplus
 }

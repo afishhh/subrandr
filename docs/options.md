@@ -9,6 +9,15 @@ Value grammar is defined using [CSS Value Definition Syntax](https://www.w3.org/
 - The values are *not* parsed like real CSS Values, but the intention is that this will be changed in the future.
 - 3 and 4 character hex colors are not supported yet.
 
+## API stability
+
+> [!NOTE]
+> The stability guarantees of these options are purposefully vague because it is not clear how volatile they will really be in practice. Maybe I won't change them for years in which case the guarantees can be strengthened.
+
+Changes to options not explicitly specified as unstable have best-effort stablility guarantees across API-compatible versions.
+They may still be renamed, removed, or have their syntax changed but new versions will still try to accept old names/syntax (unless an option is removed with no replacement).
+Such translation functionality may or may not be removed after a long enough time.
+
 ## SRV3-specific options
 
 ### srv3-layout-mode

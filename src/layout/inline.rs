@@ -674,73 +674,93 @@ enum FontFeatureEventKind {
     Reset,
 }
 
-fn set_buffer_content_from_range(
-    buffer: &mut ShapingBuffer,
-    text: &str,
-    range: Range<usize>,
-    font_feature_events: &[FontFeatureEvent],
-    grapheme_cluster_boundaries: &[usize],
-) {
-    buffer.set_pre_context(&text[..range.start]);
+struct RunShaper<'a> {
+    buffer: &'a mut ShapingBuffer,
+    font_feature_events: &'a [FontFeatureEvent],
+    grapheme_cluster_boundaries: &'a [usize],
+}
 
-    let next_grapheme_boundary_idx = match grapheme_cluster_boundaries.binary_search(&range.start) {
-        Ok(i) => i + 1,
-        Err(i) => i,
-    };
-    let mut next_grapheme_boundary_it = grapheme_cluster_boundaries[next_grapheme_boundary_idx..]
-        .iter()
-        .copied();
+impl RunShaper<'_> {
+    fn set_buffer_content(&mut self, text: &str, range: Range<usize>, direction: Direction) {
+        self.buffer.clear();
+        self.buffer.set_direction(direction);
+        self.buffer.set_pre_context(&text[..range.start]);
 
-    let mut next_feature_ev_idx = 'feature_idx: {
-        let mut idx = match font_feature_events.binary_search_by_key(&range.start, |f| f.utf8_index)
-        {
-            Ok(i) => i,
-            Err(i) => match i.checked_sub(1) {
-                Some(prev) => prev,
-                None => break 'feature_idx i,
-            },
-        };
+        let next_grapheme_boundary_idx =
+            match self.grapheme_cluster_boundaries.binary_search(&range.start) {
+                Ok(i) => i + 1,
+                Err(i) => i,
+            };
+        let mut next_grapheme_boundary_it = self.grapheme_cluster_boundaries
+            [next_grapheme_boundary_idx..]
+            .iter()
+            .copied();
 
-        let initial_cluster_utf8_index = font_feature_events[idx].utf8_index;
-        loop {
-            let Some(prev_idx) = idx.checked_sub(1) else {
-                break;
+        let mut next_feature_ev_idx = 'feature_idx: {
+            let mut idx = match self
+                .font_feature_events
+                .binary_search_by_key(&range.start, |f| f.utf8_index)
+            {
+                Ok(i) => i,
+                Err(i) => match i.checked_sub(1) {
+                    Some(prev) => prev,
+                    None => break 'feature_idx i,
+                },
             };
 
-            if font_feature_events[prev_idx].utf8_index != initial_cluster_utf8_index {
-                break;
-            }
+            let initial_cluster_utf8_index = self.font_feature_events[idx].utf8_index;
+            loop {
+                let Some(prev_idx) = idx.checked_sub(1) else {
+                    break;
+                };
 
-            idx = prev_idx;
-        }
-
-        idx
-    };
-
-    let mut current = range.start;
-    while current != range.end {
-        loop {
-            match font_feature_events.get(next_feature_ev_idx) {
-                Some(event) if event.utf8_index <= current => {
-                    match event.kind {
-                        FontFeatureEventKind::Set(tag, value) => buffer.set_feature(tag, value),
-                        FontFeatureEventKind::Reset => buffer.reset_features(),
-                    }
-
-                    next_feature_ev_idx += 1;
+                if self.font_feature_events[prev_idx].utf8_index != initial_cluster_utf8_index {
+                    break;
                 }
-                _ => break,
+
+                idx = prev_idx;
             }
+
+            idx
+        };
+
+        let mut current = range.start;
+        while current != range.end {
+            loop {
+                match self.font_feature_events.get(next_feature_ev_idx) {
+                    Some(event) if event.utf8_index <= current => {
+                        match event.kind {
+                            FontFeatureEventKind::Set(tag, value) => {
+                                self.buffer.set_feature(tag, value)
+                            }
+                            FontFeatureEventKind::Reset => self.buffer.reset_features(),
+                        }
+
+                        next_feature_ev_idx += 1;
+                    }
+                    _ => break,
+                }
+            }
+
+            let end = next_grapheme_boundary_it
+                .next()
+                .map_or(range.end, |end| end.min(range.end));
+            self.buffer.add_grapheme(&text[current..end], current);
+            current = end;
         }
 
-        let end = next_grapheme_boundary_it
-            .next()
-            .map_or(range.end, |end| end.min(range.end));
-        buffer.add_grapheme(&text[current..end], current);
-        current = end;
+        self.buffer.set_post_context(&text[range.end..]);
     }
 
-    buffer.set_post_context(&text[range.end..]);
+    pub fn shape(
+        &mut self,
+        output: &mut dyn text::ShapingSink,
+        font_iterator: text::FontMatchIterator<'_>,
+        lctx: &mut LayoutContext,
+    ) -> Result<(), text::ShapingError> {
+        self.buffer
+            .shape(lctx.log, output, font_iterator, lctx.fonts)
+    }
 }
 
 fn shape_run_initial<'a>(
@@ -765,10 +785,8 @@ fn shape_run_initial<'a>(
             bidi: &unicode_bidi::BidiInfo,
             lctx: &mut LayoutContext,
             result: &mut Vec<ShapedItem<'_>>,
-            font_features_events: &[FontFeatureEvent],
             left_padding: &mut FixedL,
-            buffer: &mut ShapingBuffer,
-            grapheme_cluster_boundaries: &[usize],
+            shaper: &mut RunShaper,
         ) -> Result<(), InlineLayoutError> {
             let mut current_paragraph = match bidi
                 .paragraphs
@@ -789,20 +807,13 @@ fn shape_run_initial<'a>(
                 };
 
                 let glyphs = {
-                    buffer.guess_properties();
-                    buffer.set_direction(direction.to_horizontal());
-                    set_buffer_content_from_range(
-                        buffer,
-                        &text,
-                        range.clone(),
-                        font_features_events,
-                        grapheme_cluster_boundaries,
-                    );
+                    shaper.buffer.guess_properties();
+                    shaper.set_buffer_content(&text, range.clone(), direction);
                     let mut output = GlyphString::new(text.clone(), direction);
-                    buffer.shape(lctx.log, &mut output, self.matcher.iterator(), lctx.fonts)?;
+                    shaper.shape(&mut output, self.matcher.iterator(), lctx)?;
                     output
                 };
-                buffer.clear();
+                shaper.buffer.clear();
 
                 result.push(ShapedItem {
                     range: range.clone(),
@@ -977,6 +988,25 @@ fn shape_run_initial<'a>(
             }
         }
 
+        fn flush_queued_text(&mut self) -> Result<(), InlineLayoutError> {
+            if let Some(queued) = self.queued_text.take() {
+                queued.flush(
+                    self.run_text.clone(),
+                    &self.bidi,
+                    self.lctx,
+                    &mut self.shaped,
+                    &mut self.queued_padding,
+                    &mut RunShaper {
+                        buffer: &mut self.shaping_buffer,
+                        font_feature_events: &self.font_feature_events,
+                        grapheme_cluster_boundaries: &self.grapheme_cluster_boundaries,
+                    },
+                )?;
+            }
+
+            Ok(())
+        }
+
         fn handle_span_start(&mut self, style: &'a ComputedStyle) -> Result<(), InlineLayoutError> {
             let left_padding = style.padding_left().to_physical_pixels(self.lctx.dpi);
 
@@ -988,18 +1018,7 @@ fn shape_run_initial<'a>(
                 //       trigger a `QueuedText::flush` and shaping break.
                 //       The only exception is right-side cloned padding which needs to be communicated
                 //       via a side-channel because it may differ inside a single `ShapedItem`.
-                if let Some(queued) = self.queued_text.take() {
-                    queued.flush(
-                        self.run_text.clone(),
-                        &self.bidi,
-                        self.lctx,
-                        &mut self.shaped,
-                        &self.font_feature_events,
-                        &mut self.queued_padding,
-                        &mut self.shaping_buffer,
-                        &self.grapheme_cluster_boundaries,
-                    )?;
-                }
+                self.flush_queued_text()?;
 
                 self.queued_padding += left_padding;
             }
@@ -1039,18 +1058,7 @@ fn shape_run_initial<'a>(
             let right_padding = style.padding_right().to_physical_pixels(self.lctx.dpi);
 
             if right_padding != FixedL::ZERO {
-                if let Some(queued) = self.queued_text.take() {
-                    queued.flush(
-                        self.run_text.clone(),
-                        &self.bidi,
-                        self.lctx,
-                        &mut self.shaped,
-                        &self.font_feature_events,
-                        &mut self.queued_padding,
-                        &mut self.shaping_buffer,
-                        &self.grapheme_cluster_boundaries,
-                    )?;
-                }
+                self.flush_queued_text()?;
 
                 if let Some(item) = self.shaped.last_mut() {
                     item.padding.current_padding_right += right_padding;
@@ -1097,18 +1105,7 @@ fn shape_run_initial<'a>(
                             span_left = span.length;
                         }
                         InlineSpanKind::Ruby { content_index } => {
-                            if let Some(queued) = self.queued_text.take() {
-                                queued.flush(
-                                    self.run_text.clone(),
-                                    &self.bidi,
-                                    self.lctx,
-                                    &mut self.shaped,
-                                    &self.font_feature_events,
-                                    &mut self.queued_padding,
-                                    &mut self.shaping_buffer,
-                                    &self.grapheme_cluster_boundaries,
-                                )?;
-                            }
+                            self.flush_queued_text()?;
 
                             let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                             self.shaped.push(ShapedItem {
@@ -1233,17 +1230,8 @@ fn shape_run_initial<'a>(
                             {
                                 queued.range.end = text.content_range.end
                             }
-                            Some(queued) => {
-                                queued.flush(
-                                    self.run_text.clone(),
-                                    &self.bidi,
-                                    self.lctx,
-                                    &mut self.shaped,
-                                    &self.font_feature_events,
-                                    &mut self.queued_padding,
-                                    &mut self.shaping_buffer,
-                                    &self.grapheme_cluster_boundaries,
-                                )?;
+                            Some(_) => {
+                                self.flush_queued_text()?;
                                 self.queued_text = Some(QueuedText {
                                     matcher: font_matcher,
                                     range: text.content_range.clone(),
@@ -1295,18 +1283,7 @@ fn shape_run_initial<'a>(
                         content_index,
                         ref block,
                     }) => {
-                        if let Some(queued) = self.queued_text.take() {
-                            queued.flush(
-                                self.run_text.clone(),
-                                &self.bidi,
-                                self.lctx,
-                                &mut self.shaped,
-                                &self.font_feature_events,
-                                &mut self.queued_padding,
-                                &mut self.shaping_buffer,
-                                &self.grapheme_cluster_boundaries,
-                            )?;
-                        }
+                        self.flush_queued_text()?;
 
                         let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                         self.shaped.push(ShapedItem {
@@ -1345,18 +1322,7 @@ fn shape_run_initial<'a>(
             }
             *end_item_index = current_item;
 
-            if let Some(queued) = self.queued_text {
-                queued.flush(
-                    self.run_text.clone(),
-                    &self.bidi,
-                    self.lctx,
-                    &mut self.shaped,
-                    &self.font_feature_events,
-                    &mut self.queued_padding,
-                    &mut self.shaping_buffer,
-                    &self.grapheme_cluster_boundaries,
-                )?;
-            }
+            self.flush_queued_text()?;
 
             debug_assert!(compute_break_opportunities || self.break_opportunities.is_empty());
 
@@ -1414,9 +1380,7 @@ struct BreakingContext<'l, 'a> {
     layout: &'a mut LayoutContext<'l>,
     constraints: &'a LayoutConstraints,
     break_opportunities: &'a [usize],
-    break_buffer: text::ShapingBuffer,
-    font_feature_events: &'a [FontFeatureEvent],
-    grapheme_cluster_boundaries: &'a [usize],
+    shaper: RunShaper<'a>,
 }
 
 #[derive(Debug)]
@@ -1576,9 +1540,7 @@ impl ShapedItemText {
                     if let Some((broken, remaining)) = self.glyphs.break_around(
                         break_range,
                         ctx.constraints.size.x - initial_x,
-                        &mut ctx.break_buffer,
-                        ctx.font_feature_events,
-                        ctx.grapheme_cluster_boundaries,
+                        &mut ctx.shaper,
                         self.font_matcher.iterator(),
                         ctx.layout,
                     )? {
@@ -2445,9 +2407,11 @@ fn layout_run_full<'a>(
             layout: lctx,
             constraints,
             break_opportunities: &break_opportunities,
-            break_buffer: text::ShapingBuffer::new(),
-            font_feature_events: &font_feature_events,
-            grapheme_cluster_boundaries: &grapheme_cluster_boundaries,
+            shaper: RunShaper {
+                buffer: &mut text::ShapingBuffer::new(),
+                font_feature_events: &font_feature_events,
+                grapheme_cluster_boundaries: &grapheme_cluster_boundaries,
+            },
         };
 
         'break_loop: loop {

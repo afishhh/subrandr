@@ -7,10 +7,10 @@ use std::{
 
 use util::{math::I26Dot6, rev_if::RevIf};
 
-use super::FontFeatureEvent;
+use super::RunShaper;
 use crate::{
     layout::LayoutContext,
-    text::{Direction, Font, FontMatchIterator, Glyph, ShapingBuffer, ShapingError, ShapingSink},
+    text::{Direction, Font, FontMatchIterator, Glyph, ShapingError, ShapingSink},
 };
 
 #[derive(Clone)]
@@ -194,9 +194,7 @@ impl GlyphStringSegment {
         text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
-        buffer: &mut ShapingBuffer,
-        font_feature_events: &[FontFeatureEvent],
-        grapheme_cluster_boundaries: &[usize],
+        shaper: &mut RunShaper,
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
@@ -221,17 +219,9 @@ impl GlyphStringSegment {
                         + usize::from(direction.is_reverse());
                     let reshape_range = reshape_cluster..break_index;
 
-                    buffer.clear();
-                    buffer.set_direction(direction);
-                    super::set_buffer_content_from_range(
-                        buffer,
-                        text.as_ref(),
-                        reshape_range,
-                        font_feature_events,
-                        grapheme_cluster_boundaries,
-                    );
+                    shaper.set_buffer_content(&text, reshape_range, direction);
                     let mut other = GlyphStringSegmentSink::new();
-                    buffer.shape(lctx.log, &mut other, font_iterator.clone(), lctx.fonts)?;
+                    shaper.shape(&mut other, font_iterator.clone(), lctx)?;
 
                     if let Some(result) = self.try_concat_with_half(i, other.0, direction, false) {
                         return Ok(result);
@@ -242,17 +232,9 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = self.text_range.start..break_index;
-        buffer.clear();
-        buffer.set_direction(direction);
-        super::set_buffer_content_from_range(
-            buffer,
-            text.as_ref(),
-            reshape_range,
-            font_feature_events,
-            grapheme_cluster_boundaries,
-        );
+        shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
         let mut result = GlyphStringSegmentSink::new();
-        buffer.shape(lctx.log, &mut result, font_iterator, lctx.fonts)?;
+        shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
     }
 
@@ -262,9 +244,7 @@ impl GlyphStringSegment {
         text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
-        buffer: &mut ShapingBuffer,
-        font_feature_events: &[FontFeatureEvent],
-        grapheme_cluster_boundaries: &[usize],
+        shaper: &mut RunShaper,
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
@@ -283,17 +263,9 @@ impl GlyphStringSegment {
                         + usize::from(direction.is_reverse());
                     let reshape_range = break_index..reshape_cluster;
 
-                    buffer.clear();
-                    buffer.set_direction(direction);
-                    super::set_buffer_content_from_range(
-                        buffer,
-                        text.as_ref(),
-                        reshape_range,
-                        font_feature_events,
-                        grapheme_cluster_boundaries,
-                    );
+                    shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
                     let mut other = GlyphStringSegmentSink::new();
-                    buffer.shape(lctx.log, &mut other, font_iterator.clone(), lctx.fonts)?;
+                    shaper.shape(&mut other, font_iterator.clone(), lctx)?;
 
                     if let Some(result) = self.try_concat_with_half(i, other.0, direction, true) {
                         return Ok(result);
@@ -304,17 +276,9 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = break_index..self.text_range.end;
-        buffer.clear();
-        buffer.set_direction(direction);
-        super::set_buffer_content_from_range(
-            buffer,
-            text.as_ref(),
-            reshape_range,
-            font_feature_events,
-            grapheme_cluster_boundaries,
-        );
+        shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
         let mut result = GlyphStringSegmentSink::new();
-        buffer.shape(lctx.log, &mut result, font_iterator, lctx.fonts)?;
+        shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
     }
 
@@ -481,9 +445,7 @@ impl GlyphString {
         &self,
         break_range: Range<usize>,
         max_width: I26Dot6,
-        buffer: &mut ShapingBuffer,
-        font_feature_events: &[FontFeatureEvent],
-        grapheme_cluster_boundaries: &[usize],
+        shaper: &mut RunShaper,
         font_iter: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
@@ -522,9 +484,7 @@ impl GlyphString {
                     self.text.clone(),
                     left_candidate_glyph,
                     break_range.start,
-                    buffer,
-                    font_feature_events,
-                    grapheme_cluster_boundaries,
+                    shaper,
                     font_iter.clone(),
                     lctx,
                     self.direction,
@@ -566,9 +526,7 @@ impl GlyphString {
                     self.text.clone(),
                     right_candidate_glyph,
                     break_range.end,
-                    buffer,
-                    font_feature_events,
-                    grapheme_cluster_boundaries,
+                    shaper,
                     font_iter,
                     lctx,
                     self.direction,

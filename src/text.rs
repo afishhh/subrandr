@@ -97,16 +97,6 @@ impl Direction {
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::Rtl | Self::Btt)
     }
-
-    #[must_use]
-    pub const fn to_horizontal(self) -> Self {
-        match self {
-            Self::Ltr => Self::Ltr,
-            Self::Rtl => Self::Rtl,
-            Self::Ttb => Self::Ltr,
-            Self::Btt => Self::Rtl,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

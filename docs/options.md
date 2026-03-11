@@ -103,6 +103,33 @@ Overrides the default edge color (`ec` attribute) of SRV3 pens.
 
 If `none`, the edge color is not defined and edge decorations will use the fallback color calculations described in `srv3-edge-type` above.
 
+### srv3-default-win-align
+
+<table>
+  <tr><td><i>Default</td> <td>7</td></tr>
+  <tr><td><i>Grammar</td> <td>&lt;integer [0,8]&gt;</td></tr>
+</table>
+
+Overrides the default alignment (`ap` attribute of `wp`) of SRV3 windows.  
+
+### srv3-default-win-x
+
+<table>
+  <tr><td><i>Default</td> <td>50</td></tr>
+  <tr><td><i>Grammar</td> <td>&lt;integer [0,100]&gt;</td></tr>
+</table>
+
+Overrides the default x position (`ah` attribute of `wp`) of SRV3 windows.  
+
+### srv3-default-win-y
+
+<table>
+  <tr><td><i>Default</td> <td>100</td></tr>
+  <tr><td><i>Grammar</td> <td>&lt;integer [0,100]&gt;</td></tr>
+</table>
+
+Overrides the default y position (`av` attribute of `wp`) of SRV3 windows.  
+
 ## Testing/debugging options
 
 Options meant to be used while working on subrandr or diagnosing issues.

@@ -262,6 +262,17 @@ fn parse_edge_color(s: &str) -> Result<Option<u32>, util::AnyError> {
     Ok(Some(u32::from_str_radix(hex, 16)?))
 }
 
+fn parse_point(s: &str) -> Result<Point, util::AnyError> {
+    s.parse()
+}
+
+fn parse_win_coordinate(s: &str) -> Result<u32, util::AnyError> {
+    s.parse()
+        .ok()
+        .filter(|&x| x <= 100)
+        .ok_or_else(|| "must be an integer in the range [0, 100]".into())
+}
+
 // `pen` attribute defaults
 pub const DEFAULT_PEN_FONT_SIZE: u16 = 100;
 pub const DEFAULT_PEN_FONT_STYLE: u32 = 0;
@@ -297,6 +308,12 @@ crate::config::define_option_group! {
         default_edge_type: EdgeType = EdgeType::None,
         #[option(name = "default-edge-color", parse_with = parse_edge_color)]
         default_edge_color: Option<u32> = None,
+        #[option(name = "default-win-align", parse_with = parse_point)]
+        default_win_align: Point = DEFAULT_WIN_POINT,
+        #[option(name = "default-win-x", parse_with = parse_win_coordinate)]
+        default_win_x: u32 = DEFAULT_WIN_X,
+        #[option(name = "default-win-y", parse_with = parse_win_coordinate)]
+        default_win_y: u32 = DEFAULT_WIN_Y,
     }
 }
 
@@ -613,8 +630,11 @@ impl Window {
         pass: &mut FrameLayoutPass,
     ) -> Result<Option<(Point2L, layout::block::BlockContainerFragment)>, layout::InlineLayoutError>
     {
-        let Alignment(text_align, vertical_align) =
-            self.pos.point().unwrap_or(DEFAULT_WIN_POINT).to_alignment();
+        let Alignment(text_align, vertical_align) = self
+            .pos
+            .point()
+            .unwrap_or(pass.cfg.srv3.default_win_align)
+            .to_alignment();
         let inner_style = {
             let mut result = ComputedStyle::DEFAULT;
             *result.make_direction_mut() = self.text_direction;
@@ -655,8 +675,10 @@ impl Window {
 
         let fragment = partial_window.layout(pass.lctx, &constraints)?;
 
-        let x_percentage = convert_coordinate(self.pos.x().unwrap_or(DEFAULT_WIN_X) as f32);
-        let y_percentage = convert_coordinate(self.pos.y().unwrap_or(DEFAULT_WIN_Y) as f32);
+        let x_percentage =
+            convert_coordinate(self.pos.x().unwrap_or(pass.cfg.srv3.default_win_x) as f32);
+        let y_percentage =
+            convert_coordinate(self.pos.y().unwrap_or(pass.cfg.srv3.default_win_y) as f32);
         let mut pos = Point2L::new(
             (x_percentage * pass.sctx.player_width().into_f32()).into(),
             (y_percentage * pass.sctx.player_height().into_f32()).into(),

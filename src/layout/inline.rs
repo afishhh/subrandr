@@ -1,3 +1,4 @@
+use core::{convert::AsRef, iter::Iterator};
 use std::{ops::Range, rc::Rc};
 
 use icu_segmenter::{options::LineBreakOptions, GraphemeClusterSegmenter};
@@ -434,6 +435,28 @@ struct LeafItemRange<'a> {
     range: Range<usize>,
     span_id: usize,
     style: &'a ComputedStyle,
+}
+
+impl AsRef<Range<usize>> for LeafItemRange<'_> {
+    fn as_ref(&self) -> &Range<usize> {
+        &self.range
+    }
+}
+
+pub fn slice_sorted_ranges_intersecting<E: AsRef<Range<usize>>>(
+    ranges: &[E],
+    range: Range<usize>,
+) -> &[E] {
+    let start = match ranges.binary_search_by_key(&range.start, |e| e.as_ref().end) {
+        Ok(s) => s + 1,
+        Err(s) => s,
+    };
+    let end = match ranges[start..].binary_search_by_key(&range.end, |e| e.as_ref().start) {
+        Ok(s) => s,
+        Err(s) => s,
+    } + start;
+
+    &ranges[start..end]
 }
 
 #[derive(Debug)]
@@ -1599,66 +1622,49 @@ fn layout_run_full<'a>(
     ) -> Result<(), InlineLayoutError> {
         let mut glyphs = shaped.glyphs.clone();
 
-        // TODO: Simplify this code, it's kind of hacky at the moment.
+        let mut intersecting_leaves = slice_sorted_ranges_intersecting(leaves, range.clone());
+        if intersecting_leaves.is_empty() {
+            // FIXME: This is only necessary because empty lines currently create empty text items
+            //        Instead explicit breaks should probably handled in another way
+            return Ok(());
+        } else if intersecting_leaves.len() == 1 {
+            push_section(&intersecting_leaves[0], glyphs, range.clone())?;
+            return Ok(());
+        }
+
         if !glyphs.direction().is_reverse() {
-            let mut si = match leaves.binary_search_by_key(&range.start, |l| l.range.start) {
-                Ok(s) => s,
-                Err(s) => s - 1,
-            };
-
-            if leaves
-                .get(si + 1)
-                .is_none_or(|l| l.range.start >= range.end)
-            {
-                push_section(&leaves[si], glyphs, range.clone())?;
-                return Ok(());
-            }
-
-            let mut i = range.start;
-            while i != range.end {
-                let end = leaves
-                    .get(si + 1)
-                    .map(|l| l.range.start.min(range.end))
-                    .unwrap_or(range.end);
+            let mut start = range.start;
+            while start != range.end {
+                let (leaf, rest) = intersecting_leaves.split_first().unwrap();
+                intersecting_leaves = rest;
+                let end = if intersecting_leaves.is_empty() {
+                    range.end
+                } else {
+                    leaf.range.end
+                };
 
                 if let Some(section_glyphs) = glyphs.split_off_visual_start(end) {
-                    push_section(&leaves[si], section_glyphs, i..end)?;
+                    push_section(leaf, section_glyphs, start..end)?;
                 }
 
-                i = end;
-                si += 1;
+                start = end;
             }
         } else {
-            let mut si = match leaves.binary_search_by_key(&range.end, |l| l.range.start) {
-                Ok(s) => s.saturating_sub(1),
-                Err(s) => s - 1,
-            };
-
-            if leaves[si].range.start <= range.start {
-                push_section(&leaves[si], glyphs, range.clone())?;
-                return Ok(());
-            }
-
-            let mut i = range.end;
-            while i != range.start {
-                let ref leaf @ LeafItemRange {
-                    range: Range { start, .. },
-                    ..
-                } = leaves[si];
-                let start = start.max(range.start);
+            let mut end = range.end;
+            while end != range.start {
+                let (leaf, rest) = intersecting_leaves.split_last().unwrap();
+                intersecting_leaves = rest;
+                let start = if intersecting_leaves.is_empty() {
+                    range.start
+                } else {
+                    leaf.range.start
+                };
 
                 if let Some(section_glyphs) = glyphs.split_off_visual_start(start) {
-                    push_section(leaf, section_glyphs, start..i)?;
+                    push_section(leaf, section_glyphs, start..end)?;
                 }
 
-                i = start;
-                si = match si.checked_sub(1) {
-                    Some(i) => i,
-                    None => {
-                        debug_assert_eq!(i, range.start);
-                        break;
-                    }
-                }
+                end = start;
             }
         };
 
@@ -2205,30 +2211,19 @@ fn layout_run_full<'a>(
         ) {
             match &item.kind {
                 ShapedItemKind::Text(_) => {
-                    // TODO: deduplicate this with split_on_leaves rtl branch
-                    //       (this is the same thing sans splitting glyphs)
-                    let mut si =
-                        match leaves.binary_search_by_key(&item.range.end, |l| l.range.start) {
-                            Ok(s) => s.saturating_sub(1),
-                            Err(s) => s - 1,
+                    let mut intersecting_leaves =
+                        slice_sorted_ranges_intersecting(leaves, item.range.clone());
+                    let mut start = item.range.start;
+                    while start != item.range.end {
+                        let (leaf, rest) = intersecting_leaves.split_first().unwrap();
+                        intersecting_leaves = rest;
+                        if intersecting_leaves.is_empty() {
+                            on_leaf(leaf.span_id, start..item.range.end);
+                            break;
+                        } else {
+                            on_leaf(leaf.span_id, start..leaf.range.end);
+                            start = leaf.range.end;
                         };
-
-                    if leaves[si].range.start <= item.range.start {
-                        return on_leaf(leaves[si].span_id, item.range.clone());
-                    }
-
-                    let mut i = item.range.end;
-                    while i != item.range.start {
-                        let ref leaf @ LeafItemRange {
-                            range: Range { start, .. },
-                            ..
-                        } = leaves[si];
-                        let start = start.max(item.range.start);
-
-                        on_leaf(leaf.span_id, start..i);
-
-                        i = start;
-                        si = si.wrapping_sub(1);
                     }
                 }
                 ShapedItemKind::Ruby(ruby) => on_leaf(ruby.span_id, item.range.clone()),

@@ -1,5 +1,4 @@
 use std::{
-    collections::LinkedList,
     fmt::Debug,
     ops::{Add as _, Deref, Range},
     rc::Rc,
@@ -18,7 +17,7 @@ pub struct GlyphString {
     /// Always refers to the original string that contains the whole context
     /// of this string.
     text: Rc<str>,
-    segments: LinkedList<GlyphStringSegment>,
+    segments: Vec<GlyphStringSegment>,
     direction: Direction,
 }
 
@@ -103,12 +102,12 @@ impl GlyphStringSegment {
     // [`Self::subslice`] does not allow creating an empty subslice so that "no empty segments"
     // can be an invariant upheld by [`GlyphString`].
     // This function allows for empty subslices but returns them as an empty [`LinkedList`].
-    fn subslice_into_list(&self, range: Range<usize>, direction: Direction) -> LinkedList<Self> {
+    fn subslice_into_vec(&self, range: Range<usize>, direction: Direction) -> Vec<Self> {
         if range.start == range.end {
-            return LinkedList::new();
+            return Vec::new();
         }
 
-        LinkedList::from([self.subslice(range, direction)])
+        Vec::from([self.subslice(range, direction)])
     }
 
     fn split_off_visual_start(&mut self, pivot: usize, direction: Direction) -> Self {
@@ -158,34 +157,45 @@ impl GlyphStringSegment {
         })
     }
 
-    fn try_concat_with_half(
+    fn try_concat_with_reshaped_half(
         &self,
         pivot: usize,
-        mut other: LinkedList<Self>,
         direction: Direction,
         forward: bool,
-    ) -> Option<LinkedList<Self>> {
+        shaper: &mut RunShaper,
+        font_iterator: FontMatchIterator<'_>,
+        lctx: &mut LayoutContext,
+    ) -> Result<Option<Vec<Self>>, ShapingError> {
         match direction.is_reverse() ^ forward {
-            false
-                if other
-                    .iter()
-                    .next()
+            false => {
+                let mut other =
+                    GlyphStringSegmentSink(vec![self.subslice(0..pivot + 1, direction)]);
+                shaper.shape(&mut other, font_iterator, lctx)?;
+                if other.0[1..]
+                    .first()
                     .and_then(|x| x.first())
-                    .is_none_or(|first| !first.unsafe_to_concat()) =>
-            {
-                other.push_front(self.subslice(0..pivot + 1, direction));
-                Some(other)
+                    .is_some_and(|first| first.unsafe_to_concat())
+                {
+                    return Ok(None);
+                }
+
+                Ok(Some(other.0))
             }
-            true if other
-                .iter()
-                .next_back()
-                .and_then(|x| x.last())
-                .is_none_or(|last| !last.unsafe_to_concat()) =>
-            {
-                other.push_back(self.subslice(pivot..self.len(), direction));
-                Some(other)
+            true => {
+                let mut other = GlyphStringSegmentSink(Vec::new());
+                shaper.shape(&mut other, font_iterator, lctx)?;
+                if other
+                    .0
+                    .last()
+                    .and_then(|x| x.last())
+                    .is_some_and(|last| last.unsafe_to_concat())
+                {
+                    return Ok(None);
+                }
+
+                other.0.push(self.subslice(pivot..self.len(), direction));
+                Ok(Some(other.0))
             }
-            _ => None,
         }
     }
 
@@ -198,16 +208,16 @@ impl GlyphStringSegment {
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
-    ) -> Result<LinkedList<Self>, ShapingError> {
+    ) -> Result<Vec<Self>, ShapingError> {
         // If the break is within a glyph (like a long ligature), we must
         // use the slow reshaping path.
         let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
         if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
             // Easy case, we can just split the glyph string right here
             if !direction.is_reverse() {
-                return Ok(self.subslice_into_list(0..glyph_index, direction));
+                return Ok(self.subslice_into_vec(0..glyph_index, direction));
             } else {
-                return Ok(self.subslice_into_list(glyph_index + 1..self.len(), direction));
+                return Ok(self.subslice_into_vec(glyph_index + 1..self.len(), direction));
             }
         } else if self.len() > 1 {
             // The hard case, we have to find the closest glyph on the left which
@@ -220,10 +230,14 @@ impl GlyphStringSegment {
                     let reshape_range = reshape_cluster..break_index;
 
                     shaper.set_buffer_content(&text, reshape_range, direction);
-                    let mut other = GlyphStringSegmentSink::new();
-                    shaper.shape(&mut other, font_iterator.clone(), lctx)?;
-
-                    if let Some(result) = self.try_concat_with_half(i, other.0, direction, false) {
+                    if let Some(result) = self.try_concat_with_reshaped_half(
+                        i,
+                        direction,
+                        false,
+                        shaper,
+                        font_iterator.clone(),
+                        lctx,
+                    )? {
                         return Ok(result);
                     }
                 }
@@ -233,7 +247,7 @@ impl GlyphStringSegment {
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = self.text_range.start..break_index;
         shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
-        let mut result = GlyphStringSegmentSink::new();
+        let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
     }
@@ -248,13 +262,13 @@ impl GlyphStringSegment {
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
-    ) -> Result<LinkedList<GlyphStringSegment>, ShapingError> {
+    ) -> Result<Vec<GlyphStringSegment>, ShapingError> {
         let can_reuse_split_glyph = self.first_byte_of_glyph(glyph_index, direction) == break_index;
         if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
             if !direction.is_reverse() {
-                return Ok(self.subslice_into_list(glyph_index..self.len(), direction));
+                return Ok(self.subslice_into_vec(glyph_index..self.len(), direction));
             } else {
-                return Ok(self.subslice_into_list(0..glyph_index + 1, direction));
+                return Ok(self.subslice_into_vec(0..glyph_index + 1, direction));
             }
         } else {
             for i in self.iter_indices_half_exclusive(glyph_index, !direction.is_reverse()) {
@@ -264,10 +278,14 @@ impl GlyphStringSegment {
                     let reshape_range = break_index..reshape_cluster;
 
                     shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
-                    let mut other = GlyphStringSegmentSink::new();
-                    shaper.shape(&mut other, font_iterator.clone(), lctx)?;
-
-                    if let Some(result) = self.try_concat_with_half(i, other.0, direction, true) {
+                    if let Some(result) = self.try_concat_with_reshaped_half(
+                        i,
+                        direction,
+                        true,
+                        shaper,
+                        font_iterator.clone(),
+                        lctx,
+                    )? {
                         return Ok(result);
                     }
                 }
@@ -277,7 +295,7 @@ impl GlyphStringSegment {
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = break_index..self.text_range.end;
         shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
-        let mut result = GlyphStringSegmentSink::new();
+        let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
     }
@@ -309,23 +327,11 @@ impl GlyphStringSegment {
     }
 }
 
-impl GlyphString {
-    pub fn new(text: Rc<str>, direction: Direction) -> Self {
-        GlyphString::from_array(text, [], direction)
-    }
-}
-
-struct GlyphStringSegmentSink(LinkedList<GlyphStringSegment>);
-
-impl GlyphStringSegmentSink {
-    fn new() -> Self {
-        Self(LinkedList::new())
-    }
-}
+struct GlyphStringSegmentSink(Vec<GlyphStringSegment>);
 
 impl ShapingSink for GlyphStringSegmentSink {
     fn append(&mut self, text_range: Range<usize>, font: &Font, glyphs: &[Glyph]) {
-        self.0.push_back(GlyphStringSegment {
+        self.0.push(GlyphStringSegment {
             storage: glyphs.into(),
             glyph_range: 0..glyphs.len(),
             text_range,
@@ -342,18 +348,11 @@ impl ShapingSink for GlyphString {
     }
 }
 
-// TODO: linked_list_cursors feature would improve some of this code significantly
 impl GlyphString {
-    fn from_array<const N: usize>(
-        text: Rc<str>,
-        segments: [GlyphStringSegment; N],
-        direction: Direction,
-    ) -> GlyphString {
-        GlyphString {
+    pub fn new(text: Rc<str>, direction: Direction) -> Self {
+        Self {
             text,
-            segments: LinkedList::from_iter(
-                segments.into_iter().filter(|segment| !segment.is_empty()),
-            ),
+            segments: Vec::new(),
             direction,
         }
     }
@@ -390,13 +389,14 @@ impl GlyphString {
     }
 
     pub(super) fn split_off_visual_start(&mut self, end_utf8_index: usize) -> Option<Self> {
-        let mut result = LinkedList::new();
         let target_utf8_index = match self.direction.is_reverse() {
             false => end_utf8_index.checked_sub(1)?,
             true => end_utf8_index,
         };
 
-        while let Some(segment) = self.segments.front() {
+        let mut i = 0;
+        while i < self.segments.len() {
+            let segment = &mut self.segments[i];
             // Make sure we're not already past the passed index which can happen
             // due to whitespace collapsing during line-breaking.
             if !self.direction.is_reverse() {
@@ -407,31 +407,27 @@ impl GlyphString {
                 // TODO: Is this case right?
                 break;
             }
-            let mut segment = self.segments.pop_front().unwrap();
 
-            match segment.glyph_at_utf8_index(target_utf8_index, self.direction) {
-                Some(last_glyph_index) => {
-                    result.push_back(
-                        segment.split_off_visual_start(last_glyph_index + 1, self.direction),
-                    );
-                    if !segment.is_empty() {
-                        self.segments.push_front(segment);
-                    }
+            if let Some(last_glyph_index) =
+                segment.glyph_at_utf8_index(target_utf8_index, self.direction)
+            {
+                let last = segment.split_off_visual_start(last_glyph_index + 1, self.direction);
+                let result = self.segments.drain(..i);
 
-                    return Some(Self {
-                        text: self.text.clone(),
-                        segments: result,
-                        direction: self.direction,
-                    });
-                }
-                None => result.push_back(segment),
+                return Some(Self {
+                    text: self.text.clone(),
+                    segments: result.chain(std::iter::once(last)).collect(),
+                    direction: self.direction,
+                });
             }
+
+            i += 1;
         }
 
-        if !result.is_empty() {
+        if i > 0 {
             Some(GlyphString {
                 text: self.text.clone(),
-                segments: result,
+                segments: self.segments.drain(..i).collect(),
                 direction: self.direction,
             })
         } else {
@@ -451,29 +447,31 @@ impl GlyphString {
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         assert!(!self.is_empty());
 
-        let mut left_segments = LinkedList::new();
+        let left_segments;
         let mut current_x = I26Dot6::ZERO;
-        let mut it = RevIf::new(self.segments.iter(), self.direction.is_reverse());
+        let mut it = RevIf::new(
+            self.segments.iter().enumerate(),
+            self.direction.is_reverse(),
+        );
         let mut next = it.next();
-        let push = |list: &mut LinkedList<GlyphStringSegment>, segment: GlyphStringSegment| {
-            if !self.direction.is_reverse() {
-                list.push_back(segment);
+        let slice_segments = |pivot: usize, after: bool| {
+            if !self.direction.is_reverse() ^ after {
+                &self.segments[..pivot]
             } else {
-                list.push_front(segment);
+                &self.segments[pivot + 1..]
             }
         };
-        let append = |list: &mut LinkedList<GlyphStringSegment>,
-                      other: &mut LinkedList<GlyphStringSegment>| {
-            if !self.direction.is_reverse() {
-                list.append(other);
-            } else {
-                other.append(list);
-                std::mem::swap(list, other);
-            }
-        };
+        let append =
+            |list: &[GlyphStringSegment], other: &mut Vec<GlyphStringSegment>, invert: bool| {
+                if !self.direction.is_reverse() ^ invert {
+                    other.splice(0..0, list.iter().cloned());
+                } else {
+                    other.extend_from_slice(list);
+                }
+            };
 
         loop {
-            let Some(segment) = next else {
+            let Some((i, segment)) = next else {
                 return Ok(None);
             };
 
@@ -497,7 +495,8 @@ impl GlyphString {
                     .fold(current_x, I26Dot6::add)
                     <= max_width
                 {
-                    append(&mut left_segments, &mut left_candidate);
+                    append(slice_segments(i, false), &mut left_candidate, false);
+                    left_segments = left_candidate;
                     break;
                 } else {
                     // This wasn't a valid break because the width ended up being too large.
@@ -508,7 +507,6 @@ impl GlyphString {
             for glyph in segment {
                 current_x += glyph.x_advance;
             }
-            push(&mut left_segments, segment.clone());
 
             next = it.next();
         }
@@ -518,7 +516,7 @@ impl GlyphString {
             segments: left_segments,
             direction: self.direction,
         };
-        while let Some(segment) = next {
+        while let Some((i, segment)) = next {
             if let Some(right_candidate_glyph) =
                 segment.glyph_at_utf8_index(break_range.end, self.direction)
             {
@@ -532,12 +530,7 @@ impl GlyphString {
                     self.direction,
                 )?;
 
-                append(
-                    &mut right_segments,
-                    // NOTE: For this to be correct we need to go back to iterating in visual order
-                    //       so `RevIf::into_inner` first.
-                    &mut it.into_inner().cloned().collect::<LinkedList<_>>(),
-                );
+                append(slice_segments(i, true), &mut right_segments, true);
 
                 return Ok(Some((
                     left,
@@ -552,9 +545,6 @@ impl GlyphString {
             next = it.next();
         }
 
-        Ok(Some((
-            left,
-            Self::from_array(self.text.clone(), [], self.direction),
-        )))
+        Ok(Some((left, Self::new(self.text.clone(), self.direction))))
     }
 }

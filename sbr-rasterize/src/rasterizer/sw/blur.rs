@@ -1,7 +1,7 @@
 use std::{f32::consts::PI, mem::MaybeUninit};
 
 pub fn gaussian_sigma_to_box_radius(sigma: f32) -> usize {
-    // https://drafts.fxtf.org/filter-effects/#funcdef-filter-blur
+    // https://drafts.csswg.org/filter-effects-1/#funcdef-filter-blur
     // Divided by two because we want a *radius* not the whole "extent".
     (((2.0 * PI).sqrt() * 0.375) * sigma).round() as usize
 }

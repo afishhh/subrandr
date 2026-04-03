@@ -37,24 +37,24 @@ impl RawShapingBuffer {
         }
     }
 
-    fn items_mut(&mut self) -> (&mut [hb_glyph_info_t], &mut [hb_glyph_position_t]) {
-        let infos: &mut [hb_glyph_info_t] = unsafe {
+    fn items(&self) -> (&[hb_glyph_info_t], &[hb_glyph_position_t]) {
+        let infos: &[hb_glyph_info_t] = unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_infos(self.0, &mut nglyphs);
             if infos.is_null() {
-                &mut []
+                &[]
             } else {
-                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
+                std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
             }
         };
 
-        let positions: &mut [hb_glyph_position_t] = unsafe {
+        let positions: &[hb_glyph_position_t] = unsafe {
             let mut nglyphs = 0;
             let infos = hb_buffer_get_glyph_positions(self.0, &mut nglyphs);
             if infos.is_null() {
-                &mut []
+                &[]
             } else {
-                std::slice::from_raw_parts_mut(infos as *mut _, nglyphs as usize)
+                std::slice::from_raw_parts(infos as *const _, nglyphs as usize)
             }
         };
 
@@ -279,19 +279,6 @@ impl Drop for ShapingBuffer {
     }
 }
 
-// Right to left text will have clusters monotonically decreasing instead of increasing,
-// so we need to fixup cluster ranges so we don't crash when slicing with them.
-fn fixup_range(a: usize, b: usize) -> Range<usize> {
-    if a > b {
-        // fixup_range accepts an *exclusive* range where b is excluded and a is included
-        // *regardless* of which is higher, therefore when reversing it we have to make
-        // sure we're taking this into account.
-        b + 1..a + 1
-    } else {
-        a..b
-    }
-}
-
 struct ShapingPass<'p> {
     log: &'p LogContext<'p>,
     buffer: RawShapingBuffer,
@@ -363,8 +350,13 @@ impl ShapingPass<'_> {
                 self.features.len() as u32,
             );
         }
-        let (infos, positions) = self.buffer.items_mut();
 
+        type ItemIter<'a> = std::iter::Zip<
+            std::slice::Iter<'a, hb_glyph_info_t>,
+            std::slice::Iter<'a, hb_glyph_position_t>,
+        >;
+
+        let (infos, positions) = self.buffer.items();
         if infos.is_empty() {
             return Ok(());
         }
@@ -381,15 +373,8 @@ impl ShapingPass<'_> {
         } else {
             cluster_range.end - 1
         };
-        // It is, in general, not possible to compute an excluded end bound for clusters here.
-        // This is because when working with RTL text such an end bound could be `-1`[1].
-        // So we use `usize::MAX` as a sentinel instead and are careful not to
-        // compare clusters with non-equality comparisons.
-        //
-        // [1] Although this placeholder is effectively `-1` :)
-        const END_CLUSTER_EXCLUDED: usize = usize::MAX;
 
-        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {
+        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t, it: &ItemIter| {
             let cluster = &self.cluster_map[info.cluster as usize];
             Glyph::from_info_and_position(
                 info,
@@ -397,7 +382,12 @@ impl ShapingPass<'_> {
                 if !is_dir_reverse {
                     cluster.utf8_index
                 } else {
-                    cluster.end_utf8_index() - 1
+                    it.clone()
+                        .find(|x| x.0.cluster != info.cluster)
+                        .map_or_else(
+                            || self.cluster_map[cluster_range.start].utf8_index,
+                            |c| self.cluster_map[c.0.cluster as usize + 1].utf8_index,
+                        )
                 },
                 &font,
             )
@@ -415,6 +405,7 @@ impl ShapingPass<'_> {
         };
 
         let mut glyph_buffer_last = self.glyph_buffer.len();
+        // These ranges are [min, max) if !is_reverse and otherwise they are [max, min].
         let mut successful_ranges = Vec::new();
         let mut it = std::iter::zip(infos, positions);
         while let Some((info, position)) = it.next() {
@@ -440,7 +431,7 @@ impl ShapingPass<'_> {
             // If we don't see a grapheme start at the end of the valid subrange then we
             // will roll back `len` by this value to get rid of the partial ending.
             let mut pending_glyphs = 0;
-            self.glyph_buffer.push(make_glyph(info, position));
+            self.glyph_buffer.push(make_glyph(info, position, &it));
             let cluster_subrange_start = info.cluster as usize;
             let mut cluster_subrange_end = cluster_subrange_start;
             loop {
@@ -448,11 +439,12 @@ impl ShapingPass<'_> {
                     Some((info, position)) => {
                         if is_cluster_initial(info.cluster) {
                             pending_glyphs = 0;
-                            cluster_subrange_end = info.cluster as usize;
+                            cluster_subrange_end =
+                                (info.cluster as usize).wrapping_add(usize::from(is_reverse));
                         }
 
                         if info.codepoint != 0 {
-                            self.glyph_buffer.push(make_glyph(info, position));
+                            self.glyph_buffer.push(make_glyph(info, position, &it));
                             len += 1;
                             pending_glyphs += 1;
                         } else {
@@ -461,7 +453,11 @@ impl ShapingPass<'_> {
                     }
                     None => {
                         pending_glyphs = 0;
-                        cluster_subrange_end = END_CLUSTER_EXCLUDED;
+                        cluster_subrange_end = if !is_reverse {
+                            cluster_range.end
+                        } else {
+                            cluster_range.start
+                        };
                         break;
                     }
                 }
@@ -480,47 +476,70 @@ impl ShapingPass<'_> {
             successful_ranges.push((cluster_subrange_start, cluster_subrange_end, len));
         }
 
-        let text_utf8_start = self.cluster_map[cluster_range.start].utf8_index;
-        let text_utf8_end = self.cluster_map.get(cluster_range.end).map_or_else(
-            || self.cluster_map.last().unwrap().end_utf8_index(),
-            |x| x.utf8_index,
-        );
-        let cluster_range_to_utf8 = |range: Range<usize>| {
-            if !is_reverse {
-                self.cluster_map[range.start].utf8_index..(if range.end == END_CLUSTER_EXCLUDED {
-                    text_utf8_end
-                } else {
-                    self.cluster_map[range.end].utf8_index
-                })
-            } else {
-                (if range.end == END_CLUSTER_EXCLUDED {
-                    text_utf8_start
-                } else {
-                    self.cluster_map[range.end].end_utf8_index()
-                })..self.cluster_map[range.start].end_utf8_index()
+        let mut broken_subrange_start = cluster_range.start;
+        if !is_reverse {
+            let text_utf8_end = self.cluster_map.get(cluster_range.end).map_or_else(
+                || self.cluster_map.last().unwrap().end_utf8_index(),
+                |x| x.utf8_index,
+            );
+            let cluster_range_to_utf8 = |range: Range<usize>| {
+                self.cluster_map[range.start].utf8_index
+                    ..self
+                        .cluster_map
+                        .get(range.end)
+                        .map_or(text_utf8_end, |c| c.utf8_index)
+            };
+            let truncate_to = glyph_buffer_last;
+
+            for (cluster_subrange_start, cluster_subrange_end, len) in successful_ranges {
+                if broken_subrange_start != cluster_subrange_start {
+                    self.retry_shaping(
+                        broken_subrange_start..cluster_subrange_start,
+                        font_iterator.clone(),
+                        force_tofu,
+                    )?;
+                }
+                broken_subrange_start = cluster_subrange_end;
+
+                let text_range =
+                    cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end);
+                self.output.append(
+                    text_range,
+                    &font.clone(),
+                    &self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len],
+                );
+                glyph_buffer_last += len;
+            }
+
+            self.glyph_buffer.truncate(truncate_to);
+        } else {
+            let cluster_range_to_utf8 = |start: usize, end: usize| {
+                self.cluster_map[end].utf8_index..self.cluster_map[start].end_utf8_index()
+            };
+
+            for (cluster_subrange_start, cluster_subrange_end, len) in
+                successful_ranges.into_iter().rev()
+            {
+                if broken_subrange_start != cluster_subrange_end {
+                    self.retry_shaping(
+                        broken_subrange_start..cluster_subrange_end,
+                        font_iterator.clone(),
+                        force_tofu,
+                    )?;
+                }
+                broken_subrange_start = cluster_subrange_start + 1;
+
+                let text_range =
+                    cluster_range_to_utf8(cluster_subrange_start, cluster_subrange_end);
+                let glyphs_start = self.glyph_buffer.len() - len;
+                let glyphs = &mut self.glyph_buffer[glyphs_start..];
+                glyphs.reverse();
+                self.output.append(text_range, &font.clone(), glyphs);
+                self.glyph_buffer.truncate(glyphs_start);
             }
         };
 
-        let mut broken_subrange_start = first_cluster;
-        for (cluster_subrange_start, cluster_subrange_end, len) in successful_ranges {
-            if broken_subrange_start != cluster_subrange_start {
-                self.retry_shaping(
-                    fixup_range(broken_subrange_start, cluster_subrange_start),
-                    font_iterator.clone(),
-                    force_tofu,
-                )?;
-            }
-            broken_subrange_start = cluster_subrange_end;
-
-            self.output.append(
-                cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end),
-                &font.clone(),
-                &self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len],
-            );
-            glyph_buffer_last += len;
-        }
-
-        if broken_subrange_start != END_CLUSTER_EXCLUDED {
+        if broken_subrange_start != cluster_range.end {
             assert!(!force_tofu, "Tofu font failed to shape any characters");
 
             // This means the font fallback system lied to us and gave us
@@ -528,11 +547,7 @@ impl ShapingPass<'_> {
             let next_force_tofu =
                 broken_subrange_start == start_cluster && font_iterator.did_system_fallback();
 
-            let range = if is_reverse {
-                cluster_range.start..broken_subrange_start + 1
-            } else {
-                broken_subrange_start..cluster_range.end
-            };
+            let range = broken_subrange_start..cluster_range.end;
             self.retry_shaping(range, font_iterator.clone(), next_force_tofu)?
         }
 

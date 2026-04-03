@@ -135,6 +135,19 @@ impl Glyph {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_new(index: hb_codepoint_t, cluster: usize) -> Self {
+        Self {
+            index,
+            cluster,
+            x_advance: I26Dot6::ZERO,
+            y_advance: I26Dot6::ZERO,
+            x_offset: I26Dot6::ZERO,
+            y_offset: I26Dot6::ZERO,
+            flags: 0,
+        }
+    }
+
     pub fn unsafe_to_break(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_BREAK) != 0
     }

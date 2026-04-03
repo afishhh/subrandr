@@ -1536,11 +1536,7 @@ impl ShapedItemText {
             if *current_width > ctx.constraints.size.x {
                 // We want to also consider breaking within the current glyph so let's
                 // start looking for break opportunities anywhere before the *next* glyph.
-                let glyph_end = if self.glyphs.direction().is_reverse() {
-                    glyph.cluster + 1
-                } else {
-                    glyph_it.peek().map(|(_, g)| g.cluster).unwrap_or(range.end)
-                };
+                let glyph_end = glyph.cluster + 1;
                 let opportunities = &ctx.break_opportunities[..match ctx
                     .break_opportunities
                     .binary_search(&glyph_end)
@@ -1720,39 +1716,40 @@ fn layout_run_full<'a>(
                             "bidi reordering attempted to partially reorder a text item on both sides"
                         );
 
-                        // Cursed code path™
-                        // I doubt even god knows whether this works in all cases,
-                        // it works in at least one though.
-                        // HACK: This can only happen due to bidi rule L1 which may split a line's
-                        // trailing whitespace into a separate level run.
-                        // Since this may only occur with whitespaces we cheat a little bit here and
-                        // just completely unsafely split glyph strings assuming no reshaping is
-                        // necessary. Reshaping here would be a bad idea anyway and doesn't make sense.
+                        // This case happens when bidi rule L1 reorders some whitespace inside a bidi
+                        // level run.
+                        // Since this is only supposed to affect whitespace glyphs, we don't reshape here
+                        // assuming that the font is sane and does not ligate spaces. If it's not sane
+                        // in this way, then true theoreteically correct line-breaking requires unbounded
+                        // backtracking so it's not like we have much of a choice.
+
                         let mut tmp = ShapedItemText {
                             font_matcher: text.font_matcher.clone(),
                             primary_font: text.primary_font.clone(),
                             glyphs: text.glyphs.clone(),
                             break_after: false,
                         };
-                        if range.start > item.range.start {
-                            tmp.glyphs.split_off_visual_start(range.start);
+                        let split_range = if range.start > item.range.start {
+                            tmp.glyphs.split_off_logical_end(range.start).map(|after| {
+                                tmp.glyphs = after;
+                                range.start..item.range.end
+                            })
+                        } else {
+                            debug_assert!(range.end < item.range.end);
+                            tmp.glyphs.split_off_logical_start(range.end).map(|before| {
+                                tmp.glyphs = before;
+                                item.range.start..range.end
+                            })
+                        };
+
+                        if let Some(split_range) = split_range {
                             push_item(&mut ShapedItem {
-                                range: range.start..item.range.end,
+                                range: split_range,
                                 kind: ShapedItemKind::Text(tmp),
                                 padding: ShapedItemPadding::MAX,
                             })
                         } else {
-                            debug_assert!(range.end < item.range.end);
-                            if let Some(before) = tmp.glyphs.split_off_visual_start(range.end) {
-                                tmp.glyphs = before;
-                                push_item(&mut ShapedItem {
-                                    range: item.range.start..range.end,
-                                    kind: ShapedItemKind::Text(tmp),
-                                    padding: ShapedItemPadding::MAX,
-                                })
-                            } else {
-                                Ok(())
-                            }
+                            Ok(())
                         }
                     } else {
                         unreachable!(
@@ -1864,7 +1861,7 @@ fn layout_run_full<'a>(
                             primary_metrics.descender - half_leading,
                         );
 
-                        for font in text.glyphs.iter_fonts_visual() {
+                        for font in text.glyphs.iter_fonts_logical() {
                             self.expand_to(
                                 font.metrics().ascender + half_leading,
                                 font.metrics().descender - half_leading,

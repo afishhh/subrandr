@@ -732,11 +732,7 @@ impl RunShaper<'_> {
             };
 
             let initial_cluster_utf8_index = self.font_feature_events[idx].utf8_index;
-            loop {
-                let Some(prev_idx) = idx.checked_sub(1) else {
-                    break;
-                };
-
+            while let Some(prev_idx) = idx.checked_sub(1) {
                 if self.font_feature_events[prev_idx].utf8_index != initial_cluster_utf8_index {
                     break;
                 }
@@ -1497,11 +1493,7 @@ impl ShapedItemText {
         let text = self.glyphs.text();
         let mut break_start_index = opportunity;
         let mut break_end_index = opportunity;
-        loop {
-            let Some(prev) = break_start_index.checked_sub(1) else {
-                break;
-            };
-
+        while let Some(prev) = break_start_index.checked_sub(1) {
             if text.as_bytes()[prev] == b' ' {
                 break_start_index = prev;
             } else {

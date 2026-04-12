@@ -405,6 +405,7 @@ fn collect_webvtt_region_settings<'a>(input: &'a str, region: &mut Region<'a>) {
             continue;
         }
 
+        #[allow(clippy::collapsible_match)] // let's not stuff parsing into match guards
         match name {
             "id" => {
                 region.identifier = value;

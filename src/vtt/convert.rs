@@ -15,7 +15,7 @@ use crate::{
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
-    renderer::FrameLayoutPass,
+    renderer::{FrameLayoutPass, SubtitleEvent},
     style::{
         computed::{FontSlant, HorizontalAlignment, TextDecorations},
         ComputedStyle,
@@ -98,7 +98,9 @@ impl vtt::Cue<'_> {
 }
 
 #[derive(Debug)]
-struct Event {
+// NOTE: Only public for SubtitleEvent, don't use by name
+#[doc(hidden)]
+pub struct Event {
     range: Range<u32>,
     writing_direction: vtt::WritingDirection,
     text_alignment: vtt::TextAlignment,
@@ -625,6 +627,59 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
     }
 
     subtitles
+}
+
+impl Subtitles {
+    pub fn iter(&self) -> SubtitleIterator<'_> {
+        SubtitleIterator(self.events.iter())
+    }
+}
+
+pub struct SubtitleIterator<'a>(std::slice::Iter<'a, Event>);
+
+impl<'a> Iterator for SubtitleIterator<'a> {
+    type Item = &'a Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl SubtitleEvent for Event {
+    fn time_range(&self) -> Range<u32> {
+        self.range.clone()
+    }
+
+    fn text(&self, output: &mut String) {
+        struct Visitor<'o> {
+            output: &'o mut String,
+        }
+
+        impl Visitor<'_> {
+            fn visit_text(&mut self, text: &str) {
+                self.output.push_str(text);
+            }
+
+            fn visit_element(&mut self, element: &Element) {
+                if let ElementKind::RubyText = element.kind {
+                    self.output.push('(');
+                }
+
+                for child in &element.children {
+                    match child {
+                        Node::Text(text) => self.visit_text(text),
+                        Node::Element(child_element) => self.visit_element(child_element),
+                    }
+                }
+
+                if let ElementKind::RubyText = element.kind {
+                    self.output.push(')');
+                }
+            }
+        }
+
+        Visitor { output }.visit_element(&self.root);
+    }
 }
 
 pub(crate) struct Layouter {

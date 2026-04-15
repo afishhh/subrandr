@@ -15,7 +15,7 @@ use crate::{
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
-    renderer::FrameLayoutPass,
+    renderer::{FrameLayoutPass, SubtitleEvent},
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
     style::{
         computed::{
@@ -192,7 +192,9 @@ struct Window {
 }
 
 #[derive(Debug)]
-struct VisualLine {
+// NOTE: Only public for SubtitleEvent, don't use by name
+#[doc(hidden)]
+pub struct VisualLine {
     range: Range<u32>,
     segments: Vec<LineSegment>,
 }
@@ -739,6 +741,61 @@ pub fn convert(
     }
 
     Ok(result)
+}
+
+impl Subtitles {
+    pub fn iter(&self) -> SubtitleIterator<'_> {
+        SubtitleIterator {
+            windows: self.windows.iter(),
+            lines: [].iter(),
+        }
+    }
+}
+
+pub struct SubtitleIterator<'a> {
+    windows: std::slice::Iter<'a, Window>,
+    lines: std::slice::Iter<'a, VisualLine>,
+}
+
+impl<'a> Iterator for SubtitleIterator<'a> {
+    // TODO: I now understand what `impl_trait_in_assoc_type` is useful for.
+    //       `type_alias_impl_trait` would allow getting rid of this struct entirely.
+    type Item = &'a VisualLine;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let Some(line) = self.lines.next() else {
+                match self.windows.next() {
+                    Some(w) => {
+                        self.lines = w.lines.iter();
+                        continue;
+                    }
+                    None => {
+                        return None;
+                    }
+                }
+            };
+
+            return Some(line);
+        }
+    }
+}
+
+impl SubtitleEvent for VisualLine {
+    fn time_range(&self) -> Range<u32> {
+        self.range.clone()
+    }
+
+    fn text(&self, output: &mut String) {
+        for segment in &self.segments {
+            output.push_str(&segment.inner.text);
+            if let Some(annotation) = &segment.annotation {
+                output.push('(');
+                output.push_str(&annotation.text);
+                output.push(')');
+            }
+        }
+    }
 }
 
 pub(crate) struct Layouter {

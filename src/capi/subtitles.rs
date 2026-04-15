@@ -4,7 +4,7 @@ use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
 use log::{debug, warn};
 use util::rc::Rc;
 
-use crate::{capi::library::CLibrary, Subtitles};
+use crate::{capi::library::CLibrary, renderer::SubtitleEvent, srv3, vtt, Subtitles};
 
 c_enum! {
     #[repr(i16)]
@@ -114,4 +114,158 @@ unsafe extern "C" fn sbr_load_text(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_subtitles_destroy(subtitles: *mut Subtitles) {
     drop(Box::from_raw(subtitles));
+}
+
+#[repr(C)]
+struct CSubtitleIteratorPublic {
+    exhausted: bool,
+    start: u32,
+    end: u32,
+}
+
+impl CSubtitleIteratorPublic {
+    fn update(&mut self, current: Option<impl SubtitleEvent>) {
+        let Some(event) = current else {
+            self.exhausted = true;
+            return;
+        };
+
+        self.exhausted = false;
+        let range = event.time_range();
+        self.start = range.start;
+        self.end = range.end;
+    }
+}
+
+#[repr(C)]
+struct CSubtitleIterator {
+    public: CSubtitleIteratorPublic,
+    /* Public fields end here */
+    text_buffer: String,
+    inner: Option<(Subtitles, CSubtitleIteratorImpl<'static>)>,
+}
+
+enum CSubtitleIteratorImpl<'a> {
+    Srv3(StatefulIterator<srv3::SubtitleIterator<'a>>),
+    Vtt(StatefulIterator<vtt::SubtitleIterator<'a>>),
+}
+
+struct StatefulIterator<I: Iterator<Item: SubtitleEvent + Copy>> {
+    current: Option<I::Item>,
+    inner: I,
+}
+
+impl<I: Iterator<Item: SubtitleEvent + Copy>> StatefulIterator<I> {
+    fn new(inner: I) -> Self {
+        Self {
+            current: None,
+            inner,
+        }
+    }
+}
+
+impl<I: Iterator<Item: SubtitleEvent + Copy>> StatefulIterator<I> {
+    fn text(&self, output: &mut String) -> Option<()> {
+        self.current.as_ref().map(|event| {
+            event.text(output);
+        })
+    }
+
+    fn advance(&mut self, public: &mut CSubtitleIteratorPublic) {
+        self.current = self.inner.next();
+        public.update(self.current);
+    }
+}
+
+impl CSubtitleIteratorImpl<'_> {
+    fn text(&self, output: &mut String) -> Option<()> {
+        match self {
+            CSubtitleIteratorImpl::Srv3(srv3) => srv3.text(output),
+            CSubtitleIteratorImpl::Vtt(vtt) => vtt.text(output),
+        }
+    }
+
+    fn advance(&mut self, public: &mut CSubtitleIteratorPublic) {
+        match self {
+            CSubtitleIteratorImpl::Srv3(srv3) => srv3.advance(public),
+            CSubtitleIteratorImpl::Vtt(vtt) => vtt.advance(public),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_new() -> *mut CSubtitleIterator {
+    Box::into_raw(Box::new(CSubtitleIterator {
+        public: CSubtitleIteratorPublic {
+            exhausted: true,
+            start: 0,
+            end: 0,
+        },
+        text_buffer: String::new(),
+        inner: None,
+    }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_next(this: *mut CSubtitleIterator) {
+    let Some((_, iter)) = &mut (*this).inner else {
+        return;
+    };
+
+    iter.advance(&mut (*this).public);
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_get_text(
+    this: *mut CSubtitleIterator,
+    flags: u64,
+) -> *const c_char {
+    if flags != 0 {
+        cthrow!(
+            InvalidArgument,
+            "non-zero flags passed to `sbr_subtitle_iterator_get_text`"
+        );
+    }
+
+    let Some((_, iter)) = &mut (*this).inner else {
+        return std::ptr::null();
+    };
+
+    (*this).text_buffer.clear();
+    match iter.text(&mut (*this).text_buffer) {
+        Some(()) => {
+            (*this).text_buffer.push('\0');
+            (*this).text_buffer.as_ptr() as _
+        }
+        None => std::ptr::null(),
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_reset(this: *mut CSubtitleIterator) {
+    (*this).public.exhausted = true;
+    (*this).inner = None;
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_destroy(this: *mut CSubtitleIterator) {
+    drop(Box::from_raw(this));
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitles_iter(this: *mut Subtitles, citer: *mut CSubtitleIterator) {
+    let subs = (*this).clone();
+    // NOTE: This whole `Rc::as_ptr` dance is to avoid any potential "technically UB"
+    //       references by going through the internal raw pointer directly.
+    let mut iter: CSubtitleIteratorImpl<'static> = match &subs {
+        Subtitles::Srv3(srv3) => {
+            CSubtitleIteratorImpl::Srv3(StatefulIterator::new((*Rc::as_ptr(srv3)).iter()))
+        }
+        Subtitles::Vtt(vtt) => {
+            CSubtitleIteratorImpl::Vtt(StatefulIterator::new((*Rc::as_ptr(vtt)).iter()))
+        }
+    };
+
+    iter.advance(&mut (*citer).public);
+    (*citer).inner = Some((subs, iter));
 }

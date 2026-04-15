@@ -345,6 +345,11 @@ impl<R: Refcount, T: ?Sized> RcBase<R, T> {
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
         std::ptr::eq(this.ptr.as_ptr() as *mut (), other.ptr.as_ptr() as *mut ())
     }
+
+    #[inline]
+    pub fn as_ptr(this: &Self) -> *const T {
+        unsafe { &raw const (*this.ptr.as_ptr()).value }
+    }
 }
 
 impl<R: Refcount, T> From<T> for RcBase<R, T> {

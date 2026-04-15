@@ -73,6 +73,21 @@ pub enum Subtitles {
     Vtt(Rc<vtt::Subtitles>),
 }
 
+pub trait SubtitleEvent {
+    fn time_range(&self) -> Range<u32>;
+    fn text(&self, output: &mut String);
+}
+
+impl<T: SubtitleEvent> SubtitleEvent for &T {
+    fn time_range(&self) -> Range<u32> {
+        T::time_range(self)
+    }
+
+    fn text(&self, output: &mut String) {
+        T::text(self, output)
+    }
+}
+
 enum FormatLayouter {
     Srv3(srv3::Layouter),
     Vtt(vtt::Layouter),

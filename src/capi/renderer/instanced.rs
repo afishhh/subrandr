@@ -47,7 +47,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
     if flags != 0 {
         cthrow!(
             InvalidArgument,
-            "non-zero flags parameter passed to `sbr_renderer_render_instanced`"
+            "non-zero flags passed to `sbr_renderer_render_instanced`"
         );
     }
 

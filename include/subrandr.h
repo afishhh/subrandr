@@ -70,6 +70,67 @@ sbr_subtitles *sbr_load_text(sbr_library *, char const *content,
                              size_t content_len, sbr_subtitle_format format,
                              char const *language_hint);
 
+// Iterator for subtitle events of an `sbr_subtitles` object.
+//
+// The size of this struct is not part of the public ABI,
+// new fields may be added in ABI-compatible releases.
+typedef struct sbr_subtitle_iterator {
+  // Whether the iterator currently points to a subtitle event.
+  //
+  // Set to `true` once the end of an event list is reached and after
+  // initialization.
+  //
+  // Accessors for subtitle event data like `sbr_subtitle_iterator_get_text`
+  // must not be called if this flag is set.
+  bool exhausted;
+
+  // Start time of this subtitle event in milliseconds.
+  uint32_t start;
+  // End time of this subtitle event in milliseconds.
+  uint32_t end;
+} sbr_subtitle_iterator;
+
+// Construct a new subtitle event iterator.
+sbr_subtitle_iterator *sbr_subtitle_iterator_new(void);
+
+// Advance this iterator to the next subtitle event.
+//
+// Note that the order of events in an `sbr_subtitles` object is unspecified
+// so this event might not be after the current one time-wise.
+void sbr_subtitle_iterator_next(sbr_subtitle_iterator *);
+
+// Get the text content of this subtitle event.
+//
+// Text formatting will be ignored and not present in the result.
+// Ruby will use parenthesized fallback form like "嗚呼(ああ)".
+//
+// `flags` must be zero.
+//
+// The returned string is guaranteed to be valid for as long as
+// no other subrandr function is called on this iterator.
+char const *sbr_subtitle_iterator_get_text(sbr_subtitle_iterator *,
+                                           uint64_t flags);
+
+// Stop iterating the subtitle event list the iterator currently points to.
+//
+// Should be done as soon as you are done using the iterator to avoid keeping
+// resources alive unnecessarily as well as for future-proofing code to work
+// with a future incremental parsing API.
+void sbr_subtitle_iterator_reset(sbr_subtitle_iterator *);
+
+void sbr_subtitle_iterator_destroy(sbr_subtitle_iterator *);
+
+// Point the passed iterator to the beggining of the subtitle event list
+// of this subtitle object.
+//
+// The order of events inside this internal list is unspecified.
+void sbr_subtitles_iter(sbr_subtitles *, sbr_subtitle_iterator *);
+
+#if 0 /* <-- so clangd doesn't think this is a doc comment :) */
+// TODO: `sbr_subtitles_iter_at` would presumably be useful for some.
+// void sbr_subtitles_iter_at(sbr_subtitle_iterator *, uint32_t point);
+#endif
+
 void sbr_subtitles_destroy(sbr_subtitles *);
 
 sbr_renderer *sbr_renderer_create(sbr_library *);

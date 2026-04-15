@@ -77,7 +77,7 @@ void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
 bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
                              uint32_t t);
 
-// Fully renders a single subtitle frame into the provided pixel buffer.
+// Fully render a single subtitle frame into the provided pixel buffer.
 //
 // Renders the subtitles that were previously specified with
 // `sbr_renderer_set_subtitles` at the state they should be at millisecond `t`.
@@ -144,7 +144,7 @@ typedef struct sbr_output_instance {
 
 typedef struct sbr_instanced_raster_pass sbr_instanced_raster_pass;
 
-// Renders a single subtitle frame to output images and immediately
+// Render a single subtitle frame to output images, immediately
 // begins an instanced raster pass which it returns a handle to.
 //
 // `clip_rect` is a rectangle that the resulting instances will be clipped to.
@@ -166,7 +166,7 @@ sbr_renderer_render_instanced(sbr_renderer *, sbr_subtitle_context const *,
 sbr_output_instance *
 sbr_instanced_raster_pass_get_instances(sbr_instanced_raster_pass *);
 
-// Rasterizes this output image into the provided pixel buffer at
+// Rasterize this output image into the provided pixel buffer at
 // a specified offset.
 //
 // `off_x` and `off_y` specify the offset at which to draw the image.
@@ -181,7 +181,7 @@ int sbr_output_image_rasterize_into(sbr_output_image const *,
                                     uint32_t width, uint32_t height,
                                     uint32_t stride);
 
-// Marks the provided raster pass as finished.
+// Mark the provided raster pass as finished.
 //
 // Must be called before the parent renderer can be used again.
 // Failing to do so will currently result in an assertion failure.

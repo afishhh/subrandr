@@ -16,7 +16,7 @@ use crate::SubtitleContext;
 pub(super) struct COutputImage<'a> {
     size: Vec2<u32>,
     user_data: *mut c_void,
-    next: *const COutputImage<'a>,
+    /* Public fields end here */
     content: OutputImage<'a>,
 }
 
@@ -28,6 +28,7 @@ pub(super) struct COutputInstance<'a> {
     dst_size: Vec2<u32>,
     src_off: Vec2<u32>,
     src_size: Vec2<u32>,
+    /* Public fields end here */
 }
 
 union COutputInstanceBase<'a> {
@@ -94,7 +95,6 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
                 self.images.push(COutputImage {
                     size,
                     user_data: std::ptr::null_mut(),
-                    next: std::ptr::null(),
                     // erase lifetime
                     content: unsafe { std::mem::transmute(image) },
                 });

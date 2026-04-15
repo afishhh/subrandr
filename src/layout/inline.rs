@@ -199,7 +199,7 @@ impl<'a> InlineSpanBuilder<'a> {
         let content_index = self.push_object_replacement();
         self.push_child(InlineItem::Block(InlineBlock {
             content_index,
-            block,
+            block: Box::new(block),
         }));
         self.last_item_is_text = false;
     }
@@ -286,7 +286,7 @@ pub struct InlineText {
 #[derive(Debug, Clone)]
 pub struct InlineBlock {
     content_index: usize,
-    block: BlockContainer,
+    block: Box<BlockContainer>,
 }
 
 #[derive(Debug)]

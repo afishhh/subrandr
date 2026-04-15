@@ -350,7 +350,9 @@ impl Renderer {
         self.layouter = match subs {
             Some(Subtitles::Srv3(srv3_subs)) => {
                 if let Some(FormatLayouter::Srv3(srv3)) = self.layouter.as_ref() {
-                    if Rc::ptr_eq(srv3.subtitles(), srv3_subs) {}
+                    if Rc::ptr_eq(srv3.subtitles(), srv3_subs) {
+                        return;
+                    }
                 }
 
                 Some(FormatLayouter::Srv3(srv3::Layouter::new(srv3_subs.clone())))

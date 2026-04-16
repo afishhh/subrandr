@@ -87,11 +87,17 @@ macro_rules! make_tree {
             content: make_tree!(@build_block_content [$style;] $content_block)
         }
     }};
-    (@build_block_content [$style: expr;] { inline $(.$class: ident)* { $($content: tt)* } }) => {
+    (@build_block_content [$style: expr;] { inline { $($content: tt)* } }) => {
         crate::layout::block::BlockContainerContent::Inline(
-            make_tree!(@build inline $(.$class)*  [$style;]; { $($content)* })
+            make_tree!(@build inline [$style;]; { $($content)* })
         )
     };
+    (@build_block_content [$style: expr;] { inline $(.$class: ident)+ { $($content: tt)* } }) => {{
+        let style = make_tree!(@apply_style $style; $($class)*);
+        crate::layout::block::BlockContainerContent::Inline(
+            make_tree!(@build inline [&style;]; { $($content)* })
+        )
+    }};
     (@build_block_content [$style: expr;] { $($content: tt)* }) => {
         crate::layout::block::BlockContainerContent::Block(
             make_tree!(@build_all block [$style;]; $($content)*).into()

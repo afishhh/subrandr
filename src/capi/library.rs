@@ -1,11 +1,22 @@
-use std::{cell::Cell, ffi::c_void};
+use std::{
+    cell::{Cell, OnceCell},
+    ffi::c_void,
+};
 
-use crate::DebugFlags;
+use log::LogContext;
+
+use crate::config::Config;
 
 pub struct CLibrary {
     pub(super) root_logger: log::RootLogger,
     pub(super) did_log_version: Cell<bool>,
-    pub(super) debug_flags: DebugFlags,
+    pub(super) env_config: OnceCell<Config>,
+}
+
+impl CLibrary {
+    pub(super) fn get_or_init_config(&self, log: &LogContext) -> &Config {
+        self.env_config.get_or_init(|| Config::from_env(log))
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -13,7 +24,7 @@ unsafe extern "C" fn sbr_library_init() -> *mut CLibrary {
     Box::into_raw(Box::new(CLibrary {
         root_logger: log::RootLogger::new(),
         did_log_version: Cell::new(false),
-        debug_flags: DebugFlags::from_env(),
+        env_config: OnceCell::new(),
     }))
 }
 

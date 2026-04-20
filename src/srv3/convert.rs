@@ -9,6 +9,7 @@ use util::{
 };
 
 use crate::{
+    config::Config,
     layout::{
         self,
         block::{BlockContainer, BlockContainerContent},
@@ -16,7 +17,10 @@ use crate::{
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
     renderer::FrameLayoutPass,
-    srv3::{BodyParser, Event, ModeHint, RubyPosition},
+    srv3::{
+        BodyParser, EdgeType, Event, ModeHint, Pen, Point, RubyPart, RubyPosition, WindowPos,
+        WindowStyle,
+    },
     style::{
         computed::{
             Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, TextShadow,
@@ -27,8 +31,6 @@ use crate::{
     text::OpenTypeTag,
     SubtitleContext,
 };
-
-use super::{EdgeType, Pen, RubyPart};
 
 macro_rules! static_rc_of_static_strings {
     [$($values: literal),* $(,)?] => {
@@ -179,14 +181,12 @@ pub struct Subtitles {
 
 #[derive(Debug)]
 struct Window {
-    x: f32,
-    y: f32,
+    pos: WindowPos,
+    text_direction: Direction,
     // TODO: What the heck does this do
     //       How does a timestamp on a window work?
     //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
-    segment_style: ComputedStyle,
-    vertical_align: VerticalAlignment,
     lines: Vec<VisualLine>,
     mode_hint: ModeHint,
 }
@@ -200,7 +200,6 @@ struct VisualLine {
 #[derive(Debug, Clone)]
 struct Segment {
     pen: Pen,
-    base_style: ComputedStyle,
     time_offset: u32,
     text: std::rc::Rc<str>,
 }
@@ -211,19 +210,174 @@ struct LineSegment {
     annotation: Option<Segment>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum LayoutMode {
+    InlineBlock,
+    // TODO: fully inline mode could probably keep using blocks for ruby which would clean
+    //       up a sizing hack in inline layout
+    Inline,
+}
+
+impl crate::config::OptionFromStr for LayoutMode {
+    fn from_str(s: &str) -> Result<Self, util::AnyError> {
+        Ok(match s {
+            "inline-block" => Self::InlineBlock,
+            "inline" => Self::Inline,
+            _ => return Err("must be either \"inline-block\" or \"inline\"".into()),
+        })
+    }
+}
+
+fn parse_font_style(s: &str) -> Result<u32, util::AnyError> {
+    let value = s.parse::<u32>()?;
+    if value == 0 || value as usize > SRV3_FONTS.len() {
+        return Err(format!("must be an integer in the range [1, {}]", SRV3_FONTS.len()).into());
+    }
+    Ok(value)
+}
+
+fn parse_edge_type(s: &str) -> Result<EdgeType, util::AnyError> {
+    Ok(match s {
+        "none" => EdgeType::None,
+        "hard-shadow" => EdgeType::HardShadow,
+        "bevel" => EdgeType::Bevel,
+        "glow" => EdgeType::Glow,
+        "soft-shadow" => EdgeType::SoftShadow,
+        _ => return Err("not a valid edge type".into()),
+    })
+}
+
+fn parse_edge_color(s: &str) -> Result<Option<u32>, util::AnyError> {
+    const ERROR: &str = "must be a color in #RRGGBB form or \"none\"";
+
+    if s == "none" {
+        return Ok(None);
+    }
+
+    let hex = s.strip_prefix("#").ok_or(ERROR)?;
+    if hex.len() != 6 {
+        return Err(ERROR.into());
+    }
+
+    Ok(Some(u32::from_str_radix(hex, 16)?))
+}
+
+fn parse_point(s: &str) -> Result<Point, util::AnyError> {
+    s.parse()
+}
+
+fn parse_win_coordinate(s: &str) -> Result<u32, util::AnyError> {
+    s.parse()
+        .ok()
+        .filter(|&x| x <= 100)
+        .ok_or_else(|| "must be an integer in the range [0, 100]".into())
+}
+
+// `pen` attribute defaults
+pub const DEFAULT_PEN_FONT_SIZE: u16 = 100;
+pub const DEFAULT_PEN_FONT_STYLE: u32 = 0;
+pub const DEFAULT_PEN_BOLD: bool = false;
+pub const DEFAULT_PEN_ITALIC: bool = false;
+pub const DEFAULT_PEN_UNDERLINE: bool = false;
+pub const DEFAULT_PEN_EDGE_TYPE: EdgeType = EdgeType::None;
+pub const DEFAULT_PEN_RUBY_PART: RubyPart = RubyPart::None;
+pub const DEFAULT_PEN_FOREGROUND_COLOR: BGRA8 = BGRA8::from_rgba32(0xFFFFFFFF);
+// The default opacity is 0.75, round(0.75 * 255) = 0xBF
+pub const DEFAULT_PEN_BACKGROUND_COLOR: BGRA8 = BGRA8::from_rgba32(0x080808BF);
+
+// `wp` attribute defaults
+pub const DEFAULT_WIN_POINT: Point = Point::BottomCenter;
+pub const DEFAULT_WIN_X: u32 = 50;
+pub const DEFAULT_WIN_Y: u32 = 100;
+// `ws` attribute defaults
+pub const DEFAULT_WIN_MODE_HINT: ModeHint = ModeHint::Default;
+
+crate::config::define_option_group! {
+    pub(crate) struct Options {
+        #[option(name = "layout-mode")]
+        layout_mode: LayoutMode = LayoutMode::InlineBlock,
+        #[option(name = "default-font-size")]
+        default_font_size: u16 = DEFAULT_PEN_FONT_SIZE,
+        #[option(name = "default-font-style", parse_with = parse_font_style)]
+        default_font_style: u32 = DEFAULT_PEN_FONT_STYLE,
+        #[option(name = "default-fg-color")]
+        default_foreground_color: BGRA8 = DEFAULT_PEN_FOREGROUND_COLOR,
+        #[option(name = "default-bg-color")]
+        default_background_color: BGRA8 = DEFAULT_PEN_BACKGROUND_COLOR,
+        #[option(name = "default-edge-type", parse_with = parse_edge_type)]
+        default_edge_type: EdgeType = EdgeType::None,
+        #[option(name = "default-edge-color", parse_with = parse_edge_color)]
+        default_edge_color: Option<u32> = None,
+        #[option(name = "default-win-align", parse_with = parse_point)]
+        default_win_align: Point = DEFAULT_WIN_POINT,
+        #[option(name = "default-win-x", parse_with = parse_win_coordinate)]
+        default_win_x: u32 = DEFAULT_WIN_X,
+        #[option(name = "default-win-y", parse_with = parse_win_coordinate)]
+        default_win_y: u32 = DEFAULT_WIN_Y,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ComputedPen {
+    font_size: u16,
+    font_style: u32,
+
+    bold: bool,
+    italic: bool,
+    underline: bool,
+
+    edge_type: EdgeType,
+    edge_color: Option<u32>,
+
+    foreground_color: rasterize::color::BGRA8,
+    background_color: rasterize::color::BGRA8,
+}
+
 impl Segment {
-    fn compute_shadows(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
+    fn compute_pen(&self, pen: &Pen, cfg: &Config) -> ComputedPen {
+        fn compute_color(default: u32, color: Option<u32>, opacity: Option<u8>) -> BGRA8 {
+            BGRA8::from_argb32(
+                color.unwrap_or(default >> 8) | (u32::from(opacity.unwrap_or(default as u8)) << 24),
+            )
+        }
+        ComputedPen {
+            font_size: pen.font_size().unwrap_or(cfg.srv3.default_font_size),
+            font_style: pen.font_style().unwrap_or(cfg.srv3.default_font_style),
+            bold: pen.bold().unwrap_or(DEFAULT_PEN_BOLD),
+            italic: pen.italic().unwrap_or(DEFAULT_PEN_ITALIC),
+            underline: pen.underline().unwrap_or(DEFAULT_PEN_UNDERLINE),
+            edge_type: pen.edge_type().unwrap_or(cfg.srv3.default_edge_type),
+            edge_color: pen.edge_color().or(cfg.srv3.default_edge_color),
+            foreground_color: compute_color(
+                cfg.srv3.default_foreground_color.to_rgba32(),
+                pen.foreground_color(),
+                pen.foreground_opacity(),
+            ),
+            background_color: compute_color(
+                cfg.srv3.default_background_color.to_rgba32(),
+                pen.background_color(),
+                pen.background_opacity(),
+            ),
+        }
+    }
+
+    fn compute_shadows(
+        &self,
+        ctx: &SubtitleContext,
+        style: &ComputedPen,
+        out: &mut Vec<TextShadow>,
+    ) {
         let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
         let l1 = Length::from_pixels((scale).max(FixedL::ONE));
         let l2 = Length::from_pixels((scale * 2).max(FixedL::ONE));
         let l3 = Length::from_pixels((scale * 3).max(FixedL::ONE));
         let l5 = Length::from_pixels((scale * 5).max(FixedL::ONE));
-        let primary_color = BGRA8::from_argb32(self.pen.edge_color.map_or_else(
-            || 0x222222 | (self.pen.foreground_color << 24),
+        let primary_color = BGRA8::from_argb32(style.edge_color.map_or_else(
+            || 0x222222 | (u32::from(style.foreground_color.a) << 24),
             |c| c | 0xFF000000,
         ));
 
-        match self.pen.edge_type {
+        match style.edge_type {
             EdgeType::None => (),
             EdgeType::HardShadow => {
                 let step = Length::HALF * (ctx.dpi < 144) as i32 + Length::HALF;
@@ -242,8 +396,8 @@ impl Segment {
                 // distinct colors for the positive-offset and negative-offset shadow.
                 // The "inner" shadow will end up with a very light gray but the "outer" one
                 // will be the usual black.
-                let secondary_color = if self.pen.edge_color.is_none() {
-                    BGRA8::from_argb32(0xCCCCCC | (self.pen.foreground_color << 24))
+                let secondary_color = if style.edge_color.is_none() {
+                    BGRA8::from_argb32(0xCCCCCC | (u32::from(style.foreground_color.a) << 24))
                 } else {
                     primary_color
                 };
@@ -289,8 +443,9 @@ impl VisualLine {
         pass: &mut FrameLayoutPass,
         segment: &Segment,
         mh: ModeHint,
+        base: &ComputedStyle,
     ) -> Option<ComputedStyle> {
-        let mut result = segment.base_style.clone();
+        let mut result = base.clone();
         pass.add_animation_point(self.range.start + segment.time_offset);
         if segment.time_offset > pass.t - self.range.start {
             match mh {
@@ -301,16 +456,34 @@ impl VisualLine {
             }
         }
 
-        if pass.srv3_use_inlines {
+        if matches!(pass.cfg.srv3.layout_mode, LayoutMode::Inline) {
             *result.make_inline_sizing_mut() = InlineSizing::Stretch;
         }
 
-        *result.make_font_size_mut() = I26Dot6::from(
-            font_size_to_pixels(segment.pen.font_size) * font_scale_from_ctx(pass.sctx),
-        );
+        let pen = segment.compute_pen(&segment.pen, pass.cfg);
+        *result.make_font_size_mut() =
+            I26Dot6::from(font_size_to_pixels(pen.font_size) * font_scale_from_ctx(pass.sctx));
+        *result.make_font_family_mut() = font_style_to_families(pen.font_style).clone();
+
+        if pen.bold {
+            *result.make_font_weight_mut() = I16Dot16::new(700);
+        }
+
+        if pen.italic {
+            *result.make_font_slant_mut() = FontSlant::Italic;
+        }
+
+        if pen.underline {
+            let decorations = result.make_text_decoration_mut();
+            decorations.underline = true;
+            decorations.underline_color = pen.foreground_color;
+        }
+
+        *result.make_color_mut() = pen.foreground_color;
+        *result.make_background_color_mut() = pen.background_color;
 
         let mut shadows = vec![];
-        segment.compute_shadows(pass.sctx, &mut shadows);
+        segment.compute_shadows(pass.sctx, &pen, &mut shadows);
 
         if !shadows.is_empty() {
             *result.make_text_shadows_mut() = shadows.into();
@@ -325,12 +498,14 @@ impl VisualLine {
         root_inline_style: ComputedStyle,
         mh: ModeHint,
     ) -> InlineContent {
-        let mut builder = InlineContentBuilder::new(root_inline_style);
+        let mut builder = InlineContentBuilder::new(root_inline_style.clone());
         let mut root = builder.root();
         let mut it = self.segments.iter();
-        let mut take_next = move |pass: &mut FrameLayoutPass| loop {
+        let mut take_next = |pass: &mut FrameLayoutPass| loop {
             let segment = it.next()?;
-            if let Some(style) = self.compute_segment_style(pass, &segment.inner, mh) {
+            if let Some(style) =
+                self.compute_segment_style(pass, &segment.inner, mh, &root_inline_style)
+            {
                 break Some((segment, style));
             }
         };
@@ -386,11 +561,11 @@ impl VisualLine {
                             .push_text(&segment.inner.text);
 
                         if let Some(annotation_style) = self
-                            .compute_segment_style(pass, annotation_segment, mh)
+                            .compute_segment_style(pass, annotation_segment, mh, &root_inline_style)
                             .map(|mut style| {
                                 // If inline-block layout is enabled then background is handled by the
                                 // containing block.
-                                if !pass.srv3_use_inlines {
+                                if matches!(pass.cfg.srv3.layout_mode, LayoutMode::InlineBlock) {
                                     *style.make_background_color_mut() = BGRA8::ZERO;
                                 }
                                 *style.make_font_size_mut() /= 2.0;
@@ -406,7 +581,7 @@ impl VisualLine {
                     }
                 };
 
-            if pass.srv3_use_inlines {
+            if matches!(pass.cfg.srv3.layout_mode, LayoutMode::Inline) {
                 if let Some(right_padding) = right_padding {
                     *style.make_padding_right_mut() = right_padding;
                 }
@@ -455,11 +630,18 @@ impl Window {
         pass: &mut FrameLayoutPass,
     ) -> Result<Option<(Point2L, layout::block::BlockContainerFragment)>, layout::InlineLayoutError>
     {
+        let Alignment(text_align, vertical_align) = self
+            .pos
+            .point()
+            .unwrap_or(pass.cfg.srv3.default_win_align)
+            .to_alignment();
         let inner_style = {
-            let mut result = self.segment_style.clone();
-            *result.make_background_color_mut() = BGRA8::ZERO;
+            let mut result = ComputedStyle::DEFAULT;
+            *result.make_direction_mut() = self.text_direction;
+            *result.make_text_align_mut() = text_align;
             result
         };
+
         let mut lines = Vec::new();
         for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
@@ -467,7 +649,7 @@ impl Window {
                     style: inner_style.clone(),
                     content: BlockContainerContent::Inline(line.to_inline_content(
                         pass,
-                        self.segment_style.clone(),
+                        inner_style.clone(),
                         self.mode_hint,
                     )),
                 });
@@ -493,19 +675,23 @@ impl Window {
 
         let fragment = partial_window.layout(pass.lctx, &constraints)?;
 
+        let x_percentage =
+            convert_coordinate(self.pos.x().unwrap_or(pass.cfg.srv3.default_win_x) as f32);
+        let y_percentage =
+            convert_coordinate(self.pos.y().unwrap_or(pass.cfg.srv3.default_win_y) as f32);
         let mut pos = Point2L::new(
-            (self.x * pass.sctx.player_width().into_f32()).into(),
-            (self.y * pass.sctx.player_height().into_f32()).into(),
+            (x_percentage * pass.sctx.player_width().into_f32()).into(),
+            (y_percentage * pass.sctx.player_height().into_f32()).into(),
         );
 
         let fragment_size = fragment.fbox.size_for_layout();
-        match self.segment_style.text_align() {
+        match text_align {
             HorizontalAlignment::Left => (),
             HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
             HorizontalAlignment::Right => pos.x -= fragment_size.x,
         }
 
-        match self.vertical_align {
+        match vertical_align {
             VerticalAlignment::Top => (),
             VerticalAlignment::Center => pos.y -= fragment_size.y / 2,
             VerticalAlignment::Bottom => pos.y -= fragment_size.y,
@@ -515,45 +701,9 @@ impl Window {
     }
 }
 
-fn pen_to_size_independent_style(
-    pen: &Pen,
-    set_default: bool,
-    mut base: ComputedStyle,
-) -> ComputedStyle {
-    if set_default || pen.font_style != Pen::DEFAULT.font_style {
-        *base.make_font_family_mut() = font_style_to_families(pen.font_style).clone();
-    }
-
-    if pen.bold {
-        *base.make_font_weight_mut() = I16Dot16::new(700);
-    }
-
-    if pen.italic {
-        *base.make_font_slant_mut() = FontSlant::Italic;
-    }
-
-    let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);
-    if pen.underline {
-        let decorations = base.make_text_decoration_mut();
-        decorations.underline = true;
-        decorations.underline_color = bgra_foreground_color;
-    }
-
-    if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {
-        *base.make_color_mut() = bgra_foreground_color;
-    }
-
-    if set_default || pen.background_color != Pen::DEFAULT.background_color {
-        *base.make_background_color_mut() = BGRA8::from_rgba32(pen.background_color);
-    }
-
-    base
-}
-
-fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedStyle) -> Segment {
+fn convert_segment(segment: &super::Segment, text: &str) -> Segment {
     Segment {
         pen: *segment.pen,
-        base_style: pen_to_size_independent_style(segment.pen, false, base_style.clone()),
         time_offset: segment.time_offset,
         text: text.into(),
     }
@@ -561,32 +711,24 @@ fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedSt
 
 struct WindowBuilder<'a> {
     log: &'a LogContext<'a>,
-    base_style: ComputedStyle,
+    text_direction: Direction,
     logset: LogOnceSet,
 }
 
 impl WindowBuilder<'_> {
     fn create_window(
         &self,
-        x: f32,
-        y: f32,
+        pos: WindowPos,
+        style: WindowStyle,
         time: u32,
         duration: u32,
-        align: Alignment,
-        mode_hint: ModeHint,
     ) -> Window {
         Window {
-            x,
-            y,
+            pos,
+            text_direction: self.text_direction,
             range: time..time + duration,
-            segment_style: {
-                let mut style = self.base_style.clone();
-                *style.make_text_align_mut() = align.0;
-                style
-            },
-            vertical_align: align.1,
             lines: Vec::new(),
-            mode_hint,
+            mode_hint: style.mode_hint().unwrap_or(DEFAULT_WIN_MODE_HINT),
         }
     }
 
@@ -602,11 +744,11 @@ impl WindowBuilder<'_> {
         let mut it = event.segments.iter();
         'segment_loop: while let Some(segment) = it.next() {
             'ruby_failed: {
-                if segment.pen.ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
+                if segment.pen.ruby_part() == Some(RubyPart::Base) && it.as_slice().len() > 3 {
                     let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
 
-                    let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
-                        ruby_block.each_ref().map(|s| s.pen.ruby_part)
+                    let [Some(RubyPart::Parenthesis), Some(RubyPart::Ruby(part)), Some(RubyPart::Parenthesis)] =
+                        ruby_block.each_ref().map(|s| s.pen.ruby_part())
                     else {
                         break 'ruby_failed;
                     };
@@ -626,8 +768,8 @@ impl WindowBuilder<'_> {
                     _ = it.next().unwrap();
                     let next = it.next().unwrap();
                     current_line.segments.push(LineSegment {
-                        inner: convert_segment(segment, &segment.text, &window.segment_style),
-                        annotation: Some(convert_segment(next, &next.text, &window.segment_style)),
+                        inner: convert_segment(segment, &segment.text),
+                        annotation: Some(convert_segment(next, &next.text)),
                     });
                     _ = it.next().unwrap();
 
@@ -642,11 +784,7 @@ impl WindowBuilder<'_> {
                     .map_or(segment.text.len(), |i| last + i);
 
                 current_line.segments.push(LineSegment {
-                    inner: convert_segment(
-                        segment,
-                        &segment.text[last..end],
-                        &window.segment_style,
-                    ),
+                    inner: convert_segment(segment, &segment.text[last..end]),
                     annotation: None,
                 });
 
@@ -677,15 +815,12 @@ pub fn convert(
     };
     let mut window_builder = WindowBuilder {
         log,
-        base_style: {
-            let mut style =
-                pen_to_size_independent_style(&Pen::DEFAULT, true, ComputedStyle::DEFAULT);
-            if let Some(lang) = lang {
-                if LocaleDirectionality::new_common().is_right_to_left(lang) {
-                    *style.make_direction_mut() = Direction::Rtl;
-                }
+        text_direction: {
+            if lang.is_some_and(|lang| LocaleDirectionality::new_common().is_right_to_left(lang)) {
+                Direction::Rtl
+            } else {
+                Direction::Ltr
             }
-            style
         },
         logset: LogOnceSet::new(),
     };
@@ -696,12 +831,10 @@ pub fn convert(
             crate::srv3::BodyElement::Window(id, window) => {
                 wname_to_index.insert(id, result.windows.len());
                 result.windows.push(window_builder.create_window(
-                    convert_coordinate(window.position.x as f32),
-                    convert_coordinate(window.position.y as f32),
+                    *window.position,
+                    *window.style,
                     window.time,
                     window.duration,
-                    window.position.point.to_alignment(),
-                    window.style.mode_hint,
                 ));
             }
             crate::srv3::BodyElement::Event(event) => {
@@ -724,12 +857,10 @@ pub fn convert(
                     window_builder.extend_lines(&mut result.windows[widx], &event);
                 } else {
                     let mut window = window_builder.create_window(
-                        convert_coordinate(event.position.x as f32),
-                        convert_coordinate(event.position.y as f32),
+                        *event.position,
+                        *event.style,
                         event.time,
                         event.duration,
-                        event.position.point.to_alignment(),
-                        event.style.mode_hint,
                     );
                     window_builder.extend_lines(&mut window, &event);
                     result.windows.push(window);

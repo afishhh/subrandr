@@ -19,6 +19,7 @@ use util::{
 };
 
 use crate::{
+    config::{define_option_group, Config},
     display::DisplayPass,
     layout::{
         self,
@@ -29,8 +30,29 @@ use crate::{
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
     text::{self, platform_font_provider},
-    vtt, DebugFlags,
+    vtt,
 };
+
+fn parse_option_u32(value: &str) -> Result<Option<u32>, util::AnyError> {
+    match value {
+        "none" => Ok(None),
+        _ if value.bytes().any(|b| !b.is_ascii_digit()) => {
+            Err("value must be a number or \"none\"".into())
+        }
+        _ => Ok(Some(value.parse()?)),
+    }
+}
+
+define_option_group! {
+    pub struct DebugOptions {
+        #[option(name = "draw-version-overlay")]
+        pub draw_version_overlay: bool = false,
+        #[option(name = "draw-perf-overlay")]
+        pub draw_perf_overlay: bool = false,
+        #[option(name = "dpi-override", parse_with  = parse_option_u32)]
+        pub render_dpi_override: Option<u32> = None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
@@ -80,14 +102,11 @@ enum FormatLayouter {
 
 pub(crate) struct FrameLayoutPass<'frame> {
     pub sctx: &'frame SubtitleContext,
+    pub cfg: &'frame Config,
     pub lctx: &'frame mut LayoutContext<'frame>,
     pub t: u32,
     unchanged_range: Range<u32>,
     fragments: Vec<(Point2L, BlockContainerFragment)>,
-    // TODO: proper configuration system
-    // TODO: fully inline mode could probably keep using blocks for ruby which would clean
-    //       up a sizing hack in inline layout
-    pub srv3_use_inlines: bool,
 }
 
 impl AsLogger for FrameLayoutPass<'_> {
@@ -297,7 +316,6 @@ impl PerfStats {
 }
 
 pub struct Renderer {
-    debug_flags: DebugFlags,
     pub(crate) fonts: text::FontDb,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
@@ -310,12 +328,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(
-        log: &LogContext,
-        debug_flags: DebugFlags,
-    ) -> Result<Self, platform_font_provider::InitError> {
+    pub fn new(log: &LogContext) -> Result<Self, platform_font_provider::InitError> {
         Ok(Self {
-            debug_flags,
             fonts: text::FontDb::new(log)?,
             glyph_cache: text::GlyphCache::new(),
             perf: PerfStats::new(),
@@ -399,6 +413,7 @@ impl Renderer {
         &mut self,
         log: &LogContext,
         ctx: &SubtitleContext,
+        cfg: &Config,
         t: u32,
         buffer: &mut [Premultiplied<BGRA8>],
         width: u32,
@@ -410,6 +425,7 @@ impl Renderer {
             &mut rasterize::sw::Rasterizer::new(),
             &mut rasterize::sw::RenderTarget::new(buffer, width, height, stride).into(),
             ctx,
+            cfg,
             t,
         )
         .inspect(|_| self.end_raster(log))
@@ -421,16 +437,17 @@ impl Renderer {
         rasterizer: &mut dyn rasterize::Rasterizer,
         target: &mut rasterize::RenderTarget,
         ctx: &SubtitleContext,
+        cfg: &Config,
         t: u32,
     ) -> Result<(), RenderError> {
-        self.render_to_scene(log, ctx, t, rasterizer)?;
+        self.render_to_scene(log, ctx, cfg, t, rasterizer)?;
         rasterizer.render_scene(target, &self.scene, &self.glyph_cache)?;
 
         Ok(())
     }
 
     fn layout_debug_overlay(
-        debug_flags: &DebugFlags,
+        cfg: &Config,
         perf: &PerfStats,
         lctx: &mut LayoutContext,
         ctx: &SubtitleContext,
@@ -445,7 +462,7 @@ impl Renderer {
             result
         };
 
-        if debug_flags.draw_version_string {
+        if cfg.debug.draw_version_overlay {
             let mut builder = InlineContentBuilder::new(base_style.clone());
             let mut root = builder.root();
 
@@ -490,7 +507,7 @@ impl Renderer {
             ));
         }
 
-        if debug_flags.draw_perf_info {
+        if cfg.debug.draw_perf_overlay {
             let mut builder = InlineContentBuilder::new({
                 let mut style = base_style.clone();
                 *style.make_text_align_mut() = HorizontalAlignment::Right;
@@ -575,6 +592,7 @@ impl Renderer {
         &mut self,
         log: &LogContext,
         ctx: &SubtitleContext,
+        cfg: &Config,
         t: u32,
         rasterizer: &dyn Rasterizer,
     ) -> Result<(), RenderError> {
@@ -586,7 +604,7 @@ impl Renderer {
         self.scene.clear();
 
         let ctx = SubtitleContext {
-            dpi: self.debug_flags.dpi_override.unwrap_or(ctx.dpi),
+            dpi: cfg.debug.render_dpi_override.unwrap_or(ctx.dpi),
             ..*ctx
         };
 
@@ -609,6 +627,7 @@ impl Renderer {
         {
             let mut pass = FrameLayoutPass {
                 sctx: &ctx,
+                cfg,
                 lctx: &mut LayoutContext {
                     log,
                     dpi: ctx.dpi,
@@ -617,7 +636,6 @@ impl Renderer {
                 t,
                 unchanged_range: 0..u32::MAX,
                 fragments: Vec::new(),
-                srv3_use_inlines: self.debug_flags.srv3_use_inlines,
             };
 
             fragments = {
@@ -633,7 +651,7 @@ impl Renderer {
             self.perf.end_layout();
 
             Self::layout_debug_overlay(
-                &self.debug_flags,
+                cfg,
                 &self.perf,
                 pass.lctx,
                 &ctx,

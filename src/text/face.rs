@@ -1,4 +1,4 @@
-use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path, sync::Arc};
+use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path};
 
 use rasterize::{Rasterizer, Texture};
 use text_sys::hb_font_t;
@@ -169,7 +169,11 @@ impl Face {
         freetype::Face::load_from_file(path, index).map(Face::FreeType)
     }
 
-    pub fn load_from_bytes(bytes: Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
+    #[cfg_attr(
+        not(any(target_arch = "wasm32", font_provider = "directwrite")),
+        expect(dead_code)
+    )]
+    pub fn load_from_bytes(bytes: std::sync::Arc<[u8]>, index: i32) -> Result<Self, FreeTypeError> {
         freetype::Face::load_from_bytes(bytes, index).map(Face::FreeType)
     }
 

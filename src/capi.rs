@@ -3,8 +3,6 @@ use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
     fmt::Formatter,
-    mem::MaybeUninit,
-    sync::Arc,
 };
 
 use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
@@ -320,23 +318,6 @@ unsafe extern "C" fn sbr_get_last_error_string() -> *const c_char {
             .as_ref()
             .map_or(std::ptr::null(), |e| e.string.as_ptr())
     })
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_open_font_from_memory(
-    _lib: *mut CLibrary,
-    data: *const u8,
-    data_len: usize,
-) -> *mut Face {
-    let mut uninit = Arc::new_uninit_slice(data_len);
-    unsafe {
-        std::mem::transmute::<&mut [MaybeUninit<u8>], &mut [u8]>(
-            Arc::get_mut(&mut uninit).unwrap(),
-        )
-        .copy_from_slice(std::slice::from_raw_parts(data, data_len));
-    }
-    let bytes = Arc::<[MaybeUninit<u8>]>::assume_init(uninit);
-    Box::into_raw(Box::new(ctry!(Face::load_from_bytes(bytes, 0))))
 }
 
 #[unsafe(no_mangle)]

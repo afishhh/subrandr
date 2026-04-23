@@ -141,7 +141,7 @@ export class Font {
 
   close() {
     const g = state();
-    g.mod.exports.sbr_library_close_font(g.lib, this.__ptr)
+    g.mod.exports.sbr_wasm_close_font(this.__ptr)
     this.__ptr = WASM_NULL as FontPtr
   }
 }

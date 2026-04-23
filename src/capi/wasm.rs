@@ -91,3 +91,8 @@ pub unsafe extern "C" fn sbr_wasm_renderer_add_font(
         source: crate::text::FontSource::Memory((*font).clone()),
     });
 }
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_wasm_close_font(font: *mut Face) {
+    std::mem::forget((*font).clone());
+}

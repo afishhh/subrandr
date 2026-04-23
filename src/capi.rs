@@ -9,7 +9,7 @@ use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
 use log::{debug, warn};
 use util::rc::Rc;
 
-use crate::{capi::library::CLibrary, text::Face, Subtitles};
+use crate::{capi::library::CLibrary, Subtitles};
 
 macro_rules! c_enum {
     (
@@ -318,9 +318,4 @@ unsafe extern "C" fn sbr_get_last_error_string() -> *const c_char {
             .as_ref()
             .map_or(std::ptr::null(), |e| e.string.as_ptr())
     })
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_library_close_font(_lib: *mut CLibrary, font: *mut Face) {
-    std::mem::forget((*font).clone());
 }

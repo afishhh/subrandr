@@ -27,7 +27,6 @@ export interface SubrandrExports {
 	// C API
 	sbr_library_init(): LibraryPtr
 	sbr_library_fini(ptr: LibraryPtr): void
-	sbr_library_close_font(sbr: LibraryPtr, ptr: FontPtr): void
 	sbr_load_text(
 		ptr: LibraryPtr,
 		text_ptr: WasmPtr, text_len: number,
@@ -66,6 +65,7 @@ export interface SubrandrExports {
 		front: WasmPtr, back: WasmPtr,
 		width: number, height: number
 	): void
+	sbr_wasm_close_font(ptr: FontPtr): void
 }
 
 export interface OutputStream {

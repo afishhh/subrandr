@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.3.0]
+
 - Added more caching to font matching to improve performance in cases that use a lot of spans.
 - Implemented support for the SRV3 `mh` (mode hint) attribute on window style. Supported values are:
   - `1`: default, has been changed to emit inactive segments as `visibility: hidden` instead of skipping
@@ -75,7 +77,8 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.3.0...HEAD
+[v1.3.0]: https://github.com/afishhh/subrandr/compare/v1.2.0...v1.3.0
 [v1.2.0]: https://github.com/afishhh/subrandr/compare/v1.1.0...v1.2.0
 [v1.1.0]: https://github.com/afishhh/subrandr/compare/v1.0.1...v1.1.0
 [v1.0.1]: https://github.com/afishhh/subrandr/compare/v1.0.0...v1.0.1

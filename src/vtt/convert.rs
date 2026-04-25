@@ -499,19 +499,22 @@ impl Element {
                     result
                 };
 
+                let mut current_base = builder.push_base(base_style.clone());
                 for child in &self.children {
                     match child {
                         Node::Element(Element {
                             kind: ElementKind::RubyText,
                             ..
                         }) => {
+                            drop(current_base);
                             child.append_to(
                                 &mut builder.push_annotation(annotation_style.clone()),
                                 annotation_font_size,
                             );
+                            current_base = builder.push_base(base_style.clone());
                         }
                         _ => {
-                            child.append_to(&mut builder.push_base(base_style.clone()), font_size);
+                            child.append_to(&mut current_base, font_size);
                         }
                     }
                 }

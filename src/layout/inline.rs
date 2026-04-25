@@ -227,7 +227,7 @@ pub struct InlineRubyBuilder<'a>(InlineSpanBuilder<'a>);
 impl<'a> InlineRubyBuilder<'a> {
     fn push(&mut self, style: ComputedStyle, annotation: bool) -> InlineSpanBuilder<'_> {
         if self.0.length % 2 != usize::from(annotation) {
-            self.0.push_span(ComputedStyle::DEFAULT);
+            _ = self.push(ComputedStyle::DEFAULT, !annotation);
         }
 
         let run_index = self.0.push_run();

@@ -49,6 +49,17 @@ check_test! {
 }
 
 check_test! {
+    name = base_after_base,
+    size = (64, 16),
+    inline.ahem {
+        ruby {
+            base { text "ab" }
+            base { text "cd" }
+        }
+    }
+}
+
+check_test! {
     name = breaks_before,
     size = (48, 60),
     inline.noto_sans_jp {

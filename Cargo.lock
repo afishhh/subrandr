@@ -1757,11 +1757,11 @@ dependencies = [
 
 [[package]]
 name = "sbr-log"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "sbr-macros"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "sbr-overlay"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1788,7 +1788,7 @@ dependencies = [
 
 [[package]]
 name = "sbr-rasterize"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "sbr-test-util",
  "sbr-util",
@@ -1798,7 +1798,7 @@ dependencies = [
 
 [[package]]
 name = "sbr-test-util"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "png",
  "sha2",
@@ -1806,7 +1806,7 @@ dependencies = [
 
 [[package]]
 name = "sbr-util"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "hashbrown",
 ]
@@ -1956,7 +1956,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "subrandr"
-version = "1.2.0"
+version = "1.3.0"
 dependencies = [
  "icu_locale",
  "icu_segmenter",

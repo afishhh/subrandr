@@ -75,37 +75,32 @@ pub enum FallbackError {
 
 impl FontconfigFontProvider {
     pub fn new() -> Result<Self, NewError> {
-        unsafe {
-            // Before this version fontconfig was not thread-safe, we share a single
-            // global PlatformFontProvider so we want it to be thread safe.
-            // This version was released 12 years ago so it's really just a sanity check.
-            if FcGetVersion() < 21091 {
-                return Err(NewError::Outdated);
-            }
-
-            let config = FcConfigGetCurrent();
-            if config.is_null() {
-                return Err(NewError::Init);
-            }
-
-            Ok({
-                let mut result = Self {
-                    config,
-                    fonts: Vec::new(),
-                };
-                result.update_font_list()?;
-                result
-            })
+        // Before this version fontconfig was not thread-safe, we share a single
+        // global PlatformFontProvider so we want it to be thread safe.
+        // This version was released 12 years ago so it's really just a sanity check.
+        if unsafe { FcGetVersion() } < 21091 {
+            return Err(NewError::Outdated);
         }
+
+        let config = unsafe { FcConfigReference(std::ptr::null_mut()) };
+        if config.is_null() {
+            return Err(NewError::Init);
+        }
+
+        Ok({
+            let mut result = Self {
+                config,
+                fonts: Vec::new(),
+            };
+            result.update_font_list()?;
+            result
+        })
     }
 }
 
 impl Drop for FontconfigFontProvider {
     fn drop(&mut self) {
-        unsafe {
-            FcConfigDestroy(self.config);
-            FcFini();
-        };
+        unsafe { FcConfigDestroy(self.config) };
     }
 }
 
@@ -231,15 +226,18 @@ impl PlatformFontProvider for FontconfigFontProvider {
             return Err(UpdateError::BringUpToDate.into());
         }
 
-        let current = unsafe { FcConfigGetCurrent() };
-        Ok(if current != self.config {
-            info!(log, "Fontconfig configuration updated, reloading font list");
-            self.config = current;
-            self.update_font_list()?;
-            true
-        } else {
-            false
-        })
+        let new = unsafe { FcConfigReference(std::ptr::null_mut()) };
+        if new == self.config {
+            unsafe { FcConfigDestroy(new) }
+            return Ok(false);
+        }
+
+        info!(log, "Fontconfig configuration updated, reloading font list");
+        unsafe { FcConfigDestroy(self.config) }
+        self.config = new;
+        self.update_font_list()?;
+
+        Ok(true)
     }
 
     fn substitute(

@@ -25,7 +25,7 @@ pub fn map_fontconfig_weight_to_opentype(fc_weight: I16Dot16) -> Option<I16Dot16
 
     let i = WEIGHT_MAP
         .binary_search_by(|x| x.0.partial_cmp(&fc_weight).unwrap())
-        .map_or_else(std::convert::identity, std::convert::identity);
+        .unwrap_or_else(std::convert::identity);
 
     if WEIGHT_MAP[i].0 == fc_weight {
         return Some(WEIGHT_MAP[i].1);
@@ -53,7 +53,7 @@ pub fn map_opentype_weight_to_fontconfig(ot_weight: I16Dot16) -> Option<I16Dot16
 
     let i = WEIGHT_MAP
         .binary_search_by(|x| x.1.partial_cmp(&ot_weight).unwrap())
-        .map_or_else(std::convert::identity, std::convert::identity);
+        .unwrap_or_else(std::convert::identity);
 
     if WEIGHT_MAP[i].1 == ot_weight {
         return Some(WEIGHT_MAP[i].0);

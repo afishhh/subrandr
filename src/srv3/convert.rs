@@ -16,6 +16,7 @@ use crate::{
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
+    oklab::Oklab,
     renderer::{EventTextOptions, FrameLayoutPass, SubtitleEvent},
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
     style::{
@@ -791,8 +792,23 @@ fn segment_to_sgr(seq: &mut SgrSequenceBuilder, segment: &Segment) {
         seq.set_italic();
     }
 
-    let fg = BGRA8::from_rgba32(segment.pen.foreground_color);
+    let mut fg = BGRA8::from_rgba32(segment.pen.foreground_color);
     let bg = BGRA8::from_rgba32(segment.pen.background_color);
+    {
+        // Sometimes subtitles use the similar foreground and background color
+        // but have a distinct shadow.
+        // Attempt to handle this case by substituting edge color for
+        // foreground color if the distance between foreground and background
+        // is too low.
+        let fg_lab = Oklab::from_gamma22_rgb(fg.r, fg.g, fg.b);
+        let bg_lab = Oklab::from_gamma22_rgb(bg.r, bg.g, bg.b);
+        if fg_lab.closer_to_than(bg_lab, 0.05) {
+            if let Some(edge) = segment.pen.edge_color {
+                fg = BGRA8::from_rgba32(edge);
+            }
+        }
+    }
+
     seq.set_foreground_color(fg.r, fg.g, fg.b);
     seq.set_background_color(bg.r, bg.g, bg.b);
 

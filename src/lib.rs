@@ -15,6 +15,7 @@ mod capi;
 mod display;
 mod html;
 mod layout;
+mod oklab;
 mod style;
 mod text;
 

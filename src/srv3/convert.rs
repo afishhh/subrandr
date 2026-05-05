@@ -15,7 +15,7 @@ use crate::{
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
         FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
     },
-    renderer::{FrameLayoutPass, SubtitleEvent},
+    renderer::{EventTextOptions, FrameLayoutPass, SubtitleEvent},
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
     style::{
         computed::{
@@ -786,10 +786,21 @@ impl SubtitleEvent for VisualLine {
         self.range.clone()
     }
 
-    fn text(&self, output: &mut String) {
+    fn text(&self, output: &mut String, options: &EventTextOptions) {
+        let time = options
+            .time
+            .map_or(u32::MAX, |x| x.saturating_sub(self.range.start));
         for segment in &self.segments {
+            if time < segment.inner.time_offset {
+                continue;
+            }
+
             output.push_str(&segment.inner.text);
-            if let Some(annotation) = &segment.annotation {
+            if let Some(annotation) = segment
+                .annotation
+                .as_ref()
+                .filter(|s| time >= s.time_offset)
+            {
                 output.push('(');
                 output.push_str(&annotation.text);
                 output.push(')');

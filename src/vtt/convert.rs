@@ -15,7 +15,7 @@ use crate::{
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
-    renderer::{FrameLayoutPass, SubtitleEvent},
+    renderer::{EventTextOptions, FrameLayoutPass, SubtitleEvent},
     style::{
         computed::{FontSlant, HorizontalAlignment, TextDecorations},
         ComputedStyle,
@@ -653,7 +653,7 @@ impl SubtitleEvent for Event {
         self.range.clone()
     }
 
-    fn text(&self, output: &mut String) {
+    fn text(&self, output: &mut String, _time: &EventTextOptions) {
         struct Visitor<'o> {
             output: &'o mut String,
         }

@@ -111,6 +111,18 @@ void sbr_subtitle_iterator_next(sbr_subtitle_iterator *);
 char const *sbr_subtitle_iterator_get_text(sbr_subtitle_iterator *,
                                            uint64_t flags);
 
+// Get the text content of this subtitle event at time `time`.
+//
+// Text formatting will be ignored and not present in the result.
+// Ruby will use parenthesized fallback form like "嗚呼(ああ)".
+//
+// `flags` must be zero.
+//
+// The returned string is guaranteed to be valid for as long as
+// no other subrandr function is called on this iterator.
+char const *sbr_subtitle_iterator_get_text_at(sbr_subtitle_iterator *,
+                                              uint32_t time, uint64_t flags);
+
 // Stop iterating the subtitle event list the iterator currently points to.
 //
 // Should be done as soon as you are done using the iterator to avoid keeping

@@ -73,9 +73,14 @@ pub enum Subtitles {
     Vtt(Rc<vtt::Subtitles>),
 }
 
+#[derive(Default, Debug, Clone, Copy)]
+pub struct EventTextOptions {
+    pub time: Option<u32>,
+}
+
 pub trait SubtitleEvent {
     fn time_range(&self) -> Range<u32>;
-    fn text(&self, output: &mut String);
+    fn text(&self, output: &mut String, options: &EventTextOptions);
 }
 
 impl<T: SubtitleEvent> SubtitleEvent for &T {
@@ -83,8 +88,8 @@ impl<T: SubtitleEvent> SubtitleEvent for &T {
         T::time_range(self)
     }
 
-    fn text(&self, output: &mut String) {
-        T::text(self, output)
+    fn text(&self, output: &mut String, options: &EventTextOptions) {
+        T::text(self, output, options)
     }
 }
 

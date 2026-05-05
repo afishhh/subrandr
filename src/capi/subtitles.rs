@@ -4,7 +4,11 @@ use icu_locale::{LanguageIdentifier, LocaleCanonicalizer};
 use log::{debug, warn};
 use util::rc::Rc;
 
-use crate::{capi::library::CLibrary, renderer::SubtitleEvent, srv3, vtt, Subtitles};
+use crate::{
+    capi::library::CLibrary,
+    renderer::{EventTextOptions, SubtitleEvent},
+    srv3, vtt, Subtitles,
+};
 
 c_enum! {
     #[repr(i16)]
@@ -165,9 +169,9 @@ impl<I: Iterator<Item: SubtitleEvent + Copy>> StatefulIterator<I> {
 }
 
 impl<I: Iterator<Item: SubtitleEvent + Copy>> StatefulIterator<I> {
-    fn text(&self, output: &mut String) -> Option<()> {
+    fn text(&self, output: &mut String, options: &EventTextOptions) -> Option<()> {
         self.current.as_ref().map(|event| {
-            event.text(output);
+            event.text(output, options);
         })
     }
 
@@ -178,10 +182,10 @@ impl<I: Iterator<Item: SubtitleEvent + Copy>> StatefulIterator<I> {
 }
 
 impl CSubtitleIteratorImpl<'_> {
-    fn text(&self, output: &mut String) -> Option<()> {
+    fn text(&self, output: &mut String, options: &EventTextOptions) -> Option<()> {
         match self {
-            CSubtitleIteratorImpl::Srv3(srv3) => srv3.text(output),
-            CSubtitleIteratorImpl::Vtt(vtt) => vtt.text(output),
+            CSubtitleIteratorImpl::Srv3(srv3) => srv3.text(output, options),
+            CSubtitleIteratorImpl::Vtt(vtt) => vtt.text(output, options),
         }
     }
 
@@ -215,6 +219,23 @@ unsafe extern "C" fn sbr_subtitle_iterator_next(this: *mut CSubtitleIterator) {
     iter.advance(&mut (*this).public);
 }
 
+impl CSubtitleIterator {
+    unsafe fn get_text(this: *mut CSubtitleIterator, options: &EventTextOptions) -> *const c_char {
+        let Some((_, iter)) = &mut (*this).inner else {
+            return std::ptr::null();
+        };
+
+        (*this).text_buffer.clear();
+        match iter.text(&mut (*this).text_buffer, options) {
+            Some(()) => {
+                (*this).text_buffer.push('\0');
+                (*this).text_buffer.as_ptr() as _
+            }
+            None => std::ptr::null(),
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_subtitle_iterator_get_text(
     this: *mut CSubtitleIterator,
@@ -227,18 +248,23 @@ unsafe extern "C" fn sbr_subtitle_iterator_get_text(
         );
     }
 
-    let Some((_, iter)) = &mut (*this).inner else {
-        return std::ptr::null();
-    };
+    CSubtitleIterator::get_text(this, &EventTextOptions { time: None })
+}
 
-    (*this).text_buffer.clear();
-    match iter.text(&mut (*this).text_buffer) {
-        Some(()) => {
-            (*this).text_buffer.push('\0');
-            (*this).text_buffer.as_ptr() as _
-        }
-        None => std::ptr::null(),
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_subtitle_iterator_get_text_at(
+    this: *mut CSubtitleIterator,
+    time: u32,
+    flags: u64,
+) -> *const c_char {
+    if flags != 0 {
+        cthrow!(
+            InvalidArgument,
+            "non-zero flags passed to `sbr_subtitle_iterator_get_text`"
+        );
     }
+
+    CSubtitleIterator::get_text(this, &EventTextOptions { time: Some(time) })
 }
 
 #[unsafe(no_mangle)]

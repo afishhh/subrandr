@@ -75,12 +75,28 @@ impl CError {
         }
     }
 
-    pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
-        Self {
+    pub fn from_error(error: impl IntoCError) -> Self {
+        error.into_c_error()
+    }
+}
+
+trait IntoCError {
+    fn into_c_error(self) -> CError;
+}
+
+impl<E: std::error::Error + Sync + 'static> IntoCError for E {
+    fn into_c_error(self) -> CError {
+        CError {
             kind: ErrorKind::Other,
-            context: Some(Box::new(error)),
+            context: Some(Box::new(self)),
             message: None,
         }
+    }
+}
+
+impl IntoCError for CError {
+    fn into_c_error(self) -> CError {
+        self
     }
 }
 
@@ -98,8 +114,6 @@ impl std::fmt::Display for CError {
         Ok(())
     }
 }
-
-impl std::error::Error for CError {}
 
 struct LastError {
     string: CString,

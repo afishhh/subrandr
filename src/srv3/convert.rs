@@ -9,6 +9,7 @@ use util::{
 };
 
 use crate::{
+    ansi::SgrSequenceBuilder,
     layout::{
         self,
         block::{BlockContainer, BlockContainerContent},
@@ -781,6 +782,25 @@ impl<'a> Iterator for SubtitleIterator<'a> {
     }
 }
 
+fn segment_to_sgr(seq: &mut SgrSequenceBuilder, segment: &Segment) {
+    seq.reset_all();
+    if segment.pen.bold {
+        seq.set_bold();
+    }
+    if segment.pen.italic {
+        seq.set_italic();
+    }
+
+    let fg = BGRA8::from_rgba32(segment.pen.foreground_color);
+    let bg = BGRA8::from_rgba32(segment.pen.background_color);
+    seq.set_foreground_color(fg.r, fg.g, fg.b);
+    seq.set_background_color(bg.r, bg.g, bg.b);
+
+    if segment.pen.underline {
+        seq.set_underline(None);
+    }
+}
+
 impl SubtitleEvent for VisualLine {
     fn time_range(&self) -> Range<u32> {
         self.range.clone()
@@ -795,17 +815,26 @@ impl SubtitleEvent for VisualLine {
                 continue;
             }
 
+            match options.style {
+                crate::renderer::EventTextStyle::Plain => (),
+                crate::renderer::EventTextStyle::Ansi => {
+                    segment_to_sgr(&mut SgrSequenceBuilder::new(output), &segment.inner);
+                }
+            }
+
             output.push_str(&segment.inner.text);
             if let Some(annotation) = segment
                 .annotation
                 .as_ref()
                 .filter(|s| time >= s.time_offset)
             {
+                segment_to_sgr(&mut SgrSequenceBuilder::new(output), annotation);
                 output.push('(');
                 output.push_str(&annotation.text);
                 output.push(')');
             }
         }
+        SgrSequenceBuilder::new(output).reset_all();
     }
 }
 

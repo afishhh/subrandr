@@ -10,6 +10,7 @@ pub use util::math::I26Dot6;
 pub mod srv3;
 pub mod vtt;
 
+mod ansi;
 mod capi;
 mod display;
 mod html;

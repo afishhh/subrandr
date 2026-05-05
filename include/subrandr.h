@@ -99,12 +99,16 @@ sbr_subtitle_iterator *sbr_subtitle_iterator_new(void);
 // so this event might not be after the current one time-wise.
 void sbr_subtitle_iterator_next(sbr_subtitle_iterator *);
 
+// Return event text without any styling (default).
+#define SBR_GET_EVENT_TEXT_STYLE_PLAIN (0 << 0)
+// Return event text with basic styling applied as ANSI SGR escape codes.
+#define SBR_GET_EVENT_TEXT_STYLE_ANSI (1 << 0)
+
 // Get the text content of this subtitle event.
 //
-// Text formatting will be ignored and not present in the result.
 // Ruby will use parenthesized fallback form like "嗚呼(ああ)".
 //
-// `flags` must be zero.
+// `flags` must be a valid combination of `SBR_GET_EVENT_TEXT_*` flags.
 //
 // The returned string is guaranteed to be valid for as long as
 // no other subrandr function is called on this iterator.
@@ -113,10 +117,9 @@ char const *sbr_subtitle_iterator_get_text(sbr_subtitle_iterator *,
 
 // Get the text content of this subtitle event at time `time`.
 //
-// Text formatting will be ignored and not present in the result.
 // Ruby will use parenthesized fallback form like "嗚呼(ああ)".
 //
-// `flags` must be zero.
+// `flags` must be a valid combination of `SBR_GET_EVENT_TEXT_*` flags.
 //
 // The returned string is guaranteed to be valid for as long as
 // no other subrandr function is called on this iterator.

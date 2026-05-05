@@ -5,8 +5,8 @@ use log::{debug, warn};
 use util::rc::Rc;
 
 use crate::{
-    capi::library::CLibrary,
-    renderer::{EventTextOptions, SubtitleEvent},
+    capi::{library::CLibrary, CError},
+    renderer::{EventTextOptions, EventTextStyle, SubtitleEvent},
     srv3, vtt, Subtitles,
 };
 
@@ -236,19 +236,36 @@ impl CSubtitleIterator {
     }
 }
 
+fn text_options_from_flags(time: Option<u32>, flags: u64) -> Result<EventTextOptions, CError> {
+    const STYLE_BITS: u64 = 1 << 0;
+    const STYLE_PLAIN: u64 = 0;
+    const STYLE_ANSI: u64 = 1 << 0;
+    const UNUSED_BITS: u64 = !0 ^ STYLE_BITS;
+    let err = CError::new(
+        crate::capi::ErrorKind::InvalidArgument,
+        "invalid flags passed to `sbr_subtitle_iterator_get_text(_at)?`",
+    );
+
+    if flags & UNUSED_BITS != 0 {
+        return Err(err);
+    }
+
+    Ok(EventTextOptions {
+        time,
+        style: match flags & STYLE_BITS {
+            STYLE_PLAIN => EventTextStyle::Plain,
+            STYLE_ANSI => EventTextStyle::Ansi,
+            _ => return Err(err),
+        },
+    })
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_subtitle_iterator_get_text(
     this: *mut CSubtitleIterator,
     flags: u64,
 ) -> *const c_char {
-    if flags != 0 {
-        cthrow!(
-            InvalidArgument,
-            "non-zero flags passed to `sbr_subtitle_iterator_get_text`"
-        );
-    }
-
-    CSubtitleIterator::get_text(this, &EventTextOptions { time: None })
+    CSubtitleIterator::get_text(this, &ctry!(text_options_from_flags(None, flags)))
 }
 
 #[unsafe(no_mangle)]
@@ -257,14 +274,7 @@ unsafe extern "C" fn sbr_subtitle_iterator_get_text_at(
     time: u32,
     flags: u64,
 ) -> *const c_char {
-    if flags != 0 {
-        cthrow!(
-            InvalidArgument,
-            "non-zero flags passed to `sbr_subtitle_iterator_get_text`"
-        );
-    }
-
-    CSubtitleIterator::get_text(this, &EventTextOptions { time: Some(time) })
+    CSubtitleIterator::get_text(this, &ctry!(text_options_from_flags(Some(time), flags)))
 }
 
 #[unsafe(no_mangle)]

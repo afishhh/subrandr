@@ -74,8 +74,16 @@ pub enum Subtitles {
 }
 
 #[derive(Default, Debug, Clone, Copy)]
+pub enum EventTextStyle {
+    #[default]
+    Plain,
+    Ansi,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
 pub struct EventTextOptions {
     pub time: Option<u32>,
+    pub style: EventTextStyle,
 }
 
 pub trait SubtitleEvent {

@@ -505,7 +505,7 @@ impl ShapingPass<'_> {
                     cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end);
                 self.output.append(
                     text_range,
-                    &font.clone(),
+                    &font,
                     &self.glyph_buffer[glyph_buffer_last..glyph_buffer_last + len],
                 );
                 glyph_buffer_last += len;
@@ -534,7 +534,7 @@ impl ShapingPass<'_> {
                 let glyphs_start = self.glyph_buffer.len() - len;
                 let glyphs = &mut self.glyph_buffer[glyphs_start..];
                 glyphs.reverse();
-                self.output.append(text_range, &font.clone(), glyphs);
+                self.output.append(text_range, &font, glyphs);
                 self.glyph_buffer.truncate(glyphs_start);
             }
         };

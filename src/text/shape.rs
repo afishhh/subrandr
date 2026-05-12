@@ -365,14 +365,6 @@ impl ShapingPass<'_> {
         let is_reverse = first_cluster != cluster_range.start;
         let is_dir_reverse =
             Direction::try_from_hb(self.properties.direction).is_some_and(|d| d.is_reverse());
-        // NOTE: `start_cluster` isn't always equal to `first_cluster`!
-        //       This is because `first_cluster` is the first cluster that *emitted a glyph*
-        //       while `start_cluster` is the directionally-first cluster in this `cluster_range`.
-        let start_cluster = if !is_reverse {
-            cluster_range.start
-        } else {
-            cluster_range.end - 1
-        };
 
         let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t, it: &ItemIter| {
             let cluster = &self.cluster_map[info.cluster as usize];
@@ -545,7 +537,7 @@ impl ShapingPass<'_> {
             // This means the font fallback system lied to us and gave us
             // a font that does not, in fact, have the character we asked for.
             let next_force_tofu =
-                broken_subrange_start == start_cluster && font_iterator.did_system_fallback();
+                broken_subrange_start == cluster_range.start && font_iterator.did_system_fallback();
 
             let range = broken_subrange_start..cluster_range.end;
             self.retry_shaping(range, font_iterator.clone(), next_force_tofu)?

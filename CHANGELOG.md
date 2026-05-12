@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- Fixed infinite recursion when failing to shape an RTL segment if font provider fallback returns a font for the first codepoint.
+
 ## [v1.3.0]
 
 - Added more caching to font matching to improve performance in cases that use a lot of spans.

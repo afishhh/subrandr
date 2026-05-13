@@ -8,8 +8,6 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches};
 use log::{error, info, LogContext};
-#[cfg(feature = "wgpu")]
-use pollster::FutureExt as _;
 use subrandr::{DebugFlags, Renderer, SubtitleContext, Subtitles};
 use winit::{
     event::StartCause,
@@ -67,8 +65,7 @@ struct Args {
     target_fps: f32,
 
     #[clap(long = "rasterizer", value_enum)]
-    #[cfg_attr(feature = "wgpu", clap(default_value_t = Rasterizer::Wgpu))]
-    #[cfg_attr(not(feature = "wgpu"), clap(default_value_t = Rasterizer::Software))]
+    #[clap(default_value_t = Rasterizer::Software)]
     rasterizer: Rasterizer,
 }
 
@@ -76,9 +73,6 @@ struct Args {
 enum Rasterizer {
     #[value(name = "sw")]
     Software,
-    #[cfg(feature = "wgpu")]
-    #[value(name = "wgpu")]
-    Wgpu,
 }
 
 mod ipc;
@@ -140,8 +134,6 @@ struct App {
     frame_valid_inside: Range<u32>,
 
     display_handle: Option<DisplayHandle>,
-    #[cfg(feature = "wgpu")]
-    wgpu: Option<wgpu::Instance>,
     state: Option<WindowState>,
 }
 
@@ -153,8 +145,6 @@ enum DisplayHandle {
 #[allow(clippy::large_enum_variant)] // this has only one instance that is never copied after construction
 enum WindowState {
     Software(SoftwareWindowState),
-    #[cfg(feature = "wgpu")]
-    Wgpu(WgpuWindowState),
 }
 
 struct SoftwareWindowState {
@@ -163,20 +153,10 @@ struct SoftwareWindowState {
     buffer: Vec<u32>,
 }
 
-#[cfg(feature = "wgpu")]
-struct WgpuWindowState {
-    window: std::sync::Arc<winit::window::Window>,
-    surface: wgpu::Surface<'static>,
-    rasterizer: subrandr::rasterize::wgpu::Rasterizer,
-    alpha_mode: wgpu::CompositeAlphaMode,
-}
-
 impl WindowState {
     fn window(&self) -> &winit::window::Window {
         match self {
             WindowState::Software(state) => &state.window,
-            #[cfg(feature = "wgpu")]
-            WindowState::Wgpu(state) => &state.window,
         }
     }
 
@@ -187,28 +167,6 @@ impl WindowState {
     fn reconfigure(&self, size: winit::dpi::PhysicalSize<u32>) {
         match self {
             WindowState::Software(_) => _ = size,
-            #[cfg(feature = "wgpu")]
-            WindowState::Wgpu(WgpuWindowState {
-                rasterizer,
-                surface,
-                alpha_mode,
-                ..
-            }) => {
-                surface.configure(
-                    rasterizer.device(),
-                    &wgpu::SurfaceConfiguration {
-                        usage: wgpu::TextureUsages::COPY_DST
-                            | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        format: wgpu::TextureFormat::Bgra8Unorm,
-                        width: size.width,
-                        height: size.height,
-                        present_mode: wgpu::PresentMode::AutoVsync,
-                        desired_maximum_frame_latency: 2,
-                        alpha_mode: *alpha_mode,
-                        view_formats: vec![wgpu::TextureFormat::Bgra8Unorm],
-                    },
-                );
-            }
         }
     }
 }
@@ -281,66 +239,6 @@ impl winit::application::ApplicationHandler for App {
                     window,
                     buffer: Vec::new(),
                 }));
-            }
-            #[cfg(feature = "wgpu")]
-            Rasterizer::Wgpu => {
-                let window = std::sync::Arc::new(window);
-                let wgpu = self.wgpu.as_mut().unwrap();
-
-                let surface = wgpu.create_surface(window.clone()).unwrap();
-                let adapter = wgpu
-                    .request_adapter(&wgpu::RequestAdapterOptions {
-                        power_preference: wgpu::PowerPreference::from_env()
-                            .unwrap_or(wgpu::PowerPreference::LowPower),
-                        force_fallback_adapter: false,
-                        compatible_surface: Some(&surface),
-                    })
-                    .block_on()
-                    .unwrap();
-                let (device, queue) = adapter
-                    .request_device(&wgpu::DeviceDescriptor {
-                        label: None,
-                        required_features: wgpu::Features::empty(),
-                        required_limits: wgpu::Limits::default(),
-                        memory_hints: wgpu::MemoryHints::Performance,
-                        trace: wgpu::Trace::Off,
-                    })
-                    .block_on()
-                    .unwrap();
-
-                let cap = surface.get_capabilities(&adapter);
-
-                let mut has_premultiplied = false;
-                let mut has_opaque = false;
-                for mode in cap.alpha_modes {
-                    match mode {
-                        wgpu::CompositeAlphaMode::Opaque => has_opaque = true,
-                        wgpu::CompositeAlphaMode::PreMultiplied => has_premultiplied = true,
-                        _ => (),
-                    }
-                }
-
-                let alpha_mode = if has_premultiplied {
-                    wgpu::CompositeAlphaMode::PreMultiplied
-                } else if has_opaque {
-                    // While this does say that the alpha channel is ignored, this seems like
-                    // it's actually not the case on X11 with the nvidia driver.
-                    // I would not be surprised if it's because of X11 not truly supporting transparency
-                    // and the fact the support is just tacked on by the compositor.
-                    wgpu::CompositeAlphaMode::Opaque
-                } else {
-                    // I guess it's better specify *something* than to crash?
-                    wgpu::CompositeAlphaMode::Inherit
-                };
-
-                let mut rasterizer = subrandr::rasterize::wgpu::Rasterizer::new(device, queue);
-                rasterizer.set_adapter_info(adapter.get_info());
-                self.state = Some(WindowState::Wgpu(WgpuWindowState {
-                    window,
-                    surface,
-                    rasterizer,
-                    alpha_mode,
-                }))
             }
         }
     }
@@ -531,26 +429,6 @@ impl winit::application::ApplicationHandler for App {
                                     soft.buffer.fill(0);
                                 }
                             }
-                            #[cfg(feature = "wgpu")]
-                            WindowState::Wgpu(wgpu) => {
-                                if let Some(subs) = self.subs.as_ref() {
-                                    let surface_texture =
-                                        wgpu.surface.get_current_texture().unwrap();
-                                    let mut target = wgpu
-                                        .rasterizer
-                                        .target_from_texture(surface_texture.texture.clone());
-                                    self.renderer.set_subtitles(Some(subs));
-
-                                    let mut frame_rasterizer = wgpu.rasterizer.begin_frame();
-                                    self.renderer
-                                        .render_to(log, &mut frame_rasterizer, &mut target, &ctx, t)
-                                        .unwrap();
-                                    frame_rasterizer.end_frame();
-                                    self.renderer.end_raster(log);
-
-                                    surface_texture.present();
-                                }
-                            }
                         }
 
                         self.frame_valid_inside = self.renderer.unchanged_inside();
@@ -570,16 +448,7 @@ impl winit::application::ApplicationHandler for App {
                         next_min_wait
                     };
 
-                    #[cfg(feature = "wgpu")]
-                    let use_poll = matches!(state, WindowState::Wgpu(_));
-                    #[cfg(not(feature = "wgpu"))]
-                    let use_poll = false;
-
-                    if use_poll && deadline == next_min_wait {
-                        event_loop.set_control_flow(ControlFlow::Poll);
-                    } else {
-                        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-                    }
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
                 }
                 None => event_loop.set_control_flow(ControlFlow::Wait),
             },
@@ -683,8 +552,6 @@ fn main() {
             }
             _ => panic!("SoftwareX11 rasterizer requires an X11 display handle"),
         },
-        #[cfg(feature = "wgpu")]
-        Rasterizer::Wgpu => {}
     }
 
     let mut player_connection = if let Some(connection_string) = &args.ipc_connection_string {
@@ -759,15 +626,6 @@ fn main() {
             overlay_window_id,
 
             display_handle,
-
-            #[cfg(feature = "wgpu")]
-            wgpu: if matches!(args.rasterizer, Rasterizer::Wgpu) {
-                Some(wgpu::Instance::new(
-                    &wgpu::InstanceDescriptor::from_env_or_default(),
-                ))
-            } else {
-                None
-            },
 
             args,
             subs,

@@ -430,7 +430,7 @@ impl Renderer {
         .inspect(|_| self.end_raster(log))
     }
 
-    pub fn render_to(
+    fn render_to(
         &mut self,
         log: &LogContext,
         rasterizer: &mut dyn rasterize::Rasterizer,

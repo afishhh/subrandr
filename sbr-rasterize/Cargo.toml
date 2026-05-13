@@ -4,14 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-[features]
-wgpu = ["dep:wgpu"]
-
 [dependencies]
 thiserror = "1"
 
 util = { workspace = true }
-wgpu = { workspace = true, optional = true }
 
 [dev-dependencies]
 test-util = { workspace = true }

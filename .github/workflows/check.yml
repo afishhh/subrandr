@@ -84,7 +84,7 @@ jobs:
       - run: cargo clippy -p xtask --all-targets -- $STABLE_CLIPPY_OPTIONS
       # The subrandr crate is checked separately because it has a `_layout_tests` feature which
       # also does not follow our MSRV.
-      - run: cargo clippy --no-deps -p subrandr --features wgpu --all-targets -- $STABLE_CLIPPY_OPTIONS
+      - run: cargo clippy --no-deps -p subrandr --all-targets -- $STABLE_CLIPPY_OPTIONS
       - run: ./ci/c_sanity_check.sh
         env:
           CROSS_TARGET: ${{ matrix.rustc-cross-target }}

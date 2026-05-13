@@ -336,9 +336,9 @@ pub type RenderTarget<'a> = RenderTargetView<'a, Premultiplied<BGRA8>>;
 fn unwrap_sw_render_target<'a, 'b>(
     target: &'a mut super::RenderTarget<'b>,
 ) -> &'a mut RenderTarget<'b> {
-    #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
     match &mut target.0 {
         super::RenderTargetInner::Software(target) => target,
+        #[expect(unreachable_patterns)]
         target => panic!(
             "Incompatible render target {:?} passed to software rasterizer (expected: software)",
             target.variant_name()
@@ -517,9 +517,9 @@ impl std::fmt::Debug for Texture<'_> {
 }
 
 fn unwrap_sw_texture(texture: &super::Texture) -> &Texture<'static> {
-    #[cfg_attr(not(feature = "wgpu"), expect(unreachable_patterns))]
     match &texture.0 {
         super::TextureInner::Software(texture) => texture,
+        #[expect(unreachable_patterns)]
         target => panic!(
             "Incompatible texture {:?} passed to software rasterizer",
             target.variant_name()

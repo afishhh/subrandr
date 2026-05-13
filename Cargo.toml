@@ -23,7 +23,6 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = ["platform-defaults"]
-wgpu = ["rasterize/wgpu"]
 
 font-provider-fontconfig = []
 font-provider-directwrite = []
@@ -90,8 +89,6 @@ members = [
 ]
 
 [workspace.dependencies]
-wgpu = { version = "26" }
-
 test-util = { path = "sbr-test-util", package = "sbr-test-util" }
 log = { path = "sbr-log", package = "sbr-log" }
 util = { path = "sbr-util", package = "sbr-util" }

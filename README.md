@@ -135,7 +135,7 @@ Currently it is still a work-in-progress and there's a few difficult problems th
 
 #### `sbr-overlay`
 
-The `sbr-overlay` directory contains a test program that can be used to test the library in software rasterization mode on X11 and with wgpu on other platforms. It renders subtitles onto a transparent window and also provides some additional functionality to synchronize with and overlay on top of existing video players. 
+The `sbr-overlay` directory contains a test program that can be used to test the library in software rasterization mode on X11. It renders subtitles onto a transparent window and also provides some additional functionality to synchronize with and overlay on top of existing video players. 
 
 Subtitles can be synchronized with video playback in [mpv](https://github.com/mpv-player/mpv/) by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (with a path to a socket created using the `--input-ipc-server` mpv option).
 
@@ -143,12 +143,6 @@ Subtitles can be synchronized with video playback in [mpv](https://github.com/mp
 [This is currently broken](https://github.com/afishhh/subrandr/issues/47) and likely to be removed soon&trade;.
 
 The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target (also only supported on X11).
-
-### Hardware acceleration
-
-subrandr currently supports an alpha-quality hardware-accelerated wgpu rasterizer. It is still experimental and provides zero or negative performance gains.
-
-There are quite a few blocking issues that need to be resolved before working on the wgpu rasterizer makes sense again. Due to these issues and more it is not exposed in either the C API or the WASM module yet.
 
 ### License
 

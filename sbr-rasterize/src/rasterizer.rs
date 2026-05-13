@@ -6,8 +6,6 @@ use util::{math::Vec2, AnyError};
 use crate::scene::SceneNode;
 
 pub mod sw;
-#[cfg(feature = "wgpu")]
-pub mod wgpu;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PixelFormat {
@@ -26,16 +24,12 @@ impl PixelFormat {
 
 enum RenderTargetInner<'a> {
     Software(sw::RenderTarget<'a>),
-    #[cfg(feature = "wgpu")]
-    Wgpu(Box<wgpu::RenderTarget>),
 }
 
 impl RenderTargetInner<'_> {
     fn variant_name(&self) -> &'static str {
         match self {
             Self::Software(_) => "software",
-            #[cfg(feature = "wgpu")]
-            Self::Wgpu(_) => "wgpu",
         }
     }
 }
@@ -46,16 +40,12 @@ impl RenderTarget<'_> {
     pub fn width(&self) -> u32 {
         match &self.0 {
             RenderTargetInner::Software(sw) => sw.width(),
-            #[cfg(feature = "wgpu")]
-            RenderTargetInner::Wgpu(wgpu) => wgpu.width(),
         }
     }
 
     pub fn height(&self) -> u32 {
         match &self.0 {
             RenderTargetInner::Software(sw) => sw.height(),
-            #[cfg(feature = "wgpu")]
-            RenderTargetInner::Wgpu(wgpu) => wgpu.height(),
         }
     }
 }
@@ -75,16 +65,12 @@ impl From<sw::Texture<'static>> for Texture {
 #[derive(Clone)]
 enum TextureInner {
     Software(sw::Texture<'static>),
-    #[cfg(feature = "wgpu")]
-    Wgpu(wgpu::Texture),
 }
 
 impl TextureInner {
     fn variant_name(&self) -> &'static str {
         match self {
             TextureInner::Software(_) => "software",
-            #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(_) => "wgpu",
         }
     }
 }
@@ -96,32 +82,24 @@ impl Texture {
     pub fn memory_footprint(&self) -> usize {
         match &self.0 {
             TextureInner::Software(sw) => sw.memory_footprint(),
-            #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu) => wgpu.memory_footprint(),
         }
     }
 
     pub fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width(),
-            #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu) => wgpu.width(),
         }
     }
 
     pub fn height(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.height(),
-            #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu) => wgpu.height(),
         }
     }
 
     pub fn is_mono(&self) -> bool {
         match &self.0 {
             TextureInner::Software(sw) => sw.is_mono(),
-            #[cfg(feature = "wgpu")]
-            TextureInner::Wgpu(wgpu) => wgpu.is_mono(),
         }
     }
 }

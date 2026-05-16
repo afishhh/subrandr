@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.3.1]
+
 - Fixed infinite recursion when failing to shape an RTL segment if font provider fallback returns a font for the first codepoint.
 
 ## [v1.3.0]
@@ -80,7 +82,8 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.3.1...HEAD
+[v1.3.1]: https://github.com/afishhh/subrandr/compare/v1.3.0...v1.3.1
 [v1.3.0]: https://github.com/afishhh/subrandr/compare/v1.2.0...v1.3.0
 [v1.2.0]: https://github.com/afishhh/subrandr/compare/v1.1.0...v1.2.0
 [v1.1.0]: https://github.com/afishhh/subrandr/compare/v1.0.1...v1.1.0

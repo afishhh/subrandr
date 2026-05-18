@@ -81,7 +81,6 @@ impl InlineContentBuilder {
             run_index: 0,
             span_index: usize::MAX,
             last_item_is_text: false,
-            length: 0,
         }
     }
 
@@ -96,25 +95,16 @@ impl InlineContentBuilder {
 
 pub struct InlineSpanBuilder<'a> {
     parent: &'a mut InlineContentBuilder,
-    span_index: usize,
     run_index: usize,
-    length: usize,
+    span_index: usize,
     // NOTE: This is necessary to distinguish text items that are last *but* are part of
     //       a child span from text items that are last and are part of this span.
     last_item_is_text: bool,
 }
 
 impl<'a> InlineSpanBuilder<'a> {
-    fn span_mut(&mut self) -> &mut InlineSpan {
-        match &mut self.parent.items[self.span_index] {
-            InlineItem::Span(span) => span,
-            _ => unreachable!(),
-        }
-    }
-
     fn push_child(&mut self, item: InlineItem) {
         self.parent.items.push(item);
-        self.length += 1;
     }
 
     pub fn current_run_text(&self) -> &str {
@@ -166,11 +156,7 @@ impl<'a> InlineSpanBuilder<'a> {
         run_index: usize,
     ) -> InlineSpanBuilder<'_> {
         let span_index = self.parent.items.len();
-        self.push_child(InlineItem::Span(InlineSpan {
-            style,
-            length: 0,
-            kind,
-        }));
+        self.push_child(InlineItem::Span(InlineSpan { style, kind }));
         self.last_item_is_text = false;
 
         InlineSpanBuilder {
@@ -178,7 +164,6 @@ impl<'a> InlineSpanBuilder<'a> {
             run_index,
             span_index,
             last_item_is_text: false,
-            length: 0,
         }
     }
 
@@ -188,11 +173,14 @@ impl<'a> InlineSpanBuilder<'a> {
 
     pub fn push_ruby(&mut self, style: ComputedStyle) -> InlineRubyBuilder<'_> {
         let content_index = self.push_object_replacement();
-        InlineRubyBuilder(self.push_span_with(
-            style,
-            InlineSpanKind::Ruby { content_index },
-            self.run_index,
-        ))
+        InlineRubyBuilder {
+            span: self.push_span_with(
+                style,
+                InlineSpanKind::Ruby { content_index },
+                self.run_index,
+            ),
+            last_was_base: false,
+        }
     }
 
     pub fn push_inline_block(&mut self, block: BlockContainer) {
@@ -214,25 +202,26 @@ impl<'a> std::fmt::Write for InlineSpanBuilder<'a> {
 
 impl<'a> Drop for InlineSpanBuilder<'a> {
     fn drop(&mut self) {
-        if self.span_index == usize::MAX {
-            return;
+        if self.span_index != usize::MAX {
+            self.parent.items.push(InlineItem::SpanEnd);
         }
-
-        self.span_mut().length = self.length;
     }
 }
 
-pub struct InlineRubyBuilder<'a>(InlineSpanBuilder<'a>);
+pub struct InlineRubyBuilder<'a> {
+    span: InlineSpanBuilder<'a>,
+    last_was_base: bool,
+}
 
 impl<'a> InlineRubyBuilder<'a> {
     fn push(&mut self, style: ComputedStyle, annotation: bool) -> InlineSpanBuilder<'_> {
-        if self.0.length % 2 != usize::from(annotation) {
+        if self.last_was_base != annotation {
             _ = self.push(ComputedStyle::DEFAULT, !annotation);
         }
+        self.last_was_base = !annotation;
 
-        let run_index = self.0.push_run();
-
-        self.0.push_span_with(
+        let run_index = self.span.push_run();
+        self.span.push_span_with(
             style.create_derived(),
             InlineSpanKind::RubyInternal {
                 run_index,
@@ -256,12 +245,12 @@ pub enum InlineItem {
     Span(InlineSpan),
     Text(InlineText),
     Block(InlineBlock),
+    SpanEnd,
 }
 
 #[derive(Debug, Clone)]
 pub struct InlineSpan {
     style: ComputedStyle,
-    length: usize,
     kind: InlineSpanKind,
 }
 
@@ -900,7 +889,6 @@ fn shape_run_initial<'a>(
     struct SpanStackEntry<'a> {
         parent_style: &'a ComputedStyle,
         span_content_start: usize,
-        remaining_children: usize,
     }
 
     impl<'a> ShapedItemBuilder<'a, '_, '_, '_> {
@@ -1097,7 +1085,6 @@ fn shape_run_initial<'a>(
             let items = &self.content.items;
             let mut current_item = item_index;
             let mut current_style = inner_style;
-            let mut span_left = usize::MAX;
             let mut span_stack: Vec<SpanStackEntry> = Vec::new();
             let mut text_leaf_items = Vec::new();
 
@@ -1105,7 +1092,6 @@ fn shape_run_initial<'a>(
                 .get(current_item)
                 .filter(|_| !span_stack.is_empty() || current_item < *end_item_index)
             {
-                span_left -= 1;
                 current_item += 1;
                 match item {
                     InlineItem::Span(span) => match span.kind {
@@ -1118,10 +1104,8 @@ fn shape_run_initial<'a>(
                             span_stack.push(SpanStackEntry {
                                 parent_style: current_style,
                                 span_content_start: self.total_content_bytes_added,
-                                remaining_children: span_left,
                             });
                             current_style = &span.style;
-                            span_left = span.length;
                         }
                         InlineSpanKind::Ruby { content_index } => {
                             self.flush_queued_text()?;
@@ -1135,8 +1119,7 @@ fn shape_run_initial<'a>(
                                     base_annotation_pairs: {
                                         let mut result = Vec::new();
 
-                                        let mut remaining = span.length;
-                                        while remaining > 0 {
+                                        while !matches!(items[current_item], InlineItem::SpanEnd) {
                                             let &InlineItem::Span(InlineSpan {
                                                 kind:
                                                     InlineSpanKind::RubyInternal {
@@ -1168,8 +1151,10 @@ fn shape_run_initial<'a>(
                                                     base_style,
                                                 )?,
                                             };
-                                            remaining -= 1;
-                                            let annotation = if remaining > 0 {
+                                            let annotation = if !matches!(
+                                                items[current_item],
+                                                InlineItem::SpanEnd
+                                            ) {
                                                 let &InlineItem::Span(InlineSpan {
                                                     kind:
                                                         InlineSpanKind::RubyInternal {
@@ -1195,7 +1180,6 @@ fn shape_run_initial<'a>(
                                                     self.span_state,
                                                     annotation_style,
                                                 )?;
-                                                remaining -= 1;
                                                 ShapedRubyAnnotation {
                                                     style: annotation_style,
                                                     primary_font: primary_font_from_style(
@@ -1217,6 +1201,9 @@ fn shape_run_initial<'a>(
 
                                             result.push((base, annotation));
                                         }
+
+                                        // For the ruby container's `SpanEnd`
+                                        current_item += 1;
 
                                         result
                                     },
@@ -1330,13 +1317,11 @@ fn shape_run_initial<'a>(
                             }
                         }
                     }
-                }
-
-                while span_left == 0 {
-                    let popped = span_stack.pop().unwrap();
-                    self.handle_span_end(current_style, &popped)?;
-                    current_style = popped.parent_style;
-                    span_left = popped.remaining_children;
+                    InlineItem::SpanEnd => {
+                        let popped = span_stack.pop().unwrap();
+                        self.handle_span_end(current_style, &popped)?;
+                        current_style = popped.parent_style;
+                    }
                 }
             }
             *end_item_index = current_item;

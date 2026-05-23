@@ -3,14 +3,15 @@ use crate::style::computed::WhiteSpaceCollapse;
 
 impl WhiteSpaceCollapse {
     fn has_collapsible_spaces(&self) -> bool {
-        matches!(self, Self::Collapse)
+        matches!(self, Self::Collapse | Self::PreserveBreaks)
     }
 }
 
 pub fn collapse_text_to(mut sink: super::BuilderTextSink, text: &str) {
-    match sink.style().white_space_collapse() {
+    let wsc = sink.style().white_space_collapse();
+    match wsc {
         // > If white-space-collapse is set to collapse or preserve-breaks, white space characters are considered collapsible and are processed by performing the following steps:
-        WhiteSpaceCollapse::Collapse => {
+        WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::PreserveBreaks => {
             let mut text = text;
             while let Some(mut next) = text.bytes().position(|b| matches!(b, b'\t' | b' ' | b'\n'))
             {
@@ -42,19 +43,23 @@ pub fn collapse_text_to(mut sink: super::BuilderTextSink, text: &str) {
                             sink.pop_prev();
                         }
 
-                        // >  2. Collapsible segment breaks are transformed for rendering according to the segment break transformation rules.
-                        // >   2.5. When white-space-collapse is collapse, segment breaks are collapsible, and are collapsed as follows:
-                        // >   2.5.1. First, any collapsible segment break immediately following another collapsible segment break is removed.
-                        let mut remove_break = sink.peek_prev().is_some_and(|(b, s)| {
-                            b == b'\n'
-                                && matches!(s.white_space_collapse(), WhiteSpaceCollapse::Collapse)
-                        });
-                        // >   2.5.2. Then any remaining segment break is either transformed into a space (U+0020) or removed depending on the context before and after the break. The rules for this operation are UA-defined in this level.
-                        // This is the first part of this UA-defined operation which we handle as follows:
-                        // - Remove line breaks at the start of the inline (done here)
-                        // - Remove line breaks at the end of the inline (done after main loop)
-                        // - Transform remaining line breaks into spaces (done after main loop)
-                        remove_break |= sink.peek_prev().is_none();
+                        // > 2. Collapsible segment breaks are transformed for rendering according to the segment break transformation rules.
+                        let mut remove_break = false;
+                        // > 2.5. When white-space-collapse is collapse, segment breaks are collapsible, and are collapsed as follows:
+                        if matches!(wsc, WhiteSpaceCollapse::Collapse) {
+                            let peek = sink.peek_prev();
+                            // > 2.5.1. First, any collapsible segment break immediately following another collapsible segment break is removed.
+                            remove_break = peek.is_some_and(|(b, s)| {
+                                let c = s.white_space_collapse();
+                                b == b'\n' && matches!(c, WhiteSpaceCollapse::Collapse)
+                            });
+                            // > 2.5.2. Then any remaining segment break is either transformed into a space (U+0020) or removed depending on the context before and after the break. The rules for this operation are UA-defined in this level.
+                            // This is the first part of this UA-defined operation which we handle as follows:
+                            // - Remove line breaks at the start of the inline (done here)
+                            // - Remove line breaks at the end of the inline (done later)
+                            // - Transform remaining line breaks into spaces (done later)
+                            remove_break |= peek.is_none();
+                        }
                         if !remove_break {
                             sink.push_str("\n");
                         }
@@ -108,7 +113,7 @@ pub fn finish_text_run_collapse(builder: &mut InlineContentBuilder, text_stack_s
                     run.replace_range(next..current, " ");
                 }
             }
-            WhiteSpaceCollapse::Preserve => (),
+            WhiteSpaceCollapse::PreserveBreaks | WhiteSpaceCollapse::Preserve => (),
         }
     }
 }

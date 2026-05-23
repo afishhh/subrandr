@@ -203,6 +203,8 @@ pub enum WhiteSpaceCollapse {
         expect(dead_code, reason = "not exposed yet")
     )]
     Collapse,
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+    PreserveBreaks,
     Preserve,
 }
 

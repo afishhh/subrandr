@@ -1145,16 +1145,20 @@ fn shape_run_initial<'a>(
             self.break_opportunities.push(idx);
         }
 
-        /// Compute additional break opportunities created by CSS [White Space
-        /// Collapsing and Transformation Rules].
+        /// Compute additional break opportunities required for compatibility.
         ///
-        /// This is required because `icu_segmenter` only computes break opportunities
-        /// required by the Unicode Line Breaking Algorithm but CSS white space rules
-        /// can introduce ones not covered by it.
+        /// This is required because `icu_segmenter` computes break opportunities in
+        /// accordance with the Unicode Line Breaking Algorithm but UAs can introduce
+        /// ones not covered by it (which users might end up relying on).
         ///
         /// One example is: in `&ZeroWidthSpace; &ZeroWidthSpace;` there *is* a break
         /// opportunity after the normal space because CSS only considers `' '` and `'\t'`
         /// for break opportunities.
+        ///
+        /// In the case of `white-space-collapse: preserve` the above case could also be
+        /// explained by CSS [White Space Collapsing and Transformation Rules] specifying
+        /// a soft break opportunity after any run of spaces but browsers seem to exhibit
+        /// this behavior unconditionally.
         ///
         /// [White Space Collapsing and Transformation Rules]: https://www.w3.org/TR/css-text-3/#white-space-phase-1
         fn compute_extra_whitespace_break_opportunities(
@@ -1163,7 +1167,9 @@ fn shape_run_initial<'a>(
             style: &ComputedStyle,
         ) {
             match style.white_space_collapse() {
-                WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::Preserve => {
+                WhiteSpaceCollapse::Collapse
+                | WhiteSpaceCollapse::PreserveBreaks
+                | WhiteSpaceCollapse::Preserve => {
                     let bytes = self.run_text.as_bytes();
                     let mut in_space_run = false;
                     for i in range {

@@ -8,10 +8,9 @@ test_define_style! {
 }
 
 // [UAX#14 LB7] prohibits breaking before a ZWSP character in the below scenario.
-// *However* CSS-specific breaking rules require a soft wrap opportunity to be
-// inserted at the end of a sequence of space|tab anyway. Since CSS rules have
-// to be followed regardless of UAX#14, a break opportunity must be inserted
-// after the space in-between the ZWSPs.
+// *However* CSS or browser-specific breaking rules can insert a soft wrap opportunity
+// at the end of such a sequence anyway.
+// We opt to follow browser precedent and require a soft wrap opportunity here for compatiblity.
 //
 // [UAX#14 LB7]: https://www.unicode.org/reports/tr14/#LB7
 check_test! {
@@ -28,6 +27,10 @@ check_test! {
 test_define_style! {
     .collapse {
         white_space_collapse: WhiteSpaceCollapse::Collapse,
+    }
+
+    .preserve_breaks {
+        white_space_collapse: WhiteSpaceCollapse::PreserveBreaks,
     }
 
     .preserve {
@@ -84,5 +87,16 @@ check_test! {
         ruby {
             base { span.red_bg { text " d " } }
         }
+    }
+}
+
+check_test! {
+    name = collapse_preserve_breaks,
+    size = (16 * 5, 80),
+    inline.ahem.preserve_breaks {
+        span.red_bg { text "\n  a  b c \n\n" }
+        span.green_bg.preserve { text " d " }
+        // NOTE: The trailing space here isn't correct but that's due to lack of white space phase 2.
+        span.yellow_bg { text " e \n f " }
     }
 }

@@ -17,7 +17,7 @@ use crate::{
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     style::{
-        computed::{FontSlant, HorizontalAlignment, TextDecorations},
+        computed::{FontSlant, HorizontalAlignment, TextDecorations, WhiteSpaceCollapse},
         ComputedStyle,
     },
     text::OpenTypeTag,
@@ -532,9 +532,14 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
     let base_style = {
         let mut result = ComputedStyle::DEFAULT;
 
+        // The font shorthand property on the (root) list of WebVTT Node Objects must be set to 5vh sans-serif.
         *result.make_font_family_mut() = rc_static!([rc_static!(str b"sans-serif")]);
+        // The color property on the (root) list of WebVTT Node Objects must be set to rgba(255,255,255,1).
         *result.make_color_mut() = BGRA8::WHITE;
+        // The background shorthand property on the WebVTT cue background box and on WebVTT Ruby Text Objects must be set to rgba(0,0,0,0.8).
         *result.make_background_color_mut() = BGRA8::new(0, 0, 0, /* 255 * 80% */ 204);
+        // The white-space property on the (root) list of WebVTT Node Objects must be set to pre-line.
+        *result.make_white_space_collapse_mut() = WhiteSpaceCollapse::PreserveBreaks;
 
         result
     };

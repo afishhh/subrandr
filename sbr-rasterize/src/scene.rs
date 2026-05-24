@@ -142,6 +142,8 @@ impl<'a> SceneContentBuilder<'a> {
 
     pub fn try_subscene<E>(
         &mut self,
+        scene_filter: Option<SceneFilter>,
+        color: BGRA8,
         content_fn: impl FnOnce(Point2S) -> Result<SubsceneKind, E>,
     ) -> Result<(), E> {
         let floored_pos = Vec2::new(
@@ -151,14 +153,23 @@ impl<'a> SceneContentBuilder<'a> {
 
         self.parent.nodes.push(SceneNode::Subscene(Subscene {
             pos: floored_pos.to_point(),
+            scene_filter,
             kind: content_fn((self.current_translation - floored_pos).to_point())?,
+            color,
         }));
 
         Ok(())
     }
 
-    pub fn subscene(&mut self, content_fn: impl FnOnce(Point2S) -> SubsceneKind) {
-        match self.try_subscene(|translation| Ok::<_, Infallible>(content_fn(translation))) {
+    pub fn subscene(
+        &mut self,
+        scene_filter: Option<SceneFilter>,
+        color: BGRA8,
+        content_fn: impl FnOnce(Point2S) -> SubsceneKind,
+    ) {
+        match self.try_subscene(scene_filter, color, |translation| {
+            Ok::<_, Infallible>(content_fn(translation))
+        }) {
             Ok(()) => (),
         }
     }
@@ -200,10 +211,17 @@ pub(crate) struct FilledRect {
     pub(crate) color: BGRA8,
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum SceneFilter {
+    ExtractAlpha { blur_stddev: I26Dot6 },
+}
+
 #[derive(Clone)]
 pub(crate) struct Subscene {
     pub(crate) pos: Point2<i32>,
     pub(crate) kind: SubsceneKind,
+    pub(crate) scene_filter: Option<SceneFilter>,
+    pub(crate) color: BGRA8,
 }
 
 #[derive(Clone)]

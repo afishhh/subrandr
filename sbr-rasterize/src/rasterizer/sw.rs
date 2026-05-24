@@ -1,7 +1,7 @@
 use std::{any::Any, collections::HashMap, hash::Hash, mem::MaybeUninit};
 
 use util::{
-    math::{Point2, Rect2, Vec2},
+    math::{I26Dot6, Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
     slice_assume_init_mut,
 };
@@ -9,7 +9,7 @@ use util::{
 use crate::{
     color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, Scene, SceneNode},
+    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, Scene, SceneFilter, SceneNode},
     PixelFormat, SceneRenderError,
 };
 
@@ -731,32 +731,13 @@ impl Rasterizer {
     }
 }
 
-impl super::Rasterizer for Rasterizer {
-    fn name(&self) -> &'static str {
-        "software"
-    }
+pub struct BlurOutput {
+    pub padding: Vec2<u32>,
+    pub texture: Texture<'static>,
+}
 
-    unsafe fn create_texture_mapped(
-        &mut self,
-        size: Vec2<u32>,
-        format: PixelFormat,
-        callback: Box<dyn FnOnce(RenderTargetView<MaybeUninit<u8>>) + '_>,
-    ) -> super::Texture {
-        super::Texture(super::TextureInner::Software({
-            match format {
-                PixelFormat::Mono => Texture::new_with_uninit(size, callback),
-                PixelFormat::Bgra => {
-                    Texture::new_with_uninit::<Premultiplied<BGRA8>>(size, |mut target| {
-                        callback(target.as_bytes())
-                    })
-                }
-            }
-        }))
-    }
-
-    fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {
-        let texture = unwrap_sw_texture(texture);
-
+impl Rasterizer {
+    pub fn blur_sw_texture(&mut self, texture: &Texture<'_>, blur_sigma: f32) -> BlurOutput {
         let is_box_blur;
         let kernel = if blur_sigma > 2.0 {
             is_box_blur = true;
@@ -816,9 +797,41 @@ impl super::Rasterizer for Rasterizer {
             blit::copy_float_to_mono(target, self.blurer.front(), width, width, height, 0, 0);
         });
 
-        super::BlurOutput {
+        BlurOutput {
             padding: Vec2::splat(self.blurer.padding() as u32),
-            texture: super::Texture(super::TextureInner::Software(result)),
+            texture: result,
+        }
+    }
+}
+
+impl super::Rasterizer for Rasterizer {
+    fn name(&self) -> &'static str {
+        "software"
+    }
+
+    unsafe fn create_texture_mapped(
+        &mut self,
+        size: Vec2<u32>,
+        format: PixelFormat,
+        callback: Box<dyn FnOnce(RenderTargetView<MaybeUninit<u8>>) + '_>,
+    ) -> super::Texture {
+        super::Texture(super::TextureInner::Software({
+            match format {
+                PixelFormat::Mono => Texture::new_with_uninit(size, callback),
+                PixelFormat::Bgra => {
+                    Texture::new_with_uninit::<Premultiplied<BGRA8>>(size, |mut target| {
+                        callback(target.as_bytes())
+                    })
+                }
+            }
+        }))
+    }
+
+    fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {
+        let output = self.blur_sw_texture(unwrap_sw_texture(texture), blur_sigma);
+        super::BlurOutput {
+            padding: output.padding,
+            texture: super::Texture(super::TextureInner::Software(output.texture)),
         }
     }
 
@@ -948,12 +961,11 @@ impl Rasterizer {
                     )
                 }
                 SceneNode::Subscene(subscene) => {
-                    let (off, texture) = match &subscene.kind {
+                    let (off, mut texture) = match &subscene.kind {
                         crate::scene::SubsceneKind::External(external) => {
                             let (off, texture) = external
                                 .rasterize(self)
                                 .map_err(SceneRenderErrorInner::External)?;
-
                             (off, unwrap_sw_texture(&texture).clone())
                         }
                         crate::scene::SubsceneKind::Scene(child_scene) => {
@@ -961,14 +973,32 @@ impl Rasterizer {
                         }
                     };
 
+                    let mut pos = subscene.pos + off;
+                    let mut output_filter = None;
+                    match subscene.scene_filter {
+                        Some(SceneFilter::ExtractAlpha { blur_stddev }) => {
+                            if blur_stddev == I26Dot6::ZERO {
+                                output_filter = Some(BitmapFilter::ExtractAlpha);
+                            } else {
+                                let output = self.blur_sw_texture(&texture, blur_stddev.into_f32());
+                                pos -= Vec2::new(output.padding.x as i32, output.padding.y as i32);
+                                texture = output.texture;
+                            }
+                        }
+                        None => {}
+                    }
+
                     on_piece(
                         self,
-                        OutputPiece::from_bitmap(Bitmap {
-                            pos: subscene.pos + off,
-                            texture: texture.into(),
-                            filter: None,
-                            color: BGRA8::WHITE,
-                        }),
+                        OutputPiece {
+                            pos,
+                            size: texture.size(),
+                            content: OutputPieceContent::Texture(OutputBitmap {
+                                texture,
+                                filter: output_filter,
+                                color: subscene.color,
+                            }),
+                        },
                     );
                 }
             }

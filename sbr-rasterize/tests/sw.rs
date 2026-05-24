@@ -293,7 +293,7 @@ fn translated_subscene_with_polyline() {
             BGRA8::BLUE,
         );
         root.with_translation(Vec2::new(FixedS::new(25), FixedS::new(25)))
-            .subscene(|_| SubsceneKind::Scene(subscene));
+            .subscene(None, BGRA8::MAGENTA, |_| SubsceneKind::Scene(subscene));
         builder.finish()
     };
 

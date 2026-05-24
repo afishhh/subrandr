@@ -108,6 +108,8 @@ impl Texture {
 enum SceneRenderErrorInner {
     #[error(transparent)]
     ToBitmaps(AnyError),
+    #[error(transparent)]
+    External(AnyError),
 }
 
 #[derive(Debug, Error)]

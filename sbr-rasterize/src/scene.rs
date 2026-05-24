@@ -208,7 +208,13 @@ pub(crate) struct Subscene {
 
 #[derive(Clone)]
 pub enum SubsceneKind {
+    External(Rc<dyn ExternalSubscene>),
     Scene(Scene),
+}
+
+pub trait ExternalSubscene {
+    fn bounding_box(&self) -> Rect2S;
+    fn rasterize(&self, rasterizer: &mut dyn Rasterizer) -> Result<(Vec2<i32>, Texture), AnyError>;
 }
 
 impl StrokedPolyline {

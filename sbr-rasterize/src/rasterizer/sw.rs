@@ -949,6 +949,13 @@ impl Rasterizer {
                 }
                 SceneNode::Subscene(subscene) => {
                     let (off, texture) = match &subscene.kind {
+                        crate::scene::SubsceneKind::External(external) => {
+                            let (off, texture) = external
+                                .rasterize(self)
+                                .map_err(SceneRenderErrorInner::External)?;
+
+                            (off, unwrap_sw_texture(&texture).clone())
+                        }
                         crate::scene::SubsceneKind::Scene(child_scene) => {
                             self.render_scene_texture(child_scene, user_data)?
                         }

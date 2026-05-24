@@ -1,6 +1,9 @@
 use std::fmt::{Debug, Display};
 
-use rasterize::{Rasterizer, Texture};
+use rasterize::{
+    color::BGRA8,
+    scene::{SceneContentBuilder, SceneFilter},
+};
 use text_sys::*;
 use util::math::{I26Dot6, Vec2};
 
@@ -157,54 +160,26 @@ impl Glyph {
     }
 }
 
-pub struct GlyphBitmap {
-    pub offset: Vec2<i32>,
-    pub texture: Texture,
-}
-
-pub fn render<'g>(
-    cache: &GlyphCache,
-    rasterizer: &mut dyn Rasterizer,
-    xf: I26Dot6,
-    yf: I26Dot6,
-    blur_sigma: f32,
+pub fn display<'g>(
+    mut output: SceneContentBuilder,
     glyphs: &mut dyn Iterator<Item = (&'g Font, &'g Glyph)>,
-) -> Result<Vec<GlyphBitmap>, GlyphRenderError> {
-    let mut result = Vec::new();
-
-    assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&xf));
-    assert!((-I26Dot6::ONE..I26Dot6::ONE).contains(&yf));
-
-    let mut x = xf;
-    let mut y = yf;
+    scene_filter: Option<SceneFilter>,
+    color: BGRA8,
+    cache: &GlyphCache,
+) -> Result<(), GlyphDisplayError> {
     for (font, glyph) in glyphs {
-        // TODO: Once vertical text is supported, this should change depending on main axis
-        let subpixel_offset = if x < 0 {
-            I26Dot6::ONE - x.abs().fract()
-        } else {
-            x.fract()
-        };
+        let offset = Vec2::new(glyph.x_offset, glyph.y_offset);
+        let advance = Vec2::new(glyph.x_advance, glyph.y_advance);
 
-        let bitmap = font.render_glyph(
-            cache,
-            rasterizer,
-            glyph.index,
-            blur_sigma,
-            subpixel_offset,
-            false,
-        )?;
+        output
+            .with_translation(offset)
+            .try_subscene(scene_filter, color, |subpixel_pos| {
+                font.glyph_subscene(cache, glyph.index, subpixel_pos.x, false)
+                    .map(|x| x.0.clone())
+            })?;
 
-        result.push(GlyphBitmap {
-            offset: Vec2::new(
-                (x + bitmap.offset.x + glyph.x_offset).floor_to_inner(),
-                (y + bitmap.offset.y + glyph.y_offset).floor_to_inner(),
-            ),
-            texture: bitmap.texture.clone(),
-        });
-
-        x += glyph.x_advance;
-        y += glyph.y_advance;
+        output.apply_translation(advance);
     }
 
-    Ok(result)
+    Ok(())
 }

@@ -123,6 +123,9 @@ pub trait Rasterizer {
         Ok(())
     }
 
+    /// Creates a new empty texture with format [`PixelFormat::Mono`].
+    fn empty_mono_texture(&self) -> Texture;
+
     /// Creates a new texture via memory-mapped initialization.
     ///
     /// # Safety

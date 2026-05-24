@@ -18,7 +18,7 @@ use util::{
 };
 
 use crate::{
-    display::DisplayPass,
+    display::{DisplayError, DisplayPass},
     layout::{
         self,
         block::BlockContainerFragment,
@@ -408,6 +408,8 @@ pub enum RenderError {
     Layout(#[from] layout::InlineLayoutError),
     #[error("Failed to layout debug overlay")]
     DebugLayout(#[from] DebugLayoutError),
+    #[error("Failed to build render scene from fragment tree")]
+    Display(#[from] DisplayError),
 }
 
 #[derive(Debug, Error)]
@@ -451,7 +453,7 @@ impl Renderer {
         t: u32,
     ) -> Result<(), RenderError> {
         self.render_to_scene(log, ctx, t, rasterizer)?;
-        rasterizer.render_scene(target, &self.scene, &self.glyph_cache)?;
+        rasterizer.render_scene(target, &self.scene, &())?;
 
         Ok(())
     }
@@ -674,16 +676,16 @@ impl Renderer {
 
         {
             self.scene_builder.reset();
-            let mut pass = DisplayPass::new(self.scene_builder.root(), ctx.dpi);
+            let mut pass = DisplayPass::new(self.scene_builder.root(), ctx.dpi, &self.glyph_cache);
 
             for &(pos, ref fragment) in &fragments {
-                pass.display_block_container_fragment(pos, fragment);
+                pass.display_block_container_fragment(pos, fragment)?;
             }
 
             for (pos, fragment) in debug_overlay_fragments {
                 match fragment {
                     DebugContentFragment::Inline(ref inline) => {
-                        pass.display_inline_content_fragment(pos, inline);
+                        pass.display_inline_content_fragment(pos, inline)?;
                     }
                     DebugContentFragment::FrameTimeGraph(graph) => {
                         graph.display(pass.output.with_translation(pos.to_vec()))

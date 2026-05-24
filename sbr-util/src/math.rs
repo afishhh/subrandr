@@ -264,6 +264,11 @@ impl<N: Number> Rect2<N> {
         max: Point2::ZERO,
     };
 
+    pub const MAX: Self = Self {
+        min: Point2::new(N::MIN, N::MIN),
+        max: Point2::new(N::MAX, N::MAX),
+    };
+
     pub const fn new(min: Point2<N>, max: Point2<N>) -> Self {
         Self { min, max }
     }
@@ -376,6 +381,23 @@ impl<N: Number> Rect2<N> {
             self.max,
             Point2::new(self.min.x, self.max.y),
         ]
+    }
+
+    fn points_to_outline(points: [Point2<N>; 4]) -> [OutlineEvent<N>; 4] {
+        [
+            OutlineEvent::MoveTo(points[0]),
+            OutlineEvent::LineTo(points[1]),
+            OutlineEvent::LineTo(points[2]),
+            OutlineEvent::LineTo(points[3]),
+        ]
+    }
+
+    pub fn to_outline(self, clockwise: bool) -> [OutlineEvent<N>; 4] {
+        let mut points = self.to_points();
+        if clockwise {
+            points.reverse();
+        }
+        Self::points_to_outline(points)
     }
 }
 

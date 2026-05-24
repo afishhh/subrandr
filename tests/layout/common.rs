@@ -281,13 +281,12 @@ fn check_fn(
         );
 
         let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
-        let glyph_cache = GlyphCache::new();
         let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target =
             rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
 
         rasterizer
-            .render_scene(&mut render_target, &scene_builder.finish(), &glyph_cache)
+            .render_scene(&mut render_target, &scene_builder.finish(), &())
             .expect("Fragment rasterization failed");
 
         pixels
@@ -314,7 +313,9 @@ pub fn check_inline(
         let fragment =
             layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
 
-        DisplayPass::new(output.root(), dpi).display_inline_content_fragment(pos, &fragment);
+        DisplayPass::new(output.root(), dpi, &GlyphCache::new())
+            .display_inline_content_fragment(pos, &fragment)
+            .expect("Display failed");
     })
 }
 
@@ -328,7 +329,9 @@ pub fn check_block(
     check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
         let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
 
-        DisplayPass::new(output.root(), dpi).display_block_container_fragment(pos, &fragment);
+        DisplayPass::new(output.root(), dpi, &GlyphCache::new())
+            .display_block_container_fragment(pos, &fragment)
+            .expect("Display failed");
     })
 }
 

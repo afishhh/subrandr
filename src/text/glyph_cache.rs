@@ -3,7 +3,6 @@ use std::{fmt::Debug, hash::Hash};
 use util::{
     cache::{Cache, CacheConfiguration, CacheStats, CacheValue},
     math::{I16Dot16, I26Dot6, Vec2},
-    HashF32,
 };
 
 use crate::text::Face;
@@ -44,7 +43,6 @@ pub(super) struct Key {
     dpi: u32,
     coords: [I16Dot16; text_sys::T1_MAX_MM_AXIS as usize],
     glyph: u32,
-    blur_sigma: HashF32,
     subpixel_bucket: u8,
 }
 
@@ -104,20 +102,13 @@ impl FontSizeCacheKey {
         (render_offset, bucket)
     }
 
-    pub(super) fn for_glyph(
-        &self,
-        face: Face,
-        glyph: u32,
-        blur_sigma: f32,
-        subpixel_bucket: u8,
-    ) -> Key {
+    pub(super) fn for_glyph(&self, face: Face, glyph: u32, subpixel_bucket: u8) -> Key {
         Key {
             face: FaceByAddr(face),
             point_size: self.point_size,
             dpi: self.dpi,
             coords: self.coords,
             glyph,
-            blur_sigma: HashF32::new(blur_sigma),
             subpixel_bucket,
         }
     }

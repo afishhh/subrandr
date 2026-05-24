@@ -9,14 +9,18 @@ use std::{
 
 use rasterize::{
     color::{Premultiplied, BGRA8},
-    PixelFormat, Rasterizer,
+    scene::{ExternalSubscene, FixedS, Point2S, Rect2S, SubsceneKind, Vec2S},
+    PixelFormat, Rasterizer, Texture,
 };
 use text_sys::*;
 use thiserror::Error;
-use util::math::{I16Dot16, I26Dot6, Vec2};
+use util::{
+    math::{I16Dot16, I26Dot6, Vec2},
+    AnyError,
+};
 
-use super::{Axis, FaceImpl, FontImpl, FontMetrics, OpenTypeTag, SingleGlyphBitmap};
-use crate::text::{ft_utils::*, FontSizeCacheKey};
+use super::{Axis, FaceImpl, FontImpl, FontMetrics, OpenTypeTag};
+use crate::text::{ft_utils::*, FontSizeCacheKey, GlyphSubscene};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
 // This is required because we currently rely on subpixel positioning while rendering
@@ -639,6 +643,12 @@ impl Drop for Font {
 }
 
 #[derive(Debug, Error)]
+pub enum GlyphDisplayError {
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+}
+
+#[derive(Debug, Error)]
 pub enum GlyphRenderError {
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),
@@ -686,104 +696,160 @@ impl FontImpl for Font {
         )
     }
 
-    type RenderError = GlyphRenderError;
-    fn render_glyph_uncached(
+    type DisplayError = GlyphDisplayError;
+    fn glyph_subscene_uncached(
         &self,
-        rasterizer: &mut dyn Rasterizer,
         index: u32,
-        offset: Vec2<I26Dot6>,
-    ) -> Result<SingleGlyphBitmap, Self::RenderError> {
+        subpixel_offset: Vec2S,
+    ) -> Result<GlyphSubscene, Self::DisplayError> {
         unsafe {
             let face = self.with_applied_size()?;
+            let _guard = TransformGuard::new(face, subpixel_offset);
 
-            struct TransformGuard(FT_Face);
-            impl TransformGuard {
-                unsafe fn new(face: FT_Face, offset: Vec2<I26Dot6>) -> Self {
-                    FT_Set_Transform(
-                        face,
-                        std::ptr::null_mut(),
-                        &mut FT_Vector {
-                            x: offset.x.into_ft(),
-                            y: offset.y.into_ft(),
-                        },
-                    );
-                    Self(face)
-                }
-            }
-            impl Drop for TransformGuard {
-                fn drop(&mut self) {
-                    unsafe { FT_Set_Transform(self.0, std::ptr::null_mut(), std::ptr::null_mut()) };
-                }
-            }
-
-            let _guard = TransformGuard::new(face, offset);
             fttry!(FT_Load_Glyph(
                 face,
                 index,
-                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
+                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
             ))?;
-            let is_bitmap;
-            let glyph = {
-                let slot = (*face).glyph;
 
-                is_bitmap = (*slot).format == FT_GLYPH_FORMAT_BITMAP;
+            let bbox;
+            let bitmap_scale;
+            let glyph = (*face).glyph;
+            if (*glyph).format == FT_GLYPH_FORMAT_BITMAP {
+                let bitmap = &(*glyph).bitmap;
+                if bitmap.width == 0 || bitmap.rows == 0 {
+                    return Ok(GlyphSubscene::empty());
+                };
 
-                if !is_bitmap {
-                    fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))?;
-                }
+                let scale = self.size.bitmap_scale;
+                let total_width =
+                    (scale * ((*glyph).bitmap_left + bitmap.width as i32)).ceil_to_inner();
+                let total_height =
+                    (scale * (bitmap.width as i32 - (*glyph).bitmap_top)).ceil_to_inner();
 
-                slot
-            };
-
-            let scale = if is_bitmap {
-                self.size.bitmap_scale
+                bbox = Rect2S::from_min_size(
+                    Point2S::ZERO,
+                    Vec2::new(FixedS::new(total_width), FixedS::new(total_height)),
+                );
+                bitmap_scale = self.size.bitmap_scale;
             } else {
-                I26Dot6::ONE
-            };
-
-            // I don't think this can happen but let's be safe
-            if (*glyph).format != FT_GLYPH_FORMAT_BITMAP {
-                return Err(GlyphRenderError::ConversionToBitmapFailed((*glyph).format));
+                bbox = Rect2S::MAX;
+                bitmap_scale = I26Dot6::ONE;
             }
 
-            let bitmap = &(*glyph).bitmap;
+            let subscene = Rc::new(FreeTypeSubscene {
+                font: self.clone(),
+                index,
+                bitmap_scale,
+                subpixel_offset,
+                bbox,
+            });
 
-            if bitmap.width == 0 || bitmap.rows == 0 {
-                return Ok(SingleGlyphBitmap {
-                    offset: Vec2::ZERO,
-                    texture: rasterizer.create_texture_mapped(
-                        Vec2::ZERO,
-                        PixelFormat::Mono,
-                        Box::new(|mut target| target.buffer_mut().fill(MaybeUninit::new(0))),
-                    ),
-                });
-            };
+            Ok(GlyphSubscene(SubsceneKind::External(subscene)))
+        }
+    }
+}
 
-            let scaled_width = (bitmap.width * scale.into_raw() as u32) >> 6;
-            let scaled_height = (bitmap.rows * scale.into_raw() as u32) >> 6;
-            let mut bitmap_offset = Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top);
-            bitmap_offset.x = (bitmap_offset.x * scale.into_raw()) / 64;
-            bitmap_offset.y = (bitmap_offset.y * scale.into_raw()) / 64;
+struct TransformGuard(FT_Face);
 
-            enum PixelMode {
-                Mono8,
-                Bgra8,
+impl TransformGuard {
+    unsafe fn new(face: FT_Face, translation: Vec2<I26Dot6>) -> Self {
+        FT_Set_Transform(
+            face,
+            std::ptr::null_mut(),
+            &mut FT_Vector {
+                x: translation.x.into_ft(),
+                y: -translation.y.into_ft(),
+            },
+        );
+        Self(face)
+    }
+}
+
+impl Drop for TransformGuard {
+    fn drop(&mut self) {
+        unsafe { FT_Set_Transform(self.0, std::ptr::null_mut(), std::ptr::null_mut()) };
+    }
+}
+
+struct FreeTypeSubscene {
+    font: Font,
+    index: u32,
+    bitmap_scale: I26Dot6,
+    subpixel_offset: Vec2S,
+    bbox: Rect2S,
+}
+
+impl FreeTypeSubscene {
+    fn rasterize_impl(
+        &self,
+        rasterizer: &mut dyn Rasterizer,
+    ) -> Result<(Vec2<i32>, Texture), GlyphRenderError> {
+        let face = self.font.with_applied_size()?;
+        let _guard = unsafe { TransformGuard::new(face, self.subpixel_offset) };
+
+        unsafe {
+            fttry!(FT_Load_Glyph(
+                face,
+                self.index,
+                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
+            ))?
+        };
+
+        let glyph = {
+            let slot = unsafe { (*face).glyph };
+
+            if unsafe { (*slot).format } != FT_GLYPH_FORMAT_BITMAP {
+                unsafe { fttry!(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))? };
             }
 
-            let pixel_mode = match bitmap.pixel_mode.into() {
-                FT_PIXEL_MODE_GRAY => PixelMode::Mono8,
-                FT_PIXEL_MODE_BGRA => PixelMode::Bgra8,
-                _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
-            };
+            slot
+        };
 
-            // I have never seen this and have no idea how it works.
-            // Better to error out than do garbage memory access and likely crash.
-            if bitmap.pitch < 0 {
-                return Err(GlyphRenderError::NegativePitch(bitmap.pitch));
-            }
+        // I don't think this can happen but let's be safe
+        if unsafe { (*glyph).format } != FT_GLYPH_FORMAT_BITMAP {
+            return Err(GlyphRenderError::ConversionToBitmapFailed(unsafe {
+                (*glyph).format
+            }));
+        }
 
-            let texture = rasterizer.create_packed_texture_mapped(
-                Vec2::new(scaled_width, scaled_height),
+        let bitmap = unsafe { &(*glyph).bitmap };
+
+        if bitmap.width == 0 || bitmap.rows == 0 {
+            return Ok((Vec2::ZERO, rasterizer.empty_mono_texture()));
+        };
+
+        // I have never seen this and have no idea how it works.
+        // Better to error out than do garbage memory access and likely crash.
+        if bitmap.pitch < 0 {
+            return Err(GlyphRenderError::NegativePitch(bitmap.pitch));
+        }
+
+        enum PixelMode {
+            Mono8,
+            Bgra8,
+        }
+
+        let pixel_mode = match bitmap.pixel_mode.into() {
+            FT_PIXEL_MODE_GRAY => PixelMode::Mono8,
+            FT_PIXEL_MODE_BGRA => PixelMode::Bgra8,
+            _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
+        };
+
+        let scaled_offset = unsafe {
+            Vec2::new(
+                (self.bitmap_scale * (*glyph).bitmap_left).round_to_inner(),
+                (self.bitmap_scale * -(*glyph).bitmap_top).round_to_inner(),
+            )
+        };
+        let dst_size = Vec2::new(
+            (bitmap.width * self.bitmap_scale.into_raw() as u32) >> 6,
+            (bitmap.rows * self.bitmap_scale.into_raw() as u32) >> 6,
+        );
+
+        let texture = unsafe {
+            rasterizer.create_packed_texture_mapped(
+                dst_size,
                 if matches!(pixel_mode, PixelMode::Bgra8) {
                     PixelFormat::Bgra
                 } else {
@@ -844,12 +910,19 @@ impl FontImpl for Font {
                         }
                     };
                 }),
-            );
+            )
+        };
 
-            Ok(SingleGlyphBitmap {
-                offset: bitmap_offset,
-                texture,
-            })
-        }
+        Ok((scaled_offset, texture))
+    }
+}
+
+impl ExternalSubscene for FreeTypeSubscene {
+    fn bounding_box(&self) -> Rect2S {
+        self.bbox
+    }
+
+    fn rasterize(&self, rasterizer: &mut dyn Rasterizer) -> Result<(Vec2<i32>, Texture), AnyError> {
+        self.rasterize_impl(rasterizer).map_err(Into::into)
     }
 }

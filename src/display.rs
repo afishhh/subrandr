@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use rasterize::{
     color::BGRA8,
-    scene::{Bitmap, BitmapFilter, SceneContentBuilder},
+    scene::{SceneContentBuilder, SceneFilter},
 };
 use util::math::{I26Dot6, Point2, Rect2};
 
@@ -22,12 +20,16 @@ use decoration::*;
 pub struct DisplayPass<'r> {
     pub output: SceneContentBuilder<'r>,
     dpi: u32,
+    glyph_cache: &'r GlyphCache,
     decoration_tracker: DecorationTracker,
 }
+
+pub type DisplayError = text::GlyphDisplayError;
 
 struct DisplayContext<'c> {
     output: SceneContentBuilder<'c>,
     dpi: u32,
+    glyph_cache: &'c GlyphCache,
     decoration_ctx: DecorationContext<'c>,
 }
 
@@ -37,10 +39,11 @@ fn round_y(mut p: Point2L) -> Point2L {
 }
 
 impl<'r> DisplayPass<'r> {
-    pub fn new(output: SceneContentBuilder<'r>, dpi: u32) -> Self {
+    pub fn new(output: SceneContentBuilder<'r>, dpi: u32, glyph_cache: &'r GlyphCache) -> Self {
         Self {
             output,
             dpi,
+            glyph_cache,
             decoration_tracker: DecorationTracker::new(),
         }
     }
@@ -49,6 +52,7 @@ impl<'r> DisplayPass<'r> {
         DisplayContext {
             output: self.output.child(),
             dpi: self.dpi,
+            glyph_cache: self.glyph_cache,
             decoration_ctx: self.decoration_tracker.root(),
         }
     }
@@ -57,18 +61,18 @@ impl<'r> DisplayPass<'r> {
         &mut self,
         pos: Point2L,
         fragment: &InlineContentFragment,
-    ) {
+    ) -> Result<(), DisplayError> {
         self.root_ctx()
-            .display_inline_content_fragment(pos, fragment);
+            .display_inline_content_fragment(pos, fragment)
     }
 
     pub fn display_block_container_fragment(
         &mut self,
         pos: Point2L,
         fragment: &BlockContainerFragment,
-    ) {
+    ) -> Result<(), DisplayError> {
         self.root_ctx()
-            .display_block_container_fragment(pos, fragment);
+            .display_block_container_fragment(pos, fragment)
     }
 }
 
@@ -77,42 +81,21 @@ impl DisplayContext<'_> {
         &mut self,
         pos: Point2L,
         fragment: &TextFragment,
-        shadow: Option<f32>,
+        shadow: Option<I26Dot6>,
         color: BGRA8,
-    ) {
+    ) -> Result<(), DisplayError> {
         let fragment = fragment.clone();
-        self.output
-            .deferred_bitmaps(Rc::new(move |rasterizer, user_data| {
-                let glyph_cache = user_data
-                    .downcast_ref::<GlyphCache>()
-                    .expect("to_bitmaps user_data is not a GlyphCache?");
+        text::display(
+            self.output.with_translation(pos.to_vec()),
+            &mut fragment.glyphs.iter_glyphs_visual(),
+            shadow.map(|blur_radius| SceneFilter::ExtractAlpha {
+                blur_stddev: blur_radius,
+            }),
+            color,
+            self.glyph_cache,
+        )?;
 
-                let mut bitmaps = Vec::new();
-                let glyphs = text::render(
-                    glyph_cache,
-                    rasterizer,
-                    pos.x.fract(),
-                    pos.y.fract(),
-                    shadow.unwrap_or(0.0),
-                    &mut fragment.glyphs.iter_glyphs_visual(),
-                )?;
-
-                let base_pos = Point2::new(pos.x.floor_to_inner(), pos.y.floor_to_inner());
-                for glyph in glyphs {
-                    bitmaps.push(Bitmap {
-                        pos: base_pos + glyph.offset,
-                        texture: glyph.texture,
-                        filter: if shadow.is_some() {
-                            Some(BitmapFilter::ExtractAlpha)
-                        } else {
-                            None
-                        },
-                        color: color.into(),
-                    });
-                }
-
-                Ok(bitmaps)
-            }));
+        Ok(())
     }
 
     fn display_line_decoration(
@@ -133,7 +116,12 @@ impl DisplayContext<'_> {
         );
     }
 
-    fn display_text(&mut self, pos: Point2L, baseline_y: FixedL, fragment: &TextFragment) {
+    fn display_text(
+        &mut self,
+        pos: Point2L,
+        baseline_y: FixedL,
+        fragment: &TextFragment,
+    ) -> Result<(), DisplayError> {
         // TODO: This should also draw an offset underline I think and possibly strike through?
         for shadow in fragment.style.text_shadows().iter().rev() {
             if shadow.color.a > 0 {
@@ -151,9 +139,9 @@ impl DisplayContext<'_> {
                 self.push_text(
                     round_y(pos + shadow.offset.to_physical_pixels(self.dpi)),
                     fragment,
-                    Some(stddev.into_f32()),
+                    Some(stddev),
                     shadow.color,
-                );
+                )?;
             }
         }
 
@@ -185,7 +173,7 @@ impl DisplayContext<'_> {
 
         let color = fragment.style.color();
         if color.a > 0 {
-            self.push_text(pos, fragment, None, color);
+            self.push_text(pos, fragment, None, color)?;
         }
 
         for decoration in self
@@ -202,6 +190,8 @@ impl DisplayContext<'_> {
                 decoration,
             );
         }
+
+        Ok(())
     }
 
     fn enter_box(
@@ -212,6 +202,7 @@ impl DisplayContext<'_> {
         DisplayContext {
             output: self.output.child(),
             dpi: self.dpi,
+            glyph_cache: self.glyph_cache,
             decoration_ctx: self
                 .decoration_ctx
                 .push_decorations(style, font_metrics_if_inline),
@@ -222,6 +213,7 @@ impl DisplayContext<'_> {
         DisplayContext {
             output: self.output.child(),
             dpi: self.dpi,
+            glyph_cache: self.glyph_cache,
             decoration_ctx: self.decoration_ctx.suspend_active(),
         }
     }
@@ -247,7 +239,12 @@ impl DisplayContext<'_> {
         }
     }
 
-    fn display_ruby_fragment(&mut self, pos: Point2L, baseline_y: FixedL, fragment: &RubyFragment) {
+    fn display_ruby_fragment(
+        &mut self,
+        pos: Point2L,
+        baseline_y: FixedL,
+        fragment: &RubyFragment,
+    ) -> Result<(), DisplayError> {
         let content_pos = pos + fragment.fbox.content_offset();
         let mut last_x = pos.x;
         for &(base_offset, ref base, annotation_offset, ref annotation) in &fragment.content {
@@ -279,7 +276,7 @@ impl DisplayContext<'_> {
                         base_pos + base.fbox.content_offset() + base_item_offset,
                         baseline_y,
                         base_item,
-                    );
+                    )?;
                 }
 
                 let base_end_x = base_pos.x + base.fbox.size_for_layout().x;
@@ -316,10 +313,12 @@ impl DisplayContext<'_> {
                         annotation_content_offset + annotation_item_offset,
                         annotation_content_offset.y + annotation.baseline_y,
                         annotation_item,
-                    );
+                    )?;
                 }
             }
         }
+
+        Ok(())
     }
 
     fn display_inline_item_fragment(
@@ -327,7 +326,7 @@ impl DisplayContext<'_> {
         pos: Point2L,
         baseline_y: FixedL,
         fragment: &InlineItemFragment,
-    ) {
+    ) -> Result<(), DisplayError> {
         match fragment {
             InlineItemFragment::Span(span) => {
                 self.display_background(pos, &span.style, &span.fbox);
@@ -335,20 +334,28 @@ impl DisplayContext<'_> {
                 let mut scope = self.enter_box(&span.style, Some(span.primary_font.metrics()));
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
-                    scope.display_inline_item_fragment(child_pos, baseline_y, child);
+                    scope.display_inline_item_fragment(child_pos, baseline_y, child)?;
                 }
             }
             InlineItemFragment::Text(text) => {
                 if text.style.visibility().is_visible() {
-                    self.display_text(round_y(pos), baseline_y, text);
+                    self.display_text(round_y(pos), baseline_y, text)?;
                 }
             }
-            InlineItemFragment::Ruby(ruby) => self.display_ruby_fragment(pos, baseline_y, ruby),
-            InlineItemFragment::Block(block) => self.display_block_container_fragment(pos, block),
+            InlineItemFragment::Ruby(ruby) => self.display_ruby_fragment(pos, baseline_y, ruby)?,
+            InlineItemFragment::Block(block) => {
+                self.display_block_container_fragment(pos, block)?
+            }
         }
+
+        Ok(())
     }
 
-    fn display_inline_content_fragment(&mut self, pos: Point2L, fragment: &InlineContentFragment) {
+    fn display_inline_content_fragment(
+        &mut self,
+        pos: Point2L,
+        fragment: &InlineContentFragment,
+    ) -> Result<(), DisplayError> {
         let mut scope = self.enter_box(&fragment.style, Some(&fragment.primary_font_metrics));
 
         for &(offset, ref line) in &fragment.lines {
@@ -358,29 +365,33 @@ impl DisplayContext<'_> {
             for &(offset, ref item) in &line.children {
                 let current = current + offset;
 
-                scope.display_inline_item_fragment(current, baseline_y, item)
+                scope.display_inline_item_fragment(current, baseline_y, item)?
             }
         }
+
+        Ok(())
     }
 
     fn display_block_container_fragment(
         &mut self,
         pos: Point2L,
         fragment: &BlockContainerFragment,
-    ) {
+    ) -> Result<(), DisplayError> {
         self.display_background(pos, &fragment.style, &fragment.fbox);
 
         let content_pos = pos + fragment.fbox.content_offset();
         let mut scope = self.enter_box(&fragment.style, None);
         match &fragment.content {
             &BlockContainerFragmentContent::Inline(offset, ref inline) => {
-                scope.display_inline_content_fragment(content_pos + offset, inline);
+                scope.display_inline_content_fragment(content_pos + offset, inline)?;
             }
             BlockContainerFragmentContent::Block(children) => {
                 for &(child_off, ref child) in children {
-                    scope.display_block_container_fragment(content_pos + child_off, child);
+                    scope.display_block_container_fragment(content_pos + child_off, child)?;
                 }
             }
         }
+
+        Ok(())
     }
 }

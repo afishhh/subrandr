@@ -75,7 +75,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
 
                     renderer.output_pieces.push(piece);
                 },
-                &renderer.inner.glyph_cache,
+                &()
             )
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.

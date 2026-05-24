@@ -809,6 +809,10 @@ impl super::Rasterizer for Rasterizer {
         "software"
     }
 
+    fn empty_mono_texture(&self) -> super::Texture {
+        super::Texture(super::TextureInner::Software(Texture::EMPTY_MONO))
+    }
+
     unsafe fn create_texture_mapped(
         &mut self,
         size: Vec2<u32>,

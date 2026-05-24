@@ -1,19 +1,16 @@
-use std::{convert::Infallible, ffi::c_void, mem::MaybeUninit};
+use std::{convert::Infallible, ffi::c_void};
 
-use rasterize::{
-    sw::{StripRasterizer, Strips},
-    PixelFormat, Rasterizer,
-};
+use rasterize::scene::{SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
 use text_sys::*;
 use util::{
     make_static_outline,
     math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
 };
 
-use super::{FaceImpl, FontImpl, FontMetrics, GlyphMetrics, SingleGlyphBitmap};
+use super::{FaceImpl, FontImpl, FontMetrics, GlyphMetrics};
 use crate::{
     layout::{FixedL, Vec2L},
-    text::FontSizeCacheKey,
+    text::{FontSizeCacheKey, GlyphSubscene},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -281,43 +278,31 @@ impl Font {
     }
 }
 
-pub struct TofuGlyph {
-    texture_offset: Vec2<i32>,
-    texture_size: Vec2<u32>,
-    strips: Strips,
-}
-
 impl Font {
-    fn draw_glyph(&self, index: u32, offset: Vec2L, rasterizer: &mut StripRasterizer) -> TofuGlyph {
+    fn build_glyph_outline(&self, mut output: SceneContentBuilder, index: u32) {
+        let mut outline = Vec::new();
+
         let shared = self.shared();
         let pixel_width = shared.glyph_metrics.width;
         let pixel_height = shared.glyph_metrics.height;
         let outline_width = pixel_height / 40;
         let base_spacing = pixel_height / 12;
         let margin = base_spacing;
-        let inner_offset = offset + Vec2::new(margin, margin);
-        let fract_offset = Vec2::new(inner_offset.x.fract(), inner_offset.y.fract());
-
+        let inner_offset = Vec2::new(margin, margin);
         let outline_size = Vec2::new(pixel_width - margin * 2, pixel_height - margin * 2);
-        let texture_size = Vec2::new(
-            (outline_size.x + fract_offset.x).ceil_to_inner() as u32,
-            (outline_size.y + fract_offset.y).ceil_to_inner() as u32,
-        );
 
         {
-            let outline_outer = Rect2::from_min_size(fract_offset.to_point(), outline_size);
+            let outline_outer = Rect2::from_min_size(inner_offset.to_point(), outline_size);
 
-            rasterizer.add_polyline(&Rect2::to_float(outline_outer).to_points());
+            outline.extend(&Rect2::to_float(outline_outer).to_outline(false));
 
             let mut outline_inner = outline_outer;
             outline_inner.expand(-outline_width, -outline_width);
-            let mut inner_points = Rect2::to_float(outline_inner).to_points();
-            inner_points.reverse();
 
-            rasterizer.add_polyline(&inner_points);
+            outline.extend(Rect2::to_float(outline_inner).to_outline(true));
         }
 
-        let content_offset = fract_offset + Vec2::splat(outline_width);
+        let content_offset = inner_offset + Vec2::splat(outline_width);
         let content_size = outline_size - Vec2::splat(outline_width * 2);
         let min_cell_spacing_x = base_spacing / 2;
         let min_cell_spacing_y = base_spacing;
@@ -364,7 +349,7 @@ impl Font {
         };
 
         let mut draw_digit = |offset: Vec2L, size: Vec2L, digit: u8| {
-            rasterizer.add_outline(&mut GLYPHS[usize::from(digit)].iter().map_points(|p| {
+            outline.extend(GLYPHS[usize::from(digit)].iter().map_points(|p| {
                 Point2::new(
                     offset.x.into_f32() + p.x * size.x.into_f32() / 200.,
                     offset.y.into_f32() + p.y * size.y.into_f32() / 400.,
@@ -404,14 +389,7 @@ impl Font {
             }
         }
 
-        TofuGlyph {
-            texture_offset: Vec2::new(
-                inner_offset.x.floor_to_inner(),
-                inner_offset.y.floor_to_inner(),
-            ),
-            texture_size,
-            strips: rasterizer.rasterize(),
-        }
+        output.filled_outline(&*outline, SceneColor::ACTIVE);
     }
 }
 
@@ -442,36 +420,15 @@ impl FontImpl for Font {
         )
     }
 
-    type RenderError = Infallible;
-    fn render_glyph_uncached(
+    type DisplayError = Infallible;
+    fn glyph_subscene_uncached(
         &self,
-        rasterizer: &mut dyn Rasterizer,
         index: u32,
-        offset: Vec2L,
-    ) -> Result<SingleGlyphBitmap, Self::RenderError> {
-        let TofuGlyph {
-            texture_offset,
-            texture_size,
-            strips,
-        } = self.draw_glyph(index, offset, &mut StripRasterizer::new());
-        let texture = unsafe {
-            rasterizer.create_packed_texture_mapped(
-                texture_size,
-                PixelFormat::Mono,
-                Box::new(|mut target| {
-                    target.buffer_mut().fill(MaybeUninit::new(0));
-
-                    strips.blend_to(target, |out, value| {
-                        out.write(value);
-                    });
-                }),
-            )
-        };
-
-        Ok(SingleGlyphBitmap {
-            offset: texture_offset,
-            texture,
-        })
+        subpixel_offset: rasterize::scene::Vec2S,
+    ) -> Result<GlyphSubscene, Self::DisplayError> {
+        let mut builder = SceneBuilder::new();
+        self.build_glyph_outline(builder.root().with_translation(subpixel_offset), index);
+        Ok(GlyphSubscene(SubsceneKind::Scene(builder.finish())))
     }
 }
 

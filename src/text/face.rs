@@ -1,17 +1,17 @@
 use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path};
 
-use rasterize::{Rasterizer, Texture};
+use rasterize::scene::{FixedS, Scene, SubsceneKind, Vec2S};
 use text_sys::hb_font_t;
 use util::{
     cache::CacheValue,
-    math::{I16Dot16, I26Dot6, Vec2},
+    math::{I16Dot16, I26Dot6},
 };
 
 use super::FreeTypeError;
 use crate::text::{FontSizeCacheKey, GlyphCache, OpenTypeTag};
 
 pub mod freetype;
-pub use freetype::GlyphRenderError;
+pub use freetype::GlyphDisplayError;
 mod tofu;
 
 #[derive(Debug, Clone, Copy)]
@@ -80,12 +80,6 @@ impl FontMetrics {
     }
 }
 
-#[derive(Clone)]
-pub struct SingleGlyphBitmap {
-    pub offset: Vec2<i32>,
-    pub texture: Texture,
-}
-
 trait FaceImpl: Sized {
     type Font: FontImpl<Face = Self>;
 
@@ -107,6 +101,15 @@ trait FaceImpl: Sized {
     fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error>;
 }
 
+#[derive(Clone)]
+pub struct GlyphSubscene(pub SubsceneKind);
+
+impl GlyphSubscene {
+    fn empty() -> Self {
+        Self(SubsceneKind::Scene(Scene::empty()))
+    }
+}
+
 trait FontImpl: Sized {
     type Face;
     fn face(&self) -> &Self::Face;
@@ -120,13 +123,12 @@ trait FontImpl: Sized {
 
     fn size_cache_key(&self) -> FontSizeCacheKey;
 
-    type RenderError;
-    fn render_glyph_uncached(
+    type DisplayError;
+    fn glyph_subscene_uncached(
         &self,
-        rasterizer: &mut dyn Rasterizer,
         index: u32,
-        offset: Vec2<I26Dot6>,
-    ) -> Result<SingleGlyphBitmap, Self::RenderError>;
+        subpixel_offset: Vec2S,
+    ) -> Result<GlyphSubscene, Self::DisplayError>;
 }
 
 macro_rules! forward_methods {
@@ -247,69 +249,23 @@ impl Font {
         }
     }
 
-    fn render_glyph_impl<'c>(
+    pub fn glyph_subscene<'c>(
         &self,
         cache: &'c GlyphCache,
-        rasterizer: &mut dyn Rasterizer,
         glyph: u32,
-        blur_sigma: f32,
-        render_offset: Vec2<I26Dot6>,
-        subpixel_bucket: u8,
-    ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
-        let key = self
-            .size_cache_key()
-            .for_glyph(self.face(), glyph, blur_sigma, subpixel_bucket);
-
-        if blur_sigma == 0.0 {
-            cache.get_or_try_insert_with(key, || match self {
-                Self::FreeType(font) => {
-                    font.render_glyph_uncached(rasterizer, glyph, render_offset)
-                }
-                Self::Tofu(font) => Ok(font
-                    .render_glyph_uncached(rasterizer, glyph, render_offset)
-                    .unwrap()),
-            })
-        } else {
-            cache.get_or_try_insert_with(key, || {
-                let unblurred = self.render_glyph_impl(
-                    cache,
-                    rasterizer,
-                    glyph,
-                    0.0,
-                    render_offset,
-                    subpixel_bucket,
-                )?;
-
-                let output = rasterizer.blur_texture(&unblurred.texture, blur_sigma);
-                Ok(SingleGlyphBitmap {
-                    offset: unblurred.offset
-                        - Vec2::new(output.padding.x as i32, output.padding.y as i32),
-                    texture: output.texture,
-                })
-            })
-        }
-    }
-
-    pub fn render_glyph<'c>(
-        &self,
-        cache: &'c GlyphCache,
-        rasterizer: &mut dyn Rasterizer,
-        glyph: u32,
-        blur_sigma: f32,
-        offset_value: I26Dot6,
+        offset_value: FixedS,
         offset_axis_is_y: bool,
-    ) -> Result<&'c SingleGlyphBitmap, GlyphRenderError> {
+    ) -> Result<&'c GlyphSubscene, GlyphDisplayError> {
         let (render_offset, subpixel_bucket) =
             FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
+        let key = self
+            .size_cache_key()
+            .for_glyph(self.face(), glyph, subpixel_bucket);
 
-        self.render_glyph_impl(
-            cache,
-            rasterizer,
-            glyph,
-            blur_sigma,
-            render_offset,
-            subpixel_bucket,
-        )
+        cache.get_or_try_insert_with(key, || match self {
+            Self::FreeType(font) => font.glyph_subscene_uncached(glyph, render_offset),
+            Self::Tofu(font) => Ok(font.glyph_subscene_uncached(glyph, render_offset).unwrap()),
+        })
     }
 }
 
@@ -319,8 +275,12 @@ impl CacheValue for GlyphMetrics {
     }
 }
 
-impl CacheValue for SingleGlyphBitmap {
+impl CacheValue for GlyphSubscene {
     fn memory_footprint(&self) -> usize {
-        std::mem::size_of_val(self) + self.texture.memory_footprint()
+        std::mem::size_of_val(self)
+            + match &self.0 {
+                SubsceneKind::External(external) => std::mem::size_of_val(&**external),
+                SubsceneKind::Scene(scene) => std::mem::size_of_val(&scene.memory_footprint()),
+            }
     }
 }

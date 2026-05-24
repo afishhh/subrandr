@@ -23,6 +23,36 @@ impl Scene {
     pub fn empty() -> Self {
         Self(Rc::default())
     }
+
+    pub fn memory_footprint(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + std::mem::size_of_val::<[_]>(&*self.0)
+            + self
+                .0
+                .iter()
+                .map(|node| match node {
+                    SceneNode::DeferredBitmaps(bitmaps) => {
+                        std::mem::size_of_val(&*bitmaps.to_bitmaps)
+                    }
+                    SceneNode::Bitmap(bitmap) => bitmap.texture.memory_footprint(),
+                    SceneNode::StrokedPolyline(stroked_polyline) => {
+                        std::mem::size_of_val::<[_]>(&stroked_polyline.polyline)
+                    }
+                    SceneNode::FilledRect(_) => 0,
+                    SceneNode::FilledOutline(FilledOutline { events, .. }) => {
+                        std::mem::size_of_val::<[_]>(events)
+                    }
+                    SceneNode::Subscene(Subscene {
+                        kind: SubsceneKind::External(external),
+                        ..
+                    }) => std::mem::size_of_val(&**external),
+                    SceneNode::Subscene(Subscene {
+                        kind: SubsceneKind::Scene(child_scene),
+                        ..
+                    }) => child_scene.memory_footprint(),
+                })
+                .sum::<usize>()
+    }
 }
 
 #[derive(Clone)]

@@ -1,7 +1,7 @@
 use std::{any::Any, convert::Infallible, fmt::Debug, rc::Rc};
 
 use util::{
-    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
+    math::{I16Dot16, I26Dot6, Outline, OutlineEvent, OutlineIterExt, Point2, Rect2, Vec2},
     AnyError,
 };
 
@@ -30,6 +30,7 @@ pub(crate) enum SceneNode {
     DeferredBitmaps(DeferredBitmaps),
     Bitmap(Bitmap),
     StrokedPolyline(StrokedPolyline),
+    FilledOutline(FilledOutline),
     FilledRect(FilledRect),
     Subscene(Subscene),
 }
@@ -133,6 +134,20 @@ impl<'a> SceneContentBuilder<'a> {
             }));
     }
 
+    pub fn filled_outline(&mut self, outline: impl Outline<f32>, color: BGRA8) {
+        let transf = Vec2::new(
+            self.current_translation.x.into_f32(),
+            self.current_translation.y.into_f32(),
+        );
+
+        self.parent
+            .nodes
+            .push(SceneNode::FilledOutline(FilledOutline {
+                events: outline.iter().map_points(|point| point + transf).collect(),
+                color,
+            }));
+    }
+
     pub fn filled_rect(&mut self, rect: Rect2S, color: BGRA8) {
         self.parent.nodes.push(SceneNode::FilledRect(FilledRect {
             rect: rect.translate(self.current_translation),
@@ -205,6 +220,12 @@ pub(crate) struct StrokedPolyline {
     pub(crate) color: BGRA8,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FilledOutline {
+    pub(crate) events: Rc<[OutlineEvent<f32>]>,
+    pub(crate) color: BGRA8,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct FilledRect {
     pub(crate) rect: Rect2S,
@@ -246,10 +267,7 @@ impl StrokedPolyline {
             I16Dot16::from_raw(self.pos.x.into_raw() << 10),
             I16Dot16::from_raw(self.pos.y.into_raw() << 10),
         );
-        let input_shift = Vec2::new(
-            (bbox.min.x.fract() + pos16.x.fract()).fract() - bbox.min.x,
-            (bbox.min.y.fract() + pos16.y.fract()).fract() - bbox.min.y,
-        );
+        let input_shift = Vec2::new(bbox.min.x.floor(), bbox.min.y.floor());
         let output_pos = Point2::new(
             (bbox.min.x + pos16.x).floor_to_inner(),
             (bbox.min.y + pos16.y).floor_to_inner(),
@@ -264,11 +282,32 @@ impl StrokedPolyline {
         let mut strip_rasterizer = sw::StripRasterizer::new();
         strip_rasterizer.stroke_polyline(
             self.polyline.iter().copied().map(|mut p| {
-                p += input_shift;
+                p -= input_shift;
                 Point2::new(p.x.into_f32(), p.y.into_f32())
             }),
             self.width.into_f32() / 2.,
         );
+
+        (output_pos, output_size, strip_rasterizer.rasterize())
+    }
+}
+
+impl FilledOutline {
+    pub fn to_strips(&self) -> (Point2<i32>, Vec2<u32>, Strips) {
+        let bbox = self.events.control_box();
+
+        let output_pos = Point2::new(bbox.min.x.floor() as i32, bbox.min.y.floor() as i32);
+        let input_shift = Vec2::new(output_pos.x as f32, output_pos.y as f32);
+        let output_size = Vec2::new(
+            (bbox.max.x.ceil() as i32 - output_pos.x) as u32,
+            (bbox.max.y.ceil() as i32 - output_pos.y) as u32,
+        );
+
+        let mut strip_rasterizer = sw::StripRasterizer::new();
+        strip_rasterizer.add_outline(self.events.iter().copied().map_points(|mut p| {
+            p -= input_shift;
+            Point2::new(p.x, p.y)
+        }));
 
         (output_pos, output_size, strip_rasterizer.rasterize())
     }

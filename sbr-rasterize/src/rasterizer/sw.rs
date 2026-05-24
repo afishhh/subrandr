@@ -946,6 +946,20 @@ impl Rasterizer {
                         },
                     );
                 }
+                SceneNode::FilledOutline(outline) => {
+                    let (pos, size, strips) = outline.to_strips();
+                    on_piece(
+                        self,
+                        OutputPiece {
+                            pos,
+                            size,
+                            content: OutputPieceContent::Strips(OutputStrips {
+                                strips,
+                                color: outline.color,
+                            }),
+                        },
+                    )
+                }
                 SceneNode::StrokedPolyline(polyline) => {
                     let (pos, size, strips) = polyline.to_strips();
                     on_piece(

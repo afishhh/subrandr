@@ -79,10 +79,18 @@ pub trait FloatOutlineIterExt: Iterator<Item = OutlineEvent<f32>> + Sized {
         quadratic_flatten_tolerance: f32,
         cubic_reduction_tolerance: f32,
     ) {
+        let mut start = Point2::ZERO;
         let mut previous = Point2::ZERO;
+
         for event in self {
             match event {
-                OutlineEvent::MoveTo(point) => previous = point,
+                OutlineEvent::MoveTo(point) => {
+                    if previous != start {
+                        callback(previous, start);
+                    }
+                    previous = point;
+                    start = point;
+                }
                 OutlineEvent::LineTo(end) => {
                     callback(previous, end);
                     previous = end;
@@ -106,6 +114,10 @@ pub trait FloatOutlineIterExt: Iterator<Item = OutlineEvent<f32>> + Sized {
                     }
                 }
             }
+        }
+
+        if previous != start {
+            callback(previous, start);
         }
     }
 }

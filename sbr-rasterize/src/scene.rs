@@ -109,12 +109,17 @@ impl<'a> SceneContentBuilder<'a> {
             }));
     }
 
-    pub fn bitmap(&mut self, texture: Texture, filter: Option<BitmapFilter>, color: BGRA8) {
+    pub fn bitmap(
+        &mut self,
+        texture: Texture,
+        filter: Option<BitmapFilter>,
+        color: impl Into<SceneColor>,
+    ) {
         self.parent.nodes.push(SceneNode::Bitmap(Bitmap {
             pos: self.rounded_translation().to_point(),
             texture,
             filter,
-            color,
+            color: color.into(),
         }));
     }
 
@@ -122,7 +127,7 @@ impl<'a> SceneContentBuilder<'a> {
         &mut self,
         polyline: Vec<Point2<I16Dot16>>,
         width: I16Dot16,
-        color: BGRA8,
+        color: impl Into<SceneColor>,
     ) {
         self.parent
             .nodes
@@ -130,11 +135,11 @@ impl<'a> SceneContentBuilder<'a> {
                 pos: self.current_translation.to_point(),
                 polyline,
                 width,
-                color,
+                color: color.into(),
             }));
     }
 
-    pub fn filled_outline(&mut self, outline: impl Outline<f32>, color: BGRA8) {
+    pub fn filled_outline(&mut self, outline: impl Outline<f32>, color: impl Into<SceneColor>) {
         let transf = Vec2::new(
             self.current_translation.x.into_f32(),
             self.current_translation.y.into_f32(),
@@ -144,21 +149,21 @@ impl<'a> SceneContentBuilder<'a> {
             .nodes
             .push(SceneNode::FilledOutline(FilledOutline {
                 events: outline.iter().map_points(|point| point + transf).collect(),
-                color,
+                color: color.into(),
             }));
     }
 
-    pub fn filled_rect(&mut self, rect: Rect2S, color: BGRA8) {
+    pub fn filled_rect(&mut self, rect: Rect2S, color: impl Into<SceneColor>) {
         self.parent.nodes.push(SceneNode::FilledRect(FilledRect {
             rect: rect.translate(self.current_translation),
-            color,
+            color: color.into(),
         }));
     }
 
     pub fn try_subscene<E>(
         &mut self,
         scene_filter: Option<SceneFilter>,
-        color: BGRA8,
+        active_color: impl Into<SceneColor>,
         content_fn: impl FnOnce(Point2S) -> Result<SubsceneKind, E>,
     ) -> Result<(), E> {
         let floored_pos = Vec2::new(
@@ -170,7 +175,7 @@ impl<'a> SceneContentBuilder<'a> {
             pos: floored_pos.to_point(),
             scene_filter,
             kind: content_fn((self.current_translation - floored_pos).to_point())?,
-            color,
+            active_color: active_color.into(),
         }));
 
         Ok(())
@@ -179,10 +184,10 @@ impl<'a> SceneContentBuilder<'a> {
     pub fn subscene(
         &mut self,
         scene_filter: Option<SceneFilter>,
-        color: BGRA8,
+        active_color: impl Into<SceneColor>,
         content_fn: impl FnOnce(Point2S) -> SubsceneKind,
     ) {
-        match self.try_subscene(scene_filter, color, |translation| {
+        match self.try_subscene(scene_filter, active_color, |translation| {
             Ok::<_, Infallible>(content_fn(translation))
         }) {
             Ok(()) => (),
@@ -199,12 +204,33 @@ pub(crate) struct DeferredBitmaps {
         Rc<dyn Fn(&mut dyn Rasterizer, &(dyn Any + 'static)) -> Result<Vec<Bitmap>, AnyError>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneColor(BGRA8);
+
+impl SceneColor {
+    pub const ACTIVE: Self = Self(BGRA8::new(1, 0, 0, 0));
+
+    pub(crate) fn compute(self, active_color: BGRA8) -> BGRA8 {
+        if self == Self::ACTIVE {
+            active_color
+        } else {
+            self.0
+        }
+    }
+}
+
+impl From<BGRA8> for SceneColor {
+    fn from(value: BGRA8) -> Self {
+        Self(if value.a == 0 { BGRA8::ZERO } else { value })
+    }
+}
+
 #[derive(Clone)]
 pub struct Bitmap {
     pub pos: Point2<i32>,
     pub texture: Texture,
     pub filter: Option<BitmapFilter>,
-    pub color: BGRA8,
+    pub color: SceneColor,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -217,19 +243,19 @@ pub(crate) struct StrokedPolyline {
     pub(crate) pos: Point2S,
     pub(crate) polyline: Vec<Point2<I16Dot16>>,
     pub(crate) width: I16Dot16,
-    pub(crate) color: BGRA8,
+    pub(crate) color: SceneColor,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct FilledOutline {
     pub(crate) events: Rc<[OutlineEvent<f32>]>,
-    pub(crate) color: BGRA8,
+    pub(crate) color: SceneColor,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct FilledRect {
     pub(crate) rect: Rect2S,
-    pub(crate) color: BGRA8,
+    pub(crate) color: SceneColor,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -242,7 +268,7 @@ pub(crate) struct Subscene {
     pub(crate) pos: Point2<i32>,
     pub(crate) kind: SubsceneKind,
     pub(crate) scene_filter: Option<SceneFilter>,
-    pub(crate) color: BGRA8,
+    pub(crate) active_color: SceneColor,
 }
 
 #[derive(Clone)]

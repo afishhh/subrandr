@@ -2,11 +2,14 @@ use std::path::PathBuf;
 
 use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
-    scene::{FixedS, Scene, SceneBuilder, SubsceneKind},
+    scene::{FixedS, Scene, SceneBuilder, SceneColor, SceneFilter, SubsceneKind},
     sw::{self, InstancedOutputBuilder, OutputPiece},
-    PixelFormat, Rasterizer as _,
+    Rasterizer as _,
 };
-use util::math::{I16Dot16, Point2, Rect2, Vec2};
+use util::{
+    make_static_outline,
+    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
+};
 
 struct DrawChecker {
     base_path: PathBuf,
@@ -329,50 +332,47 @@ fn antialiased_rectangle() {
 
 #[test]
 fn blurred_triangle() {
-    let mut r = sw::Rasterizer::new();
-    let triangle = unsafe {
-        r.create_texture_mapped(
-            Vec2::splat(90),
-            PixelFormat::Mono,
-            Box::new(|mut target| {
-                target.buffer_mut().fill(std::mem::MaybeUninit::new(0));
-                let mut sr = sw::StripRasterizer::new();
-                sr.stroke_polyline(
-                    [
-                        Point2::new(9.0, 81.0),
-                        Point2::new(81.0, 81.0),
-                        Point2::new(45.0, 9.0),
-                        Point2::new(9.0, 81.0),
-                        Point2::new(81.0, 81.0),
-                    ]
-                    .into_iter(),
-                    7.5,
-                );
-                let strips = sr.rasterize();
-                strips.blend_to(target, |p, v| {
-                    p.write(v);
-                });
-            }),
-        )
+    let mut builder = SceneBuilder::new();
+    let triangle = {
+        let mut root = builder.root();
+        root.stroked_polyline(
+            vec![
+                Point2::new(I16Dot16::new(9), I16Dot16::new(81)),
+                Point2::new(I16Dot16::new(81), I16Dot16::new(81)),
+                Point2::new(I16Dot16::new(45), I16Dot16::new(9)),
+                Point2::new(I16Dot16::new(9), I16Dot16::new(81)),
+                Point2::new(I16Dot16::new(81), I16Dot16::new(81)),
+            ],
+            I16Dot16::new(15),
+            BGRA8::RED,
+        );
+        builder.finish()
     };
 
-    let triangle_blurred_09 = r.blur_texture(&triangle, 0.9);
-    let triangle_blurred_25 = r.blur_texture(&triangle, 2.5);
-    let mut builder = SceneBuilder::new();
     let scene = {
         let mut root = builder.root();
         root.apply_translation(Vec2::new(FixedS::new(20), FixedS::new(20)));
-        root.with_translation(Vec2::new(
-            -FixedS::new(triangle_blurred_25.padding.x as i32),
-            -FixedS::new(triangle_blurred_25.padding.y as i32),
-        ))
-        .bitmap(triangle_blurred_25.texture, None, BGRA8::MAGENTA);
-        root.with_translation(Vec2::new(
-            -FixedS::new(triangle_blurred_09.padding.x as i32),
-            -FixedS::new(triangle_blurred_09.padding.y as i32),
-        ))
-        .bitmap(triangle_blurred_09.texture, None, BGRA8::YELLOW);
-        root.bitmap(triangle, None, BGRA8::BLACK);
+        root.subscene(
+            Some(SceneFilter::ExtractAlpha {
+                blur_stddev: I26Dot6::from_quotient(5, 2),
+            }),
+            BGRA8::MAGENTA,
+            |_| SubsceneKind::Scene(triangle.clone()),
+        );
+        root.subscene(
+            Some(SceneFilter::ExtractAlpha {
+                blur_stddev: I26Dot6::from_quotient(9, 10),
+            }),
+            BGRA8::YELLOW,
+            |_| SubsceneKind::Scene(triangle.clone()),
+        );
+        root.subscene(
+            Some(SceneFilter::ExtractAlpha {
+                blur_stddev: I26Dot6::ZERO,
+            }),
+            BGRA8::BLACK,
+            |_| SubsceneKind::Scene(triangle),
+        );
         builder.finish()
     };
 
@@ -423,4 +423,48 @@ fn bilinear_scaling() {
     };
 
     _ = DrawChecker::check_defaults("bilinear_scaling", scene_size, &scene);
+}
+
+#[test]
+fn placeholder_subscene_with_filled_outline() {
+    let mut builder = SceneBuilder::new();
+    let subscene = {
+        let mut root = builder.root();
+        root.filled_outline(
+            &make_static_outline![
+                #move_to (8, 8);
+                line_to (30, 30);
+                quad_to (10, 50), (50, 50);
+                line_to (50, 10);
+            ],
+            SceneColor::ACTIVE,
+        );
+        root.stroked_polyline(
+            vec![
+                Point2::new(I16Dot16::new(4), I16Dot16::new(4)),
+                Point2::new(I16Dot16::new(4), I16Dot16::new(60)),
+                Point2::new(I16Dot16::new(60), I16Dot16::new(60)),
+            ],
+            I16Dot16::new(8),
+            BGRA8::YELLOW,
+        );
+        builder.finish()
+    };
+    let scene = {
+        let mut root = builder.root();
+        root.subscene(None, BGRA8::MAGENTA, |_| {
+            SubsceneKind::Scene(subscene.clone())
+        });
+        root.with_translation(Vec2::new(FixedS::ZERO, FixedS::new(60)))
+            .subscene(None, BGRA8::ORANGERED, |_| SubsceneKind::Scene(subscene));
+        builder.finish()
+    };
+
+    let mut checker = DrawChecker::check_immediate(
+        "placeholder_subscene_with_filled_outline",
+        Vec2::new(60, 124),
+        &scene,
+    );
+    checker.check_instanced(Rect2::new(Point2::new(0, 15), Point2::new(60, 76)), false);
+    checker.check_instanced(Rect2::new(Point2::new(37, 37), Point2::new(75, 89)), false);
 }

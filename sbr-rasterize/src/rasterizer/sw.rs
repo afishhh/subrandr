@@ -845,6 +845,7 @@ impl super::Rasterizer for Rasterizer {
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
         self.render_scene_pieces_impl(
+            BGRA8::MAGENTA,
             &scene.0,
             &mut |r, piece| piece.content.blend_to_impl(r, target, piece.pos),
             user_data,
@@ -885,7 +886,7 @@ pub struct OutputPiece {
 }
 
 impl OutputPiece {
-    fn from_bitmap(bitmap: Bitmap) -> Self {
+    fn from_bitmap(bitmap: Bitmap, active_color: BGRA8) -> Self {
         let texture = unwrap_sw_texture(&bitmap.texture);
         Self {
             pos: bitmap.pos,
@@ -894,7 +895,7 @@ impl OutputPiece {
                 OutputPieceContent::Texture(OutputBitmap {
                     texture: texture.clone(),
                     filter: bitmap.filter,
-                    color: bitmap.color,
+                    color: bitmap.color.compute(active_color),
                 })
             },
         }
@@ -904,6 +905,7 @@ impl OutputPiece {
 impl Rasterizer {
     fn render_scene_pieces_impl(
         &mut self,
+        active_color: BGRA8,
         scene: &[SceneNode],
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
         user_data: &(dyn Any + 'static),
@@ -915,11 +917,11 @@ impl Rasterizer {
                         .map_err(SceneRenderErrorInner::ToBitmaps)?
                     {
                         bitmap.pos += bitmaps.translation;
-                        on_piece(self, OutputPiece::from_bitmap(bitmap));
+                        on_piece(self, OutputPiece::from_bitmap(bitmap, active_color));
                     }
                 }
                 SceneNode::Bitmap(bitmap) => {
-                    on_piece(self, OutputPiece::from_bitmap(bitmap.clone()));
+                    on_piece(self, OutputPiece::from_bitmap(bitmap.clone(), active_color));
                 }
                 &SceneNode::FilledRect(FilledRect { rect, color }) => {
                     on_piece(
@@ -941,7 +943,7 @@ impl Rasterizer {
                                         rect.max.y - rect.min.y.floor(),
                                     ),
                                 },
-                                color,
+                                color: color.compute(active_color),
                             }),
                         },
                     );
@@ -955,7 +957,7 @@ impl Rasterizer {
                             size,
                             content: OutputPieceContent::Strips(OutputStrips {
                                 strips,
-                                color: outline.color,
+                                color: outline.color.compute(active_color),
                             }),
                         },
                     )
@@ -969,12 +971,13 @@ impl Rasterizer {
                             size,
                             content: OutputPieceContent::Strips(OutputStrips {
                                 strips,
-                                color: polyline.color,
+                                color: polyline.color.compute(active_color),
                             }),
                         },
                     )
                 }
                 SceneNode::Subscene(subscene) => {
+                    let new_active_color = subscene.active_color.compute(active_color);
                     let (off, mut texture) = match &subscene.kind {
                         crate::scene::SubsceneKind::External(external) => {
                             let (off, texture) = external
@@ -983,7 +986,7 @@ impl Rasterizer {
                             (off, unwrap_sw_texture(&texture).clone())
                         }
                         crate::scene::SubsceneKind::Scene(child_scene) => {
-                            self.render_scene_texture(child_scene, user_data)?
+                            self.render_scene_texture(new_active_color, child_scene, user_data)?
                         }
                     };
 
@@ -1010,7 +1013,7 @@ impl Rasterizer {
                             content: OutputPieceContent::Texture(OutputBitmap {
                                 texture,
                                 filter: output_filter,
-                                color: subscene.color,
+                                color: new_active_color,
                             }),
                         },
                     );
@@ -1027,17 +1030,24 @@ impl Rasterizer {
         on_piece: &mut dyn FnMut(OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_pieces_impl(&scene.0, &mut move |_r, p| on_piece(p), user_data)
+        self.render_scene_pieces_impl(
+            BGRA8::MAGENTA,
+            &scene.0,
+            &mut move |_r, p| on_piece(p),
+            user_data,
+        )
     }
 
     fn render_scene_texture(
         &mut self,
+        active_color: BGRA8,
         scene: &Scene,
         user_data: &(dyn Any + 'static),
     ) -> Result<(Vec2<i32>, Texture<'static>), super::SceneRenderError> {
         let mut pieces = Vec::new();
         let mut rect = Rect2::NOTHING;
         self.render_scene_pieces_impl(
+            active_color,
             &scene.0,
             &mut |_, piece| {
                 rect.expand_to_rect(piece.rect());

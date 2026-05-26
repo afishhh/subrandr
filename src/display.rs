@@ -107,7 +107,7 @@ impl DisplayContext<'_> {
                         } else {
                             None
                         },
-                        color,
+                        color: color.into(),
                     });
                 }
 

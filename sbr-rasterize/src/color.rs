@@ -74,15 +74,6 @@ impl BGRA8 {
             ..self
         }
     }
-
-    pub const fn mask_color(self) -> Self {
-        Self {
-            b: 0,
-            g: 0,
-            r: 0,
-            a: self.a,
-        }
-    }
 }
 
 pub trait Premultiply: Debug + Clone + Copy {

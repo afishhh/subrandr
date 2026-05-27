@@ -9,7 +9,7 @@ use util::{
 use crate::{
     color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, SceneNode, Vec2S},
+    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, Scene, SceneNode},
     PixelFormat, SceneRenderError,
 };
 
@@ -449,6 +449,12 @@ impl Texture<'static> {
         }
     }
 
+    pub const EMPTY_MONO: Texture<'static> = Texture {
+        width: 0,
+        height: 0,
+        data: TextureData::BorrowedMono(&[]),
+    };
+
     pub const SINGLE_FILLED_MONO_PIXEL: Texture<'static> = Texture {
         width: 1,
         height: 1,
@@ -819,15 +825,14 @@ impl super::Rasterizer for Rasterizer {
     fn render_scene(
         &mut self,
         target: &mut super::RenderTarget,
-        scene: &[SceneNode],
+        scene: &Scene,
         user_data: &(dyn Any + 'static),
     ) -> Result<(), super::SceneRenderError> {
         let target = unwrap_sw_render_target(target);
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
-        self.render_scene_pieces_at(
-            Vec2::ZERO,
-            scene,
+        self.render_scene_pieces_impl(
+            &scene.0,
             &mut |r, piece| piece.content.blend_to_impl(r, target, piece.pos),
             user_data,
         )?;
@@ -884,20 +889,19 @@ impl OutputPiece {
 }
 
 impl Rasterizer {
-    fn render_scene_pieces_at(
+    fn render_scene_pieces_impl(
         &mut self,
-        offset: Vec2S,
         scene: &[SceneNode],
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
-        let current_translation = offset;
         for node in scene {
             match node {
                 SceneNode::DeferredBitmaps(bitmaps) => {
-                    for bitmap in (bitmaps.to_bitmaps)(self, user_data)
+                    for mut bitmap in (bitmaps.to_bitmaps)(self, user_data)
                         .map_err(SceneRenderErrorInner::ToBitmaps)?
                     {
+                        bitmap.pos += bitmaps.translation;
                         on_piece(self, OutputPiece::from_bitmap(bitmap));
                     }
                 }
@@ -930,7 +934,7 @@ impl Rasterizer {
                     );
                 }
                 SceneNode::StrokedPolyline(polyline) => {
-                    let (pos, size, strips) = polyline.to_strips(current_translation.to_point());
+                    let (pos, size, strips) = polyline.to_strips();
                     on_piece(
                         self,
                         OutputPiece {
@@ -943,12 +947,23 @@ impl Rasterizer {
                         },
                     )
                 }
-                SceneNode::Subscene(subscene) => self.render_scene_pieces_at(
-                    current_translation + subscene.pos.to_vec(),
-                    &subscene.scene,
-                    on_piece,
-                    user_data,
-                )?,
+                SceneNode::Subscene(subscene) => {
+                    let (off, texture) = match &subscene.kind {
+                        crate::scene::SubsceneKind::Scene(child_scene) => {
+                            self.render_scene_texture(child_scene, user_data)?
+                        }
+                    };
+
+                    on_piece(
+                        self,
+                        OutputPiece::from_bitmap(Bitmap {
+                            pos: subscene.pos + off,
+                            texture: texture.into(),
+                            filter: None,
+                            color: BGRA8::WHITE,
+                        }),
+                    );
+                }
             }
         }
 
@@ -957,11 +972,46 @@ impl Rasterizer {
 
     pub fn render_scene_pieces(
         &mut self,
-        scene: &[SceneNode],
+        scene: &Scene,
         on_piece: &mut dyn FnMut(OutputPiece),
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_pieces_at(Vec2::ZERO, scene, &mut move |_r, p| on_piece(p), user_data)
+        self.render_scene_pieces_impl(&scene.0, &mut move |_r, p| on_piece(p), user_data)
+    }
+
+    fn render_scene_texture(
+        &mut self,
+        scene: &Scene,
+        user_data: &(dyn Any + 'static),
+    ) -> Result<(Vec2<i32>, Texture<'static>), super::SceneRenderError> {
+        let mut pieces = Vec::new();
+        let mut rect = Rect2::NOTHING;
+        self.render_scene_pieces_impl(
+            &scene.0,
+            &mut |_, piece| {
+                rect.expand_to_rect(piece.rect());
+                pieces.push(piece);
+            },
+            user_data,
+        )?;
+
+        if rect.is_empty() {
+            return Ok((Vec2::ZERO, Texture::EMPTY_MONO));
+        }
+
+        Ok((
+            rect.min.to_vec(),
+            Texture::new_with(
+                Vec2::new(rect.width() as u32, rect.height() as u32),
+                |mut view| {
+                    for piece in pieces {
+                        piece
+                            .content
+                            .blend_to_impl(self, &mut view, piece.pos - rect.min.to_vec());
+                    }
+                },
+            ),
+        ))
     }
 }
 

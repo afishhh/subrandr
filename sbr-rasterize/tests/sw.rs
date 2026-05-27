@@ -1,8 +1,8 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
-    scene::{self, FixedS},
+    scene::{FixedS, Scene, SceneBuilder, SubsceneKind},
     sw::{self, InstancedOutputBuilder, OutputPiece},
     PixelFormat, Rasterizer as _,
 };
@@ -23,7 +23,7 @@ struct DrawChecker {
 }
 
 impl DrawChecker {
-    fn check_immediate(name: &str, size: Vec2<u32>, scene: &[scene::SceneNode]) -> Self {
+    fn check_immediate(name: &str, size: Vec2<u32>, scene: &Scene) -> Self {
         let mut buffer = vec![Premultiplied(BGRA8::ZERO); (size.x * size.y) as usize];
         let mut target = sw::RenderTarget::new(&mut buffer, size.x, size.y, size.x);
 
@@ -56,7 +56,7 @@ impl DrawChecker {
         }
     }
 
-    fn check_defaults(name: &str, size: Vec2<u32>, scene: &[scene::SceneNode]) -> Self {
+    fn check_defaults(name: &str, size: Vec2<u32>, scene: &Scene) -> Self {
         let mut checker = Self::check_immediate(name, size, scene);
         checker.check_instanced(
             Rect2::from_min_size(Point2::ZERO, Vec2::new(size.x as i32, size.y as i32)),
@@ -180,55 +180,60 @@ impl DrawChecker {
 
 #[test]
 fn simple_rectangles() {
-    let scene = &[
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+    let mut builder = SceneBuilder::new();
+    let scene = {
+        let mut root = builder.root();
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(10), FixedS::new(10)),
                 max: Point2::new(FixedS::new(90), FixedS::new(90)),
             },
-            color: BGRA8::YELLOW,
-        }),
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+            BGRA8::YELLOW,
+        );
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(5), FixedS::new(5)),
                 max: Point2::new(FixedS::new(50), FixedS::new(50)),
             },
-            color: BGRA8::RED,
-        }),
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+            BGRA8::RED,
+        );
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(50), FixedS::new(50)),
                 max: Point2::new(FixedS::new(100), FixedS::new(100)),
             },
-            color: BGRA8::BLUE,
-        }),
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+            BGRA8::BLUE,
+        );
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(25), FixedS::new(25)),
                 max: Point2::new(FixedS::new(75), FixedS::new(75)),
             },
-            color: BGRA8::GREEN.mul_alpha(150),
-        }),
-    ];
+            BGRA8::GREEN.mul_alpha(150),
+        );
+        builder.finish()
+    };
 
-    DrawChecker::check_defaults("simple_rectangles", Vec2::new(100, 100), scene);
+    DrawChecker::check_defaults("simple_rectangles", Vec2::new(100, 100), &scene);
 }
 
 #[test]
 fn clipped_polyline() {
-    let scene = &[scene::SceneNode::StrokedPolyline(scene::StrokedPolyline {
-        polyline: vec![
+    let mut builder = SceneBuilder::new();
+    builder.root().stroked_polyline(
+        vec![
             Point2::new(I16Dot16::new(50), I16Dot16::new(120)),
             Point2::new(I16Dot16::new(120), I16Dot16::new(50)),
             Point2::new(I16Dot16::new(-20), I16Dot16::new(50)),
             Point2::new(I16Dot16::new(50), I16Dot16::new(-20)),
             Point2::new(I16Dot16::new(50), I16Dot16::new(120)),
         ],
-        width: I16Dot16::new(8),
-        color: BGRA8::RED,
-    })];
+        I16Dot16::new(8),
+        BGRA8::RED,
+    );
+    let scene = builder.finish();
 
-    let mut checker = DrawChecker::check_defaults("clipped_polyline", Vec2::new(100, 100), scene);
+    let mut checker = DrawChecker::check_defaults("clipped_polyline", Vec2::new(100, 100), &scene);
     checker.check_instanced(
         Rect2::new(Point2::new(20, -10), Point2::new(200, 80)),
         false,
@@ -237,9 +242,11 @@ fn clipped_polyline() {
 
 #[test]
 fn translated_subscene_with_polyline() {
-    let subscene = Arc::from([
-        scene::SceneNode::StrokedPolyline(scene::StrokedPolyline {
-            polyline: vec![
+    let mut builder = SceneBuilder::new();
+    let subscene = {
+        let mut root = builder.root();
+        root.stroked_polyline(
+            vec![
                 Point2::new(I16Dot16::new(4), I16Dot16::new(4)),
                 Point2::new(I16Dot16::new(60), I16Dot16::new(4)),
                 Point2::new(I16Dot16::new(60), I16Dot16::new(60)),
@@ -248,51 +255,52 @@ fn translated_subscene_with_polyline() {
                 // Needs an extra segment to properly close
                 Point2::new(I16Dot16::new(60), I16Dot16::new(4)),
             ],
-            width: I16Dot16::new(8),
-            color: BGRA8::CYAN,
-        }),
-        scene::SceneNode::StrokedPolyline(scene::StrokedPolyline {
-            polyline: vec![
+            I16Dot16::new(8),
+            BGRA8::CYAN,
+        );
+        root.stroked_polyline(
+            vec![
                 Point2::new(I16Dot16::new(4), I16Dot16::new(4)),
                 Point2::new(I16Dot16::new(60), I16Dot16::new(60)),
             ],
-            width: I16Dot16::new(8),
-            color: BGRA8::MAGENTA,
-        }),
-        scene::SceneNode::StrokedPolyline(scene::StrokedPolyline {
-            polyline: vec![
+            I16Dot16::new(8),
+            BGRA8::MAGENTA,
+        );
+        root.stroked_polyline(
+            vec![
                 Point2::new(I16Dot16::new(60), I16Dot16::new(4)),
                 Point2::new(I16Dot16::new(4), I16Dot16::new(60)),
             ],
-            width: I16Dot16::new(8),
-            color: BGRA8::MAGENTA,
-        }),
-    ]);
-    let scene = &[
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+            I16Dot16::new(8),
+            BGRA8::MAGENTA,
+        );
+        builder.finish()
+    };
+    let scene = {
+        let mut root = builder.root();
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(10), FixedS::new(10)),
                 max: Point2::new(FixedS::new(90), FixedS::new(90)),
             },
-            color: BGRA8::YELLOW,
-        }),
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2 {
+            BGRA8::YELLOW,
+        );
+        root.filled_rect(
+            Rect2 {
                 min: Point2::new(FixedS::new(25), FixedS::new(25)),
                 max: Point2::new(FixedS::new(120), FixedS::new(120)),
             },
-            color: BGRA8::BLUE,
-        }),
-        scene::SceneNode::Subscene(scene::Subscene {
-            pos: Point2::new(FixedS::new(25), FixedS::new(25)),
-            scene: subscene,
-        }),
-    ];
+            BGRA8::BLUE,
+        );
+        root.with_translation(Vec2::new(FixedS::new(25), FixedS::new(25)))
+            .subscene(|_| SubsceneKind::Scene(subscene));
+        builder.finish()
+    };
 
     let mut checker = DrawChecker::check_immediate(
         "translated_subscene_with_polyline",
         Vec2::new(100, 100),
-        scene,
+        &scene,
     );
     checker.check_instanced(Rect2::new(Point2::new(20, 43), Point2::new(91, 76)), false);
     checker.check_instanced(Rect2::new(Point2::new(37, 37), Point2::new(75, 89)), false);
@@ -300,16 +308,20 @@ fn translated_subscene_with_polyline() {
 
 #[test]
 fn antialiased_rectangle() {
-    let scene = &[scene::SceneNode::FilledRect(scene::FilledRect {
-        rect: Rect2 {
-            min: Point2::new(FixedS::from_f32(1.75), FixedS::from_f32(1.5)),
-            max: Point2::new(FixedS::from_f32(7.5), FixedS::from_f32(7.3)),
-        },
-        color: BGRA8::YELLOW,
-    })];
+    let mut builder = SceneBuilder::new();
+    let scene = {
+        builder.root().filled_rect(
+            Rect2 {
+                min: Point2::new(FixedS::from_f32(1.75), FixedS::from_f32(1.5)),
+                max: Point2::new(FixedS::from_f32(7.5), FixedS::from_f32(7.3)),
+            },
+            BGRA8::YELLOW,
+        );
+        builder.finish()
+    };
 
     let mut checker =
-        DrawChecker::check_immediate("antialiased_rectangle", Vec2::new(10, 10), scene);
+        DrawChecker::check_immediate("antialiased_rectangle", Vec2::new(10, 10), &scene);
     checker.check_instanced(Rect2::new(Point2::new(2, 2), Point2::new(8, 8)), false);
     checker.check_instanced(Rect2::new(Point2::new(1, 3), Point2::new(5, 6)), false);
     checker.check_instanced(Rect2::new(Point2::new(0, 0), Point2::new(5, 10)), false);
@@ -346,36 +358,25 @@ fn blurred_triangle() {
 
     let triangle_blurred_09 = r.blur_texture(&triangle, 0.9);
     let triangle_blurred_25 = r.blur_texture(&triangle, 2.5);
-    let scene = &[
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(20, 20)
-                - Vec2::new(
-                    triangle_blurred_25.padding.x as i32,
-                    triangle_blurred_25.padding.y as i32,
-                ),
-            texture: triangle_blurred_25.texture,
-            filter: None,
-            color: BGRA8::MAGENTA,
-        }),
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(20, 20)
-                - Vec2::new(
-                    triangle_blurred_09.padding.x as i32,
-                    triangle_blurred_09.padding.y as i32,
-                ),
-            texture: triangle_blurred_09.texture,
-            filter: None,
-            color: BGRA8::YELLOW,
-        }),
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(20, 20),
-            texture: triangle,
-            filter: None,
-            color: BGRA8::BLACK,
-        }),
-    ];
+    let mut builder = SceneBuilder::new();
+    let scene = {
+        let mut root = builder.root();
+        root.apply_translation(Vec2::new(FixedS::new(20), FixedS::new(20)));
+        root.with_translation(Vec2::new(
+            -FixedS::new(triangle_blurred_25.padding.x as i32),
+            -FixedS::new(triangle_blurred_25.padding.y as i32),
+        ))
+        .bitmap(triangle_blurred_25.texture, None, BGRA8::MAGENTA);
+        root.with_translation(Vec2::new(
+            -FixedS::new(triangle_blurred_09.padding.x as i32),
+            -FixedS::new(triangle_blurred_09.padding.y as i32),
+        ))
+        .bitmap(triangle_blurred_09.texture, None, BGRA8::YELLOW);
+        root.bitmap(triangle, None, BGRA8::BLACK);
+        builder.finish()
+    };
 
-    _ = DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), scene);
+    _ = DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), &scene);
 }
 
 #[test]
@@ -399,36 +400,27 @@ fn bilinear_scaling() {
     // This output has been painstakingly confirmed to match Gimp, ImageMagick and WebGL in shadertoy.
     // (WebGL only for `part_to_16` since I don't know if you can do this sort of operation with the others)
     let scene_size = Vec2::new(50, 20);
-    let scene = &[
-        scene::SceneNode::FilledRect(scene::FilledRect {
-            rect: Rect2::new(
+    let mut builder = SceneBuilder::new();
+    let scene = {
+        let mut root = builder.root();
+        root.filled_rect(
+            Rect2::new(
                 Point2::ZERO,
                 Point2::new(
                     FixedS::new(scene_size.x as i32),
                     FixedS::new(scene_size.y as i32),
                 ),
             ),
-            color: BGRA8::BLACK,
-        }),
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(2, 7),
-            texture: t.into(),
-            filter: None,
-            color: BGRA8::WHITE,
-        }),
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(10, 2),
-            texture: full_to_16.into(),
-            filter: None,
-            color: BGRA8::WHITE,
-        }),
-        scene::SceneNode::Bitmap(scene::Bitmap {
-            pos: Point2::new(30, 2),
-            texture: part_to_16.into(),
-            filter: None,
-            color: BGRA8::WHITE,
-        }),
-    ];
+            BGRA8::BLACK,
+        );
+        root.with_translation(Vec2::new(FixedS::new(2), FixedS::new(7)))
+            .bitmap(t.into(), None, BGRA8::WHITE);
+        root.with_translation(Vec2::new(FixedS::new(10), FixedS::new(2)))
+            .bitmap(full_to_16.into(), None, BGRA8::WHITE);
+        root.with_translation(Vec2::new(FixedS::new(30), FixedS::new(2)))
+            .bitmap(part_to_16.into(), None, BGRA8::WHITE);
+        builder.finish()
+    };
 
-    _ = DrawChecker::check_defaults("bilinear_scaling", scene_size, scene);
+    _ = DrawChecker::check_defaults("bilinear_scaling", scene_size, &scene);
 }

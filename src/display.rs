@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use rasterize::{
     color::BGRA8,
-    scene::{Bitmap, BitmapFilter, DeferredBitmaps, FilledRect, SceneNode},
+    scene::{Bitmap, BitmapFilter, SceneContentBuilder},
 };
 use util::math::{I26Dot6, Point2, Rect2};
 
@@ -10,7 +10,7 @@ use crate::{
     layout::{
         block::{BlockContainerFragment, BlockContainerFragmentContent},
         inline::{InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
-        FixedL, FragmentBox, Point2L, Rect2L,
+        FixedL, FragmentBox, Point2L,
     },
     style::{computed::ToPhysicalPixels, ComputedStyle},
     text::{self, FontMetrics, GlyphCache},
@@ -20,13 +20,13 @@ mod decoration;
 use decoration::*;
 
 pub struct DisplayPass<'r> {
-    pub output: &'r mut Vec<SceneNode>,
+    pub output: SceneContentBuilder<'r>,
     dpi: u32,
     decoration_tracker: DecorationTracker,
 }
 
 struct DisplayContext<'c> {
-    output: &'c mut Vec<SceneNode>,
+    output: SceneContentBuilder<'c>,
     dpi: u32,
     decoration_ctx: DecorationContext<'c>,
 }
@@ -37,7 +37,7 @@ fn round_y(mut p: Point2L) -> Point2L {
 }
 
 impl<'r> DisplayPass<'r> {
-    pub fn new(output: &'r mut Vec<SceneNode>, dpi: u32) -> Self {
+    pub fn new(output: SceneContentBuilder<'r>, dpi: u32) -> Self {
         Self {
             output,
             dpi,
@@ -47,7 +47,7 @@ impl<'r> DisplayPass<'r> {
 
     fn root_ctx(&mut self) -> DisplayContext<'_> {
         DisplayContext {
-            output: &mut *self.output,
+            output: self.output.child(),
             dpi: self.dpi,
             decoration_ctx: self.decoration_tracker.root(),
         }
@@ -73,10 +73,6 @@ impl<'r> DisplayPass<'r> {
 }
 
 impl DisplayContext<'_> {
-    fn push_rect_fill(output: &mut Vec<SceneNode>, rect: Rect2L, color: BGRA8) {
-        output.push(SceneNode::FilledRect(FilledRect { rect, color }));
-    }
-
     fn push_text(
         &mut self,
         pos: Point2L,
@@ -86,43 +82,41 @@ impl DisplayContext<'_> {
     ) {
         let fragment = fragment.clone();
         self.output
-            .push(SceneNode::DeferredBitmaps(DeferredBitmaps {
-                to_bitmaps: Rc::new(move |rasterizer, user_data| {
-                    let glyph_cache = user_data
-                        .downcast_ref::<GlyphCache>()
-                        .expect("to_bitmaps user_data is not a GlyphCache?");
+            .deferred_bitmaps(Rc::new(move |rasterizer, user_data| {
+                let glyph_cache = user_data
+                    .downcast_ref::<GlyphCache>()
+                    .expect("to_bitmaps user_data is not a GlyphCache?");
 
-                    let mut bitmaps = Vec::new();
-                    let glyphs = text::render(
-                        glyph_cache,
-                        rasterizer,
-                        pos.x.fract(),
-                        pos.y.fract(),
-                        shadow.unwrap_or(0.0),
-                        &mut fragment.glyphs.iter_glyphs_visual(),
-                    )?;
+                let mut bitmaps = Vec::new();
+                let glyphs = text::render(
+                    glyph_cache,
+                    rasterizer,
+                    pos.x.fract(),
+                    pos.y.fract(),
+                    shadow.unwrap_or(0.0),
+                    &mut fragment.glyphs.iter_glyphs_visual(),
+                )?;
 
-                    let base_pos = Point2::new(pos.x.floor_to_inner(), pos.y.floor_to_inner());
-                    for glyph in glyphs {
-                        bitmaps.push(Bitmap {
-                            pos: base_pos + glyph.offset,
-                            texture: glyph.texture,
-                            filter: if shadow.is_some() {
-                                Some(BitmapFilter::ExtractAlpha)
-                            } else {
-                                None
-                            },
-                            color,
-                        });
-                    }
+                let base_pos = Point2::new(pos.x.floor_to_inner(), pos.y.floor_to_inner());
+                for glyph in glyphs {
+                    bitmaps.push(Bitmap {
+                        pos: base_pos + glyph.offset,
+                        texture: glyph.texture,
+                        filter: if shadow.is_some() {
+                            Some(BitmapFilter::ExtractAlpha)
+                        } else {
+                            None
+                        },
+                        color,
+                    });
+                }
 
-                    Ok(bitmaps)
-                }),
+                Ok(bitmaps)
             }));
     }
 
     fn display_line_decoration(
-        output: &mut Vec<SceneNode>,
+        output: &mut SceneContentBuilder,
         x0: FixedL,
         x1: FixedL,
         baseline_y: I26Dot6,
@@ -130,8 +124,7 @@ impl DisplayContext<'_> {
     ) {
         let decoration_y = baseline_y + decoration.baseline_offset;
 
-        Self::push_rect_fill(
-            output,
+        output.filled_rect(
             Rect2::new(
                 Point2::new(x0, decoration_y),
                 Point2::new(x1, decoration_y + decoration.thickness),
@@ -181,7 +174,13 @@ impl DisplayContext<'_> {
             .iter()
             .filter(|x| matches!(x.kind, DecorationKind::Underline))
         {
-            Self::display_line_decoration(self.output, pos.x, text_end_x, baseline_y, decoration);
+            Self::display_line_decoration(
+                &mut self.output,
+                pos.x,
+                text_end_x,
+                baseline_y,
+                decoration,
+            );
         }
 
         let color = fragment.style.color();
@@ -195,7 +194,13 @@ impl DisplayContext<'_> {
             .iter()
             .filter(|x| matches!(x.kind, DecorationKind::LineThrough))
         {
-            Self::display_line_decoration(self.output, pos.x, text_end_x, baseline_y, decoration);
+            Self::display_line_decoration(
+                &mut self.output,
+                pos.x,
+                text_end_x,
+                baseline_y,
+                decoration,
+            );
         }
     }
 
@@ -205,7 +210,7 @@ impl DisplayContext<'_> {
         font_metrics_if_inline: Option<&FontMetrics>,
     ) -> DisplayContext<'_> {
         DisplayContext {
-            output: &mut *self.output,
+            output: self.output.child(),
             dpi: self.dpi,
             decoration_ctx: self
                 .decoration_ctx
@@ -215,7 +220,7 @@ impl DisplayContext<'_> {
 
     fn suspend_decorations(&mut self) -> DisplayContext<'_> {
         DisplayContext {
-            output: &mut *self.output,
+            output: self.output.child(),
             dpi: self.dpi,
             decoration_ctx: self.decoration_ctx.suspend_active(),
         }
@@ -238,7 +243,7 @@ impl DisplayContext<'_> {
             bg.max.y = bg.max.y.round();
             bg.min.x = bg.min.x.floor();
             bg.min.y = bg.min.y.round();
-            Self::push_rect_fill(self.output, bg, background);
+            self.output.filled_rect(bg, background);
         }
     }
 
@@ -260,7 +265,7 @@ impl DisplayContext<'_> {
                         base_pos.x + base.children.first().map_or(FixedL::ZERO, |x| x.0.x);
                     for decoration in base_scope.decoration_ctx.active_decorations() {
                         Self::display_line_decoration(
-                            base_scope.output,
+                            &mut base_scope.output,
                             last_x,
                             initial_base_padding_end,
                             baseline_y,
@@ -283,7 +288,7 @@ impl DisplayContext<'_> {
                         base_pos.x + base.children.last().map_or(FixedL::ZERO, |x| x.0.x);
                     for decoration in base_scope.decoration_ctx.active_decorations() {
                         Self::display_line_decoration(
-                            base_scope.output,
+                            &mut base_scope.output,
                             final_base_padding_end,
                             base_end_x,
                             baseline_y,

@@ -45,6 +45,18 @@ impl<N> OutlineEvent<N> {
     }
 }
 
+impl<N: Number> Outline<N> for [OutlineEvent<N>] {
+    fn iter(&self) -> impl Iterator<Item = OutlineEvent<N>> {
+        self.iter().copied()
+    }
+}
+
+impl<N: Number, T: Outline<N> + ?Sized> Outline<N> for &T {
+    fn iter(&self) -> impl Iterator<Item = OutlineEvent<N>> {
+        T::iter(self)
+    }
+}
+
 pub trait OutlineIterExt<N: Number>: Iterator<Item = OutlineEvent<N>> {
     fn map_points<M: Number>(
         self,

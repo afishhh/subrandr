@@ -2,13 +2,12 @@ use std::{
     collections::VecDeque,
     fmt::{Debug, Write as _},
     ops::Range,
-    sync::Arc,
 };
 
 use log::{trace, AsLogger, LogContext};
 use rasterize::{
     color::{Premultiplied, BGRA8},
-    scene::{SceneNode, StrokedPolyline, Subscene},
+    scene::{Scene, SceneBuilder, SceneContentBuilder},
     Rasterizer,
 };
 use thiserror::Error;
@@ -263,7 +262,7 @@ impl PerfStats {
     fn make_frame_time_graph(
         &self,
         pixel_scale: I16Dot16,
-    ) -> Option<(Vec2<I16Dot16>, Arc<[SceneNode]>)> {
+    ) -> Option<(Vec2<I16Dot16>, FrameTimeGraphFragment)> {
         if self.whole.frames.len() <= 1 {
             return None;
         }
@@ -277,10 +276,13 @@ impl PerfStats {
 
         let graph_width = I16Dot16::new(500) * pixel_scale;
         let graph_height = I16Dot16::new(80) * pixel_scale;
-        let mut graph_drawing = Vec::with_capacity(5);
+        let mut fragment = FrameTimeGraphFragment {
+            polylines: [const { (Vec::new(), BGRA8::ZERO) }; 5],
+            line_width: pixel_scale,
+        };
 
-        let mut draw_polyline = |times: &PerfTimes, color: BGRA8| {
-            let polyline = times
+        let make_polyline = |times: &PerfTimes| -> Vec<Point2<I16Dot16>> {
+            times
                 .frames
                 .iter()
                 .copied()
@@ -292,22 +294,29 @@ impl PerfStats {
                         graph_height - (graph_height * time / gmax),
                     )
                 })
-                .collect();
-
-            graph_drawing.push(SceneNode::StrokedPolyline(StrokedPolyline {
-                polyline,
-                width: pixel_scale,
-                color,
-            }));
+                .collect()
         };
 
-        draw_polyline(&self.whole, BGRA8::YELLOW);
-        draw_polyline(&self.nondebug_layout, BGRA8::CYAN);
-        draw_polyline(&self.debug_layout, BGRA8::BLUE);
-        draw_polyline(&self.display, BGRA8::LIME);
-        draw_polyline(&self.raster, BGRA8::ORANGERED);
+        fragment.polylines[0] = (make_polyline(&self.whole), BGRA8::YELLOW);
+        fragment.polylines[1] = (make_polyline(&self.nondebug_layout), BGRA8::CYAN);
+        fragment.polylines[2] = (make_polyline(&self.debug_layout), BGRA8::BLUE);
+        fragment.polylines[3] = (make_polyline(&self.display), BGRA8::LIME);
+        fragment.polylines[4] = (make_polyline(&self.raster), BGRA8::ORANGERED);
 
-        Some((Vec2::new(graph_width, graph_height), graph_drawing.into()))
+        Some((Vec2::new(graph_width, graph_height), fragment))
+    }
+}
+
+struct FrameTimeGraphFragment {
+    polylines: [(Vec<Point2<I16Dot16>>, BGRA8); 5],
+    line_width: I16Dot16,
+}
+
+impl FrameTimeGraphFragment {
+    fn display(self, mut output: SceneContentBuilder<'_>) {
+        for (points, color) in self.polylines {
+            output.stroked_polyline(points, self.line_width, color);
+        }
     }
 }
 
@@ -316,7 +325,9 @@ pub struct Renderer {
     pub(crate) fonts: text::FontDb,
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
-    scene: Vec<SceneNode>,
+
+    scene_builder: SceneBuilder,
+    scene: Scene,
 
     unchanged_range: Range<u32>,
     previous_context: SubtitleContext,
@@ -344,7 +355,8 @@ impl Renderer {
                 padding_top: I26Dot6::ZERO,
                 padding_bottom: I26Dot6::ZERO,
             },
-            scene: Vec::new(),
+            scene_builder: SceneBuilder::new(),
+            scene: Scene::empty(),
             layouter: None,
         })
     }
@@ -406,7 +418,7 @@ pub enum DebugLayoutError {
 
 enum DebugContentFragment {
     Inline(InlineContentFragment),
-    Subscene(Arc<[SceneNode]>),
+    FrameTimeGraph(FrameTimeGraphFragment),
 }
 
 impl Renderer {
@@ -568,7 +580,7 @@ impl Renderer {
                     DebugContentFragment::Inline(perf_text_fragment),
                 ));
 
-                if let Some((graph_size, graph_drawing)) =
+                if let Some((graph_size, graph_fragment)) =
                     perf.make_frame_time_graph(I16Dot16::from_quotient(ctx.dpi as i32, 72))
                 {
                     fragments.push((
@@ -577,7 +589,7 @@ impl Renderer {
                                 - FixedL::from_raw(graph_size.x.into_raw() >> 10),
                             graph_y,
                         ),
-                        DebugContentFragment::Subscene(graph_drawing),
+                        DebugContentFragment::FrameTimeGraph(graph_fragment),
                     ));
                 }
             }
@@ -598,7 +610,7 @@ impl Renderer {
         self.perf.start_frame();
         self.fonts.update_platform_font_list(log)?;
         self.glyph_cache.advance_generation();
-        self.scene.clear();
+        self.scene = Scene::empty();
 
         let ctx = SubtitleContext {
             dpi: self.debug_flags.dpi_override.unwrap_or(ctx.dpi),
@@ -661,32 +673,32 @@ impl Renderer {
         }
 
         {
-            let mut pass = DisplayPass::new(&mut self.scene, ctx.dpi);
+            self.scene_builder.reset();
+            let mut pass = DisplayPass::new(self.scene_builder.root(), ctx.dpi);
 
             for &(pos, ref fragment) in &fragments {
                 pass.display_block_container_fragment(pos, fragment);
             }
 
-            for &(pos, ref fragment) in &debug_overlay_fragments {
+            for (pos, fragment) in debug_overlay_fragments {
                 match fragment {
-                    DebugContentFragment::Inline(inline) => {
+                    DebugContentFragment::Inline(ref inline) => {
                         pass.display_inline_content_fragment(pos, inline);
                     }
-                    DebugContentFragment::Subscene(scene) => {
-                        pass.output.push(SceneNode::Subscene(Subscene {
-                            pos: Point2::new(pos.x, pos.y),
-                            scene: scene.clone(),
-                        }));
+                    DebugContentFragment::FrameTimeGraph(graph) => {
+                        graph.display(pass.output.with_translation(pos.to_vec()))
                     }
                 }
             }
+
+            self.scene = self.scene_builder.finish()
         }
         self.perf.end_display();
 
         Ok(())
     }
 
-    pub(crate) fn scene(&self) -> &[SceneNode] {
+    pub(crate) fn scene(&self) -> &Scene {
         &self.scene
     }
 

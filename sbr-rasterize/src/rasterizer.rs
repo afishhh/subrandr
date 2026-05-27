@@ -3,7 +3,7 @@ use std::{any::Any, fmt::Write, mem::MaybeUninit};
 use thiserror::Error;
 use util::{math::Vec2, AnyError};
 
-use crate::scene::SceneNode;
+use crate::scene::Scene;
 
 pub mod sw;
 
@@ -156,7 +156,7 @@ pub trait Rasterizer {
     fn render_scene(
         &mut self,
         target: &mut RenderTarget,
-        scene: &[SceneNode],
+        scene: &Scene,
         user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError>;
 }

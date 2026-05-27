@@ -2,7 +2,7 @@ use std::{path::Path, sync::OnceLock};
 
 use rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
-    scene::SceneNode,
+    scene::SceneBuilder,
     Rasterizer,
 };
 use util::{
@@ -249,7 +249,7 @@ fn check_fn(
     name: &str,
     viewport_size: Vec2L,
     dpi: u32,
-    fun: impl FnOnce(&mut LayoutContext, &LayoutConstraints, &mut Vec<SceneNode>),
+    fun: impl FnOnce(&mut LayoutContext, &LayoutConstraints, &mut SceneBuilder),
 ) {
     let project_dir = test_util::project_dir();
     let tests_dir = project_dir.join("tests/");
@@ -267,7 +267,7 @@ fn check_fn(
     let width = viewport_size.x.ceil_to_inner() as u32;
     let height = viewport_size.y.ceil_to_inner() as u32;
     let mut pixels = {
-        let mut scene = Vec::new();
+        let mut scene_builder = SceneBuilder::new();
         fun(
             &mut LayoutContext {
                 log,
@@ -277,7 +277,7 @@ fn check_fn(
             &LayoutConstraints {
                 size: viewport_size,
             },
-            &mut scene,
+            &mut scene_builder,
         );
 
         let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
@@ -287,7 +287,7 @@ fn check_fn(
             rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
 
         rasterizer
-            .render_scene(&mut render_target, &scene, &glyph_cache)
+            .render_scene(&mut render_target, &scene_builder.finish(), &glyph_cache)
             .expect("Fragment rasterization failed");
 
         pixels
@@ -314,7 +314,7 @@ pub fn check_inline(
         let fragment =
             layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
 
-        DisplayPass::new(output, dpi).display_inline_content_fragment(pos, &fragment);
+        DisplayPass::new(output.root(), dpi).display_inline_content_fragment(pos, &fragment);
     })
 }
 
@@ -328,7 +328,7 @@ pub fn check_block(
     check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
         let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
 
-        DisplayPass::new(output, dpi).display_block_container_fragment(pos, &fragment);
+        DisplayPass::new(output.root(), dpi).display_block_container_fragment(pos, &fragment);
     })
 }
 

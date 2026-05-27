@@ -32,7 +32,7 @@ impl DrawChecker {
 
         let mut rasterizer = sw::Rasterizer::new();
         rasterizer
-            .render_scene(&mut target.reborrow().into(), scene, &())
+            .render_scene(&mut target.reborrow().into(), scene)
             .expect("failed to rasterize scene to framebuffer");
 
         let mut scratch = buffer.clone();
@@ -52,7 +52,7 @@ impl DrawChecker {
             pieces: {
                 let mut result = Vec::new();
                 rasterizer
-                    .render_scene_pieces(scene, &mut |piece| result.push(piece), &())
+                    .render_scene_pieces(scene, &mut |piece| result.push(piece))
                     .unwrap();
                 result
             },

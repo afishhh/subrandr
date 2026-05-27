@@ -1,4 +1,4 @@
-use std::{any::Any, convert::Infallible, fmt::Debug, rc::Rc};
+use std::{convert::Infallible, fmt::Debug, rc::Rc};
 
 use util::{
     math::{I16Dot16, I26Dot6, Outline, OutlineEvent, OutlineIterExt, Point2, Rect2, Vec2},
@@ -31,9 +31,6 @@ impl Scene {
                 .0
                 .iter()
                 .map(|node| match node {
-                    SceneNode::DeferredBitmaps(bitmaps) => {
-                        std::mem::size_of_val(&*bitmaps.to_bitmaps)
-                    }
                     SceneNode::Bitmap(bitmap) => bitmap.texture.memory_footprint(),
                     SceneNode::StrokedPolyline(stroked_polyline) => {
                         std::mem::size_of_val::<[_]>(&stroked_polyline.polyline)
@@ -57,7 +54,6 @@ impl Scene {
 
 #[derive(Clone)]
 pub(crate) enum SceneNode {
-    DeferredBitmaps(DeferredBitmaps),
     Bitmap(Bitmap),
     StrokedPolyline(StrokedPolyline),
     FilledOutline(FilledOutline),
@@ -123,20 +119,6 @@ impl<'a> SceneContentBuilder<'a> {
             self.current_translation.x.round_to_inner(),
             self.current_translation.y.round_to_inner(),
         )
-    }
-
-    pub fn deferred_bitmaps(
-        &mut self,
-        to_bitmaps: Rc<
-            dyn Fn(&mut dyn Rasterizer, &(dyn Any + 'static)) -> Result<Vec<Bitmap>, AnyError>,
-        >,
-    ) {
-        self.parent
-            .nodes
-            .push(SceneNode::DeferredBitmaps(DeferredBitmaps {
-                translation: self.rounded_translation(),
-                to_bitmaps,
-            }));
     }
 
     pub fn bitmap(
@@ -225,15 +207,6 @@ impl<'a> SceneContentBuilder<'a> {
     }
 }
 
-// HACK: Instead do proper generic outline rasterization
-//       Will need a way to keep the FreeType option most likely.
-#[derive(Clone)]
-pub(crate) struct DeferredBitmaps {
-    pub(crate) translation: Vec2<i32>,
-    pub(crate) to_bitmaps:
-        Rc<dyn Fn(&mut dyn Rasterizer, &(dyn Any + 'static)) -> Result<Vec<Bitmap>, AnyError>>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneColor(BGRA8);
 
@@ -256,11 +229,11 @@ impl From<BGRA8> for SceneColor {
 }
 
 #[derive(Clone)]
-pub struct Bitmap {
-    pub pos: Point2<i32>,
-    pub texture: Texture,
-    pub filter: Option<BitmapFilter>,
-    pub color: SceneColor,
+pub(crate) struct Bitmap {
+    pub(crate) pos: Point2<i32>,
+    pub(crate) texture: Texture,
+    pub(crate) filter: Option<BitmapFilter>,
+    pub(crate) color: SceneColor,
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

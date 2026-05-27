@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Write, mem::MaybeUninit};
+use std::{fmt::Write, mem::MaybeUninit};
 
 use thiserror::Error;
 use util::{math::Vec2, AnyError};
@@ -107,8 +107,6 @@ impl Texture {
 #[derive(Debug, Error)]
 enum SceneRenderErrorInner {
     #[error(transparent)]
-    ToBitmaps(AnyError),
-    #[error(transparent)]
     External(AnyError),
 }
 
@@ -162,7 +160,6 @@ pub trait Rasterizer {
         &mut self,
         target: &mut RenderTarget,
         scene: &Scene,
-        user_data: &(dyn Any + 'static),
     ) -> Result<(), SceneRenderError>;
 }
 

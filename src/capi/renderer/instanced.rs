@@ -66,17 +66,13 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
 
         ctry!(renderer
             .rasterizer
-            .render_scene_pieces(
-                renderer.inner.scene(),
-                &mut |piece| {
-                    if piece.size.x == 0 || piece.size.y == 0 {
-                        return;
-                    }
+            .render_scene_pieces(renderer.inner.scene(), &mut |piece| {
+                if piece.size.x == 0 || piece.size.y == 0 {
+                    return;
+                }
 
-                    renderer.output_pieces.push(piece);
-                },
-                &()
-            )
+                renderer.output_pieces.push(piece);
+            })
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.
             .inspect_err(|_| renderer.output_pieces.clear()));

@@ -995,9 +995,14 @@ impl Rasterizer {
         log: &LogContext,
         active_color: BGRA8,
         scene: &[SceneNode],
+        cull_rect: Rect2S,
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
     ) -> Result<(), SceneRenderError> {
         for node in scene {
+            if !node.bounding_box().intersects(&cull_rect) {
+                continue;
+            }
+
             match node {
                 SceneNode::Bitmap(bitmap) => {
                     on_piece(self, OutputPiece::from_bitmap(bitmap.clone(), active_color));
@@ -1126,9 +1131,16 @@ impl Rasterizer {
         &mut self,
         log: &LogContext,
         scene: &Scene,
+        cull_rect: Rect2S,
         on_piece: &mut dyn FnMut(OutputPiece),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut move |_r, p| on_piece(p))
+        self.render_scene_pieces_impl(
+            log,
+            BGRA8::MAGENTA,
+            &scene.0,
+            cull_rect,
+            &mut move |_r, p| on_piece(p),
+        )
     }
 
     pub fn render_scene(
@@ -1139,9 +1151,20 @@ impl Rasterizer {
     ) -> Result<(), super::SceneRenderError> {
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
-        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
-            piece.blend_to(r, target, piece.pos)
-        })?;
+        let cull_rect = Rect2S::new(
+            Point2::ZERO,
+            Point2::new(
+                FixedS::new(target.width as i32),
+                FixedS::new(target.height as i32),
+            ),
+        );
+        self.render_scene_pieces_impl(
+            log,
+            BGRA8::MAGENTA,
+            &scene.0,
+            cull_rect,
+            &mut |r, piece| piece.blend_to(r, target, piece.pos),
+        )?;
 
         Ok(())
     }
@@ -1192,6 +1215,7 @@ impl RasterCache {
                         log,
                         active_color,
                         &scene.0,
+                        Rect2S::MAX,
                         &mut |_, piece| {
                             bbox.expand_to_rect(piece.rect());
                             pieces.push(piece);

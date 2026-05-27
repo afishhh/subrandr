@@ -30,6 +30,16 @@ impl Scene {
         Self(Rc::default())
     }
 
+    pub(crate) fn bounding_box(&self) -> Rect2S {
+        let mut bbox = Rect2S::NOTHING;
+
+        for node in self.0.iter() {
+            node.expand_bounding_box(&mut bbox);
+        }
+
+        bbox
+    }
+
     pub fn memory_footprint(&self) -> usize {
         std::mem::size_of::<Self>()
             + std::mem::size_of_val::<[_]>(&*self.0)
@@ -65,6 +75,53 @@ pub(crate) enum SceneNode {
     FilledOutline(FilledOutline),
     FilledRect(FilledRect),
     Subscene(Subscene),
+}
+
+impl SceneNode {
+    pub(crate) fn expand_bounding_box(&self, bbox: &mut Rect2S) {
+        match self {
+            SceneNode::Bitmap(bitmap) => bbox.expand_to_rect(Rect2S::from_min_size(
+                Point2::new(FixedS::new(bitmap.pos.x), FixedS::new(bitmap.pos.y)),
+                Vec2::new(
+                    FixedS::new(bitmap.scaled_size.x as i32),
+                    FixedS::new(bitmap.scaled_size.y as i32),
+                ),
+            )),
+            SceneNode::StrokedPolyline(polyline) => polyline
+                .polyline
+                .iter()
+                .copied()
+                .map(|p| {
+                    p + Vec2::new(
+                        I16Dot16::from_raw(polyline.pos.x.into_raw() << 10),
+                        I16Dot16::from_raw(polyline.pos.y.into_raw() << 10),
+                    )
+                })
+                .for_each(|p| {
+                    bbox.expand_to_point(Point2::new(
+                        FixedS::from_raw(p.x.into_raw() >> 10),
+                        FixedS::from_raw(p.y.into_raw() >> 10),
+                    ))
+                }),
+            SceneNode::FilledOutline(outline) => {
+                let cbox = outline.events.control_box();
+                bbox.expand_to_rect(Rect2S::new(
+                    Point2::new(cbox.min.x.into(), cbox.min.y.into()),
+                    Point2::new(cbox.max.x.into(), cbox.max.y.into()),
+                ));
+            }
+            SceneNode::FilledRect(filled_rect) => {
+                bbox.expand_to_rect(filled_rect.rect);
+            }
+            SceneNode::Subscene(subscene) => bbox.expand_to_rect(subscene.bounding_box()),
+        }
+    }
+
+    pub(crate) fn bounding_box(&self) -> Rect2S {
+        let mut result = Rect2::NOTHING;
+        self.expand_bounding_box(&mut result);
+        result
+    }
 }
 
 pub struct SceneBuilder {
@@ -297,6 +354,30 @@ pub trait ExternalSubscene {
 
     fn bounding_box(&self) -> Rect2S;
     fn rasterize(&self, rasterizer: &mut dyn Rasterizer) -> Result<(Vec2<i32>, Texture), AnyError>;
+}
+
+impl Subscene {
+    pub(crate) fn bounding_box(&self) -> Rect2S {
+        let inner_bbox = match &self.kind {
+            SubsceneKind::External(external) => external.bounding_box(),
+            SubsceneKind::Scene(scene) => scene.bounding_box(),
+        };
+
+        if inner_bbox == Rect2S::MAX || inner_bbox == Rect2S::NOTHING {
+            return inner_bbox;
+        }
+
+        match self.scene_filter {
+            Some(SceneFilter::ExtractAlpha { blur_stddev }) => {
+                let mut result = inner_bbox;
+                let expansion = blur_stddev * 3;
+                result.expand(expansion, expansion);
+                result
+            }
+            None => inner_bbox,
+        }
+        .translate(self.pos.to_vec())
+    }
 }
 
 impl StrokedPolyline {

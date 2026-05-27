@@ -5,6 +5,7 @@ use std::{
 
 use rasterize::{
     color::{Premultiplied, BGRA8},
+    scene::{FixedS, Rect2S},
     sw::{InstancedOutputBuilder, OutputImage, OutputPiece},
 };
 use util::math::{Point2, Rect2, Vec2};
@@ -64,9 +65,13 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
             .inner
             .render_to_scene(log, &*ctx, t, &mut renderer.rasterizer));
 
+        let cull_rect = Rect2S::new(
+            Point2::new(FixedS::new(clip_rect.min.x), FixedS::new(clip_rect.min.y)),
+            Point2::new(FixedS::new(clip_rect.max.x), FixedS::new(clip_rect.max.y)),
+        );
         ctry!(renderer
             .rasterizer
-            .render_scene_pieces(log, renderer.inner.scene(), &mut |piece| {
+            .render_scene_pieces(log, renderer.inner.scene(), cull_rect, &mut |piece| {
                 if piece.size.x == 0 || piece.size.y == 0 {
                     return;
                 }

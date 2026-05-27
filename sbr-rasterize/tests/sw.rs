@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use log::RootLogger;
 use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
-    scene::{FixedS, Scene, SceneBuilder, SceneColor, SceneFilter, SubsceneKind},
+    scene::{FixedS, Rect2S, Scene, SceneBuilder, SceneColor, SceneFilter, SubsceneKind},
     sw::{self, InstancedOutputBuilder, OutputPiece},
 };
 use util::{
@@ -21,20 +21,21 @@ struct DrawChecker {
     /// This is the one that is actually saved as a snapshot,
     /// other draws are just checked to match this one.
     reference: Vec<Premultiplied<BGRA8>>,
-    /// Saved pieces used for running subsequent instanced draws.
+    scene: Scene,
+    /// Saved unculled pieces used for running subsequent instanced draws.
     pieces: Vec<OutputPiece>,
     scratch: Vec<Premultiplied<BGRA8>>,
 }
 
 impl DrawChecker {
-    fn check_immediate(name: &str, size: Vec2<u32>, scene: &Scene) -> Self {
+    fn check_immediate(name: &str, size: Vec2<u32>, scene: Scene) -> Self {
         let mut buffer = vec![Premultiplied(BGRA8::ZERO); (size.x * size.y) as usize];
         let mut target = sw::RenderTarget::new(&mut buffer, size.x, size.y, size.x);
 
         let logger = RootLogger::new();
         let mut rasterizer = sw::Rasterizer::new();
         rasterizer
-            .render_scene(&logger.new_ctx(), &mut target.reborrow(), scene)
+            .render_scene(&logger.new_ctx(), &mut target.reborrow(), &scene)
             .expect("failed to rasterize scene to framebuffer");
 
         let mut scratch = buffer.clone();
@@ -54,15 +55,18 @@ impl DrawChecker {
             pieces: {
                 let mut result = Vec::new();
                 rasterizer
-                    .render_scene_pieces(&logger.new_ctx(), scene, &mut |piece| result.push(piece))
+                    .render_scene_pieces(&logger.new_ctx(), &scene, Rect2S::MAX, &mut |piece| {
+                        result.push(piece)
+                    })
                     .unwrap();
                 result
             },
+            scene,
             rasterizer,
         }
     }
 
-    fn check_defaults(name: &str, size: Vec2<u32>, scene: &Scene) -> Self {
+    fn check_defaults(name: &str, size: Vec2<u32>, scene: Scene) -> Self {
         let mut checker = Self::check_immediate(name, size, scene);
         checker.check_instanced(
             Rect2::from_min_size(Point2::ZERO, Vec2::new(size.x as i32, size.y as i32)),
@@ -112,7 +116,12 @@ impl<'i, 't> InstancedOutputBuilder<'i> for InstanceCompositor<'t> {
 }
 
 impl DrawChecker {
-    fn check_instanced(&mut self, clip_rect: Rect2<i32>, force_snapshot: bool) {
+    fn check_instanced_culled(
+        &mut self,
+        clip_rect: Rect2<i32>,
+        cull_rect: Rect2S,
+        force_snapshot: bool,
+    ) {
         assert!(!clip_rect.is_empty());
 
         self.secondary_draw_index += 1;
@@ -124,13 +133,28 @@ impl DrawChecker {
         let mut target =
             sw::RenderTarget::new(&mut self.scratch, self.size.x, self.size.y, self.size.x);
 
+        let mut culled_pieces = Vec::new();
+        let pieces = if cull_rect == Rect2S::MAX {
+            &self.pieces
+        } else {
+            self.rasterizer
+                .render_scene_pieces(
+                    &RootLogger::new().new_ctx(),
+                    &self.scene,
+                    cull_rect,
+                    &mut |piece| culled_pieces.push(piece),
+                )
+                .unwrap();
+            &culled_pieces
+        };
+
         sw::pieces_to_instanced_images(
             &mut InstanceCompositor {
                 rasterizer: sw::Rasterizer::new(),
                 target: target.reborrow(),
                 images: Vec::new(),
             },
-            self.pieces.iter(),
+            pieces.iter(),
             clip_rect,
             &mut self.rasterizer,
         );
@@ -171,6 +195,8 @@ impl DrawChecker {
                 "Draw {} snapshot written to {display_path}",
                 self.secondary_draw_index
             );
+            eprintln!("Clip rect: {clip_rect:?}");
+            eprintln!("Cull rect: {cull_rect:?}");
         };
 
         if let Some(mismatch_position) = mismatch_position {
@@ -182,6 +208,18 @@ impl DrawChecker {
         } else if force_snapshot {
             write_snapshot();
         }
+    }
+
+    fn check_instanced(&mut self, clip_rect: Rect2<i32>, force_snapshot: bool) {
+        self.check_instanced_culled(clip_rect, Rect2S::MAX, force_snapshot);
+        self.check_instanced_culled(
+            clip_rect,
+            Rect2::new(
+                Point2::new(FixedS::new(clip_rect.min.x), FixedS::new(clip_rect.min.y)),
+                Point2::new(FixedS::new(clip_rect.max.x), FixedS::new(clip_rect.max.y)),
+            ),
+            force_snapshot,
+        );
     }
 }
 
@@ -221,7 +259,7 @@ fn simple_rectangles() {
         builder.finish()
     };
 
-    DrawChecker::check_defaults("simple_rectangles", Vec2::new(100, 100), &scene);
+    DrawChecker::check_defaults("simple_rectangles", Vec2::new(100, 100), scene);
 }
 
 #[test]
@@ -240,7 +278,7 @@ fn clipped_polyline() {
     );
     let scene = builder.finish();
 
-    let mut checker = DrawChecker::check_defaults("clipped_polyline", Vec2::new(100, 100), &scene);
+    let mut checker = DrawChecker::check_defaults("clipped_polyline", Vec2::new(100, 100), scene);
     checker.check_instanced(
         Rect2::new(Point2::new(20, -10), Point2::new(200, 80)),
         false,
@@ -307,7 +345,7 @@ fn translated_subscene_with_polyline() {
     let mut checker = DrawChecker::check_immediate(
         "translated_subscene_with_polyline",
         Vec2::new(100, 100),
-        &scene,
+        scene,
     );
     checker.check_instanced(Rect2::new(Point2::new(20, 43), Point2::new(91, 76)), false);
     checker.check_instanced(Rect2::new(Point2::new(37, 37), Point2::new(75, 89)), false);
@@ -328,7 +366,7 @@ fn antialiased_rectangle() {
     };
 
     let mut checker =
-        DrawChecker::check_immediate("antialiased_rectangle", Vec2::new(10, 10), &scene);
+        DrawChecker::check_immediate("antialiased_rectangle", Vec2::new(10, 10), scene);
     checker.check_instanced(Rect2::new(Point2::new(2, 2), Point2::new(8, 8)), false);
     checker.check_instanced(Rect2::new(Point2::new(1, 3), Point2::new(5, 6)), false);
     checker.check_instanced(Rect2::new(Point2::new(0, 0), Point2::new(5, 10)), false);
@@ -380,7 +418,7 @@ fn blurred_triangle() {
         builder.finish()
     };
 
-    _ = DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), &scene);
+    DrawChecker::check_defaults("blurred_triangle", Vec2::new(130, 130), scene);
 }
 
 #[test]
@@ -425,7 +463,7 @@ fn bilinear_scaling() {
         builder.finish()
     };
 
-    _ = DrawChecker::check_defaults("bilinear_scaling", scene_size, &scene);
+    DrawChecker::check_defaults("bilinear_scaling", scene_size, scene);
 }
 
 #[test]
@@ -466,7 +504,7 @@ fn placeholder_subscene_with_filled_outline() {
     let mut checker = DrawChecker::check_immediate(
         "placeholder_subscene_with_filled_outline",
         Vec2::new(60, 124),
-        &scene,
+        scene,
     );
     checker.check_instanced(Rect2::new(Point2::new(0, 15), Point2::new(60, 76)), false);
     checker.check_instanced(Rect2::new(Point2::new(37, 37), Point2::new(75, 89)), false);

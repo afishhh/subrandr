@@ -501,12 +501,16 @@ impl std::fmt::Debug for Texture<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}x{} {} texture",
+            "[{}x{} {} texture]@{:?}",
             self.width,
             self.height,
             match self.data.as_ref() {
                 TextureDataRef::Mono(_) => "A8",
                 TextureDataRef::Bgra(_) => "BGRA8",
+            },
+            match self.data.as_ref() {
+                TextureDataRef::Mono(s) => s.as_ptr() as *const (),
+                TextureDataRef::Bgra(s) => s.as_ptr() as *const (),
             }
         )
     }
@@ -534,6 +538,7 @@ enum RasterCacheKey {
         subscene: SubsceneCacheKey,
         active_color: BGRA8,
     },
+    BlurTexture(Texture<'static>, I26Dot6),
 }
 
 enum SubsceneCacheKey {
@@ -599,6 +604,12 @@ impl CacheValue for CachedSubscenePieces {
                     OutputPieceContent::Rect(_) => 0,
                 })
                 .sum::<usize>()
+    }
+}
+
+impl CacheValue for BlurOutput {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of::<Self>() + self.texture.memory_footprint()
     }
 }
 
@@ -815,6 +826,13 @@ impl Rasterizer {
 pub struct BlurOutput {
     pub padding: Vec2<u32>,
     pub texture: Texture<'static>,
+}
+
+impl BlurOutput {
+    const EMPTY: Self = Self {
+        padding: Vec2::ZERO,
+        texture: Texture::EMPTY_MONO,
+    };
 }
 
 impl Rasterizer {
@@ -1085,9 +1103,10 @@ impl Rasterizer {
                             if blur_stddev == I26Dot6::ZERO {
                                 output_filter = Some(BitmapFilter::ExtractAlpha);
                             } else {
-                                let output = self.blur_texture(&texture, blur_stddev.into_f32());
+                                let output =
+                                    cache.get_or_blur_texture(log, &texture, blur_stddev, self);
                                 pos -= Vec2::new(output.padding.x as i32, output.padding.y as i32);
-                                texture = output.texture;
+                                texture = output.texture.clone();
                             }
                         }
                         None => {}
@@ -1255,6 +1274,24 @@ impl RasterCache {
             }
         }
         .map(|CachedSubsceneTexture((offset, texture))| (*offset, texture.clone()))
+    }
+
+    fn get_or_blur_texture(
+        &self,
+        log: &LogContext,
+        src: &Texture<'static>,
+        stddev: I26Dot6,
+        rasterizer: &mut Rasterizer,
+    ) -> &BlurOutput {
+        if src.width() == 0 || src.height() == 0 {
+            return &BlurOutput::EMPTY;
+        }
+
+        self.0
+            .get_or_insert_with(RasterCacheKey::BlurTexture(src.clone(), stddev), || {
+                trace!(log, "Blurring {src:?} with σ={stddev}");
+                rasterizer.blur_texture(src, stddev.into_f32())
+            })
     }
 }
 

@@ -77,6 +77,8 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
             // so the above assertion is not triggered in such a case.
             .inspect_err(|_| renderer.output_pieces.clear()));
 
+        renderer.rasterizer.advance_cache_generation();
+
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,
             instances: &'o mut Vec<COutputInstance<'static>>,

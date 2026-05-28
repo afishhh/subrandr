@@ -433,7 +433,10 @@ impl Renderer {
         rasterizer: &mut rasterize::sw::Rasterizer,
     ) -> Result<(), RenderError> {
         self.render_to(log, rasterizer, &mut target.into(), ctx, t)
-            .inspect(|_| self.end_raster(log))
+            .inspect(|_| {
+                self.end_raster(log);
+                rasterizer.advance_cache_generation();
+            })
     }
 
     fn render_to(

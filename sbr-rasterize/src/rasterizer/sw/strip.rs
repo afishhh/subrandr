@@ -479,6 +479,11 @@ impl Strips {
             }
         }
     }
+
+    pub(crate) fn memory_footprint(&self) -> usize {
+        std::mem::size_of_val::<[_]>(&self.strips)
+            + std::mem::size_of_val::<[_]>(&self.alpha_buffer.0)
+    }
 }
 
 #[derive(Debug, Clone)]

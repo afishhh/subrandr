@@ -1,6 +1,12 @@
-use std::{collections::HashMap, hash::Hash, mem::MaybeUninit};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    mem::MaybeUninit,
+    rc::{Rc, Weak},
+};
 
 use util::{
+    cache::{Cache, CacheConfiguration, CacheValue},
     math::{I26Dot6, Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
     slice_assume_init_mut,
@@ -9,7 +15,10 @@ use util::{
 use crate::{
     color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
-    scene::{Bitmap, BitmapFilter, FilledRect, FixedS, Rect2S, Scene, SceneFilter, SceneNode},
+    scene::{
+        Bitmap, BitmapFilter, ExternalSubscene, FilledRect, FixedS, Rect2S, Scene, SceneFilter,
+        SceneNode, SubsceneKind,
+    },
     PixelFormat, SceneRenderError,
 };
 
@@ -533,15 +542,106 @@ fn unwrap_sw_texture(texture: &super::Texture) -> &Texture<'static> {
     }
 }
 
+const RASTER_CACHE_CONFIGURATION: CacheConfiguration = CacheConfiguration {
+    trim_memory_threshold: 8 * 1024 * 1024,
+    trim_kept_generations: 3,
+};
+
+#[derive(PartialEq, Eq, Hash)]
+enum RasterCacheKey {
+    SubsceneTexture {
+        subscene: SubsceneCacheKey,
+        active_color: BGRA8,
+    },
+}
+
+enum SubsceneCacheKey {
+    External(Weak<dyn ExternalSubscene>),
+    Scene(Weak<[SceneNode]>),
+}
+
+impl SubsceneCacheKey {
+    fn addr(&self) -> usize {
+        match self {
+            SubsceneCacheKey::External(weak) => Weak::as_ptr(weak).addr(),
+            SubsceneCacheKey::Scene(scene) => Weak::as_ptr(scene).addr(),
+        }
+    }
+}
+
+impl PartialEq for SubsceneCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr() == other.addr()
+    }
+}
+
+impl Eq for SubsceneCacheKey {}
+
+impl Hash for SubsceneCacheKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addr().hash(state);
+    }
+}
+
+impl From<&SubsceneKind> for SubsceneCacheKey {
+    fn from(value: &SubsceneKind) -> Self {
+        match value {
+            SubsceneKind::External(external) => SubsceneCacheKey::External(Rc::downgrade(external)),
+            SubsceneKind::Scene(scene) => SubsceneCacheKey::Scene(Rc::downgrade(&scene.0)),
+        }
+    }
+}
+
+struct CachedSubsceneTexture((Vec2<i32>, Texture<'static>));
+
+impl CacheValue for CachedSubsceneTexture {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of::<Self>() + self.0 .1.memory_footprint()
+    }
+}
+
+struct CachedSubscenePieces {
+    pieces: Vec<OutputPiece>,
+    bbox: Rect2<i32>,
+}
+
+impl CacheValue for CachedSubscenePieces {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + std::mem::size_of_val::<[_]>(&self.pieces)
+            + self
+                .pieces
+                .iter()
+                .map(|piece| match &piece.content {
+                    OutputPieceContent::Texture(bitmap) => bitmap.texture.memory_footprint(),
+                    OutputPieceContent::Strips(strips) => strips.strips.memory_footprint(),
+                    OutputPieceContent::Rect(_) => 0,
+                })
+                .sum::<usize>()
+    }
+}
+
 pub struct Rasterizer {
     blurer: blur::Blurer,
+    // NOTE: This is an `Rc` only to workaround borrowing rules.
+    //       No other live references shall exist outside a running render pass.
+    cache: Rc<RasterCache>,
 }
+
+struct RasterCache(Cache<RasterCacheKey>);
 
 impl Rasterizer {
     pub fn new() -> Self {
         Self {
             blurer: blur::Blurer::new(),
+            cache: Rc::new(RasterCache(Cache::new(RASTER_CACHE_CONFIGURATION))),
         }
+    }
+
+    pub fn advance_cache_generation(&mut self) {
+        Rc::get_mut(&mut self.cache)
+            .expect("live references to `sw::Rasterizer` cache exist outside raster pass or generation advanced during raster pass").0
+            .advance_generation();
     }
 
     pub fn blit(
@@ -809,6 +909,23 @@ impl super::Rasterizer for Rasterizer {
         "software"
     }
 
+    fn write_debug_info(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        let stats = self.cache.0.stats();
+        let (footprint_divisor, footprint_suffix) =
+            util::human_size_suffix(stats.total_memory_footprint);
+
+        writeln!(writer, "== raster cache stats ==")?;
+        writeln!(
+            writer,
+            "approximate memory footprint: {:.3}{footprint_suffix}B",
+            stats.total_memory_footprint as f32 / footprint_divisor as f32
+        )?;
+        writeln!(writer, "total entries: {}", stats.total_entries)?;
+        writeln!(writer, "current generation: {}", stats.generation)?;
+
+        Ok(())
+    }
+
     fn empty_mono_texture(&self) -> super::Texture {
         super::Texture(super::TextureInner::Software(Texture::EMPTY_MONO))
     }
@@ -862,8 +979,9 @@ pub struct OutputBitmap<'a> {
     pub color: BGRA8,
 }
 
+#[derive(Clone)]
 pub struct OutputStrips {
-    pub strips: Strips,
+    pub strips: Rc<Strips>,
     pub color: BGRA8,
 }
 
@@ -873,12 +991,14 @@ pub struct OutputRect {
     pub color: BGRA8,
 }
 
+#[derive(Clone)]
 pub enum OutputPieceContent {
     Texture(OutputBitmap<'static>),
     Strips(OutputStrips),
     Rect(OutputRect),
 }
 
+#[derive(Clone)]
 pub struct OutputPiece {
     pub pos: Point2<i32>,
     pub size: Vec2<u32>,
@@ -947,7 +1067,7 @@ impl Rasterizer {
                             pos,
                             size,
                             content: OutputPieceContent::Strips(OutputStrips {
-                                strips,
+                                strips: Rc::new(strips),
                                 color: outline.color.compute(active_color),
                             }),
                         },
@@ -961,25 +1081,38 @@ impl Rasterizer {
                             pos,
                             size,
                             content: OutputPieceContent::Strips(OutputStrips {
-                                strips,
+                                strips: Rc::new(strips),
                                 color: polyline.color.compute(active_color),
                             }),
                         },
                     )
                 }
                 SceneNode::Subscene(subscene) => {
+                    let cache = self.cache.clone();
                     let new_active_color = subscene.active_color.compute(active_color);
-                    let (off, mut texture) = match &subscene.kind {
-                        crate::scene::SubsceneKind::External(external) => {
-                            let (off, texture) = external
-                                .rasterize(self)
-                                .map_err(SceneRenderErrorInner::External)?;
-                            (off, unwrap_sw_texture(&texture).clone())
+                    if let SubsceneKind::Scene(scene) = &subscene.kind {
+                        if subscene.scene_filter.is_none() {
+                            let (pieces, _) =
+                                cache.get_or_render_scene_pieces(scene, new_active_color, self)?;
+
+                            for piece in pieces {
+                                on_piece(
+                                    self,
+                                    OutputPiece {
+                                        pos: piece.pos + subscene.pos.to_vec(),
+                                        ..piece.clone()
+                                    },
+                                );
+                            }
+                            continue;
                         }
-                        crate::scene::SubsceneKind::Scene(child_scene) => {
-                            self.render_scene_texture(new_active_color, child_scene)?
-                        }
-                    };
+                    }
+
+                    let (off, mut texture) = cache.get_or_render_subscene_texture(
+                        &subscene.kind,
+                        new_active_color,
+                        self,
+                    )?;
 
                     let mut pos = subscene.pos + off;
                     let mut output_filter = None;
@@ -1023,35 +1156,107 @@ impl Rasterizer {
         self.render_scene_pieces_impl(BGRA8::MAGENTA, &scene.0, &mut move |_r, p| on_piece(p))
     }
 
-    fn render_scene_texture(
+    fn pieces_to_texture(
         &mut self,
-        active_color: BGRA8,
-        scene: &Scene,
-    ) -> Result<(Vec2<i32>, Texture<'static>), super::SceneRenderError> {
-        let mut pieces = Vec::new();
-        let mut rect = Rect2::NOTHING;
-        self.render_scene_pieces_impl(active_color, &scene.0, &mut |_, piece| {
-            rect.expand_to_rect(piece.rect());
-            pieces.push(piece);
-        })?;
-
-        if rect.is_empty() {
-            return Ok((Vec2::ZERO, Texture::EMPTY_MONO));
+        pieces: &[OutputPiece],
+        bbox: Rect2<i32>,
+    ) -> (Vec2<i32>, Texture<'static>) {
+        if bbox.is_empty() {
+            return (Vec2::ZERO, Texture::EMPTY_MONO);
         }
 
-        Ok((
-            rect.min.to_vec(),
+        (
+            bbox.min.to_vec(),
             Texture::new_with(
-                Vec2::new(rect.width() as u32, rect.height() as u32),
+                Vec2::new(bbox.width() as u32, bbox.height() as u32),
                 |mut view| {
                     for piece in pieces {
                         piece
                             .content
-                            .blend_to_impl(self, &mut view, piece.pos - rect.min.to_vec());
+                            .blend_to_impl(self, &mut view, piece.pos - bbox.min.to_vec());
                     }
                 },
             ),
-        ))
+        )
+    }
+}
+
+impl RasterCache {
+    fn get_or_render_scene_pieces(
+        &self,
+        scene: &Scene,
+        active_color: BGRA8,
+        rasterizer: &mut Rasterizer,
+    ) -> Result<(&[OutputPiece], Rect2<i32>), super::SceneRenderError> {
+        self.0
+            .get_or_try_insert_with::<CachedSubscenePieces, _>(
+                RasterCacheKey::SubsceneTexture {
+                    subscene: SubsceneCacheKey::Scene(Rc::downgrade(&scene.0)),
+                    active_color,
+                },
+                || {
+                    let mut pieces = Vec::new();
+                    let mut bbox = Rect2::NOTHING;
+                    rasterizer.render_scene_pieces_impl(
+                        active_color,
+                        &scene.0,
+                        &mut |_, piece| {
+                            bbox.expand_to_rect(piece.rect());
+                            pieces.push(piece);
+                        },
+                    )?;
+
+                    Ok(CachedSubscenePieces { pieces, bbox })
+                },
+            )
+            .map(|CachedSubscenePieces { pieces, bbox }| (&**pieces, *bbox))
+    }
+
+    fn get_or_render_subscene_texture(
+        &self,
+        kind: &SubsceneKind,
+        new_active_color: BGRA8,
+        rasterizer: &mut Rasterizer,
+    ) -> Result<(Vec2<i32>, Texture<'static>), super::SceneRenderError> {
+        match kind {
+            SubsceneKind::External(external) => {
+                self.0.get_or_try_insert_with::<CachedSubsceneTexture, _>(
+                    RasterCacheKey::SubsceneTexture {
+                        subscene: kind.into(),
+                        active_color: BGRA8::ZERO,
+                    },
+                    || {
+                        let (off, texture) = external
+                            .rasterize(rasterizer)
+                            .map_err(SceneRenderErrorInner::External)?;
+                        Ok(CachedSubsceneTexture((
+                            off,
+                            unwrap_sw_texture(&texture).clone(),
+                        )))
+                    },
+                )
+            }
+            SubsceneKind::Scene(child_scene) => {
+                self.0.get_or_try_insert_with::<CachedSubsceneTexture, _>(
+                    RasterCacheKey::SubsceneTexture {
+                        subscene: kind.into(),
+                        active_color: BGRA8::ZERO,
+                    },
+                    || {
+                        let (pieces, bbox) = self.get_or_render_scene_pieces(
+                            child_scene,
+                            new_active_color,
+                            rasterizer,
+                        )?;
+
+                        Ok(CachedSubsceneTexture(
+                            rasterizer.pieces_to_texture(pieces, bbox),
+                        ))
+                    },
+                )
+            }
+        }
+        .map(|CachedSubsceneTexture((offset, texture))| (*offset, texture.clone()))
     }
 }
 

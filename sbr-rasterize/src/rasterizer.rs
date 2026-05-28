@@ -1,5 +1,6 @@
 use std::{fmt::Write, mem::MaybeUninit};
 
+use log::LogContext;
 use thiserror::Error;
 use util::{math::Vec2, AnyError};
 
@@ -158,6 +159,7 @@ pub trait Rasterizer {
 
     fn render_scene(
         &mut self,
+        log: &LogContext,
         target: &mut RenderTarget,
         scene: &Scene,
     ) -> Result<(), SceneRenderError>;

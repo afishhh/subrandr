@@ -448,7 +448,7 @@ impl Renderer {
         t: u32,
     ) -> Result<(), RenderError> {
         self.render_to_scene(log, ctx, t, rasterizer)?;
-        rasterizer.render_scene(target, &self.scene)?;
+        rasterizer.render_scene(log, target, &self.scene)?;
 
         Ok(())
     }

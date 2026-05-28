@@ -5,6 +5,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use log::{trace, LogContext};
 use util::{
     cache::{Cache, CacheConfiguration, CacheValue},
     math::{I26Dot6, Point2, Rect2, Vec2},
@@ -958,13 +959,14 @@ impl super::Rasterizer for Rasterizer {
 
     fn render_scene(
         &mut self,
+        log: &LogContext,
         target: &mut super::RenderTarget,
         scene: &Scene,
     ) -> Result<(), super::SceneRenderError> {
         let target = unwrap_sw_render_target(target);
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
-        self.render_scene_pieces_impl(BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
+        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
             piece.content.blend_to_impl(r, target, piece.pos)
         })?;
 
@@ -1025,6 +1027,7 @@ impl OutputPiece {
 impl Rasterizer {
     fn render_scene_pieces_impl(
         &mut self,
+        log: &LogContext,
         active_color: BGRA8,
         scene: &[SceneNode],
         on_piece: &mut dyn FnMut(&mut Rasterizer, OutputPiece),
@@ -1092,8 +1095,12 @@ impl Rasterizer {
                     let new_active_color = subscene.active_color.compute(active_color);
                     if let SubsceneKind::Scene(scene) = &subscene.kind {
                         if subscene.scene_filter.is_none() {
-                            let (pieces, _) =
-                                cache.get_or_render_scene_pieces(scene, new_active_color, self)?;
+                            let (pieces, _) = cache.get_or_render_scene_pieces(
+                                log,
+                                scene,
+                                new_active_color,
+                                self,
+                            )?;
 
                             for piece in pieces {
                                 on_piece(
@@ -1109,6 +1116,7 @@ impl Rasterizer {
                     }
 
                     let (off, mut texture) = cache.get_or_render_subscene_texture(
+                        log,
                         &subscene.kind,
                         new_active_color,
                         self,
@@ -1150,10 +1158,11 @@ impl Rasterizer {
 
     pub fn render_scene_pieces(
         &mut self,
+        log: &LogContext,
         scene: &Scene,
         on_piece: &mut dyn FnMut(OutputPiece),
     ) -> Result<(), SceneRenderError> {
-        self.render_scene_pieces_impl(BGRA8::MAGENTA, &scene.0, &mut move |_r, p| on_piece(p))
+        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut move |_r, p| on_piece(p))
     }
 
     fn pieces_to_texture(
@@ -1184,6 +1193,7 @@ impl Rasterizer {
 impl RasterCache {
     fn get_or_render_scene_pieces(
         &self,
+        log: &LogContext,
         scene: &Scene,
         active_color: BGRA8,
         rasterizer: &mut Rasterizer,
@@ -1195,9 +1205,12 @@ impl RasterCache {
                     active_color,
                 },
                 || {
+                    trace!(log, "Rendering subscene {scene:?} to pieces");
+
                     let mut pieces = Vec::new();
                     let mut bbox = Rect2::NOTHING;
                     rasterizer.render_scene_pieces_impl(
+                        log,
                         active_color,
                         &scene.0,
                         &mut |_, piece| {
@@ -1214,6 +1227,7 @@ impl RasterCache {
 
     fn get_or_render_subscene_texture(
         &self,
+        log: &LogContext,
         kind: &SubsceneKind,
         new_active_color: BGRA8,
         rasterizer: &mut Rasterizer,
@@ -1226,6 +1240,13 @@ impl RasterCache {
                         active_color: BGRA8::ZERO,
                     },
                     || {
+                        trace!(
+                            log,
+                            "Rendering external subscene [{:?}]@{:?} to texture",
+                            util::fmt_from_fn(|x| external.write_debug_name(x)),
+                            Rc::as_ptr(external) as *const ()
+                        );
+
                         let (off, texture) = external
                             .rasterize(rasterizer)
                             .map_err(SceneRenderErrorInner::External)?;
@@ -1244,10 +1265,16 @@ impl RasterCache {
                     },
                     || {
                         let (pieces, bbox) = self.get_or_render_scene_pieces(
+                            log,
                             child_scene,
                             new_active_color,
                             rasterizer,
                         )?;
+
+                        trace!(
+                            log,
+                            "Rendering pieces of subscene {child_scene:?} to texture",
+                        );
 
                         Ok(CachedSubsceneTexture(
                             rasterizer.pieces_to_texture(pieces, bbox),

@@ -1388,6 +1388,7 @@ dependencies = [
 name = "sbr-rasterize"
 version = "0.6.0"
 dependencies = [
+ "sbr-log",
  "sbr-test-util",
  "sbr-util",
  "thiserror 1.0.63",

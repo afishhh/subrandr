@@ -19,6 +19,12 @@ pub type Rect2S = Rect2<I26Dot6>;
 #[derive(Clone)]
 pub struct Scene(pub(crate) Rc<[SceneNode]>);
 
+impl Debug for Scene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Scene@{:?}", Rc::as_ptr(&self.0) as *const ())
+    }
+}
+
 impl Scene {
     pub fn empty() -> Self {
         Self(Rc::default())
@@ -281,6 +287,11 @@ pub enum SubsceneKind {
 }
 
 pub trait ExternalSubscene {
+    fn write_debug_name(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        _ = fmt;
+        Ok(())
+    }
+
     fn bounding_box(&self) -> Rect2S;
     fn rasterize(&self, rasterizer: &mut dyn Rasterizer) -> Result<(Vec2<i32>, Texture), AnyError>;
 }

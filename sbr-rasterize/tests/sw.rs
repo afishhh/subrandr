@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use log::RootLogger;
 use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::{FixedS, Scene, SceneBuilder, SceneColor, SceneFilter, SubsceneKind},
@@ -30,9 +31,10 @@ impl DrawChecker {
         let mut buffer = vec![Premultiplied(BGRA8::ZERO); (size.x * size.y) as usize];
         let mut target = sw::RenderTarget::new(&mut buffer, size.x, size.y, size.x);
 
+        let logger = RootLogger::new();
         let mut rasterizer = sw::Rasterizer::new();
         rasterizer
-            .render_scene(&mut target.reborrow().into(), scene)
+            .render_scene(&logger.new_ctx(), &mut target.reborrow().into(), scene)
             .expect("failed to rasterize scene to framebuffer");
 
         let mut scratch = buffer.clone();
@@ -52,7 +54,7 @@ impl DrawChecker {
             pieces: {
                 let mut result = Vec::new();
                 rasterizer
-                    .render_scene_pieces(scene, &mut |piece| result.push(piece))
+                    .render_scene_pieces(&logger.new_ctx(), scene, &mut |piece| result.push(piece))
                     .unwrap();
                 result
             },

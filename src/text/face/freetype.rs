@@ -594,11 +594,13 @@ impl Font {
 
 impl std::fmt::Debug for Font {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Font")
-            .field("face", self.face())
-            .field("point_size", &self.point_size())
-            .field("dpi", &self.size.dpi)
-            .finish()
+        write!(
+            f,
+            "{:?} {}pt {}dpi",
+            self.face(),
+            self.size.point_size,
+            self.size.dpi
+        )
     }
 }
 
@@ -918,6 +920,14 @@ impl FreeTypeSubscene {
 }
 
 impl ExternalSubscene for FreeTypeSubscene {
+    fn write_debug_name(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            fmt,
+            "glyph {:?} of {:?} at {:?}",
+            self.index, self.font, self.subpixel_offset
+        )
+    }
+
     fn bounding_box(&self) -> Rect2S {
         self.bbox
     }

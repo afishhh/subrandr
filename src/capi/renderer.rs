@@ -76,9 +76,10 @@ unsafe extern "C" fn sbr_renderer_render(
 ) -> c_int {
     let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
     let log = &(*renderer).lib.root_logger.new_ctx();
+    let target = rasterize::sw::RenderTarget::new(buffer, width, height, stride);
     ctry!((*renderer)
         .inner
-        .render(log, &*ctx, t, buffer, width, height, stride));
+        .render(log, &*ctx, t, target, &mut (*renderer).rasterizer));
     0
 }
 

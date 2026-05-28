@@ -8,7 +8,13 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches};
 use log::{error, info, LogContext};
-use subrandr::{DebugFlags, Renderer, SubtitleContext, Subtitles};
+use subrandr::{
+    rasterize::{
+        color::{Premultiplied, BGRA8},
+        sw,
+    },
+    DebugFlags, Renderer, SubtitleContext, Subtitles,
+};
 use winit::{
     event::StartCause,
     event_loop::{self, ControlFlow, EventLoop},
@@ -150,7 +156,8 @@ enum WindowState {
 struct SoftwareWindowState {
     window: winit::window::Window,
     presenter: softpresent::Presenter,
-    buffer: Vec<u32>,
+    buffer: Vec<Premultiplied<BGRA8>>,
+    rasterizer: sw::Rasterizer,
 }
 
 impl WindowState {
@@ -238,6 +245,7 @@ impl winit::application::ApplicationHandler for App {
                         .expect("Failed to create software presenter"),
                     window,
                     buffer: Vec::new(),
+                    rasterizer: sw::Rasterizer::new(),
                 }));
             }
         }
@@ -393,7 +401,10 @@ impl winit::application::ApplicationHandler for App {
                     if !self.frame_valid_inside.contains(&t) {
                         match state {
                             WindowState::Software(soft) => {
-                                soft.buffer.resize(s_width as usize * s_height as usize, 0);
+                                soft.buffer.resize(
+                                    s_width as usize * s_height as usize,
+                                    Premultiplied(BGRA8::ZERO),
+                                );
                                 if let Some(subs) = self.subs.as_ref() {
                                     // TODO: Do this properly instead
                                     self.renderer.set_subtitles(Some(subs));
@@ -402,14 +413,13 @@ impl winit::application::ApplicationHandler for App {
                                             log,
                                             &ctx,
                                             t,
-                                            unsafe {
-                                                std::mem::transmute::<&mut [u32], &mut [_]>(
-                                                    soft.buffer.as_mut_slice(),
-                                                )
-                                            },
-                                            s_width,
-                                            s_height,
-                                            s_width,
+                                            sw::RenderTarget::new(
+                                                &mut soft.buffer,
+                                                s_width,
+                                                s_height,
+                                                s_width,
+                                            ),
+                                            &mut soft.rasterizer,
                                         )
                                         .unwrap();
 
@@ -426,7 +436,7 @@ impl winit::application::ApplicationHandler for App {
                                         )
                                         .expect("Failed to present buffer");
                                 } else {
-                                    soft.buffer.fill(0);
+                                    soft.buffer.fill(Premultiplied(BGRA8::ZERO));
                                 }
                             }
                         }

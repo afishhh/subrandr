@@ -6,7 +6,7 @@ use std::{
 
 use log::{trace, AsLogger, LogContext};
 use rasterize::{
-    color::{Premultiplied, BGRA8},
+    color::BGRA8,
     scene::{Scene, SceneBuilder, SceneContentBuilder},
     Rasterizer,
 };
@@ -429,19 +429,11 @@ impl Renderer {
         log: &LogContext,
         ctx: &SubtitleContext,
         t: u32,
-        buffer: &mut [Premultiplied<BGRA8>],
-        width: u32,
-        height: u32,
-        stride: u32,
+        target: rasterize::sw::RenderTarget,
+        rasterizer: &mut rasterize::sw::Rasterizer,
     ) -> Result<(), RenderError> {
-        self.render_to(
-            log,
-            &mut rasterize::sw::Rasterizer::new(),
-            &mut rasterize::sw::RenderTarget::new(buffer, width, height, stride).into(),
-            ctx,
-            t,
-        )
-        .inspect(|_| self.end_raster(log))
+        self.render_to(log, rasterizer, &mut target.into(), ctx, t)
+            .inspect(|_| self.end_raster(log))
     }
 
     fn render_to(

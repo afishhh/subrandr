@@ -3,7 +3,6 @@ use std::{path::Path, sync::OnceLock};
 use rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::SceneBuilder,
-    Rasterizer,
 };
 use util::{
     math::I26Dot6,
@@ -282,8 +281,7 @@ fn check_fn(
 
         let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
         let mut rasterizer = rasterize::sw::Rasterizer::new();
-        let mut render_target =
-            rasterize::sw::RenderTarget::new(&mut pixels, width, height, width).into();
+        let mut render_target = rasterize::sw::RenderTarget::new(&mut pixels, width, height, width);
 
         rasterizer
             .render_scene(log, &mut render_target, &scene_builder.finish())

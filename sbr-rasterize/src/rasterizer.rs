@@ -1,10 +1,7 @@
 use std::{fmt::Write, mem::MaybeUninit};
 
-use log::LogContext;
 use thiserror::Error;
 use util::{math::Vec2, AnyError};
-
-use crate::scene::Scene;
 
 pub mod sw;
 
@@ -20,40 +17,6 @@ impl PixelFormat {
             PixelFormat::Mono => 1,
             PixelFormat::Bgra => 4,
         }
-    }
-}
-
-enum RenderTargetInner<'a> {
-    Software(sw::RenderTarget<'a>),
-}
-
-impl RenderTargetInner<'_> {
-    fn variant_name(&self) -> &'static str {
-        match self {
-            Self::Software(_) => "software",
-        }
-    }
-}
-
-pub struct RenderTarget<'a>(RenderTargetInner<'a>);
-
-impl RenderTarget<'_> {
-    pub fn width(&self) -> u32 {
-        match &self.0 {
-            RenderTargetInner::Software(sw) => sw.width(),
-        }
-    }
-
-    pub fn height(&self) -> u32 {
-        match &self.0 {
-            RenderTargetInner::Software(sw) => sw.height(),
-        }
-    }
-}
-
-impl<'a> From<sw::RenderTarget<'a>> for RenderTarget<'a> {
-    fn from(value: sw::RenderTarget<'a>) -> Self {
-        Self(RenderTargetInner::Software(value))
     }
 }
 
@@ -86,21 +49,15 @@ impl Texture {
         }
     }
 
-    pub fn width(&self) -> u32 {
+    pub(crate) fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width(),
         }
     }
 
-    pub fn height(&self) -> u32 {
+    pub(crate) fn height(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.height(),
-        }
-    }
-
-    pub fn is_mono(&self) -> bool {
-        match &self.0 {
-            TextureInner::Software(sw) => sw.is_mono(),
         }
     }
 }
@@ -115,6 +72,8 @@ enum SceneRenderErrorInner {
 #[error(transparent)]
 pub struct SceneRenderError(#[from] SceneRenderErrorInner);
 
+// TODO: Reconsider trait/naming, now that we have everything in `Scene` this is
+//       only really used for uploading textures and writing debug info.
 pub trait Rasterizer {
     // Used for displaying debug information
     fn name(&self) -> &'static str;
@@ -138,34 +97,4 @@ pub trait Rasterizer {
         // FIXME: ugly box...
         callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
     ) -> Texture;
-
-    /// Creates a new atlased texture via memory-mapped initialization.
-    ///
-    /// # Safety
-    ///
-    /// `callback` must initialize the entire buffer passed to it before returning.
-    // TODO: Merge into create_texture_mapped as parameter?
-    #[allow(clippy::type_complexity)]
-    unsafe fn create_packed_texture_mapped(
-        &mut self,
-        size: Vec2<u32>,
-        format: PixelFormat,
-        callback: Box<dyn FnOnce(sw::RenderTargetView<MaybeUninit<u8>>) + '_>,
-    ) -> Texture {
-        self.create_texture_mapped(size, format, callback)
-    }
-
-    fn blur_texture(&mut self, texture: &Texture, blur_sigma: f32) -> BlurOutput;
-
-    fn render_scene(
-        &mut self,
-        log: &LogContext,
-        target: &mut RenderTarget,
-        scene: &Scene,
-    ) -> Result<(), SceneRenderError>;
-}
-
-pub struct BlurOutput {
-    pub padding: Vec2<u32>,
-    pub texture: Texture,
 }

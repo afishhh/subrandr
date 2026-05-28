@@ -850,7 +850,7 @@ impl FreeTypeSubscene {
         );
 
         let texture = unsafe {
-            rasterizer.create_packed_texture_mapped(
+            rasterizer.create_texture_mapped(
                 dst_size,
                 if matches!(pixel_mode, PixelMode::Bgra8) {
                     PixelFormat::Bgra

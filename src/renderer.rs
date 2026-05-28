@@ -429,26 +429,14 @@ impl Renderer {
         log: &LogContext,
         ctx: &SubtitleContext,
         t: u32,
-        target: rasterize::sw::RenderTarget,
+        mut target: rasterize::sw::RenderTarget,
         rasterizer: &mut rasterize::sw::Rasterizer,
     ) -> Result<(), RenderError> {
-        self.render_to(log, rasterizer, &mut target.into(), ctx, t)
-            .inspect(|_| {
-                self.end_raster(log);
-                rasterizer.advance_cache_generation();
-            })
-    }
-
-    fn render_to(
-        &mut self,
-        log: &LogContext,
-        rasterizer: &mut dyn rasterize::Rasterizer,
-        target: &mut rasterize::RenderTarget,
-        ctx: &SubtitleContext,
-        t: u32,
-    ) -> Result<(), RenderError> {
         self.render_to_scene(log, ctx, t, rasterizer)?;
-        rasterizer.render_scene(log, target, &self.scene)?;
+        rasterizer.render_scene(log, &mut target, &self.scene)?;
+
+        self.end_raster(log);
+        rasterizer.advance_cache_generation();
 
         Ok(())
     }

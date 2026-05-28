@@ -343,19 +343,6 @@ impl<P> RenderTargetView<'_, MaybeUninit<P>> {
 
 pub type RenderTarget<'a> = RenderTargetView<'a, Premultiplied<BGRA8>>;
 
-fn unwrap_sw_render_target<'a, 'b>(
-    target: &'a mut super::RenderTarget<'b>,
-) -> &'a mut RenderTarget<'b> {
-    match &mut target.0 {
-        super::RenderTargetInner::Software(target) => target,
-        #[expect(unreachable_patterns)]
-        target => panic!(
-            "Incompatible render target {:?} passed to software rasterizer (expected: software)",
-            target.variant_name()
-        ),
-    }
-}
-
 #[derive(Clone)]
 enum TextureData<'a> {
     OwnedMono(Arc<[u8]>),
@@ -506,13 +493,6 @@ impl<'a> Texture<'a> {
             TextureData::OwnedMono(mono) => mono.len(),
             TextureData::OwnedBgra(bgra) => bgra.len() * 4,
             TextureData::BorrowedMono(_) => 0,
-        }
-    }
-
-    pub(super) fn is_mono(&self) -> bool {
-        match &self.data {
-            TextureData::OwnedMono(_) | TextureData::BorrowedMono(_) => true,
-            TextureData::OwnedBgra(_) => false,
         }
     }
 }
@@ -838,7 +818,7 @@ pub struct BlurOutput {
 }
 
 impl Rasterizer {
-    pub fn blur_sw_texture(&mut self, texture: &Texture<'_>, blur_sigma: f32) -> BlurOutput {
+    pub(crate) fn blur_texture(&mut self, texture: &Texture<'_>, blur_sigma: f32) -> BlurOutput {
         let is_box_blur;
         let kernel = if blur_sigma > 2.0 {
             is_box_blur = true;
@@ -947,30 +927,6 @@ impl super::Rasterizer for Rasterizer {
                 }
             }
         }))
-    }
-
-    fn blur_texture(&mut self, texture: &super::Texture, blur_sigma: f32) -> super::BlurOutput {
-        let output = self.blur_sw_texture(unwrap_sw_texture(texture), blur_sigma);
-        super::BlurOutput {
-            padding: output.padding,
-            texture: super::Texture(super::TextureInner::Software(output.texture)),
-        }
-    }
-
-    fn render_scene(
-        &mut self,
-        log: &LogContext,
-        target: &mut super::RenderTarget,
-        scene: &Scene,
-    ) -> Result<(), super::SceneRenderError> {
-        let target = unwrap_sw_render_target(target);
-        target.buffer.fill(Premultiplied(BGRA8::ZERO));
-
-        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
-            piece.content.blend_to_impl(r, target, piece.pos)
-        })?;
-
-        Ok(())
     }
 }
 
@@ -1129,7 +1085,7 @@ impl Rasterizer {
                             if blur_stddev == I26Dot6::ZERO {
                                 output_filter = Some(BitmapFilter::ExtractAlpha);
                             } else {
-                                let output = self.blur_sw_texture(&texture, blur_stddev.into_f32());
+                                let output = self.blur_texture(&texture, blur_stddev.into_f32());
                                 pos -= Vec2::new(output.padding.x as i32, output.padding.y as i32);
                                 texture = output.texture;
                             }
@@ -1163,6 +1119,21 @@ impl Rasterizer {
         on_piece: &mut dyn FnMut(OutputPiece),
     ) -> Result<(), SceneRenderError> {
         self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut move |_r, p| on_piece(p))
+    }
+
+    pub fn render_scene(
+        &mut self,
+        log: &LogContext,
+        target: &mut RenderTarget,
+        scene: &Scene,
+    ) -> Result<(), super::SceneRenderError> {
+        target.buffer.fill(Premultiplied(BGRA8::ZERO));
+
+        self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
+            piece.content.blend_to_impl(r, target, piece.pos)
+        })?;
+
+        Ok(())
     }
 
     fn pieces_to_texture(
@@ -1320,15 +1291,6 @@ impl OutputPieceContent {
                 );
             }
         }
-    }
-
-    pub fn blend_to(
-        &self,
-        rasterizer: &mut Rasterizer,
-        target: &mut super::RenderTarget,
-        pos: Point2<i32>,
-    ) {
-        self.blend_to_impl(rasterizer, unwrap_sw_render_target(target), pos);
     }
 }
 

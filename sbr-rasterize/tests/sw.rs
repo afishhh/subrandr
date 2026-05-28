@@ -5,7 +5,6 @@ use sbr_rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::{FixedS, Scene, SceneBuilder, SceneColor, SceneFilter, SubsceneKind},
     sw::{self, InstancedOutputBuilder, OutputPiece},
-    Rasterizer as _,
 };
 use util::{
     make_static_outline,
@@ -34,7 +33,7 @@ impl DrawChecker {
         let logger = RootLogger::new();
         let mut rasterizer = sw::Rasterizer::new();
         rasterizer
-            .render_scene(&logger.new_ctx(), &mut target.reborrow().into(), scene)
+            .render_scene(&logger.new_ctx(), &mut target.reborrow(), scene)
             .expect("failed to rasterize scene to framebuffer");
 
         let mut scratch = buffer.clone();

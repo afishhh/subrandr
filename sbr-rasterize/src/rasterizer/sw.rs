@@ -615,6 +615,7 @@ impl CacheValue for BlurOutput {
 
 pub struct Rasterizer {
     blurer: blur::Blurer,
+    strip_rasterizer: strip::StripRasterizer,
     // NOTE: This is an `Rc` only to workaround borrowing rules.
     //       No other live references shall exist outside a running render pass.
     cache: Rc<RasterCache>,
@@ -626,6 +627,7 @@ impl Rasterizer {
     pub fn new() -> Self {
         Self {
             blurer: blur::Blurer::new(),
+            strip_rasterizer: strip::StripRasterizer::new(),
             cache: Rc::new(RasterCache(Cache::new(RASTER_CACHE_CONFIGURATION))),
         }
     }
@@ -1037,7 +1039,7 @@ impl Rasterizer {
                     );
                 }
                 SceneNode::FilledOutline(outline) => {
-                    let (pos, size, strips) = outline.to_strips();
+                    let (pos, size, strips) = outline.to_strips(&mut self.strip_rasterizer);
                     on_piece(
                         self,
                         OutputPiece {
@@ -1051,7 +1053,7 @@ impl Rasterizer {
                     )
                 }
                 SceneNode::StrokedPolyline(polyline) => {
-                    let (pos, size, strips) = polyline.to_strips();
+                    let (pos, size, strips) = polyline.to_strips(&mut self.strip_rasterizer);
                     on_piece(
                         self,
                         OutputPiece {

@@ -297,7 +297,10 @@ pub trait ExternalSubscene {
 }
 
 impl StrokedPolyline {
-    pub fn to_strips(&self) -> (Point2<i32>, Vec2<u32>, Strips) {
+    pub fn to_strips(
+        &self,
+        strip_rasterizer: &mut sw::StripRasterizer,
+    ) -> (Point2<i32>, Vec2<u32>, Strips) {
         let mut bbox = Rect2::bounding_box_of_points(self.polyline.iter().copied());
         bbox.expand(self.width, self.width);
 
@@ -319,7 +322,6 @@ impl StrokedPolyline {
                 - (bbox.min.y + pos16.y.fract()).floor_to_inner()) as u32,
         );
 
-        let mut strip_rasterizer = sw::StripRasterizer::new();
         strip_rasterizer.stroke_polyline(
             self.polyline.iter().copied().map(|mut p| {
                 p -= input_shift;
@@ -333,7 +335,10 @@ impl StrokedPolyline {
 }
 
 impl FilledOutline {
-    pub fn to_strips(&self) -> (Point2<i32>, Vec2<u32>, Strips) {
+    pub fn to_strips(
+        &self,
+        strip_rasterizer: &mut sw::StripRasterizer,
+    ) -> (Point2<i32>, Vec2<u32>, Strips) {
         let bbox = self.events.control_box();
 
         let output_pos = Point2::new(bbox.min.x.floor() as i32, bbox.min.y.floor() as i32);
@@ -343,7 +348,6 @@ impl FilledOutline {
             (bbox.max.y.ceil() as i32 - output_pos.y) as u32,
         );
 
-        let mut strip_rasterizer = sw::StripRasterizer::new();
         strip_rasterizer.add_outline(self.events.iter().copied().map_points(|mut p| {
             p -= input_shift;
             Point2::new(p.x, p.y)

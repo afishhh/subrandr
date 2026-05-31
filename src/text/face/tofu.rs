@@ -87,7 +87,7 @@ impl Font {
                     width: pixel_width,
                     height: pixel_height,
                     hori_bearing_x: pixel_height / 12,
-                    hori_bearing_y: ascender,
+                    hori_bearing_y: -ascender,
                     hori_advance: pixel_width,
                     vert_bearing_x: I26Dot6::ZERO,
                     vert_bearing_y: I26Dot6::ZERO,

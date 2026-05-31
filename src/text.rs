@@ -168,8 +168,8 @@ pub fn display<'g>(
     cache: &GlyphCache,
 ) -> Result<(), GlyphDisplayError> {
     for (font, glyph) in glyphs {
-        let offset = Vec2::new(glyph.x_offset, glyph.y_offset);
-        let advance = Vec2::new(glyph.x_advance, glyph.y_advance);
+        let offset = Vec2::new(glyph.x_offset, -glyph.y_offset);
+        let advance = Vec2::new(glyph.x_advance, -glyph.y_advance);
 
         output
             .with_translation(offset)

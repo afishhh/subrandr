@@ -8,8 +8,8 @@ use std::{
 };
 
 use rasterize::{
-    color::{Premultiplied, BGRA8},
-    scene::{ExternalSubscene, FixedS, Point2S, Rect2S, SubsceneKind, Vec2S},
+    color::BGRA8,
+    scene::{ExternalSubscene, FixedS, Rect2S, SceneBuilder, SubsceneKind, Vec2S},
     PixelFormat, Rasterizer, Texture,
 };
 use text_sys::*;
@@ -645,7 +645,17 @@ impl Drop for Font {
 }
 
 #[derive(Debug, Error)]
+pub enum BitmapCopyError {
+    #[error("Unsupported pixel mode {0}")]
+    UnsupportedPixelMode(std::ffi::c_uchar),
+    #[error("Unsupported (negative) bitmap pitch {0}")]
+    NegativePitch(std::ffi::c_int),
+}
+
+#[derive(Debug, Error)]
 pub enum GlyphDisplayError {
+    #[error(transparent)]
+    BitmapGlyphCopy(#[from] BitmapCopyError),
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),
 }
@@ -656,10 +666,8 @@ pub enum GlyphRenderError {
     FreeType(#[from] FreeTypeError),
     #[error("Unsupported glyph format {0} after conversion")]
     ConversionToBitmapFailed(FT_Glyph_Format),
-    #[error("Unsupported pixel mode {0}")]
-    UnsupportedBitmapFormat(std::ffi::c_uchar),
-    #[error("Unsupported (negative) bitmap pitch {0}")]
-    NegativePitch(std::ffi::c_int),
+    #[error(transparent)]
+    BitmapCopy(#[from] BitmapCopyError),
 }
 
 impl FontImpl for Font {
@@ -698,11 +706,16 @@ impl FontImpl for Font {
         )
     }
 
+    // TODO: This mechanism could be improved to:
+    //       - Avoid hinting outlines for each subpixel offset
+    //         (transform is applied after hinting anyway)
+    //       - Avoid copying bitmap glyph to texture for each size separately
     type DisplayError = GlyphDisplayError;
     fn glyph_subscene_uncached(
         &self,
         index: u32,
         subpixel_offset: Vec2S,
+        rasterizer: &mut dyn Rasterizer,
     ) -> Result<GlyphSubscene, Self::DisplayError> {
         unsafe {
             let face = self.with_applied_size()?;
@@ -711,11 +724,10 @@ impl FontImpl for Font {
             fttry!(FT_Load_Glyph(
                 face,
                 index,
-                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR | FT_LOAD_BITMAP_METRICS_ONLY) as i32
+                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
             ))?;
 
             let mut bbox;
-            let bitmap_scale;
             let glyph = (*face).glyph;
             let mut graphics = None;
             if (*glyph).format == FT_GLYPH_FORMAT_BITMAP {
@@ -725,50 +737,55 @@ impl FontImpl for Font {
                 };
 
                 let scale = self.size.bitmap_scale;
-                let total_width =
-                    (scale * ((*glyph).bitmap_left + bitmap.width as i32)).ceil_to_inner();
-                let total_height =
-                    (scale * (bitmap.width as i32 - (*glyph).bitmap_top)).ceil_to_inner();
-
-                bbox = Rect2S::from_min_size(
-                    Point2S::ZERO,
-                    Vec2::new(FixedS::new(total_width), FixedS::new(total_height)),
+                let scaled_offset = {
+                    Vec2::new(
+                        scale * ((*glyph).bitmap_left),
+                        scale * (-(*glyph).bitmap_top),
+                    )
+                };
+                let scaled_size = Vec2::new(
+                    (scale * bitmap.width as i32).floor_to_inner() as u32,
+                    (scale * bitmap.rows as i32).floor_to_inner() as u32,
                 );
-                bitmap_scale = self.size.bitmap_scale;
-            } else {
-                bitmap_scale = I26Dot6::ONE;
-                if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE
-                    // HACK: COLRv0 glyphs have OUTLINE format but are handled specially by
-                    // FreeType and when we do our funny caching we get a SIGSEGV.
-                    // Correct solution is not misusing the API in this way but I want to minimize
-                    // the amount of `FT_Render_Glyph` reimplemented here so for now let's just
-                    // avoid caching outlines from fonts that have color layers.
-                    && ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0
-                {
-                    let outline = FTOutline::from_ref(&(*glyph).outline);
-                    if outline.points().is_empty() {
-                        return Ok(GlyphSubscene::empty());
-                    }
+                let texture = copy_glyph_slot_bitmap_to_texture(glyph, rasterizer)?;
 
-                    bbox = Rect2S::NOTHING;
-                    for p in outline.points() {
-                        bbox.expand_to_point(Point2::new(
-                            FixedS::from_ft(p.x),
-                            FixedS::from_ft(-p.y),
-                        ));
-                    }
-
-                    graphics = Some(CachedGlyphGraphics::Outline(OwnedFTOutline::from(outline)))
-                } else {
-                    bbox = Rect2S::MAX;
+                return Ok(GlyphSubscene(SubsceneKind::Scene({
+                    let mut b = SceneBuilder::new();
+                    b.root().with_translation(scaled_offset).bitmap(
+                        texture,
+                        scaled_size,
+                        None,
+                        BGRA8::WHITE,
+                    );
+                    b.finish()
+                })));
+            } else if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE
+                // HACK: COLRv0 glyphs have OUTLINE format but are handled specially by
+                // FreeType and when we do our funny caching we get a SIGSEGV.
+                // Correct solution is not misusing the API in this way but I want to minimize
+                // the amount of `FT_Render_Glyph` reimplemented here so for now let's just
+                // avoid caching outlines from fonts that have color layers.
+                && ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0
+            {
+                let outline = FTOutline::from_ref(&(*glyph).outline);
+                if outline.points().is_empty() {
+                    return Ok(GlyphSubscene::empty());
                 }
+
+                bbox = Rect2S::NOTHING;
+                for p in outline.points() {
+                    bbox.expand_to_point(Point2::new(FixedS::from_ft(p.x), FixedS::from_ft(-p.y)));
+                }
+
+                graphics = Some(CachedGlyphGraphics::Outline(OwnedFTOutline::from(outline)))
+            } else {
+                bbox = Rect2S::MAX;
             }
 
             let subscene = Rc::new(FreeTypeSubscene {
                 font: self.clone(),
                 index,
                 subpixel_offset,
-                bitmap_scale,
                 graphics,
                 bbox,
             });
@@ -776,6 +793,44 @@ impl FontImpl for Font {
             Ok(GlyphSubscene(SubsceneKind::External(subscene)))
         }
     }
+}
+
+unsafe fn copy_glyph_slot_bitmap_to_texture(
+    glyph: FT_GlyphSlot,
+    rasterizer: &mut dyn Rasterizer,
+) -> Result<Texture, BitmapCopyError> {
+    let glyph = &*glyph;
+
+    let Ok(src_stride) = usize::try_from(glyph.bitmap.pitch) else {
+        // I have never seen this and have no idea how it works.
+        // Better to error out than do garbage memory access and likely crash.
+        return Err(BitmapCopyError::NegativePitch(glyph.bitmap.pitch));
+    };
+
+    let pixel_format = match glyph.bitmap.pixel_mode.into() {
+        FT_PIXEL_MODE_GRAY => PixelFormat::Mono,
+        FT_PIXEL_MODE_BGRA => PixelFormat::Bgra,
+        _ => {
+            return Err(BitmapCopyError::UnsupportedPixelMode(
+                glyph.bitmap.pixel_mode,
+            ))
+        }
+    };
+
+    Ok(rasterizer.create_texture_mapped(
+        Vec2::new(glyph.bitmap.width, glyph.bitmap.rows),
+        pixel_format,
+        Box::new(|mut target| {
+            let mut ptr = glyph.bitmap.buffer;
+            let src_width = usize::from(pixel_format.width()) * glyph.bitmap.width as usize;
+
+            for y in 0..glyph.bitmap.rows {
+                let row = std::slice::from_raw_parts(ptr.cast(), src_width);
+                target.row(y as i32).unwrap().copy_from_slice(row);
+                ptr = ptr.add(src_stride);
+            }
+        }),
+    ))
 }
 
 struct TransformGuard(FT_Face);
@@ -824,7 +879,6 @@ struct FreeTypeSubscene {
     font: Font,
     index: u32,
     subpixel_offset: Vec2S,
-    bitmap_scale: I26Dot6,
     graphics: Option<CachedGlyphGraphics>,
     bbox: Rect2S,
 }
@@ -946,101 +1000,10 @@ impl FreeTypeSubscene {
             return Ok((Vec2::ZERO, rasterizer.empty_mono_texture()));
         };
 
-        // I have never seen this and have no idea how it works.
-        // Better to error out than do garbage memory access and likely crash.
-        if bitmap.pitch < 0 {
-            return Err(GlyphRenderError::NegativePitch(bitmap.pitch));
-        }
-
-        enum PixelMode {
-            Mono8,
-            Bgra8,
-        }
-
-        let pixel_mode = match bitmap.pixel_mode.into() {
-            FT_PIXEL_MODE_GRAY => PixelMode::Mono8,
-            FT_PIXEL_MODE_BGRA => PixelMode::Bgra8,
-            _ => return Err(GlyphRenderError::UnsupportedBitmapFormat(bitmap.pixel_mode)),
-        };
-
-        let scaled_offset = unsafe {
-            Vec2::new(
-                (self.bitmap_scale * (*glyph).bitmap_left).round_to_inner(),
-                (self.bitmap_scale * -(*glyph).bitmap_top).round_to_inner(),
-            )
-        };
-        let dst_size = Vec2::new(
-            (bitmap.width * self.bitmap_scale.into_raw() as u32) >> 6,
-            (bitmap.rows * self.bitmap_scale.into_raw() as u32) >> 6,
-        );
-
-        let texture = unsafe {
-            rasterizer.create_texture_mapped(
-                dst_size,
-                if matches!(pixel_mode, PixelMode::Bgra8) {
-                    PixelFormat::Bgra
-                } else {
-                    PixelFormat::Mono
-                },
-                Box::new(|mut target| {
-                    let mut src_stride = bitmap.pitch.unsigned_abs() as usize;
-                    let src_width = bitmap.width;
-                    let src_height = bitmap.rows;
-                    let src_off = Vec2::ZERO;
-                    let src_size = Vec2::new(src_width as i32, src_height as i32);
-                    let src = std::slice::from_raw_parts(
-                        bitmap.buffer.cast_const(),
-                        src_stride * src_height as usize,
-                    );
-
-                    let sw = rasterize::sw::Rasterizer::new();
-                    match pixel_mode {
-                        PixelMode::Mono8 => {
-                            sw.scale_mono_raw(
-                                target, src, src_width, src_height, src_stride, src_off, src_size,
-                            );
-                        }
-                        PixelMode::Bgra8 => {
-                            assert!(
-                                bitmap.buffer.cast::<BGRA8>().is_aligned(),
-                                "FreeType gave us an unaligned BGRA8 bitmap"
-                            );
-                            assert!(
-                                src_stride % 4 == 0,
-                                "FreeType gave us a BGRA8 bitmap with an unaligned stride"
-                            );
-                            src_stride /= 4;
-
-                            let width = target.width() / 4;
-                            let height = target.height();
-                            let stride = target.stride() / 4;
-                            let target = rasterize::sw::RenderTargetView::new(
-                                std::slice::from_raw_parts_mut(
-                                    target
-                                        .buffer_mut()
-                                        .as_mut_ptr()
-                                        .cast::<MaybeUninit<Premultiplied<BGRA8>>>(),
-                                    height as usize * stride as usize,
-                                ),
-                                width,
-                                height,
-                                stride,
-                            );
-                            let src = std::slice::from_raw_parts(
-                                src.as_ptr().cast::<Premultiplied<BGRA8>>(),
-                                src.len() / 4,
-                            );
-
-                            sw.scale_bgra_raw(
-                                target, src, src_width, src_height, src_stride, src_off, src_size,
-                            );
-                        }
-                    };
-                }),
-            )
-        };
-
-        Ok((scaled_offset, texture))
+        Ok((
+            unsafe { Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top) },
+            unsafe { copy_glyph_slot_bitmap_to_texture(glyph, rasterizer)? },
+        ))
     }
 }
 

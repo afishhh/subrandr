@@ -62,7 +62,7 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
 
         ctry!(renderer
             .inner
-            .render_to_scene(log, &*ctx, t, &renderer.rasterizer));
+            .render_to_scene(log, &*ctx, t, &mut renderer.rasterizer));
 
         ctry!(renderer
             .rasterizer
@@ -76,8 +76,6 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.
             .inspect_err(|_| renderer.output_pieces.clear()));
-
-        renderer.rasterizer.advance_cache_generation();
 
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,
@@ -123,7 +121,10 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
             },
             renderer.output_pieces.iter(),
             clip_rect,
+            &mut renderer.rasterizer,
         );
+
+        renderer.rasterizer.advance_cache_generation();
 
         if !renderer.output_instances.is_empty() {
             let len = renderer.output_instances.len();

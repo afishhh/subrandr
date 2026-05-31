@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display};
 use rasterize::{
     color::BGRA8,
     scene::{SceneContentBuilder, SceneFilter},
+    Rasterizer,
 };
 use text_sys::*;
 use util::math::{I26Dot6, Vec2};
@@ -166,6 +167,7 @@ pub fn display<'g>(
     scene_filter: Option<SceneFilter>,
     color: BGRA8,
     cache: &GlyphCache,
+    rasterizer: &mut dyn Rasterizer,
 ) -> Result<(), GlyphDisplayError> {
     for (font, glyph) in glyphs {
         let offset = Vec2::new(glyph.x_offset, -glyph.y_offset);
@@ -174,7 +176,7 @@ pub fn display<'g>(
         output
             .with_translation(offset)
             .try_subscene(scene_filter, color, |subpixel_pos| {
-                font.glyph_subscene(cache, glyph.index, subpixel_pos.x, false)
+                font.glyph_subscene(cache, glyph.index, subpixel_pos.x, false, rasterizer)
                     .map(|x| x.0.clone())
             })?;
 

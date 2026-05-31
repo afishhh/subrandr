@@ -253,7 +253,12 @@ fn check_fn(
     name: &str,
     viewport_size: Vec2L,
     dpi: u32,
-    fun: impl FnOnce(&mut LayoutContext, &LayoutConstraints, &mut SceneBuilder),
+    fun: impl FnOnce(
+        &mut LayoutContext,
+        &LayoutConstraints,
+        &mut SceneBuilder,
+        &mut dyn rasterize::Rasterizer,
+    ),
 ) {
     let project_dir = test_util::project_dir();
     let tests_dir = project_dir.join("tests/");
@@ -272,6 +277,7 @@ fn check_fn(
     let height = viewport_size.y.ceil_to_inner() as u32;
     let mut pixels = {
         let mut scene_builder = SceneBuilder::new();
+        let mut rasterizer = rasterize::sw::Rasterizer::new();
         fun(
             &mut LayoutContext {
                 log,
@@ -282,10 +288,10 @@ fn check_fn(
                 size: viewport_size,
             },
             &mut scene_builder,
+            &mut rasterizer,
         );
 
         let mut pixels = vec![Premultiplied(BGRA8::ZERO); width as usize * height as usize];
-        let mut rasterizer = rasterize::sw::Rasterizer::new();
         let mut render_target = rasterize::sw::RenderTarget::new(&mut pixels, width, height, width);
 
         rasterizer
@@ -312,14 +318,19 @@ pub fn check_inline(
     dpi: u32,
     inline: InlineContent,
 ) {
-    check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
-        let fragment =
-            layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
+    check_fn(
+        name,
+        viewport_size,
+        dpi,
+        |lctx, constraints, output, rasterizer| {
+            let fragment =
+                layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
 
-        DisplayPass::new(output.root(), dpi, &GlyphCache::new())
-            .display_inline_content_fragment(pos, &fragment)
-            .expect("Display failed");
-    })
+            DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)
+                .display_inline_content_fragment(pos, &fragment)
+                .expect("Display failed");
+        },
+    )
 }
 
 pub fn check_block(
@@ -329,13 +340,18 @@ pub fn check_block(
     dpi: u32,
     block: BlockContainer,
 ) {
-    check_fn(name, viewport_size, dpi, |lctx, constraints, output| {
-        let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
+    check_fn(
+        name,
+        viewport_size,
+        dpi,
+        |lctx, constraints, output, rasterizer| {
+            let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
 
-        DisplayPass::new(output.root(), dpi, &GlyphCache::new())
-            .display_block_container_fragment(pos, &fragment)
-            .expect("Display failed");
-    })
+            DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)
+                .display_block_container_fragment(pos, &fragment)
+                .expect("Display failed");
+        },
+    )
 }
 
 macro_rules! check_one {

@@ -1,6 +1,7 @@
 use rasterize::{
     color::BGRA8,
     scene::{SceneContentBuilder, SceneFilter},
+    Rasterizer,
 };
 use util::math::{I26Dot6, Point2, Rect2};
 
@@ -21,6 +22,7 @@ pub struct DisplayPass<'r> {
     pub output: SceneContentBuilder<'r>,
     dpi: u32,
     glyph_cache: &'r GlyphCache,
+    rasterizer: &'r mut dyn Rasterizer,
     decoration_tracker: DecorationTracker,
 }
 
@@ -30,6 +32,7 @@ struct DisplayContext<'c> {
     output: SceneContentBuilder<'c>,
     dpi: u32,
     glyph_cache: &'c GlyphCache,
+    rasterizer: &'c mut dyn Rasterizer,
     decoration_ctx: DecorationContext<'c>,
 }
 
@@ -39,11 +42,17 @@ fn round_y(mut p: Point2L) -> Point2L {
 }
 
 impl<'r> DisplayPass<'r> {
-    pub fn new(output: SceneContentBuilder<'r>, dpi: u32, glyph_cache: &'r GlyphCache) -> Self {
+    pub fn new(
+        output: SceneContentBuilder<'r>,
+        dpi: u32,
+        glyph_cache: &'r GlyphCache,
+        rasterizer: &'r mut dyn Rasterizer,
+    ) -> Self {
         Self {
             output,
             dpi,
             glyph_cache,
+            rasterizer,
             decoration_tracker: DecorationTracker::new(),
         }
     }
@@ -53,6 +62,7 @@ impl<'r> DisplayPass<'r> {
             output: self.output.child(),
             dpi: self.dpi,
             glyph_cache: self.glyph_cache,
+            rasterizer: self.rasterizer,
             decoration_ctx: self.decoration_tracker.root(),
         }
     }
@@ -93,6 +103,7 @@ impl DisplayContext<'_> {
             }),
             color,
             self.glyph_cache,
+            self.rasterizer,
         )?;
 
         Ok(())
@@ -203,6 +214,7 @@ impl DisplayContext<'_> {
             output: self.output.child(),
             dpi: self.dpi,
             glyph_cache: self.glyph_cache,
+            rasterizer: self.rasterizer,
             decoration_ctx: self
                 .decoration_ctx
                 .push_decorations(style, font_metrics_if_inline),
@@ -214,6 +226,7 @@ impl DisplayContext<'_> {
             output: self.output.child(),
             dpi: self.dpi,
             glyph_cache: self.glyph_cache,
+            rasterizer: self.rasterizer,
             decoration_ctx: self.decoration_ctx.suspend_active(),
         }
     }

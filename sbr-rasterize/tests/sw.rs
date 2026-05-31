@@ -12,6 +12,7 @@ use util::{
 };
 
 struct DrawChecker {
+    rasterizer: sw::Rasterizer,
     base_path: PathBuf,
     display_base_path: String,
     secondary_draw_index: u32,
@@ -57,6 +58,7 @@ impl DrawChecker {
                     .unwrap();
                 result
             },
+            rasterizer,
         }
     }
 
@@ -130,6 +132,7 @@ impl DrawChecker {
             },
             self.pieces.iter(),
             clip_rect,
+            &mut self.rasterizer,
         );
 
         let min_x = u32::try_from(clip_rect.min.x).unwrap_or(0).min(self.size.x);
@@ -394,7 +397,6 @@ fn bilinear_scaling() {
     let r = sw::Rasterizer::new();
     let t = sw::Texture::new_borrowed_mono(RECTANGLE_TEXTURE_DATA, 5, 5);
 
-    let full_to_16 = r.scale_texture(&t, Vec2::splat(16), Vec2::ZERO, t.size());
     let part_off = Vec2::new(2, 1);
     let part_to_16 = r.scale_texture(&t, Vec2::splat(16), part_off, t.size() - part_off);
 
@@ -415,11 +417,11 @@ fn bilinear_scaling() {
             BGRA8::BLACK,
         );
         root.with_translation(Vec2::new(FixedS::new(2), FixedS::new(7)))
-            .bitmap(t.into(), None, BGRA8::WHITE);
+            .bitmap(t.clone().into(), t.size(), None, BGRA8::WHITE);
         root.with_translation(Vec2::new(FixedS::new(10), FixedS::new(2)))
-            .bitmap(full_to_16.into(), None, BGRA8::WHITE);
+            .bitmap(t.into(), Vec2::splat(16), None, BGRA8::WHITE);
         root.with_translation(Vec2::new(FixedS::new(30), FixedS::new(2)))
-            .bitmap(part_to_16.into(), None, BGRA8::WHITE);
+            .bitmap(part_to_16.into(), Vec2::splat(16), None, BGRA8::WHITE);
         builder.finish()
     };
 

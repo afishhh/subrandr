@@ -1,6 +1,9 @@
 use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path};
 
-use rasterize::scene::{FixedS, Scene, SubsceneKind, Vec2S};
+use rasterize::{
+    scene::{FixedS, Scene, SubsceneKind, Vec2S},
+    Rasterizer,
+};
 use text_sys::hb_font_t;
 use util::{
     cache::CacheValue,
@@ -128,6 +131,7 @@ trait FontImpl: Sized {
         &self,
         index: u32,
         subpixel_offset: Vec2S,
+        rasterizer: &mut dyn Rasterizer,
     ) -> Result<GlyphSubscene, Self::DisplayError>;
 }
 
@@ -255,6 +259,7 @@ impl Font {
         glyph: u32,
         offset_value: FixedS,
         offset_axis_is_y: bool,
+        rasterizer: &mut dyn Rasterizer,
     ) -> Result<&'c GlyphSubscene, GlyphDisplayError> {
         let (render_offset, subpixel_bucket) =
             FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
@@ -263,8 +268,10 @@ impl Font {
             .for_glyph(self.face(), glyph, subpixel_bucket);
 
         cache.get_or_try_insert_with(key, || match self {
-            Self::FreeType(font) => font.glyph_subscene_uncached(glyph, render_offset),
-            Self::Tofu(font) => Ok(font.glyph_subscene_uncached(glyph, render_offset).unwrap()),
+            Self::FreeType(font) => font.glyph_subscene_uncached(glyph, render_offset, rasterizer),
+            Self::Tofu(font) => Ok(font
+                .glyph_subscene_uncached(glyph, render_offset, rasterizer)
+                .unwrap()),
         })
     }
 }

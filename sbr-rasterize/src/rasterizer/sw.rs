@@ -271,10 +271,6 @@ impl<'a, P> RenderTargetView<'a, P> {
         }
     }
 
-    pub fn buffer_mut(&mut self) -> &mut [P] {
-        self.buffer
-    }
-
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -307,6 +303,20 @@ impl<'a, P> RenderTargetView<'a, P> {
         Some(unsafe {
             self.buffer
                 .get_unchecked_mut(y as usize * self.stride as usize + x as usize)
+        })
+    }
+
+    pub fn row(&mut self, y: i32) -> Option<&mut [P]> {
+        let y = u32::try_from(y).ok()?;
+
+        if y >= self.height {
+            return None;
+        }
+
+        let start = y as usize * self.stride as usize;
+        Some(unsafe {
+            self.buffer
+                .get_unchecked_mut(start..start + self.width as usize)
         })
     }
 }
@@ -524,12 +534,19 @@ const RASTER_CACHE_CONFIGURATION: CacheConfiguration = CacheConfiguration {
 };
 
 #[derive(PartialEq, Eq, Hash)]
+#[expect(clippy::enum_variant_names)]
 enum RasterCacheKey {
     SubsceneTexture {
         subscene: SubsceneCacheKey,
         active_color: BGRA8,
     },
     BlurTexture(Texture<'static>, I26Dot6),
+    ScaleTexture {
+        texture: Texture<'static>,
+        dst_size: Vec2<u32>,
+        src_off: Vec2<u32>,
+        src_size: Vec2<u32>,
+    },
 }
 
 enum SubsceneCacheKey {
@@ -601,6 +618,14 @@ impl CacheValue for CachedSubscenePieces {
 impl CacheValue for BlurOutput {
     fn memory_footprint(&self) -> usize {
         std::mem::size_of::<Self>() + self.texture.memory_footprint()
+    }
+}
+
+struct CachedTexture(Texture<'static>);
+
+impl CacheValue for CachedTexture {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of::<Self>() + self.0.memory_footprint()
     }
 }
 
@@ -739,37 +764,7 @@ impl Rasterizer {
         }
     }
 
-    pub fn scale_mono_raw(
-        &self,
-        target: RenderTargetView<'_, MaybeUninit<u8>>,
-        src: &[u8],
-        src_width: u32,
-        src_height: u32,
-        src_stride: usize,
-        src_off: Vec2<i32>,
-        src_size: Vec2<i32>,
-    ) {
-        scale::scale_mono(
-            target, src, src_stride, src_width, src_height, src_off, src_size,
-        );
-    }
-
-    pub fn scale_bgra_raw(
-        &self,
-        target: RenderTargetView<'_, MaybeUninit<Premultiplied<BGRA8>>>,
-        src: &[Premultiplied<BGRA8>],
-        src_width: u32,
-        src_height: u32,
-        src_stride: usize,
-        src_off: Vec2<i32>,
-        src_size: Vec2<i32>,
-    ) {
-        scale::scale_bgra(
-            target, src, src_stride, src_width, src_height, src_off, src_size,
-        );
-    }
-
-    pub fn scale_texture(
+    fn scale_texture_uncached(
         &self,
         texture: &Texture,
         dst_size: Vec2<u32>,
@@ -804,6 +799,18 @@ impl Rasterizer {
                 })
             },
         }
+    }
+
+    pub fn scale_texture(
+        &self,
+        texture: &Texture<'static>,
+        dst_size: Vec2<u32>,
+        src_off: Vec2<u32>,
+        src_size: Vec2<u32>,
+    ) -> Texture<'static> {
+        self.cache
+            .get_or_scale_texture(texture, dst_size, src_off, src_size, self)
+            .clone()
     }
 }
 
@@ -970,7 +977,7 @@ impl OutputPiece {
         let texture = unwrap_sw_texture(&bitmap.texture);
         Self {
             pos: bitmap.pos,
-            size: Vec2::new(bitmap.texture.width(), bitmap.texture.height()),
+            size: bitmap.scaled_size,
             content: {
                 OutputPieceContent::Texture(OutputBitmap {
                     texture: texture.clone(),
@@ -1133,7 +1140,7 @@ impl Rasterizer {
         target.buffer.fill(Premultiplied(BGRA8::ZERO));
 
         self.render_scene_pieces_impl(log, BGRA8::MAGENTA, &scene.0, &mut |r, piece| {
-            piece.content.blend_to_impl(r, target, piece.pos)
+            piece.blend_to(r, target, piece.pos)
         })?;
 
         Ok(())
@@ -1154,9 +1161,7 @@ impl Rasterizer {
                 Vec2::new(bbox.width() as u32, bbox.height() as u32),
                 |mut view| {
                     for piece in pieces {
-                        piece
-                            .content
-                            .blend_to_impl(self, &mut view, piece.pos - bbox.min.to_vec());
+                        piece.blend_to(self, &mut view, piece.pos - bbox.min.to_vec());
                     }
                 },
             ),
@@ -1277,24 +1282,49 @@ impl RasterCache {
                 rasterizer.blur_texture(src, stddev.into_f32())
             })
     }
+
+    pub fn get_or_scale_texture(
+        &self,
+        texture: &Texture<'static>,
+        dst_size: Vec2<u32>,
+        src_off: Vec2<u32>,
+        src_size: Vec2<u32>,
+        rasterizer: &Rasterizer,
+    ) -> &Texture<'static> {
+        let Ok(CachedTexture(result)) = self.0.get_or_try_insert_with(
+            RasterCacheKey::ScaleTexture {
+                texture: texture.clone(),
+                dst_size,
+                src_off,
+                src_size,
+            },
+            || {
+                Ok::<_, std::convert::Infallible>(CachedTexture(
+                    rasterizer.scale_texture_uncached(texture, dst_size, src_off, src_size),
+                ))
+            },
+        );
+
+        result
+    }
 }
 
-impl OutputPieceContent {
-    fn blend_to_impl(
-        &self,
-        rasterizer: &mut Rasterizer,
-        target: &mut RenderTarget,
-        pos: Point2<i32>,
-    ) {
-        match self {
+impl OutputPiece {
+    fn blend_to(&self, rasterizer: &mut Rasterizer, target: &mut RenderTarget, pos: Point2<i32>) {
+        match &self.content {
             OutputPieceContent::Texture(image) => {
-                rasterizer.blit_texture_filtered(
-                    target,
-                    pos,
-                    &image.texture,
-                    image.filter,
-                    image.color,
-                );
+                let texture = if self.size == image.texture.size() {
+                    &image.texture
+                } else {
+                    &rasterizer.scale_texture(
+                        &image.texture,
+                        self.size,
+                        Vec2::ZERO,
+                        image.texture.size(),
+                    )
+                };
+
+                rasterizer.blit_texture_filtered(target, pos, texture, image.filter, image.color);
             }
             OutputPieceContent::Strips(OutputStrips { strips, color }) => {
                 let pre = color.premultiply();
@@ -1384,6 +1414,7 @@ pub trait InstancedOutputBuilder<'a> {
     fn on_instance(&mut self, image: Self::ImageHandle, params: OutputInstanceParameters);
 }
 
+#[derive(Debug)]
 struct ClipRectIntersection {
     dst_pos: Point2<i32>,
     min_clip: Vec2<u32>,
@@ -1442,6 +1473,7 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
     builder: &mut B,
     pieces: impl Iterator<Item = &'a OutputPiece>,
     clip_rect: Rect2<i32>,
+    rasterizer: &mut Rasterizer,
 ) {
     let mut texture_map = HashMap::<OutputBitmap<'static>, B::ImageHandle>::new();
 
@@ -1465,8 +1497,41 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
 
         match &piece.content {
             OutputPieceContent::Texture(bitmap) => {
-                let handle = try_insert_bitmap(bitmap.clone());
-                builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
+                if piece.size == bitmap.texture.size() {
+                    let handle = try_insert_bitmap(bitmap.clone());
+                    builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
+                } else {
+                    let mut params = OutputInstanceParameters {
+                        dst_pos: clip_intersection.dst_pos,
+                        dst_size: clip_intersection.size,
+                        src_off: Vec2::ZERO,
+                        src_size: bitmap.texture.size(),
+                    };
+
+                    let handle = if clip_intersection.min_clip != Vec2::ZERO
+                        || clip_intersection.max_clip != Vec2::ZERO
+                    {
+                        // We can't really pass through the scaling if clipped as it might
+                        // result in fractional offset/size, so we have to scale the bitmap
+                        // here if that's the case.
+                        let scaled = rasterizer.scale_texture(
+                            &bitmap.texture,
+                            piece.size,
+                            Vec2::ZERO,
+                            bitmap.texture.size(),
+                        );
+                        params.src_off = clip_intersection.min_clip;
+                        params.src_size = clip_intersection.size;
+                        try_insert_bitmap(OutputBitmap {
+                            texture: scaled,
+                            ..*bitmap
+                        })
+                    } else {
+                        try_insert_bitmap(bitmap.clone())
+                    };
+
+                    builder.on_instance(handle, params);
+                }
             }
             OutputPieceContent::Strips(strips) => {
                 for op in strips.strips.paint_iter() {

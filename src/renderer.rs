@@ -588,7 +588,7 @@ impl Renderer {
         log: &LogContext,
         ctx: &SubtitleContext,
         t: u32,
-        rasterizer: &dyn Rasterizer,
+        rasterizer: &mut dyn Rasterizer,
     ) -> Result<(), RenderError> {
         self.previous_context = *ctx;
 
@@ -659,7 +659,12 @@ impl Renderer {
 
         {
             self.scene_builder.reset();
-            let mut pass = DisplayPass::new(self.scene_builder.root(), ctx.dpi, &self.glyph_cache);
+            let mut pass = DisplayPass::new(
+                self.scene_builder.root(),
+                ctx.dpi,
+                &self.glyph_cache,
+                rasterizer,
+            );
 
             for &(pos, ref fragment) in &fragments {
                 pass.display_block_container_fragment(pos, fragment)?;

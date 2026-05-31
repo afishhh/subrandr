@@ -425,6 +425,7 @@ impl FontImpl for Font {
         &self,
         index: u32,
         subpixel_offset: rasterize::scene::Vec2S,
+        _rasterizer: &mut dyn rasterize::Rasterizer,
     ) -> Result<GlyphSubscene, Self::DisplayError> {
         let mut builder = SceneBuilder::new();
         self.build_glyph_outline(builder.root().with_translation(subpixel_offset), index);

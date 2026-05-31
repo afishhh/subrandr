@@ -130,11 +130,13 @@ impl<'a> SceneContentBuilder<'a> {
     pub fn bitmap(
         &mut self,
         texture: Texture,
+        scaled_size: Vec2<u32>,
         filter: Option<BitmapFilter>,
         color: impl Into<SceneColor>,
     ) {
         self.parent.nodes.push(SceneNode::Bitmap(Bitmap {
             pos: self.rounded_translation().to_point(),
+            scaled_size,
             texture,
             filter,
             color: color.into(),
@@ -237,6 +239,7 @@ impl From<BGRA8> for SceneColor {
 #[derive(Clone)]
 pub(crate) struct Bitmap {
     pub(crate) pos: Point2<i32>,
+    pub(crate) scaled_size: Vec2<u32>,
     pub(crate) texture: Texture,
     pub(crate) filter: Option<BitmapFilter>,
     pub(crate) color: SceneColor,

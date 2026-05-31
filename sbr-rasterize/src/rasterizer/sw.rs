@@ -271,15 +271,6 @@ impl<'a, P> RenderTargetView<'a, P> {
         }
     }
 
-    pub fn empty() -> Self {
-        Self {
-            buffer: &mut [],
-            width: 0,
-            height: 0,
-            stride: 0,
-        }
-    }
-
     pub fn buffer_mut(&mut self) -> &mut [P] {
         self.buffer
     }
@@ -351,7 +342,7 @@ enum TextureData<'a> {
 }
 
 impl TextureData<'_> {
-    pub fn as_ref(&self) -> TextureDataRef<'_> {
+    fn as_ref(&self) -> TextureDataRef<'_> {
         match self {
             Self::OwnedMono(a) => TextureDataRef::Mono(a),
             Self::OwnedBgra(bgra) => TextureDataRef::Bgra(bgra),
@@ -446,13 +437,13 @@ impl Texture<'static> {
         }
     }
 
-    pub const EMPTY_MONO: Texture<'static> = Texture {
+    const EMPTY_MONO: Texture<'static> = Texture {
         width: 0,
         height: 0,
         data: TextureData::BorrowedMono(&[]),
     };
 
-    pub const SINGLE_FILLED_MONO_PIXEL: Texture<'static> = Texture {
+    const SINGLE_FILLED_MONO_PIXEL: Texture<'static> = Texture {
         width: 1,
         height: 1,
         data: TextureData::BorrowedMono(&[u8::MAX]),
@@ -673,7 +664,7 @@ impl Rasterizer {
         }
     }
 
-    pub fn blit_texture_filtered(
+    fn blit_texture_filtered(
         &self,
         target: &mut RenderTarget,
         pos: Point2<i32>,
@@ -700,7 +691,7 @@ impl Rasterizer {
         }
     }
 
-    pub fn copy_texture_filtered(
+    fn copy_texture_filtered(
         &self,
         target: &mut RenderTarget,
         pos: Point2<i32>,
@@ -814,20 +805,11 @@ impl Rasterizer {
             },
         }
     }
-
-    pub fn fill_axis_aligned_rect(
-        &self,
-        target: RenderTargetView<Premultiplied<BGRA8>>,
-        rect: Rect2S,
-        color: Premultiplied<BGRA8>,
-    ) {
-        fill_rect::<BlendOver, _>(target, rect, color);
-    }
 }
 
-pub struct BlurOutput {
-    pub padding: Vec2<u32>,
-    pub texture: Texture<'static>,
+struct BlurOutput {
+    padding: Vec2<u32>,
+    texture: Texture<'static>,
 }
 
 impl BlurOutput {
@@ -838,7 +820,7 @@ impl BlurOutput {
 }
 
 impl Rasterizer {
-    pub(crate) fn blur_texture(&mut self, texture: &Texture<'_>, blur_sigma: f32) -> BlurOutput {
+    fn blur_texture(&mut self, texture: &Texture<'_>, blur_sigma: f32) -> BlurOutput {
         let is_box_blur;
         let kernel = if blur_sigma > 2.0 {
             is_box_blur = true;

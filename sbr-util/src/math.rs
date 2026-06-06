@@ -81,12 +81,14 @@ impl<N: Copy> Vec2<N> {
 }
 
 impl<N: Number + Signed> Vec2<N> {
+    #[track_caller]
     pub fn normal(self) -> Self {
         Self::new(self.y, -self.x)
     }
 }
 
 impl<N: Number> Vec2<N> {
+    #[track_caller]
     pub fn length(self) -> N
     where
         N: Sqrt,
@@ -94,6 +96,7 @@ impl<N: Number> Vec2<N> {
         (self.x * self.x + self.y * self.y).sqrt()
     }
 
+    #[track_caller]
     pub fn length_sq(self) -> N {
         self.x * self.x + self.y * self.y
     }
@@ -106,6 +109,7 @@ impl<N: Number> Vec2<N> {
     /// However there is also a useful geometric definition:
     /// u⋅v = ||u|| * ||v|| * cos(θ)
     /// where θ is the angle between u and v.
+    #[track_caller]
     pub fn dot(self, other: Self) -> N {
         self.x * other.x + self.y * other.y
     }
@@ -125,6 +129,7 @@ impl<N: Number> Vec2<N> {
     /// it is in the "counter-clockwise direction".
     ///
     /// another NOTE: This terminology is made up and probably not very formal.
+    #[track_caller]
     pub fn cross(self, other: Self) -> N {
         self.x * other.y - self.y * other.x
     }
@@ -148,6 +153,7 @@ impl<N: Debug> Debug for Vec2<N> {
 impl<N: Number> Mul<N> for Vec2<N> {
     type Output = Self;
 
+    #[track_caller]
     fn mul(self, rhs: N) -> Self::Output {
         Self {
             x: self.x * rhs,
@@ -159,6 +165,7 @@ impl<N: Number> Mul<N> for Vec2<N> {
 impl<N: Number> Div<N> for Vec2<N> {
     type Output = Self;
 
+    #[track_caller]
     fn div(self, rhs: N) -> Self::Output {
         Self {
             x: self.x / rhs,
@@ -223,6 +230,7 @@ impl_binop!(
 impl<N: Number + Signed> Neg for Vec2<N> {
     type Output = Self;
 
+    #[track_caller]
     fn neg(self) -> Self::Output {
         Self::new(-self.x, -self.y)
     }
@@ -280,6 +288,7 @@ impl<N: Number> Rect2<N> {
         }
     }
 
+    #[track_caller]
     pub fn translate<U>(self, vector: Vec2<U>) -> Self
     where
         U: Number,

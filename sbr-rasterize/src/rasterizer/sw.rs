@@ -385,9 +385,28 @@ impl PartialEq for TextureData<'_> {
 
 impl Eq for TextureData<'_> {}
 
+#[derive(Clone, Copy)]
 enum TextureDataRef<'a> {
     Mono(&'a [u8]),
     Bgra(&'a [Premultiplied<BGRA8>]),
+}
+
+impl TextureDataRef<'_> {
+    fn hash_content<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match *self {
+            TextureDataRef::Mono(mono) => mono.hash(state),
+            TextureDataRef::Bgra(bgra) => bgra.hash(state),
+        }
+    }
+
+    fn eq_content(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (TextureDataRef::Mono(mono), TextureDataRef::Mono(other_mono)) => mono == other_mono,
+            (TextureDataRef::Bgra(bgra), TextureDataRef::Bgra(other_bgra)) => bgra == other_bgra,
+            _ => false,
+        }
+    }
 }
 
 trait TexturePixel: Sized {
@@ -496,7 +515,19 @@ impl<'a> Texture<'a> {
         }
     }
 
-    pub fn memory_footprint(&self) -> usize {
+    fn hash_content<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.width.hash(state);
+        self.height.hash(state);
+        self.data.as_ref().hash_content(state);
+    }
+
+    fn eq_content(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && TextureDataRef::eq_content(&self.data.as_ref(), &other.data.as_ref())
+    }
+
+    pub(crate) fn memory_footprint(&self) -> usize {
         match &self.data {
             TextureData::OwnedMono(mono) => mono.len(),
             TextureData::OwnedBgra(bgra) => bgra.len() * 4,
@@ -946,12 +977,43 @@ impl super::Rasterizer for Rasterizer {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct OutputBitmap<'a> {
     pub texture: Texture<'a>,
     pub filter: Option<BitmapFilter>,
     pub color: BGRA8,
 }
+
+impl OutputBitmap<'_> {
+    fn compare_by_content(&self) -> bool {
+        (self.texture.width() as usize * self.texture.height() as usize) <= 64
+    }
+}
+
+impl Hash for OutputBitmap<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        if self.compare_by_content() {
+            self.texture.hash_content(state);
+        } else {
+            self.texture.hash(state);
+        }
+        self.filter.hash(state);
+        self.color.hash(state);
+    }
+}
+
+impl PartialEq for OutputBitmap<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        (if self.compare_by_content() {
+            Texture::eq_content(&self.texture, &other.texture)
+        } else {
+            Texture::eq(&self.texture, &other.texture)
+        }) && self.filter == other.filter
+            && self.color == other.color
+    }
+}
+
+impl Eq for OutputBitmap<'_> {}
 
 #[derive(Clone)]
 pub struct OutputStrips {
@@ -1515,14 +1577,14 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
     clip_rect: Rect2<i32>,
     rasterizer: &mut Rasterizer,
 ) {
-    let mut texture_map = HashMap::<OutputBitmap<'static>, B::ImageHandle>::new();
+    let mut texture_map = HashMap::<OutputBitmap<'a>, B::ImageHandle>::new();
 
     for piece in pieces {
         let Some(clip_intersection) = clip_pixel_rects(piece.rect(), clip_rect) else {
             continue;
         };
 
-        let mut try_insert_bitmap = |bitmap: OutputBitmap<'static>| {
+        let mut try_insert_bitmap = |builder: &mut B, bitmap: OutputBitmap<'a>| {
             let occupied = match texture_map.entry(bitmap) {
                 std::collections::hash_map::Entry::Occupied(occupied) => occupied,
                 std::collections::hash_map::Entry::Vacant(vacant) => {
@@ -1538,7 +1600,7 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
         match &piece.content {
             OutputPieceContent::Texture(bitmap) => {
                 if piece.size == bitmap.texture.size() {
-                    let handle = try_insert_bitmap(bitmap.clone());
+                    let handle = try_insert_bitmap(builder, bitmap.clone());
                     builder.on_instance(handle, OutputInstanceParameters::from(clip_intersection));
                 } else {
                     let mut params = OutputInstanceParameters {
@@ -1562,12 +1624,15 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                         );
                         params.src_off = clip_intersection.min_clip;
                         params.src_size = clip_intersection.size;
-                        try_insert_bitmap(OutputBitmap {
-                            texture: scaled,
-                            ..*bitmap
-                        })
+                        try_insert_bitmap(
+                            builder,
+                            OutputBitmap {
+                                texture: scaled,
+                                ..*bitmap
+                            },
+                        )
                     } else {
-                        try_insert_bitmap(bitmap.clone())
+                        try_insert_bitmap(builder, bitmap.clone())
                     };
 
                     builder.on_instance(handle, params);
@@ -1588,14 +1653,13 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                     match op {
                         StripPaintOp::Copy(copy) => {
                             let texture = copy.to_texture();
-                            let size = texture.size();
-                            let handle = builder.on_image(
-                                size,
-                                OutputImage::Texture(OutputBitmap {
+                            let handle = try_insert_bitmap(
+                                builder,
+                                OutputBitmap {
                                     texture,
                                     filter: None,
                                     color: strips.color,
-                                }),
+                                },
                             );
                             builder.on_instance(
                                 handle,
@@ -1604,13 +1668,13 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                         }
                         StripPaintOp::Fill(fill) => {
                             let texture = fill.to_vertical_texture();
-                            let handle = builder.on_image(
-                                texture.size(),
-                                OutputImage::Texture(OutputBitmap {
+                            let handle = try_insert_bitmap(
+                                builder,
+                                OutputBitmap {
                                     texture,
                                     filter: None,
                                     color: strips.color,
-                                }),
+                                },
                             );
                             builder.on_instance(
                                 handle,
@@ -1654,7 +1718,7 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                         filter: None,
                         color,
                     };
-                    let handle = try_insert_bitmap(bitmap.clone());
+                    let handle = try_insert_bitmap(builder, bitmap.clone());
                     builder.on_instance(
                         handle,
                         OutputInstanceParameters {

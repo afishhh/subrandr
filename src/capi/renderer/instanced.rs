@@ -3,6 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
+use log::trace;
 use rasterize::{
     color::{Premultiplied, BGRA8},
     scene::{FixedS, Rect2S},
@@ -130,6 +131,13 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
         );
 
         renderer.rasterizer.advance_cache_generation();
+
+        trace!(
+            log,
+            "Rasterized to {} images and {} instances",
+            renderer.output_images.len(),
+            renderer.output_instances.len()
+        );
 
         if !renderer.output_instances.is_empty() {
             let len = renderer.output_instances.len();

@@ -80,7 +80,7 @@ pub trait Premultiply: Debug + Clone + Copy {
     fn premultiply(self) -> Premultiplied<Self>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Premultiplied<T: Premultiply>(pub T);
 

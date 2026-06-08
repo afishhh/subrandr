@@ -48,6 +48,12 @@ impl Texture {
             TextureInner::Software(sw) => sw.memory_footprint(),
         }
     }
+
+    pub(crate) fn is_mono(&self) -> bool {
+        match &self.0 {
+            TextureInner::Software(sw) => matches!(sw.format(), PixelFormat::Mono),
+        }
+    }
 }
 
 #[derive(Debug, Error)]

@@ -489,6 +489,13 @@ impl<'a> Texture<'a> {
         self.height
     }
 
+    pub(crate) fn format(&self) -> PixelFormat {
+        match &self.data {
+            TextureData::OwnedMono(_) => PixelFormat::Mono,
+            TextureData::OwnedBgra(_) | TextureData::BorrowedMono(_) => PixelFormat::Bgra,
+        }
+    }
+
     pub fn memory_footprint(&self) -> usize {
         match &self.data {
             TextureData::OwnedMono(mono) => mono.len(),
@@ -1064,7 +1071,16 @@ impl Rasterizer {
                     let cache = self.cache.clone();
                     let new_active_color = subscene.active_color.compute(active_color);
                     if let SubsceneKind::Scene(scene) = &subscene.kind {
-                        if subscene.scene_filter.is_none() {
+                        let mut can_skip_texture = false;
+
+                        can_skip_texture |= subscene.scene_filter.is_none();
+                        // Unblurred `ExtractAlpha` from a mono scene is a no-op.
+                        can_skip_texture |= matches!(
+                            subscene.scene_filter,
+                            Some(SceneFilter::ExtractAlpha { blur_stddev }) if blur_stddev == FixedS::ZERO
+                        ) && scene.is_mono();
+
+                        if can_skip_texture {
                             let (pieces, _) = cache.get_or_render_scene_pieces(
                                 log,
                                 scene,

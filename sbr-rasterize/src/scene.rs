@@ -40,6 +40,16 @@ impl Scene {
         bbox
     }
 
+    pub(crate) fn is_mono(&self) -> bool {
+        for node in self.0.iter() {
+            if !node.is_mono() {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn memory_footprint(&self) -> usize {
         std::mem::size_of::<Self>()
             + std::mem::size_of_val::<[_]>(&*self.0)
@@ -121,6 +131,25 @@ impl SceneNode {
         let mut result = Rect2::NOTHING;
         self.expand_bounding_box(&mut result);
         result
+    }
+
+    pub(crate) fn is_mono(&self) -> bool {
+        match self {
+            SceneNode::Bitmap(bitmap) => {
+                bitmap.texture.is_mono() && bitmap.color == SceneColor::ACTIVE
+            }
+            &SceneNode::StrokedPolyline(StrokedPolyline { color, .. })
+            | &SceneNode::FilledOutline(FilledOutline { color, .. })
+            | &SceneNode::FilledRect(FilledRect { color, .. }) => color == SceneColor::ACTIVE,
+            SceneNode::Subscene(subscene) => {
+                subscene.active_color == SceneColor::ACTIVE
+                    && match (&subscene.scene_filter, &subscene.kind) {
+                        (Some(SceneFilter::ExtractAlpha { .. }), _) => true,
+                        (None, SubsceneKind::External(_)) => false,
+                        (None, SubsceneKind::Scene(scene)) => scene.is_mono(),
+                    }
+            }
+        }
     }
 }
 

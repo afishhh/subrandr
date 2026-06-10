@@ -1077,24 +1077,20 @@ impl Rasterizer {
                     on_piece(self, OutputPiece::from_bitmap(bitmap.clone(), active_color));
                 }
                 &SceneNode::FilledRect(FilledRect { rect, color }) => {
+                    let floored_pos =
+                        Point2::new(rect.min.x.floor_to_inner(), rect.min.y.floor_to_inner());
                     on_piece(
                         self,
                         OutputPiece {
-                            pos: Point2::new(
-                                rect.min.x.floor_to_inner(),
-                                rect.min.y.floor_to_inner(),
-                            ),
+                            pos: floored_pos,
                             size: Vec2::new(
-                                (rect.max.x - rect.min.x.floor()).ceil_to_inner() as u32,
-                                (rect.max.y - rect.min.y.floor()).ceil_to_inner() as u32,
+                                (rect.max.x - floored_pos.x).ceil_to_inner() as u32,
+                                (rect.max.y - floored_pos.y).ceil_to_inner() as u32,
                             ),
                             content: OutputPieceContent::Rect(OutputRect {
                                 rect: Rect2S {
-                                    min: Point2::new(rect.min.x.fract(), rect.min.y.fract()),
-                                    max: Point2::new(
-                                        rect.max.x - rect.min.x.floor(),
-                                        rect.max.y - rect.min.y.floor(),
-                                    ),
+                                    min: rect.min - floored_pos.to_vec(),
+                                    max: rect.max - floored_pos.to_vec(),
                                 },
                                 color: color.compute(active_color),
                             }),

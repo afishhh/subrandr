@@ -268,6 +268,8 @@ macro_rules! define_fixed_for_type {
                 Self(signed_floor + Self::ONE.0 * (was_negative_with_fract as $type))
             }
 
+            // TODO: Most callsites of this are using it when they shouldn't or don't need to.
+            //       Fix them?
             pub const fn fract(self) -> Self {
                 let unsigned = self.0 & Self::FRACTIONAL_MASK;
                 let mut extension = (self.0 & Self::SIGN_MASK) >> (<$type>::BITS - P - 1);

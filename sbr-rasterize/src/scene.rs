@@ -417,6 +417,8 @@ impl Subscene {
 }
 
 impl StrokedPolyline {
+    // TODO: Get rid of this. The rounding here is probably wrong anyway...
+    //       Part of "finally figure out a sane outline repr" goal.
     pub fn to_strips(
         &self,
         strip_rasterizer: &mut sw::StripRasterizer,
@@ -424,8 +426,6 @@ impl StrokedPolyline {
         let mut bbox = Rect2::bounding_box_of_points(self.polyline.iter().copied());
         bbox.expand(self.width, self.width);
 
-        // TODO: I've implemented this or similar logic like 10 times
-        //       already can we split this out into a function please??
         let pos16 = Point2::new(
             I16Dot16::from_raw(self.pos.x.into_raw() << 10),
             I16Dot16::from_raw(self.pos.y.into_raw() << 10),

@@ -22,6 +22,14 @@ check_test! {
     }
 }
 
+check_test! {
+    name = COLRv0,
+    size = (535, 75),
+    inline.bungee_tint.fs64 {
+        text "Hello, world!"
+    }
+}
+
 test_define_style! {
     .hello { color: BGRA8::LIME }
 }

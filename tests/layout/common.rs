@@ -222,11 +222,14 @@ test_font!(
     "NotoSansArabic-Regular.ttf"
 );
 test_font!(NOTO_SANS_JP, b"Noto Sans JP", "NotoSansJP-Regular.ttf");
+// This is a bitmap font
 test_font!(
     NOTO_COLOR_EMOJI,
     b"Noto Color Emoji",
     "NotoColorEmoji-Subset.ttf"
 );
+// This is a COLRv0 font
+test_font!(BUNGEE_TINT, b"Bungee Tint", "BungeeTint-Regular.ttf");
 
 const ALL_FONTS: &[&TestFont] = &[
     AHEM,
@@ -234,6 +237,7 @@ const ALL_FONTS: &[&TestFont] = &[
     NOTO_SANS_ARABIC,
     NOTO_SANS_JP,
     NOTO_COLOR_EMOJI,
+    BUNGEE_TINT,
 ];
 
 test_define_style! {
@@ -242,6 +246,7 @@ test_define_style! {
     pub .noto_sans_arabic { font_family: rc_static!([NOTO_SANS_ARABIC.family()])}
     pub .noto_sans_jp { font_family: rc_static!([NOTO_SANS_JP.family()])}
     pub .noto_color_emoji { font_family: rc_static!([NOTO_COLOR_EMOJI.family()])}
+    pub .bungee_tint { font_family: rc_static!([BUNGEE_TINT.family()])}
 }
 
 fn check_fn(
@@ -379,6 +384,7 @@ macro_rules! check_test {
         $($rest: tt)*
     ) => {
         #[test]
+        #[allow(non_snake_case)]
         fn $name() {
             $crate::layout_tests::common::check_one! {
                 name = stringify!($name),

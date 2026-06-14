@@ -737,7 +737,14 @@ impl FontImpl for Font {
                 bitmap_scale = self.size.bitmap_scale;
             } else {
                 bitmap_scale = I26Dot6::ONE;
-                if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE {
+                if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE
+                    // HACK: COLRv0 glyphs have OUTLINE format but are handled specially by
+                    // FreeType and when we do our funny caching we get a SIGSEGV.
+                    // Correct solution is not misusing the API in this way but I want to minimize
+                    // the amount of `FT_Render_Glyph` reimplemented here so for now let's just
+                    // avoid caching outlines from fonts that have color layers.
+                    && ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0
+                {
                     let outline = FTOutline::from_ref(&(*glyph).outline);
                     if outline.points().is_empty() {
                         return Ok(GlyphSubscene::empty());

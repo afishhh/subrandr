@@ -1,6 +1,6 @@
 ## [Unreleased]
 
-- Fixed infinite recursion when failing to shape an RTL segment if font provider fallback returns a font for the first codepoint.
+- Fixed infinite recursion when failing to shape an RTL segment even after font provider fallback returned a font for the first codepoint.
 - The experimental `wgpu` rasterizer has been removed. Hardware acceleration may be revisited in the future with a revised approach.
 - Fixed glyph y-offset being applied incorrectly. This fixes some glyphs in complex scripts like Arabic being misplaced on the y-axis.
 

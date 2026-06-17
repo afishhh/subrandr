@@ -27,9 +27,7 @@
         ];
       in
       with pkgs.lib; {
-        packages.default = pkgs.callPackage
-          (import ./nix/default.nix self.shortRev or self.dirtyShortRev)
-          { };
+        packages.default = pkgs.callPackage (import ./nix/default.nix) { buildRevision = self.shortRev or self.dirtyShortRev; };
         devShell = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             bashInteractive

@@ -1,11 +1,10 @@
-buildRevision:
 { rustPlatform
 , stdenv
 , pkg-config
-, jq
 , harfbuzz
 , freetype
 , fontconfig
+, buildRevision ? null
 , ...
 }:
 
@@ -23,7 +22,6 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     pkg-config
-    jq
   ];
 
   buildInputs = [

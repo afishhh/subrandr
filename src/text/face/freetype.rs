@@ -702,8 +702,6 @@ impl Font {
     }
 
     // TODO: This mechanism could be improved to:
-    //       - Avoid hinting outlines for each subpixel offset
-    //         (transform is applied after hinting anyway)
     //       - Avoid copying bitmap glyph to texture for each size separately
     pub(super) fn glyph_subscene_uncached(
         &self,
@@ -723,7 +721,6 @@ impl Font {
 
             let mut bbox;
             let glyph = (*face).glyph;
-            let mut graphics = None;
             if (*glyph).format == FT_GLYPH_FORMAT_BITMAP {
                 let bitmap = &(*glyph).bitmap;
                 if bitmap.width == 0 || bitmap.rows == 0 {
@@ -754,11 +751,10 @@ impl Font {
                     b.finish()
                 })));
             } else if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE
-                // HACK: COLRv0 glyphs have OUTLINE format but are handled specially by
-                // FreeType and when we do our funny caching we get a SIGSEGV.
-                // Correct solution is not misusing the API in this way but I want to minimize
-                // the amount of `FT_Render_Glyph` reimplemented here so for now let's just
-                // avoid caching outlines from fonts that have color layers.
+                // COLRv0 glyphs actually store multiple layers which we would
+                // have to take into account here so disable this path
+                // if the font contains such glyphs.
+                // TODO: Could be made more granular.
                 && ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0
             {
                 let outline = FTOutline::from_ref(&(*glyph).outline);
@@ -784,8 +780,6 @@ impl Font {
                     );
                     return Ok(GlyphSubscene(SubsceneKind::Scene(b.finish())));
                 }
-
-                graphics = Some(CachedGlyphGraphics::Outline(OwnedFTOutline::from(outline)))
             } else {
                 bbox = Rect2S::MAX;
             }
@@ -794,7 +788,6 @@ impl Font {
                 font: self.clone(),
                 index,
                 subpixel_offset,
-                graphics,
                 bbox,
             });
 
@@ -863,37 +856,11 @@ impl Drop for TransformGuard {
     }
 }
 
-struct GlyphSlotOutlineGuard {
-    slot: FT_GlyphSlot,
-    old_outline: FT_Outline,
-}
-
-impl GlyphSlotOutlineGuard {
-    unsafe fn new(slot: FT_GlyphSlot, new_outline: FT_Outline) -> Self {
-        Self {
-            slot,
-            old_outline: std::mem::replace(&mut (*slot).outline, new_outline),
-        }
-    }
-}
-
-impl Drop for GlyphSlotOutlineGuard {
-    fn drop(&mut self) {
-        unsafe { (*self.slot).outline = self.old_outline };
-    }
-}
-
 struct FreeTypeSubscene {
     font: Font,
     index: u32,
     subpixel_offset: Vec2S,
-    graphics: Option<CachedGlyphGraphics>,
     bbox: Rect2S,
-}
-
-enum CachedGlyphGraphics {
-    // TODO: this outline is not taken into account in cache entry memory footprint
-    Outline(OwnedFTOutline),
 }
 
 #[repr(transparent)]
@@ -1071,36 +1038,6 @@ impl util::math::Outline<I26Dot6> for FTOutline {
     }
 }
 
-// An `FT_Outline` but allocated using the Rust global allocator, must not be freed
-// using `FT_Outline_Done`.
-struct OwnedFTOutline(FTOutline);
-
-impl From<&FTOutline> for OwnedFTOutline {
-    fn from(value: &FTOutline) -> Self {
-        let points: Box<[_]> = value.points().into();
-        let tags: Box<[_]> = value.tags().into();
-        let contours: Box<[_]> = value.contours().into();
-        OwnedFTOutline(FTOutline(FT_Outline_ {
-            n_contours: value.0.n_contours,
-            n_points: value.0.n_points,
-            points: Box::into_raw(points) as *mut FT_Vector,
-            tags: Box::into_raw(tags) as *mut c_uchar,
-            contours: Box::into_raw(contours) as *mut c_ushort,
-            flags: value.0.flags & !(FT_OUTLINE_OWNER as i32),
-        }))
-    }
-}
-
-impl Drop for OwnedFTOutline {
-    fn drop(&mut self) {
-        unsafe {
-            _ = Box::from_raw(self.0.points_ptr());
-            _ = Box::from_raw(self.0.tags_ptr());
-            _ = Box::from_raw(self.0.contours_ptr());
-        }
-    }
-}
-
 impl FreeTypeSubscene {
     fn rasterize_impl(
         &self,
@@ -1109,23 +1046,13 @@ impl FreeTypeSubscene {
         let face = self.font.with_applied_size()?;
         let _guard = unsafe { TransformGuard::new(face, self.subpixel_offset) };
 
-        let _outline_guard;
-        match &self.graphics {
-            Some(CachedGlyphGraphics::Outline(outline)) => unsafe {
-                let slot = (*face).glyph;
-                (*slot).format = FT_GLYPH_FORMAT_OUTLINE;
-                _outline_guard = GlyphSlotOutlineGuard::new(slot, outline.0 .0);
-            },
-            None => {
-                unsafe {
-                    fttry!(FT_Load_Glyph(
-                        face,
-                        self.index,
-                        (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
-                    ))?
-                };
-            }
-        }
+        unsafe {
+            fttry!(FT_Load_Glyph(
+                face,
+                self.index,
+                (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
+            ))?
+        };
 
         let glyph = {
             let slot = unsafe { (*face).glyph };

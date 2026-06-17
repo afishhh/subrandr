@@ -1,4 +1,4 @@
-use std::{convert::Infallible, ffi::c_void};
+use std::ffi::c_void;
 
 use rasterize::scene::{SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
 use text_sys::*;
@@ -7,7 +7,7 @@ use util::{
     math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
 };
 
-use super::{FaceImpl, FontImpl, FontMetrics, GlyphMetrics};
+use super::{FontMetrics, GlyphMetrics};
 use crate::{
     layout::{FixedL, Vec2L},
     text::{FontSizeCacheKey, GlyphSubscene},
@@ -16,42 +16,29 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Face;
 
-impl FaceImpl for Face {
-    type Font = Font;
-
-    fn family_name(&self) -> &str {
+impl Face {
+    pub(super) fn family_name(&self) -> &str {
         "Subrandr Tofu Font"
     }
 
-    fn addr(&self) -> usize {
-        // This is an unaligned address that should never occur
-        // in any actually real font backends.
-        1
-    }
-
-    fn axes(&self) -> &[super::Axis] {
+    pub(super) fn axes(&self) -> &[super::Axis] {
         &[]
     }
 
-    fn set_axis(&mut self, _index: usize, _value: I16Dot16) {
+    pub(super) fn set_axis(&mut self, _index: usize, _value: I16Dot16) {
         panic!("Cannot set builtin tofu font axis values")
     }
 
-    fn weight(&self) -> I16Dot16 {
+    pub(super) fn weight(&self) -> I16Dot16 {
         I16Dot16::new(400)
     }
 
-    fn italic(&self) -> bool {
+    pub(super) fn italic(&self) -> bool {
         false
     }
 
-    fn contains_codepoint(&self, _codepoint: u32) -> bool {
+    pub(super) fn contains_codepoint(&self, _codepoint: u32) -> bool {
         true
-    }
-
-    type Error = Infallible;
-    fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error> {
-        Ok(Font::create(point_size, dpi))
     }
 }
 
@@ -391,28 +378,20 @@ impl Font {
 
         output.filled_outline(outline.iter().copied(), SceneColor::ACTIVE);
     }
-}
 
-impl FontImpl for Font {
-    type Face = Face;
-
-    fn face(&self) -> &Self::Face {
-        &Face
-    }
-
-    fn metrics(&self) -> &FontMetrics {
+    pub(super) fn metrics(&self) -> &FontMetrics {
         &self.shared().font_metrics
     }
 
-    fn point_size(&self) -> I26Dot6 {
+    pub(super) fn point_size(&self) -> I26Dot6 {
         self.shared().point_size
     }
 
-    fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
+    pub(super) fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
         I26Dot6::ONE
     }
 
-    fn size_cache_key(&self) -> FontSizeCacheKey {
+    pub(super) fn size_cache_key(&self) -> FontSizeCacheKey {
         FontSizeCacheKey::new(
             self.point_size(),
             self.shared().dpi,
@@ -420,16 +399,15 @@ impl FontImpl for Font {
         )
     }
 
-    type DisplayError = Infallible;
-    fn glyph_subscene_uncached(
+    pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
         subpixel_offset: rasterize::scene::Vec2S,
         _rasterizer: &mut dyn rasterize::Rasterizer,
-    ) -> Result<GlyphSubscene, Self::DisplayError> {
+    ) -> GlyphSubscene {
         let mut builder = SceneBuilder::new();
         self.build_glyph_outline(builder.root().with_translation(subpixel_offset), index);
-        Ok(GlyphSubscene(SubsceneKind::Scene(builder.finish())))
+        GlyphSubscene(SubsceneKind::Scene(builder.finish()))
     }
 }
 

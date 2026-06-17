@@ -493,12 +493,12 @@ mod test {
     use util::math::I26Dot6;
 
     use super::GlyphString;
-    use crate::text::{Direction, Face, Glyph};
+    use crate::text::{Direction, Font, Glyph};
 
     #[test]
     fn split_off_in_glyph() {
         let original = {
-            let font = Face::tofu().with_size(I26Dot6::new(16), 72).unwrap();
+            let font = Font::tofu(I26Dot6::new(16), 72);
             let mut result = GlyphString::new(Rc::from("abcde"), Direction::Ltr);
             result.segments.extend([
                 super::GlyphStringSegment {

@@ -1,7 +1,7 @@
 use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path};
 
 use rasterize::{
-    scene::{FixedS, Scene, SubsceneKind, Vec2S},
+    scene::{FixedS, Scene, SubsceneKind},
     Rasterizer,
 };
 use text_sys::hb_font_t;
@@ -83,27 +83,6 @@ impl FontMetrics {
     }
 }
 
-trait FaceImpl: Sized {
-    type Font: FontImpl<Face = Self>;
-
-    fn family_name(&self) -> &str;
-    fn addr(&self) -> usize;
-
-    fn axes(&self) -> &[Axis];
-    fn axis(&self, tag: OpenTypeTag) -> Option<Axis> {
-        self.axes().iter().find(|x| x.tag == tag).copied()
-    }
-    fn set_axis(&mut self, index: usize, value: I16Dot16);
-
-    fn weight(&self) -> I16Dot16;
-    fn italic(&self) -> bool;
-
-    fn contains_codepoint(&self, codepoint: u32) -> bool;
-
-    type Error;
-    fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Self::Font, Self::Error>;
-}
-
 #[derive(Clone)]
 pub struct GlyphSubscene(pub SubsceneKind);
 
@@ -111,28 +90,6 @@ impl GlyphSubscene {
     fn empty() -> Self {
         Self(SubsceneKind::Scene(Scene::empty()))
     }
-}
-
-trait FontImpl: Sized {
-    type Face;
-    fn face(&self) -> &Self::Face;
-
-    fn metrics(&self) -> &FontMetrics;
-    fn point_size(&self) -> I26Dot6;
-    // Used to fix HarfBuzz metrics for scaled bitmap fonts which HarfBuzz sees in
-    // their unscaled form. It would be ideal to instead handle this in
-    // the font funcs but that's non-trivial so this works.
-    fn harfbuzz_scale_factor_for(&self, glyph: u32) -> I26Dot6;
-
-    fn size_cache_key(&self) -> FontSizeCacheKey;
-
-    type DisplayError;
-    fn glyph_subscene_uncached(
-        &self,
-        index: u32,
-        subpixel_offset: Vec2S,
-        rasterizer: &mut dyn Rasterizer,
-    ) -> Result<GlyphSubscene, Self::DisplayError>;
 }
 
 macro_rules! forward_methods {
@@ -188,16 +145,11 @@ impl Face {
         freetype::Face::load_from_static_bytes(bytes, index).map(Face::FreeType)
     }
 
-    pub const fn tofu() -> Self {
-        Face::Tofu(tofu::Face)
-    }
-
     forward_methods!(
         variants = Face::[FreeType, Tofu];
         pub fn family_name[&]() -> &str;
 
         pub fn axes[&]() -> &[Axis];
-        pub fn axis[&](tag: OpenTypeTag) -> Option<Axis>;
         pub fn set_axis[&mut](index: usize, value: I16Dot16) -> ();
 
         pub fn weight[&]() -> I16Dot16;
@@ -206,19 +158,25 @@ impl Face {
         pub fn contains_codepoint[&](codepoint: u32) -> bool;
     );
 
+    pub fn axis(&self, tag: OpenTypeTag) -> Option<Axis> {
+        self.axes().iter().find(|x| x.tag == tag).copied()
+    }
+
     pub fn addr(&self) -> usize {
         match self {
             Face::FreeType(face) => face.addr(),
-            Face::Tofu(face) => face.addr(),
+            Face::Tofu(tofu::Face) => {
+                // This is an unaligned address that should never occur
+                // in any actually real font backends.
+                1
+            }
         }
     }
 
     pub fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
         match &self {
             Face::FreeType(face) => face.with_size(point_size, dpi).map(Font::FreeType),
-            Face::Tofu(face) => match face.with_size(point_size, dpi) {
-                Ok(font) => Ok(Font::Tofu(font)),
-            },
+            Face::Tofu(tofu::Face) => Ok(Font::Tofu(tofu::Font::create(point_size, dpi))),
         }
     }
 }
@@ -239,10 +197,14 @@ impl Font {
         pub fn harfbuzz_scale_factor_for[&](glyph: u32) -> I26Dot6;
     );
 
+    pub fn tofu(point_size: I26Dot6, dpi: u32) -> Self {
+        Self::Tofu(tofu::Font::create(point_size, dpi))
+    }
+
     pub fn face(&self) -> Face {
         match self {
             Font::FreeType(font) => Face::FreeType(font.face().clone()),
-            Font::Tofu(_) => Face::tofu(),
+            Font::Tofu(_) => Face::Tofu(tofu::Face),
         }
     }
 
@@ -269,9 +231,7 @@ impl Font {
 
         cache.get_or_try_insert_with(key, || match self {
             Self::FreeType(font) => font.glyph_subscene_uncached(glyph, render_offset, rasterizer),
-            Self::Tofu(font) => Ok(font
-                .glyph_subscene_uncached(glyph, render_offset, rasterizer)
-                .unwrap()),
+            Self::Tofu(font) => Ok(font.glyph_subscene_uncached(glyph, render_offset, rasterizer)),
         })
     }
 }

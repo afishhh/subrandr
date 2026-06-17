@@ -158,7 +158,7 @@ impl FontMatcher {
     }
 
     pub fn tofu(&self) -> Font {
-        Face::tofu().with_size(self.size, self.dpi).unwrap()
+        Font::tofu(self.size, self.dpi)
     }
 
     pub fn size(&self) -> I26Dot6 {

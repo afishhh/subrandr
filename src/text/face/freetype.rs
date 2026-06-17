@@ -19,7 +19,7 @@ use util::{
     AnyError,
 };
 
-use super::{Axis, FaceImpl, FontImpl, FontMetrics, OpenTypeTag};
+use super::{Axis, FontMetrics, OpenTypeTag};
 use crate::text::{ft_utils::*, FontSizeCacheKey, GlyphSubscene};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
@@ -210,28 +210,26 @@ impl Face {
     }
 }
 
-impl FaceImpl for Face {
-    type Font = Font;
-
-    fn family_name(&self) -> &str {
+impl Face {
+    pub(super) fn family_name(&self) -> &str {
         // NOTE: FreeType says this is *always* an ASCII string.
         unsafe { CStr::from_ptr((*self.face).family_name).to_str().unwrap() }
     }
 
-    fn addr(&self) -> usize {
+    pub(super) fn addr(&self) -> usize {
         self.face.addr()
     }
 
-    fn axes(&self) -> &[Axis] {
+    pub(super) fn axes(&self) -> &[Axis] {
         &self.shared_data().axes
     }
 
-    fn set_axis(&mut self, index: usize, value: I16Dot16) {
+    pub(super) fn set_axis(&mut self, index: usize, value: I16Dot16) {
         assert!(self.shared_data().axes[index].is_value_in_range(value));
         self.coords[index] = value.into_ft();
     }
 
-    fn weight(&self) -> I16Dot16 {
+    pub(super) fn weight(&self) -> I16Dot16 {
         SharedFaceData::get_ref(self.face)
             .axes
             .iter()
@@ -252,7 +250,7 @@ impl FaceImpl for Face {
             )
     }
 
-    fn italic(&self) -> bool {
+    pub(super) fn italic(&self) -> bool {
         SharedFaceData::get_ref(self.face)
             .axes
             .iter()
@@ -263,7 +261,7 @@ impl FaceImpl for Face {
             )
     }
 
-    fn contains_codepoint(&self, codepoint: u32) -> bool {
+    pub(super) fn contains_codepoint(&self, codepoint: u32) -> bool {
         if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
             return false;
         }
@@ -274,8 +272,7 @@ impl FaceImpl for Face {
         index != 0
     }
 
-    type Error = FreeTypeError;
-    fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
+    pub(super) fn with_size(&self, point_size: I26Dot6, dpi: u32) -> Result<Font, FreeTypeError> {
         Font::create(self.face, self.coords, point_size, dpi)
     }
 }
@@ -670,25 +667,23 @@ pub enum GlyphRenderError {
     BitmapCopy(#[from] BitmapCopyError),
 }
 
-impl FontImpl for Font {
-    type Face = Face;
-
-    fn face(&self) -> &Self::Face {
+impl Font {
+    pub(super) fn face(&self) -> &Face {
         unsafe { std::mem::transmute(self) }
     }
 
-    fn metrics(&self) -> &FontMetrics {
+    pub(super) fn metrics(&self) -> &FontMetrics {
         &self.size.metrics
     }
 
-    fn point_size(&self) -> I26Dot6 {
+    pub(super) fn point_size(&self) -> I26Dot6 {
         self.size.point_size
     }
 
     // FIXME: This is not really correct since it should also scale bitmaps in scalable
     //        fonts but doing that with FreeType is a pain. Since fonts rarely mix
     //        outlines and bitmaps let's just ignore that for now.
-    fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
+    pub(super) fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
         let is_scalable =
             unsafe { (*self.ft_face).face_flags & (FT_FACE_FLAG_SCALABLE as FT_Long) != 0 };
         if is_scalable {
@@ -698,7 +693,7 @@ impl FontImpl for Font {
         }
     }
 
-    fn size_cache_key(&self) -> FontSizeCacheKey {
+    pub(super) fn size_cache_key(&self) -> FontSizeCacheKey {
         FontSizeCacheKey::new(
             self.point_size(),
             self.size.dpi,
@@ -710,13 +705,12 @@ impl FontImpl for Font {
     //       - Avoid hinting outlines for each subpixel offset
     //         (transform is applied after hinting anyway)
     //       - Avoid copying bitmap glyph to texture for each size separately
-    type DisplayError = GlyphDisplayError;
-    fn glyph_subscene_uncached(
+    pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
         subpixel_offset: Vec2S,
         rasterizer: &mut dyn Rasterizer,
-    ) -> Result<GlyphSubscene, Self::DisplayError> {
+    ) -> Result<GlyphSubscene, GlyphDisplayError> {
         unsafe {
             let face = self.with_applied_size()?;
             let _guard = TransformGuard::new(face, subpixel_offset);

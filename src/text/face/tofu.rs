@@ -10,7 +10,7 @@ use util::{
 use super::{FontMetrics, GlyphMetrics};
 use crate::{
     layout::{FixedL, Vec2L},
-    text::{FontSizeCacheKey, GlyphSubscene},
+    text::{FontSizeKey, GlyphSubscene},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -391,8 +391,8 @@ impl Font {
         I26Dot6::ONE
     }
 
-    pub(super) fn size_cache_key(&self) -> FontSizeCacheKey {
-        FontSizeCacheKey::new(
+    pub(super) fn size_cache_key(&self) -> FontSizeKey {
+        FontSizeKey::new(
             self.point_size(),
             self.shared().dpi,
             [I16Dot16::ZERO; text_sys::T1_MAX_MM_AXIS as usize],

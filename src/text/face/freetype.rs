@@ -20,7 +20,7 @@ use util::{
 };
 
 use super::{Axis, FontMetrics, OpenTypeTag};
-use crate::text::{ft_utils::*, FontSizeCacheKey, GlyphSubscene};
+use crate::text::{ft_utils::*, FontSizeKey, GlyphCache, GlyphKey, GlyphSubscene};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
 // This is required because we currently rely on subpixel positioning while rendering
@@ -329,6 +329,7 @@ impl Drop for Face {
 struct Size {
     ft_size: FT_Size,
     metrics: FontMetrics,
+    bitmap_strike_index: u32,
     bitmap_scale: I26Dot6,
     point_size: I26Dot6,
     dpi: u32,
@@ -490,6 +491,7 @@ impl Font {
             unsafe { (*face).face_flags & (FT_FACE_FLAG_FIXED_SIZES as FT_Long) != 0 };
         let mut bitmap_scale = I26Dot6::ONE;
 
+        let mut bitmap_strike_index = 0;
         if has_bitmaps {
             let sizes = unsafe {
                 std::slice::from_raw_parts_mut(
@@ -503,26 +505,23 @@ impl Font {
             let ppem = map_to_ppem(point_size.into_raw().into(), dpi.into());
 
             // First size larger than requested, or the largest size if not found
-            let mut picked_size_index = 0usize;
             for (i, size) in sizes.iter().enumerate() {
                 #[allow(clippy::useless_conversion)] // c_ulong conversion
-                if (i64::from(sizes[picked_size_index].x_ppem) < ppem
-                    && size.x_ppem > sizes[picked_size_index].x_ppem)
+                if (i64::from(sizes[bitmap_strike_index].x_ppem) < ppem
+                    && size.x_ppem > sizes[bitmap_strike_index].x_ppem)
                     || (i64::from(size.x_ppem) > ppem
-                        && size.x_ppem < sizes[picked_size_index].x_ppem)
+                        && size.x_ppem < sizes[bitmap_strike_index].x_ppem)
                 {
-                    picked_size_index = i;
+                    bitmap_strike_index = i;
                 }
             }
 
             #[allow(clippy::unnecessary_cast)]
             let new_scale =
-                I26Dot6::from_wide_quotient(ppem, sizes[picked_size_index].x_ppem as i64);
+                I26Dot6::from_wide_quotient(ppem, sizes[bitmap_strike_index].x_ppem as i64);
             bitmap_scale = new_scale;
 
-            unsafe {
-                fttry!(FT_Select_Size(face, picked_size_index as i32))?;
-            }
+            unsafe { fttry!(FT_Select_Size(face, bitmap_strike_index as i32))? };
         }
 
         if is_scalable {
@@ -556,6 +555,7 @@ impl Font {
             size: ManuallyDrop::new(Rc::new(Size {
                 ft_size: size,
                 metrics,
+                bitmap_strike_index: bitmap_strike_index as u32,
                 bitmap_scale,
                 point_size,
                 dpi,
@@ -641,32 +641,6 @@ impl Drop for Font {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum BitmapCopyError {
-    #[error("Unsupported pixel mode {0}")]
-    UnsupportedPixelMode(std::ffi::c_uchar),
-    #[error("Unsupported (negative) bitmap pitch {0}")]
-    NegativePitch(std::ffi::c_int),
-}
-
-#[derive(Debug, Error)]
-pub enum GlyphDisplayError {
-    #[error(transparent)]
-    BitmapGlyphCopy(#[from] BitmapCopyError),
-    #[error(transparent)]
-    FreeType(#[from] FreeTypeError),
-}
-
-#[derive(Debug, Error)]
-pub enum GlyphRenderError {
-    #[error(transparent)]
-    FreeType(#[from] FreeTypeError),
-    #[error("Unsupported glyph format {0} after conversion")]
-    ConversionToBitmapFailed(FT_Glyph_Format),
-    #[error(transparent)]
-    BitmapCopy(#[from] BitmapCopyError),
-}
-
 impl Font {
     pub(super) fn face(&self) -> &Face {
         unsafe { std::mem::transmute(self) }
@@ -693,107 +667,159 @@ impl Font {
         }
     }
 
-    pub(super) fn size_cache_key(&self) -> FontSizeCacheKey {
-        FontSizeCacheKey::new(
+    pub(super) fn size_cache_key(&self) -> FontSizeKey {
+        FontSizeKey::new(
             self.point_size(),
             self.size.dpi,
             self.coords.map(I16Dot16::from_ft),
         )
     }
+}
 
-    // TODO: This mechanism could be improved to:
-    //       - Avoid copying bitmap glyph to texture for each size separately
+#[derive(Debug, Error)]
+pub enum GlyphDisplayError {
+    #[error(transparent)]
+    BitmapGlyphCopy(#[from] BitmapCopyError),
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+}
+
+struct CachedBitmapTexture {
+    texture: Texture,
+    unscaled_offset: Vec2<i32>,
+}
+
+impl util::cache::CacheValue for CachedBitmapTexture {
+    fn memory_footprint(&self) -> usize {
+        std::mem::size_of_val(self) + self.texture.memory_footprint()
+    }
+}
+
+impl Font {
+    fn subscene_for_cached_bitmap(
+        &self,
+        CachedBitmapTexture {
+            texture,
+            unscaled_offset,
+        }: &CachedBitmapTexture,
+    ) -> GlyphSubscene {
+        if texture.width() == 0 || texture.height() == 0 {
+            return GlyphSubscene::empty();
+        };
+
+        let scale = self.size.bitmap_scale;
+        let scaled_offset = Vec2::new(scale * unscaled_offset.x, scale * unscaled_offset.y);
+        let scaled_size = Vec2::new(
+            (scale * texture.width() as i32).floor_to_inner() as u32,
+            (scale * texture.height() as i32).floor_to_inner() as u32,
+        );
+
+        GlyphSubscene(SubsceneKind::Scene({
+            let mut b = SceneBuilder::new();
+            b.root().with_translation(scaled_offset).bitmap(
+                texture.clone(),
+                scaled_size,
+                None,
+                BGRA8::WHITE,
+            );
+            b.finish()
+        }))
+    }
+
     pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
         subpixel_offset: Vec2S,
         rasterizer: &mut dyn Rasterizer,
+        glyph_cache: &GlyphCache,
+        glyph_key: GlyphKey,
     ) -> Result<GlyphSubscene, GlyphDisplayError> {
-        unsafe {
-            let face = self.with_applied_size()?;
-            let _guard = TransformGuard::new(face, subpixel_offset);
+        let bitmap_key = glyph_key.for_bitmap_strike(self.size.bitmap_strike_index);
+        if let Some(cached) = glyph_cache.get::<CachedBitmapTexture>(bitmap_key.clone()) {
+            return Ok(self.subscene_for_cached_bitmap(cached));
+        }
 
+        let face = self.with_applied_size()?;
+        let _guard = unsafe { TransformGuard::new(face, subpixel_offset) };
+
+        unsafe {
             fttry!(FT_Load_Glyph(
                 face,
                 index,
                 (FT_LOAD_TARGET_LIGHT | FT_LOAD_COLOR) as i32
-            ))?;
+            ))?
+        };
 
-            let mut bbox;
-            let glyph = (*face).glyph;
-            if (*glyph).format == FT_GLYPH_FORMAT_BITMAP {
-                let bitmap = &(*glyph).bitmap;
-                if bitmap.width == 0 || bitmap.rows == 0 {
-                    return Ok(GlyphSubscene::empty());
-                };
+        let mut bbox;
+        let glyph = unsafe { (*face).glyph };
+        if unsafe { (*glyph).format == FT_GLYPH_FORMAT_BITMAP } {
+            let bitmap = unsafe { &(*glyph).bitmap };
+            let cached = if bitmap.width == 0 || bitmap.rows == 0 {
+                &CachedBitmapTexture {
+                    texture: rasterizer.empty_mono_texture(),
+                    unscaled_offset: Vec2::ZERO,
+                }
+            } else {
+                glyph_cache.get_or_try_insert_with::<_, BitmapCopyError>(bitmap_key, || unsafe {
+                    Ok(CachedBitmapTexture {
+                        texture: copy_glyph_slot_bitmap_to_texture(glyph, rasterizer)?,
+                        unscaled_offset: Vec2::new((*glyph).bitmap_left, -(*glyph).bitmap_top),
+                    })
+                })?
+            };
 
-                let scale = self.size.bitmap_scale;
-                let scaled_offset = {
-                    Vec2::new(
-                        scale * ((*glyph).bitmap_left),
-                        scale * (-(*glyph).bitmap_top),
-                    )
-                };
-                let scaled_size = Vec2::new(
-                    (scale * bitmap.width as i32).floor_to_inner() as u32,
-                    (scale * bitmap.rows as i32).floor_to_inner() as u32,
-                );
-                let texture = copy_glyph_slot_bitmap_to_texture(glyph, rasterizer)?;
-
-                return Ok(GlyphSubscene(SubsceneKind::Scene({
-                    let mut b = SceneBuilder::new();
-                    b.root().with_translation(scaled_offset).bitmap(
-                        texture,
-                        scaled_size,
-                        None,
-                        BGRA8::WHITE,
-                    );
-                    b.finish()
-                })));
-            } else if (*glyph).format == FT_GLYPH_FORMAT_OUTLINE
+            return Ok(self.subscene_for_cached_bitmap(cached));
+        } else if unsafe {(*glyph).format == FT_GLYPH_FORMAT_OUTLINE}
                 // COLRv0 glyphs actually store multiple layers which we would
                 // have to take into account here so disable this path
                 // if the font contains such glyphs.
                 // TODO: Could be made more granular.
-                && ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0
-            {
-                let outline = FTOutline::from_ref(&(*glyph).outline);
-                if outline.points().is_empty() {
-                    return Ok(GlyphSubscene::empty());
-                }
-
-                bbox = Rect2S::NOTHING;
-                for p in outline.points() {
-                    bbox.expand_to_point(Point2::new(FixedS::from_ft(p.x), FixedS::from_ft(-p.y)));
-                }
-
-                let bbox_size = bbox.size();
-                let bbox_min_dim = bbox_size.x.min(bbox_size.y);
-                let bbox_max_dim = bbox_size.x.max(bbox_size.y);
-                if bbox_max_dim > 128 && bbox_min_dim > 64 {
-                    let mut b = SceneBuilder::new();
-                    b.root().filled_outline(
-                        outline
-                            .iter()
-                            .map(|x| x.map(|c| Point2::new(c.x.into_f32(), -c.y.into_f32()))),
-                        SceneColor::ACTIVE,
-                    );
-                    return Ok(GlyphSubscene(SubsceneKind::Scene(b.finish())));
-                }
-            } else {
-                bbox = Rect2S::MAX;
+                && unsafe { ((*face).face_flags & FT_FACE_FLAG_COLOR as FT_Long) == 0 }
+        {
+            let outline = unsafe { FTOutline::from_ref(&(*glyph).outline) };
+            if outline.points().is_empty() {
+                return Ok(GlyphSubscene::empty());
             }
 
-            let subscene = Rc::new(FreeTypeSubscene {
-                font: self.clone(),
-                index,
-                subpixel_offset,
-                bbox,
-            });
+            bbox = Rect2S::NOTHING;
+            for p in outline.points() {
+                bbox.expand_to_point(Point2::new(FixedS::from_ft(p.x), FixedS::from_ft(-p.y)));
+            }
 
-            Ok(GlyphSubscene(SubsceneKind::External(subscene)))
+            let bbox_size = bbox.size();
+            let bbox_min_dim = bbox_size.x.min(bbox_size.y);
+            let bbox_max_dim = bbox_size.x.max(bbox_size.y);
+            if bbox_max_dim > 128 && bbox_min_dim > 64 {
+                let mut b = SceneBuilder::new();
+                b.root().filled_outline(
+                    outline
+                        .iter()
+                        .map(|x| x.map(|c| Point2::new(c.x.into_f32(), -c.y.into_f32()))),
+                    SceneColor::ACTIVE,
+                );
+                return Ok(GlyphSubscene(SubsceneKind::Scene(b.finish())));
+            }
+        } else {
+            bbox = Rect2S::MAX;
         }
+
+        let subscene = Rc::new(FreeTypeSubscene {
+            font: self.clone(),
+            index,
+            subpixel_offset,
+            bbox,
+        });
+
+        Ok(GlyphSubscene(SubsceneKind::External(subscene)))
     }
+}
+
+#[derive(Debug, Error)]
+pub enum BitmapCopyError {
+    #[error("Unsupported pixel mode {0}")]
+    UnsupportedPixelMode(std::ffi::c_uchar),
+    #[error("Unsupported (negative) bitmap pitch {0}")]
+    NegativePitch(std::ffi::c_int),
 }
 
 unsafe fn copy_glyph_slot_bitmap_to_texture(
@@ -1036,6 +1062,16 @@ impl util::math::Outline<I26Dot6> for FTOutline {
             current: PointsAndTags(std::iter::zip(&[], &[])),
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum GlyphRenderError {
+    #[error(transparent)]
+    FreeType(#[from] FreeTypeError),
+    #[error("Unsupported glyph format {0} after conversion")]
+    ConversionToBitmapFailed(FT_Glyph_Format),
+    #[error(transparent)]
+    BitmapCopy(#[from] BitmapCopyError),
 }
 
 impl FreeTypeSubscene {

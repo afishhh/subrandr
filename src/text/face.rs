@@ -11,7 +11,7 @@ use util::{
 };
 
 use super::FreeTypeError;
-use crate::text::{FontSizeCacheKey, GlyphCache, OpenTypeTag};
+use crate::text::{FontSizeKey, GlyphCache, GlyphKey, OpenTypeTag};
 
 pub mod freetype;
 pub use freetype::GlyphDisplayError;
@@ -191,7 +191,7 @@ impl Font {
     forward_methods!(
         variants = Font::[FreeType, Tofu];
 
-        fn size_cache_key[&]() -> FontSizeCacheKey;
+        fn size_cache_key[&]() -> FontSizeKey;
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
         pub fn harfbuzz_scale_factor_for[&](glyph: u32) -> I26Dot6;
@@ -224,15 +224,20 @@ impl Font {
         rasterizer: &mut dyn Rasterizer,
     ) -> Result<&'c GlyphSubscene, GlyphDisplayError> {
         let (render_offset, subpixel_bucket) =
-            FontSizeCacheKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
-        let key = self
-            .size_cache_key()
-            .for_glyph(self.face(), glyph, subpixel_bucket);
+            GlyphKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
+        let key = self.size_cache_key().for_glyph(self.face(), glyph);
 
-        cache.get_or_try_insert_with(key, || match self {
-            Self::FreeType(font) => font.glyph_subscene_uncached(glyph, render_offset, rasterizer),
-            Self::Tofu(font) => Ok(font.glyph_subscene_uncached(glyph, render_offset, rasterizer)),
-        })
+        cache.get_or_try_insert_with(
+            key.clone().for_subpixel_bucket(subpixel_bucket),
+            || match self {
+                Self::FreeType(font) => {
+                    font.glyph_subscene_uncached(glyph, render_offset, rasterizer, cache, key)
+                }
+                Self::Tofu(font) => {
+                    Ok(font.glyph_subscene_uncached(glyph, render_offset, rasterizer))
+                }
+            },
+        )
     }
 }
 

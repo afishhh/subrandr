@@ -69,20 +69,24 @@ impl GlyphCache {
     ) -> Result<&V, E> {
         self.0.get_or_try_insert_with(key, insert)
     }
+
+    pub(super) fn get<V: CacheValue>(&self, key: Key) -> Option<&V> {
+        self.0.get(key)
+    }
 }
 
-pub(super) struct FontSizeCacheKey {
+pub(super) struct FontSizeKey {
     point_size: I26Dot6,
     dpi: u32,
     coords: [I16Dot16; text_sys::T1_MAX_MM_AXIS as usize],
 }
 
-impl FontSizeCacheKey {
+impl FontSizeKey {
     pub fn new(
         point_size: I26Dot6,
         dpi: u32,
         coords: [I16Dot16; text_sys::T1_MAX_MM_AXIS as usize],
-    ) -> FontSizeCacheKey {
+    ) -> Self {
         Self {
             point_size,
             dpi,
@@ -90,6 +94,22 @@ impl FontSizeCacheKey {
         }
     }
 
+    pub(super) fn for_glyph(&self, face: Face, glyph: u32) -> GlyphKey {
+        GlyphKey(Key {
+            face: FaceByAddr(face),
+            point_size: self.point_size,
+            dpi: self.dpi,
+            coords: self.coords,
+            glyph,
+            subpixel_bucket: 0,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct GlyphKey(pub(super) Key);
+
+impl GlyphKey {
     pub(super) fn get_subpixel_bucket(offset: I26Dot6, y_axis: bool) -> (Vec2<I26Dot6>, u8) {
         let offset_trunc = I26Dot6::from_raw(offset.into_raw() & 0b110000);
         let bucket = (offset_trunc.into_raw() >> 3) as u8 | y_axis as u8;
@@ -102,14 +122,19 @@ impl FontSizeCacheKey {
         (render_offset, bucket)
     }
 
-    pub(super) fn for_glyph(&self, face: Face, glyph: u32, subpixel_bucket: u8) -> Key {
+    pub(super) fn for_bitmap_strike(self, bitmap_strike_index: u32) -> Key {
         Key {
-            face: FaceByAddr(face),
-            point_size: self.point_size,
-            dpi: self.dpi,
-            coords: self.coords,
-            glyph,
+            point_size: I26Dot6::ZERO,
+            dpi: bitmap_strike_index,
+            coords: [I16Dot16::ZERO; text_sys::T1_MAX_MM_AXIS as usize],
+            ..self.0
+        }
+    }
+
+    pub(super) fn for_subpixel_bucket(self, subpixel_bucket: u8) -> Key {
+        Key {
             subpixel_bucket,
+            ..self.0
         }
     }
 }

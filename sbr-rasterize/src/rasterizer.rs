@@ -43,9 +43,21 @@ impl TextureInner {
 pub struct Texture(TextureInner);
 
 impl Texture {
-    pub(crate) fn memory_footprint(&self) -> usize {
+    pub fn memory_footprint(&self) -> usize {
         match &self.0 {
             TextureInner::Software(sw) => sw.memory_footprint(),
+        }
+    }
+
+    pub fn width(&self) -> u32 {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.width(),
+        }
+    }
+
+    pub fn height(&self) -> u32 {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.height(),
         }
     }
 

@@ -290,6 +290,11 @@ impl<K: Hash + PartialEq + Eq + 'static> Cache<K> {
             Ok(value) => value,
         }
     }
+
+    #[must_use]
+    pub fn get<V: CacheValue>(&self, key: K) -> Option<&V> {
+        self.get_or_try_insert_with(key, || Err(())).ok()
+    }
 }
 
 #[cfg(test)]

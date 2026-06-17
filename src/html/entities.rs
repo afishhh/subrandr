@@ -53,7 +53,7 @@ struct NextSparsePair {
 #[repr(C, align(2))]
 struct Aligned16<const N: usize>([u8; N]);
 
-const TRIE_DATA: Aligned16<53040> = Aligned16(*include_bytes!("./trie_little_endian.bin"));
+static TRIE_DATA: Aligned16<53040> = Aligned16(*include_bytes!("./trie_little_endian.bin"));
 
 unsafe fn traverse(ptr: *const u8, remaining: &[u8]) -> Option<(&'static str, u8)> {
     unsafe {

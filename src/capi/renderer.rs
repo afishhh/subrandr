@@ -98,16 +98,16 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
     let rasterizer = &mut (*renderer).rasterizer;
     ctry!(core_renderer.render_to_scene(log, &*ctx, t, rasterizer));
 
-    (*renderer).instanced_pass.render_scene(
+    ctry!((*renderer).instanced_pass.render_scene(
         log,
         rasterizer,
         core_renderer.scene(),
         clip_rect,
         flags,
         CInstancedRasterPassContext::Renderer(NonNull::new(renderer).unwrap()),
-    );
+    ));
 
-    return &raw mut (*renderer).instanced_pass;
+    &raw mut (*renderer).instanced_pass
 }
 
 #[unsafe(no_mangle)]

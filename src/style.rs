@@ -175,7 +175,6 @@ pub fn apply_declarations_to(
     result
 }
 
-#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
 pub fn compute_with_declarations(
     log: &LogContext,
     declarations: &mut dyn Iterator<Item = &[Declaration<'_>]>,

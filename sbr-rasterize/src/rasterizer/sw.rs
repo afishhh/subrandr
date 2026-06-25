@@ -445,6 +445,33 @@ pub struct Texture<'a> {
 }
 
 impl Texture<'static> {
+    pub fn from_strided_bgra(
+        pixels: &[Premultiplied<BGRA8>],
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Self {
+        check_pixel_buffer_dimensions(
+            pixels.len(),
+            width,
+            height,
+            stride,
+            &format_args!("{}::from_strided_bgra", std::any::type_name::<Self>()),
+        );
+
+        unsafe {
+            Self::new_with_uninit::<Premultiplied<BGRA8>>(Vec2::new(width, height), |mut target| {
+                for y in 0..height {
+                    let src_row =
+                        &pixels[y as usize * stride as usize..(y + 1) as usize * stride as usize];
+                    let (dst_row, dst_padding) = target.row(y as i32).unwrap_unchecked();
+                    dst_row.copy_from_slice(std::mem::transmute(src_row));
+                    dst_padding.fill(MaybeUninit::zeroed());
+                }
+            })
+        }
+    }
+
     fn new_with<P: TexturePixel>(
         size: Vec2<u32>,
         render: impl FnOnce(RenderTargetView<P>),

@@ -5,7 +5,7 @@ use util::math::{I16Dot16, Vec2};
 
 use super::{
     inline::BoxBaselineSet,
-    {Axes, FixedL, FragmentBox, LayoutConstraint, LayoutContext, Vec2L, Vec2LW},
+    {Axes, FixedL, FragmentBox, LayoutConstraint, LayoutContext, Vec2L},
 };
 use crate::{
     layout::EdgeExtents,

@@ -697,7 +697,6 @@ impl IndependentBoxFragment {
 }
 
 impl IndependentBox {
-    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
     pub fn layout(
         &self,
         lctx: &mut LayoutContext,

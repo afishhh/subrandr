@@ -2,7 +2,7 @@ use std::{
     alloc::{Layout, LayoutError},
     fmt::{Debug, Display},
     hash::Hash,
-    mem::MaybeUninit,
+    mem::{offset_of, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
@@ -349,6 +349,25 @@ impl<R: Refcount, T: ?Sized> RcBase<R, T> {
     #[inline]
     pub fn as_ptr(this: &Self) -> *const T {
         unsafe { &raw const (*this.ptr.as_ptr()).value }
+    }
+
+    #[inline]
+    pub fn into_raw(this: Self) -> *const T {
+        let ptr = Self::as_ptr(&this);
+        std::mem::forget(this);
+        ptr
+    }
+
+    #[inline]
+    pub unsafe fn from_raw(ptr: *const T) -> Self
+    where
+        T: Sized, // offset_of! doesn't work with unsized here
+    {
+        let box_ptr = ptr
+            .byte_sub(offset_of!(RcBox::<R, T>, value))
+            .cast::<RcBox<R, T>>()
+            .cast_mut();
+        Self::from_raw_box(NonNull::new_unchecked(box_ptr))
     }
 }
 

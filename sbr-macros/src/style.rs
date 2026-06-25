@@ -257,11 +257,13 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
             computed_style_impl.extend(quote! {
                 pub fn #name(&self) -> #ampersand_if_not_copy #type_ {
-                    #ampersand_if_not_copy self.#group_name.#name
+                    #ampersand_if_not_copy self.0.#group_name.#name
                 }
 
                 pub fn #make_mut_name(&mut self) -> &mut #type_ {
-                    &mut ::util::rc::Rc::make_mut(&mut self.#group_name).#name
+                    let inner = ::util::rc::Rc::make_mut(&mut self.0);
+                    let group = ::util::rc::Rc::make_mut(&mut inner.#group_name);
+                    &mut group.#name
                 }
             });
 
@@ -286,7 +288,7 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
         }
 
         if inherit_whole_group {
-            create_child_impl.extend(quote! { #group_name: self.#group_name.clone(), });
+            create_child_impl.extend(quote! { #group_name: self.0.#group_name.clone(), });
         } else {
             create_child_impl.extend(quote! {
                 #group_name: ::util::rc::Rc::new(#group_type_name {
@@ -298,21 +300,32 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
     result.extend(quote! {
         #[derive(Clone)]
-        pub struct ComputedStyle {
+        pub struct ComputedStyleInner {
             #computed_style_fields
         }
 
+        #[derive(Clone)]
+        pub struct ComputedStyle(::util::rc::Rc<ComputedStyleInner>);
+
         impl ComputedStyle {
-            pub const DEFAULT: Self = Self {
+            pub const DEFAULT: Self = Self(::util::rc::rc_static!(ComputedStyleInner {
                 #default_const_impl
-            };
+            }));
 
             #computed_style_impl
 
             pub fn create_derived(&self) -> Self {
-                Self {
+                Self(::util::rc::Rc::new(ComputedStyleInner {
                     #create_child_impl
-                }
+                }))
+            }
+
+            pub fn into_raw(self) -> *const ComputedStyleInner {
+                ::util::rc::Rc::into_raw(self.0)
+            }
+
+            pub unsafe fn from_raw(raw: *const ComputedStyleInner) -> Self {
+                Self(::util::rc::Rc::from_raw(raw))
             }
         }
 

@@ -242,7 +242,18 @@ fn check_pixel_buffer_dimensions(
     );
     assert!(
         width <= stride,
-        "width passed to {name} is larger than stride",
+        "Width passed to {name} is greater than stride",
+    );
+    // We cast dimensions to `i32` in various places so let's be safe.
+    assert!(
+        height <= i32::MAX as u32,
+        "Height passed to {name} is greater than {}",
+        i32::MAX
+    );
+    assert!(
+        stride <= i32::MAX as u32,
+        "Stride passed to {name} is greater than {}",
+        i32::MAX
     );
 }
 

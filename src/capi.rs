@@ -190,6 +190,8 @@ macro_rules! ctrywrap {
     };
 }
 
+mod instanced_raster;
+mod layout;
 mod library;
 mod renderer;
 mod subtitles;

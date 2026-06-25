@@ -45,8 +45,12 @@ pub(super) struct CInstancedRasterPass {
     current: Option<CInstancedRasterPassContext>,
 }
 
+// TODO: this could be made a trait once traits allow pointers as receivers
+//       (we cannot borrow CRenderer without invalidating our raster pass,
+//        theoretically it should be possible to dance around this but it'd be tricky)
 pub(super) enum CInstancedRasterPassContext {
     Renderer(NonNull<CRenderer>),
+    Abc(*mut sw::Rasterizer),
 }
 
 impl CInstancedRasterPassContext {
@@ -55,6 +59,7 @@ impl CInstancedRasterPassContext {
             CInstancedRasterPassContext::Renderer(renderer) => {
                 &raw mut (*renderer.as_ptr()).rasterizer
             }
+            CInstancedRasterPassContext::Abc(c) => *c,
         }
     }
 
@@ -64,6 +69,7 @@ impl CInstancedRasterPassContext {
                 let log = &(*(*renderer.as_ptr()).lib).root_logger.new_ctx();
                 (*renderer.as_ptr()).inner.end_raster(log);
             }
+            CInstancedRasterPassContext::Abc(_) => {}
         }
     }
 }
@@ -96,10 +102,9 @@ impl CInstancedRasterPass {
         }
 
         assert!(
-            (*self).output_pieces.is_empty(),
-            "output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
+            self.output_pieces.is_empty() || self.current.is_none(),
+            "invalid instanced raster state, did you forget to call `sbr_instanced_raster_pass_finish`?"
         );
-        assert!(self.current.is_none());
 
         let cull_rect = Rect2S::new(
             Point2::new(FixedS::new(clip_rect.min.x), FixedS::new(clip_rect.min.y)),
@@ -116,7 +121,7 @@ impl CInstancedRasterPass {
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.
             .inspect_err(|_| self.output_pieces.clear())
-            .map_err(CError::from_error);
+            .map_err(CError::from_error)?;
 
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,

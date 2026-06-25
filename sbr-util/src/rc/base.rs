@@ -371,21 +371,9 @@ impl<R: Refcount, T: ?Sized> RcBase<R, T> {
     }
 }
 
-impl<R: Refcount, T> From<T> for RcBase<R, T> {
+impl<R: Refcount, U: ?Sized, T: Into<UniqueRcBase<R, U>>> From<T> for RcBase<R, U> {
     fn from(value: T) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<R: Refcount, T> From<Vec<T>> for RcBase<R, [T]> {
-    fn from(value: Vec<T>) -> Self {
-        UniqueRcBase::into_shared(UniqueRcBase::from(value))
-    }
-}
-
-impl<R: Refcount> From<&str> for RcBase<R, str> {
-    fn from(value: &str) -> Self {
-        UniqueRcBase::into_shared(UniqueRcBase::from(value))
+        UniqueRcBase::into_shared(value.into())
     }
 }
 

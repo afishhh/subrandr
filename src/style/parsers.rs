@@ -14,24 +14,24 @@ impl Length {
         // TODO: accept 0
         Ok(if lk.peek::<Dimension>() {
             let dim = stream.parse::<Dimension>()?;
-            if dim.unit().eq_ignore_ascii_case("cm") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 2.54 }))
+            if dim.unit().eq_ignore_ascii_case("pt") {
+                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 72.0 }))
+            } else if dim.unit().eq_ignore_ascii_case("px") {
+                Length::from_pixels(I26Dot6::from_f64(dim.value()))
+            } else if dim.unit().eq_ignore_ascii_case("in") {
+                Length::from_pixels(I26Dot6::from_f64(dim.value() * 96.0))
             } else if dim.unit().eq_ignore_ascii_case("mm") {
                 Length::from_pixels(I26Dot6::from_f64(
                     dim.value() * const { (96.0 / 2.54) / 10.0 },
                 ))
+            } else if dim.unit().eq_ignore_ascii_case("cm") {
+                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 2.54 }))
             } else if dim.unit().eq_ignore_ascii_case("Q") {
                 Length::from_pixels(I26Dot6::from_f64(
                     dim.value() * const { (96.0 / 2.54) / 40.0 },
                 ))
-            } else if dim.unit().eq_ignore_ascii_case("in") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * 96.0))
             } else if dim.unit().eq_ignore_ascii_case("pc") {
                 Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 6.0 }))
-            } else if dim.unit().eq_ignore_ascii_case("pt") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 72.0 }))
-            } else if dim.unit().eq_ignore_ascii_case("px") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value()))
             } else {
                 todo!();
             }

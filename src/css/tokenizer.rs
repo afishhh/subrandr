@@ -1,5 +1,73 @@
 //! https://www.w3.org/TR/css-syntax-3/#tokenization
 
+// Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
+const SOURCE_LEN_LIMIT: usize = 1 << 24;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+pub trait Spanned {
+    fn span(&self) -> Span;
+}
+
+impl Spanned for Span {
+    fn span(&self) -> Span {
+        *self
+    }
+}
+
+#[derive(Debug)]
+pub struct LineColumn {
+    pub line: u32,
+    pub column: u32,
+}
+
+pub struct SourceMap {
+    lines: Vec<u32>,
+}
+
+impl SourceMap {
+    pub fn new(source: &str) -> Self {
+        let mut lines = Vec::new();
+
+        let mut last_was_cr = false;
+        for (i, b) in source.bytes().enumerate() {
+            if b == b'\r' {
+                last_was_cr = true;
+                lines.push(i as u32);
+                continue;
+            }
+
+            if b == b'\n' {
+                if last_was_cr {
+                    *lines.last_mut().unwrap() = i as u32;
+                } else {
+                    lines.push(i as u32);
+                }
+            }
+
+            last_was_cr = false;
+        }
+
+        Self { lines }
+    }
+
+    pub fn byte_line_column(&self, byte: u32) -> LineColumn {
+        let line = match self.lines.binary_search(&byte) {
+            Ok(i) => i,
+            Err(i) => i,
+        };
+        let line_byte_start = line.checked_sub(1).map_or(0, |i| self.lines[i]);
+        LineColumn {
+            line: line as u32,
+            column: byte - line_byte_start,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct StreamPosition {
     index: usize,
@@ -10,7 +78,6 @@ struct StreamPosition {
 pub struct TokenStream<'a> {
     source: &'a str,
     pos: StreamPosition,
-    temporary_buffer: String,
 }
 
 pub fn is_whitespace(codepoint: char) -> bool {
@@ -38,22 +105,13 @@ fn is_valid_escape(a: char, b: char) -> bool {
 }
 
 impl<'a> TokenStream<'a> {
-    pub const fn new(text: &'a str) -> Self {
+    pub(super) const fn new(text: &'a str) -> Self {
         Self {
             source: text,
             pos: StreamPosition {
                 index: 0,
                 last_was_cr: false,
             },
-            temporary_buffer: String::new(),
-        }
-    }
-
-    pub fn fork(&self) -> Self {
-        Self {
-            source: self.source,
-            pos: self.pos.clone(),
-            temporary_buffer: String::new(),
         }
     }
 
@@ -371,7 +429,7 @@ impl<'a> TokenStream<'a> {
             (with $kind: expr) => {
                 return Some(Token {
                     kind: $kind,
-                    representation: &self.source[start..self.pos.index],
+                    span: Span { start: start as u32, end: self.pos.index as u32 },
                 })
             };
             ($kind: ident $(, $value: expr)?) => {
@@ -579,7 +637,7 @@ impl TokenKind<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'a> {
     pub kind: TokenKind<'a>,
-    pub representation: &'a str,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -25,49 +25,6 @@ pub struct LineColumn {
     pub column: u32,
 }
 
-pub struct SourceMap {
-    lines: Vec<u32>,
-}
-
-impl SourceMap {
-    pub fn new(source: &str) -> Self {
-        let mut lines = Vec::new();
-
-        let mut last_was_cr = false;
-        for (i, b) in source.bytes().enumerate() {
-            if b == b'\r' {
-                last_was_cr = true;
-                lines.push(i as u32);
-                continue;
-            }
-
-            if b == b'\n' {
-                if last_was_cr {
-                    *lines.last_mut().unwrap() = i as u32;
-                } else {
-                    lines.push(i as u32);
-                }
-            }
-
-            last_was_cr = false;
-        }
-
-        Self { lines }
-    }
-
-    pub fn byte_line_column(&self, byte: u32) -> LineColumn {
-        let line = match self.lines.binary_search(&byte) {
-            Ok(i) => i,
-            Err(i) => i,
-        };
-        let line_byte_start = line.checked_sub(1).map_or(0, |i| self.lines[i]);
-        LineColumn {
-            line: line as u32,
-            column: byte - line_byte_start,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct StreamPosition {
     index: usize,

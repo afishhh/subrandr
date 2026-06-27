@@ -9,6 +9,8 @@ use util::{
 pub mod computed;
 use computed::*;
 
+mod parsers;
+
 // Generates `ComputedStyle`.
 //
 // `ComputedStyle` is bascially a tree of `Rc`s, property access has to

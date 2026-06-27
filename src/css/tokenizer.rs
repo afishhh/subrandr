@@ -7,7 +7,7 @@ struct StreamPosition {
 }
 
 // TODO: had_parse_error boolean?
-pub struct InputStream<'a> {
+pub struct TokenStream<'a> {
     source: &'a str,
     pos: StreamPosition,
     temporary_buffer: String,
@@ -15,6 +15,10 @@ pub struct InputStream<'a> {
 
 pub fn is_whitespace(codepoint: char) -> bool {
     matches!(codepoint, '\n' | '\t' | ' ')
+}
+
+pub fn is_whitespace2(codepoint: u8) -> bool {
+    matches!(codepoint, b'\n' | b'\t' | b' ')
 }
 
 fn is_non_printable(codepoint: char) -> bool {
@@ -33,7 +37,7 @@ fn is_valid_escape(a: char, b: char) -> bool {
     a == '\\' && b != '\n'
 }
 
-impl<'a> InputStream<'a> {
+impl<'a> TokenStream<'a> {
     pub const fn new(text: &'a str) -> Self {
         Self {
             source: text,
@@ -81,8 +85,8 @@ impl<'a> InputStream<'a> {
         }
     }
 
-    fn consume_string(&mut self, ending: char) -> TokenKind {
-        self.temporary_buffer.clear();
+    fn consume_string(&mut self, ending: char) -> TokenKind<'a> {
+        let start = self.pos.index;
 
         loop {
             match self.consume_codepoint() {
@@ -96,29 +100,23 @@ impl<'a> InputStream<'a> {
                     None => (),
                     Some('\n') => self.advance_by(1),
                     Some(_) => {
-                        let e = self.consume_escaped_codepoint();
-                        self.temporary_buffer.push(e);
+                        self.skip_escaped_codepoint();
                     }
                 },
-                Some(c) => self.temporary_buffer.push(c),
+                Some(_) => {}
             }
         }
 
-        return TokenKind::String(self.temporary_buffer.as_str().into());
+        TokenKind::String(Escaped(&self.source[start..self.pos.index]))
     }
 
-    fn consume_ident_sequence(&mut self) -> IdentSequence<'a> {
-        self.temporary_buffer.clear();
+    fn consume_ident_sequence(&mut self) -> Escaped<'a> {
+        let start = self.pos.index;
 
         loop {
             match self.consume_codepoint() {
-                Some(c) if is_ident(c) => {
-                    self.temporary_buffer.push(c);
-                }
-                Some(c) if self.peek_is_valid_escape(c) => {
-                    let e = self.consume_escaped_codepoint();
-                    self.temporary_buffer.push(e);
-                }
+                Some(c) if is_ident(c) => {}
+                Some(c) if self.peek_is_valid_escape(c) => self.skip_escaped_codepoint(),
                 Some(c) => {
                     self.reconsume(c);
                     break;
@@ -127,7 +125,7 @@ impl<'a> InputStream<'a> {
             }
         }
 
-        self.temporary_buffer.as_str().into()
+        Escaped(&self.source[start..self.pos.index])
     }
 
     fn consume_number(&mut self) -> (f64, bool) {
@@ -144,7 +142,7 @@ impl<'a> InputStream<'a> {
 
         let peek = self.peek_bytes(3);
         let mut i = 1;
-        if matches!(peek.get(0), Some(b'E' | b'e')) && {
+        if matches!(peek.first(), Some(b'E' | b'e')) && {
             i += matches!(peek.get(1), Some(b'+' | b'-')) as usize;
             matches!(peek.get(i), Some(b'0'..=b'9'))
         } {
@@ -162,50 +160,58 @@ impl<'a> InputStream<'a> {
         )
     }
 
-    fn consume_numeric_token(&mut self) -> TokenKind {
+    fn consume_numeric_token(&mut self) -> TokenKind<'a> {
         let number = self.consume_number();
 
         if self.peek_would_start_an_ident_sequence() {
-            return TokenKind::Dimension(DimensionToken {
+            TokenKind::Dimension(DimensionToken {
                 value: number.0,
                 integer: number.1,
                 unit: self.consume_ident_sequence(),
-            });
+            })
         } else if self.peek_codepoint().is_some_and(|c| c == '%') {
             self.advance_by(1);
-            return TokenKind::Percentage(PercentageToken { value: number.0 });
+            TokenKind::Percentage(PercentageToken { value: number.0 })
         } else {
-            return TokenKind::Number(NumberToken {
+            TokenKind::Number(NumberToken {
                 value: number.0,
                 integer: number.1,
-            });
+            })
         }
     }
 
     fn consume_remants_of_bad_url(&mut self) {
         match self.consume_codepoint() {
-            Some(')') | None => return,
+            Some(')') | None => (),
             Some('\\') => {
                 if self.peek_is_valid_escape('\\') {
-                    self.consume_escaped_codepoint();
+                    self.skip_escaped_codepoint();
                 }
             }
             Some(_) => (),
         }
     }
 
-    fn consume_unqouted_url(&mut self) -> TokenKind {
-        self.temporary_buffer.clear();
-
+    fn consume_unqouted_url(&mut self) -> TokenKind<'a> {
         while self.peek_codepoint().is_some_and(is_whitespace) {
             self.advance_by(1);
         }
 
+        let start = self.pos.index;
+        let end;
         loop {
             match self.consume_codepoint() {
-                Some(')') => break,
-                None => break,
+                Some(')') => {
+                    end = self.pos.index - 1;
+                    break;
+                }
+                None => {
+                    end = self.pos.index;
+                    break;
+                }
                 Some(c) if is_whitespace(c) => {
+                    end = self.pos.index - 1;
+
                     while self.peek_codepoint().is_some_and(is_whitespace) {
                         self.advance_by(1);
                     }
@@ -228,21 +234,20 @@ impl<'a> InputStream<'a> {
                 }
                 Some('\\') => {
                     if self.peek_is_valid_escape('\\') {
-                        let e = self.consume_escaped_codepoint();
-                        self.temporary_buffer.push(e);
+                        self.skip_escaped_codepoint();
                     } else {
                         self.consume_remants_of_bad_url();
                         return TokenKind::BadUrl;
                     }
                 }
-                Some(c) => self.temporary_buffer.push(c),
+                Some(_) => {}
             }
         }
 
-        TokenKind::Url(self.temporary_buffer.as_str().into())
+        TokenKind::Url(Escaped(&self.source[start..end]))
     }
 
-    fn consume_ident_like(&mut self) -> TokenKind {
+    fn consume_ident_like(&mut self) -> TokenKind<'a> {
         let string = self.consume_ident_sequence();
 
         if string.eq_ignore_ascii_case("url") && self.peek_const("(") {
@@ -272,9 +277,9 @@ impl<'a> InputStream<'a> {
             }
         } else if self.peek_const("(") {
             self.pos.index += 1;
-            return TokenKind::Function(string);
+            TokenKind::Function(string)
         } else {
-            return TokenKind::Ident(string);
+            TokenKind::Ident(string)
         }
     }
 
@@ -485,33 +490,35 @@ impl<'a> InputStream<'a> {
         }
     }
 
-    fn consume_escaped_codepoint(&mut self) -> char {
-        let start = self.pos.index;
-        match self.consume_codepoint() {
-            Some('0'..='9' | 'A'..='F' | 'a'..='f') => {
-                let end = self.source[self.pos.index + 1..self.pos.index + 6]
-                    .find(|c: char| !c.is_ascii_hexdigit())
-                    .map_or(self.pos.index + 6, |v| self.pos.index + 1 + v);
-                self.pos.index = end;
-                if self.peek_codepoint().is_some_and(is_whitespace) {
-                    self.advance_by(1);
-                }
-                let value = u64::from_str_radix(&self.source[start..end], 16).unwrap();
+    fn skip_escaped_codepoint(&mut self) {
+        let hex_len = self
+            .peek_bytes(6)
+            .iter()
+            .position(|&c| !c.is_ascii_hexdigit())
+            .map_or(6, |v| v);
 
-                value
-                    .try_into()
-                    .ok()
-                    .and_then(char::from_u32)
-                    .unwrap_or(char::REPLACEMENT_CHARACTER)
-            }
-            None => char::REPLACEMENT_CHARACTER,
-            Some(c) => c,
+        if hex_len == 0 {
+            self.consume_codepoint();
+            return;
+        }
+
+        self.advance_by(hex_len);
+        if self.peek_codepoint().is_some_and(is_whitespace) {
+            self.advance_by(1);
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum TokenKind {
+impl<'a> Iterator for TokenStream<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.consume_token()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind<'a> {
     LParen,
     RParen,
     Comma,
@@ -524,29 +531,77 @@ pub enum TokenKind {
     RBracket,
     LBrace,
     RBrace,
-    Ident(Box<str>),
-    Function(Box<str>),
-    AtKeyword(Box<str>),
-    Hash(HashToken),
-    String(Box<str>),
+    Ident(Escaped<'a>),
+    Function(Escaped<'a>),
+    AtKeyword(Escaped<'a>),
+    Hash(HashToken<'a>),
+    String(Escaped<'a>),
     BadString,
-    Url(Box<str>),
+    Url(Escaped<'a>),
     BadUrl,
     Delim(char),
     Number(NumberToken),
     Percentage(PercentageToken),
-    Dimension(DimensionToken),
+    Dimension(DimensionToken<'a>),
 }
 
-#[derive(Debug, Clone)]
+impl TokenKind<'_> {
+    pub fn name(&self) -> &'static str {
+        match self {
+            TokenKind::LParen => "<(-token>",
+            TokenKind::RParen => "<)-token>",
+            TokenKind::Comma => "<comma-token>",
+            TokenKind::Cdc => "<CDC-token>",
+            TokenKind::Cdo => "<CDO-token>",
+            TokenKind::Colon => "<colon-token>",
+            TokenKind::Semicolon => "<semicolon-token>",
+            TokenKind::Whitespace => "<whitespace-token>",
+            TokenKind::LBracket => "<[-token>",
+            TokenKind::RBracket => "<]-token>",
+            TokenKind::LBrace => "<{-token>",
+            TokenKind::RBrace => "<}-token>",
+            TokenKind::Ident(_) => "<ident-token>",
+            TokenKind::Function(_) => "<function-token>",
+            TokenKind::AtKeyword(_) => "<at-keyword-token>",
+            TokenKind::Hash(_) => "<hash-token>",
+            TokenKind::String(_) => "<string-token>",
+            TokenKind::BadString => "<bad-string-token>",
+            TokenKind::Url(_) => "<url-token>",
+            TokenKind::BadUrl => "<bad-url-token>",
+            TokenKind::Delim(_) => "<delim-token>",
+            TokenKind::Number(_) => "<number-token>",
+            TokenKind::Percentage(_) => "<percentage-token>",
+            TokenKind::Dimension(_) => "<dimension-token>",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token<'a> {
-    pub kind: TokenKind,
+    pub kind: TokenKind<'a>,
     pub representation: &'a str,
 }
 
-#[derive(Debug, Clone)]
-pub struct HashToken {
-    pub value: Box<str>,
+#[derive(Debug, Clone, Copy)]
+pub struct Escaped<'a>(&'a str);
+
+impl PartialEq for Escaped<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.unescape_iter().eq(other.unescape_iter())
+    }
+}
+
+impl Eq for Escaped<'_> {}
+
+impl PartialEq<&str> for Escaped<'_> {
+    fn eq(&self, &other: &&str) -> bool {
+        self.unescape_iter().eq(other.chars())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HashToken<'a> {
+    pub value: Escaped<'a>,
     pub type_flag: HashTypeFlag,
 }
 
@@ -583,9 +638,114 @@ impl PartialEq for PercentageToken {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct DimensionToken {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DimensionToken<'a> {
     pub value: f64,
     pub integer: bool,
-    pub unit: Box<str>,
+    pub unit: Escaped<'a>,
+}
+
+impl<'a> Escaped<'a> {
+    pub fn unescape_iter(self) -> impl Iterator<Item = char> + use<'a> {
+        let mut current = self.0.chars();
+        std::iter::from_fn(move || loop {
+            let next = current.next()?;
+            if next != '\\' {
+                return Some(next);
+            }
+
+            let peek = current.as_str();
+            let hex_end = peek.as_bytes()[..peek.len().min(6)]
+                .iter()
+                .position(|&b| !b.is_ascii_hexdigit())
+                .unwrap_or(6);
+
+            if hex_end == 0 {
+                let next = current.next();
+                match next {
+                    Some('\n') => continue,
+                    Some('\r') if current.as_str().starts_with("\n") => {
+                        continue;
+                    }
+                    Some(c) => return Some(c),
+                    None => return Some(char::REPLACEMENT_CHARACTER),
+                }
+            }
+
+            let n_skip = 'skip: {
+                let mut it = peek.bytes().skip(hex_end);
+                let Some(next) = it.next() else {
+                    break 'skip hex_end;
+                };
+
+                if is_whitespace2(next) {
+                    hex_end + 1
+                } else if next == b'\r' {
+                    hex_end + 1 + (it.next() == Some(b'\n')) as usize
+                } else {
+                    hex_end
+                }
+            };
+            current = peek[n_skip..].chars();
+
+            let value = u64::from_str_radix(&peek[..hex_end], 16).unwrap();
+            return Some(
+                value
+                    .try_into()
+                    .ok()
+                    .and_then(char::from_u32)
+                    .unwrap_or(char::REPLACEMENT_CHARACTER),
+            );
+        })
+    }
+
+    pub fn eq_ignore_ascii_case(self, string: &str) -> bool {
+        self.unescape_iter().eq(string.chars())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::css::tokenizer::{Escaped, TokenKind, TokenStream};
+
+    #[track_caller]
+    fn assert_tokens(text: &str, tokens: &[TokenKind]) {
+        let mut stream = TokenStream::new(text);
+
+        let mut i = 0;
+        while let Some(token) = stream.consume_token() {
+            assert_eq!(token.kind, tokens[i]);
+            i += 1;
+        }
+
+        if i != tokens.len() {
+            panic!(
+                "Premature end of token stream. Expected {len} elements but got only {i}",
+                len = tokens.len()
+            );
+        }
+    }
+
+    #[test]
+    fn unquoted_url() {
+        let content = Escaped(
+            r"data:image/png\3B base64\2ciVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==",
+        );
+        assert_eq!(content, "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==");
+
+        assert_tokens(
+            r"url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==)",
+            &[TokenKind::Url(content)],
+        );
+
+        assert_tokens(
+            r"u\72l(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==)",
+            &[TokenKind::Url(content)],
+        );
+
+        assert_tokens(
+            " u\\72l(   data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==\t\t)  ",
+            &[TokenKind::Whitespace, TokenKind::Url(content), TokenKind::Whitespace]
+        );
+    }
 }

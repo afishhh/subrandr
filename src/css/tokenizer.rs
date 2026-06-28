@@ -1,29 +1,6 @@
 //! https://www.w3.org/TR/css-syntax-3/#tokenization
 
-// Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
-const SOURCE_LEN_LIMIT: usize = 1 << 24;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start: u32,
-    pub end: u32,
-}
-
-pub trait Spanned {
-    fn span(&self) -> Span;
-}
-
-impl Spanned for Span {
-    fn span(&self) -> Span {
-        *self
-    }
-}
-
-#[derive(Debug)]
-pub struct LineColumn {
-    pub line: u32,
-    pub column: u32,
-}
+use std::{fmt::Write, ops::Range};
 
 #[derive(Debug, Clone)]
 struct StreamPosition {
@@ -32,7 +9,7 @@ struct StreamPosition {
 }
 
 // TODO: had_parse_error boolean?
-pub struct TokenStream<'a> {
+pub(super) struct Tokenizer<'a> {
     source: &'a str,
     pos: StreamPosition,
 }
@@ -61,7 +38,7 @@ fn is_valid_escape(a: char, b: char) -> bool {
     a == '\\' && b != '\n'
 }
 
-impl<'a> TokenStream<'a> {
+impl<'a> Tokenizer<'a> {
     pub(super) const fn new(text: &'a str) -> Self {
         Self {
             source: text,
@@ -70,6 +47,10 @@ impl<'a> TokenStream<'a> {
                 last_was_cr: false,
             },
         }
+    }
+
+    pub fn source(&self) -> &'a str {
+        self.source
     }
 
     fn reconsume(&mut self, codepoint: char) {
@@ -100,9 +81,7 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    fn consume_string(&mut self, ending: char) -> TokenKind<'a> {
-        let start = self.pos.index;
-
+    fn consume_string(&mut self, ending: char) -> TokenKind {
         loop {
             match self.consume_codepoint() {
                 Some(c) if c == ending => break,
@@ -122,7 +101,7 @@ impl<'a> TokenStream<'a> {
             }
         }
 
-        TokenKind::String(Escaped(&self.source[start..self.pos.index]))
+        TokenKind::String
     }
 
     fn consume_ident_sequence(&mut self) -> Escaped<'a> {
@@ -143,8 +122,7 @@ impl<'a> TokenStream<'a> {
         Escaped(&self.source[start..self.pos.index])
     }
 
-    fn consume_number(&mut self) -> (f64, bool) {
-        let start = self.pos.index;
+    fn consume_number(&mut self) -> bool {
         let mut is_integer = true;
 
         if matches!(self.peek_codepoint(), Some('+' | '-')) {
@@ -169,29 +147,25 @@ impl<'a> TokenStream<'a> {
             }
         }
 
-        (
-            self.source[start..self.pos.index].parse().unwrap(),
-            is_integer,
-        )
+        is_integer
     }
 
-    fn consume_numeric_token(&mut self) -> TokenKind<'a> {
-        let number = self.consume_number();
+    fn consume_numeric_token(&mut self) -> TokenKind {
+        let start = self.pos.index;
+        let integer = self.consume_number();
 
         if self.peek_would_start_an_ident_sequence() {
-            TokenKind::Dimension(DimensionToken {
-                value: number.0,
-                integer: number.1,
-                unit: self.consume_ident_sequence(),
-            })
+            let unit_offset = (self.pos.index - start) as u32;
+            self.consume_ident_sequence();
+            TokenKind::Dimension {
+                integer,
+                unit_offset,
+            }
         } else if self.peek_codepoint().is_some_and(|c| c == '%') {
             self.advance_by(1);
-            TokenKind::Percentage(PercentageToken { value: number.0 })
+            TokenKind::Percentage { integer }
         } else {
-            TokenKind::Number(NumberToken {
-                value: number.0,
-                integer: number.1,
-            })
+            TokenKind::Number { integer }
         }
     }
 
@@ -207,7 +181,7 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    fn consume_unqouted_url(&mut self) -> TokenKind<'a> {
+    fn consume_unqouted_url(&mut self) -> Option<Range<usize>> {
         while self.peek_codepoint().is_some_and(is_whitespace) {
             self.advance_by(1);
         }
@@ -236,33 +210,34 @@ impl<'a> TokenStream<'a> {
                         break;
                     } else {
                         self.consume_remants_of_bad_url();
-                        return TokenKind::BadUrl;
+                        return None;
                     }
                 }
                 Some('"' | '\'' | '(') => {
                     self.consume_remants_of_bad_url();
-                    return TokenKind::BadUrl;
+                    return None;
                 }
                 Some(c) if is_non_printable(c) => {
                     self.consume_remants_of_bad_url();
-                    return TokenKind::BadUrl;
+                    return None;
                 }
                 Some('\\') => {
                     if self.peek_is_valid_escape('\\') {
                         self.skip_escaped_codepoint();
                     } else {
                         self.consume_remants_of_bad_url();
-                        return TokenKind::BadUrl;
+                        return None;
                     }
                 }
                 Some(_) => {}
             }
         }
 
-        TokenKind::Url(Escaped(&self.source[start..end]))
+        Some(start..end)
     }
 
-    fn consume_ident_like(&mut self) -> TokenKind<'a> {
+    fn consume_ident_like(&mut self) -> TokenKind {
+        let start = self.pos.index;
         let string = self.consume_ident_sequence();
 
         if string.eq_ignore_ascii_case("url") && self.peek_const("(") {
@@ -286,15 +261,27 @@ impl<'a> TokenStream<'a> {
             });
 
             if is_fun {
-                TokenKind::Function(string)
+                TokenKind::Function
             } else {
-                self.consume_unqouted_url()
+                let Some(Range {
+                    start: value_start,
+                    end: value_end,
+                }) = self.consume_unqouted_url()
+                else {
+                    return TokenKind::BadUrl;
+                };
+
+                TokenKind::Url {
+                    // TODO: checked cast
+                    value_offset: (value_start - start) as u16,
+                    trailing_len: (value_end - start) as u16,
+                }
             }
         } else if self.peek_const("(") {
             self.pos.index += 1;
-            TokenKind::Function(string)
+            TokenKind::Function
         } else {
-            TokenKind::Ident(string)
+            TokenKind::Ident
         }
     }
 
@@ -378,7 +365,7 @@ impl<'a> TokenStream<'a> {
         self.source.as_bytes()[self.pos.index..].starts_with(value.as_bytes())
     }
 
-    pub fn consume_token(&mut self) -> Option<Token<'a>> {
+    pub fn consume_token(&mut self) -> Option<Token> {
         self.consume_comments();
 
         let start = self.pos.index;
@@ -386,11 +373,11 @@ impl<'a> TokenStream<'a> {
             (with $kind: expr) => {
                 return Some(Token {
                     kind: $kind,
-                    span: Span { start: start as u32, end: self.pos.index as u32 },
+                    len: (self.pos.index - start) as u32,
                 })
             };
-            ($kind: ident $(, $value: expr)?) => {
-                return_token!(with TokenKind::$kind $(($value))?)
+            ($($kind: tt)*) => {
+                return_token!(with TokenKind::$($kind)*)
             };
         }
 
@@ -414,15 +401,12 @@ impl<'a> TokenStream<'a> {
                         hash_type = HashTypeFlag::Id;
                     }
 
-                    return_token!(
-                        Hash,
-                        HashToken {
-                            value: self.consume_ident_sequence(),
-                            type_flag: hash_type,
-                        }
-                    );
+                    self.consume_ident_sequence();
+                    return_token!(Hash {
+                        type_flag: hash_type,
+                    });
                 } else {
-                    return_token!(Delim, '#');
+                    return_token!(Delim);
                 }
             }
             Some('(') => return_token!(LParen),
@@ -432,7 +416,7 @@ impl<'a> TokenStream<'a> {
                     self.reconsume('+');
                     return_token!(with self.consume_numeric_token());
                 } else {
-                    return_token!(Delim, '+')
+                    return_token!(Delim)
                 }
             }
             Some(',') => return_token!(Comma),
@@ -450,7 +434,7 @@ impl<'a> TokenStream<'a> {
                         return_token!(with self.consume_ident_like());
                     } else {
                         self.pos = old;
-                        return_token!(Delim, '-')
+                        return_token!(Delim)
                     }
                 }
             }
@@ -459,7 +443,7 @@ impl<'a> TokenStream<'a> {
                     self.reconsume('.');
                     return_token!(with self.consume_numeric_token());
                 } else {
-                    return_token!(Delim, '.');
+                    return_token!(Delim);
                 }
             }
             Some(':') => return_token!(Colon),
@@ -469,15 +453,15 @@ impl<'a> TokenStream<'a> {
                     self.advance_by(3);
                     return_token!(Cdo);
                 } else {
-                    return_token!(Delim, '<');
+                    return_token!(Delim);
                 }
             }
             Some('@') => {
                 if self.peek_would_start_an_ident_sequence() {
                     let string = self.consume_ident_sequence();
-                    return_token!(AtKeyword, string);
+                    return_token!(AtKeyword);
                 } else {
-                    return_token!(Delim, '@');
+                    return_token!(Delim);
                 }
             }
             Some('[') => return_token!(LBracket),
@@ -489,7 +473,7 @@ impl<'a> TokenStream<'a> {
                     self.reconsume('\\');
                     return_token!(with self.consume_ident_like());
                 } else {
-                    return_token!(Delim, '\\');
+                    return_token!(Delim);
                 }
             }
             Some('0'..='9') => {
@@ -501,7 +485,7 @@ impl<'a> TokenStream<'a> {
                 return_token!(with self.consume_ident_like());
             }
             None => None,
-            Some(c) => return_token!(Delim, c),
+            Some(_) => return_token!(Delim),
         }
     }
 
@@ -524,8 +508,8 @@ impl<'a> TokenStream<'a> {
     }
 }
 
-impl<'a> Iterator for TokenStream<'a> {
-    type Item = Token<'a>;
+impl<'a> Iterator for Tokenizer<'a> {
+    type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.consume_token()
@@ -533,7 +517,7 @@ impl<'a> Iterator for TokenStream<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenKind<'a> {
+pub enum TokenKind {
     LParen,
     RParen,
     Comma,
@@ -546,21 +530,33 @@ pub enum TokenKind<'a> {
     RBracket,
     LBrace,
     RBrace,
-    Ident(Escaped<'a>),
-    Function(Escaped<'a>),
-    AtKeyword(Escaped<'a>),
-    Hash(HashToken<'a>),
-    String(Escaped<'a>),
+    Ident,
+    Function,
+    AtKeyword,
+    Hash {
+        type_flag: HashTypeFlag,
+    },
+    String,
     BadString,
-    Url(Escaped<'a>),
+    Url {
+        value_offset: u16,
+        trailing_len: u16,
+    },
     BadUrl,
-    Delim(char),
-    Number(NumberToken),
-    Percentage(PercentageToken),
-    Dimension(DimensionToken<'a>),
+    Delim,
+    Number {
+        integer: bool,
+    },
+    Percentage {
+        integer: bool,
+    },
+    Dimension {
+        integer: bool,
+        unit_offset: u32,
+    },
 }
 
-impl TokenKind<'_> {
+impl TokenKind {
     pub fn name(&self) -> &'static str {
         match self {
             TokenKind::LParen => "<(-token>",
@@ -575,26 +571,26 @@ impl TokenKind<'_> {
             TokenKind::RBracket => "<]-token>",
             TokenKind::LBrace => "<{-token>",
             TokenKind::RBrace => "<}-token>",
-            TokenKind::Ident(_) => "<ident-token>",
-            TokenKind::Function(_) => "<function-token>",
-            TokenKind::AtKeyword(_) => "<at-keyword-token>",
-            TokenKind::Hash(_) => "<hash-token>",
-            TokenKind::String(_) => "<string-token>",
+            TokenKind::Ident => "<ident-token>",
+            TokenKind::Function => "<function-token>",
+            TokenKind::AtKeyword => "<at-keyword-token>",
+            TokenKind::Hash { .. } => "<hash-token>",
+            TokenKind::String => "<string-token>",
             TokenKind::BadString => "<bad-string-token>",
-            TokenKind::Url(_) => "<url-token>",
+            TokenKind::Url { .. } => "<url-token>",
             TokenKind::BadUrl => "<bad-url-token>",
-            TokenKind::Delim(_) => "<delim-token>",
-            TokenKind::Number(_) => "<number-token>",
-            TokenKind::Percentage(_) => "<percentage-token>",
-            TokenKind::Dimension(_) => "<dimension-token>",
+            TokenKind::Delim => "<delim-token>",
+            TokenKind::Number { .. } => "<number-token>",
+            TokenKind::Percentage { .. } => "<percentage-token>",
+            TokenKind::Dimension { .. } => "<dimension-token>",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Token<'a> {
-    pub kind: TokenKind<'a>,
-    pub span: Span,
+pub struct Token {
+    pub kind: TokenKind,
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -615,52 +611,16 @@ impl PartialEq<&str> for Escaped<'_> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HashToken<'a> {
-    pub value: Escaped<'a>,
-    pub type_flag: HashTypeFlag,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashTypeFlag {
     Id,
     Unrestricted,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct NumberToken {
-    pub value: f64,
-    pub integer: bool,
-}
-
-impl Eq for NumberToken {}
-
-impl PartialEq for NumberToken {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.total_cmp(&other.value).is_eq() && self.integer == other.integer
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PercentageToken {
-    pub value: f64,
-}
-
-impl Eq for PercentageToken {}
-
-impl PartialEq for PercentageToken {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.total_cmp(&other.value).is_eq()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DimensionToken<'a> {
-    pub value: f64,
-    pub integer: bool,
-    pub unit: Escaped<'a>,
-}
-
 impl<'a> Escaped<'a> {
+    pub fn new(escaped: &'a str) -> Self {
+        Self(escaped)
+    }
+
     pub fn unescape_iter(self) -> impl Iterator<Item = char> + use<'a> {
         let mut current = self.0.chars();
         std::iter::from_fn(move || loop {
@@ -719,13 +679,22 @@ impl<'a> Escaped<'a> {
     }
 }
 
+impl std::fmt::Display for Escaped<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for chr in self.unescape_iter() {
+            f.write_char(chr)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::css::tokenizer::{Escaped, TokenKind, TokenStream};
+    use crate::css::tokenizer::{Escaped, TokenKind, Tokenizer};
 
     #[track_caller]
     fn assert_tokens(text: &str, tokens: &[TokenKind]) {
-        let mut stream = TokenStream::new(text);
+        let mut stream = Tokenizer::new(text);
 
         let mut i = 0;
         while let Some(token) = stream.consume_token() {
@@ -750,17 +719,23 @@ mod test {
 
         assert_tokens(
             r"url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==)",
-            &[TokenKind::Url(content)],
+            &[TokenKind::Url {
+                value_offset: 4,
+                trailing_len: 1,
+            }],
         );
 
         assert_tokens(
             r"u\72l(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==)",
-            &[TokenKind::Url(content)],
+            &[TokenKind::Url {
+                value_offset: 6,
+                trailing_len: 1,
+            }],
         );
 
         assert_tokens(
             " u\\72l(   data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==\t\t)  ",
-            &[TokenKind::Whitespace, TokenKind::Url(content), TokenKind::Whitespace]
+            &[TokenKind::Whitespace, TokenKind::Url { value_offset: 9, trailing_len: 3 }, TokenKind::Whitespace]
         );
     }
 }

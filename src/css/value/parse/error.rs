@@ -1,4 +1,4 @@
-use crate::css::tokenizer::{Span, Spanned};
+use super::{Span, Spanned};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -19,6 +19,10 @@ impl ParseError {
                 message: message.to_string(),
             }],
         }
+    }
+
+    pub fn append(&mut self, mut other: ParseError) {
+        self.messages.append(&mut other.messages);
     }
 }
 

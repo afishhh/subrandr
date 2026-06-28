@@ -1,220 +1,66 @@
 use std::cell::Cell;
 
-use super::*;
-use crate::css::tokenizer::{
-    DimensionToken, Escaped, NumberToken, PercentageToken, Span, Spanned, Token, TokenKind,
-    TokenStream,
-};
+use crate::css::tokenizer::{Escaped, Tokenizer};
 
-pub enum ValueTokenTree<'a> {
-    Ident(Ident<'a>),
-    String(StringLit<'a>),
-    FunctionalNotation(FunctionalNotation<'a>),
-    UnquotedUrl(Escaped<'a>),
-    Number(Number),
-    Percentage(PercentageToken),
-    Dimension(Dimension<'a>),
-    Comma(Comma),
+mod error;
+mod token_buffer;
+mod token_tree;
+
+pub use error::ParseError;
+use token_buffer::*;
+pub use token_tree::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
 }
 
-impl<'a> Spanned for ValueTokenTree<'a> {
+pub trait Spanned {
+    fn span(&self) -> Span;
+}
+
+impl Spanned for Span {
     fn span(&self) -> Span {
-        match self {
-            ValueTokenTree::Ident(ident) => ident.span(),
-            ValueTokenTree::String(string) => string.span(),
-            ValueTokenTree::FunctionalNotation(functional_notation) => todo!(),
-            ValueTokenTree::UnquotedUrl(escaped) => todo!(),
-            ValueTokenTree::Number(number) => todo!(),
-            ValueTokenTree::Percentage(percentage_token) => todo!(),
-            ValueTokenTree::Dimension(dimension) => todo!(),
-            ValueTokenTree::Comma(comma) => todo!(),
-        }
+        *self
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Ident<'a> {
-    span: Span,
-    value: Escaped<'a>,
+#[derive(Debug)]
+pub struct LineColumn {
+    pub line: u32,
+    pub column: u32,
 }
 
-impl Spanned for Ident<'_> {
-    fn span(&self) -> Span {
-        self.span
-    }
+pub struct ParseStream<'a> {
+    cursor: Cell<Cursor<'a>>,
 }
 
-impl<'a> Ident<'a> {
-    pub fn value(&self) -> Escaped<'a> {
-        self.value
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct StringLit<'a> {
-    span: Span,
-    value: Escaped<'a>,
-}
-
-impl Spanned for StringLit<'_> {
-    fn span(&self) -> Span {
-        self.span
-    }
-}
-
-impl<'a> StringLit<'a> {
-    pub fn value(&self) -> Escaped<'a> {
-        self.value
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Number {
-    token: NumberToken,
-}
-
-impl Number {
-    pub fn is_integer(&self) -> bool {
-        self.token.integer
-    }
-
-    pub fn value(&self) -> f64 {
-        self.token.value
-    }
-}
-
-pub struct FunctionalNotation<'a> {
-    function: Escaped<'a>,
-    content: Vec<Token<'a>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Dimension<'a> {
-    token: DimensionToken<'a>,
-}
-
-impl<'a> Dimension<'a> {
-    pub fn is_integer(&self) -> bool {
-        self.token.integer
-    }
-
-    pub fn value(&self) -> f64 {
-        self.token.value
-    }
-
-    pub fn unit(&self) -> Escaped<'a> {
-        self.token.unit
-    }
-}
-
-impl<'a> ValueTokenTree<'a> {
-    fn try_next_in(stream: &mut TokenStream<'a>) -> Result<Option<ValueTokenTree<'a>>, ParseError> {
-        loop {
-            let Some(token) = stream.consume_token() else {
-                return Ok(None);
-            };
-
-            let span = token.span;
-            return Ok(Some(match token.kind {
-                TokenKind::Whitespace => continue,
-                TokenKind::Ident(value) => ValueTokenTree::Ident(Ident { span, value }),
-                TokenKind::String(value) => ValueTokenTree::String(StringLit { span, value }),
-                TokenKind::Function(function) => {
-                    let mut content = Vec::new();
-                    loop {
-                        let Some(token) = stream.consume_token() else {
-                            return Err(ParseError::new(
-                                token.span,
-                                "unterminated functional notation",
-                            ));
-                        };
-
-                        if token.kind == TokenKind::RParen {
-                            break ValueTokenTree::FunctionalNotation(FunctionalNotation {
-                                function,
-                                content,
-                            });
-                        }
-
-                        content.push(token);
-                    }
-                }
-                TokenKind::Url(url) => ValueTokenTree::UnquotedUrl(url),
-                TokenKind::Number(token) => ValueTokenTree::Number(Number { token }),
-                TokenKind::Percentage(percentage) => ValueTokenTree::Percentage(percentage),
-                TokenKind::Dimension(token) => ValueTokenTree::Dimension(Dimension { token }),
-                TokenKind::Comma => ValueTokenTree::Comma(Comma(())),
-                kind => {
-                    return Err(ParseError::new(
-                        span,
-                        format_args!("`{}` not legal in values", kind.name()),
-                    ))
-                }
-            }));
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            ValueTokenTree::Ident(_) => "<ident>",
-            ValueTokenTree::String(_) => "<string>",
-            ValueTokenTree::FunctionalNotation(_) => "<function>",
-            ValueTokenTree::UnquotedUrl(_) => "<unquoted-url>",
-            &ValueTokenTree::Number(Number {
-                token: NumberToken { integer, .. },
-            }) => match integer {
-                true => "<integer>",
-                false => "<number>",
-            },
-            ValueTokenTree::Percentage(_) => "<percentage>",
-            ValueTokenTree::Dimension(_) => "<dimension>",
-            ValueTokenTree::Comma(_) => ",",
-        }
-    }
-}
-
-pub struct ValueParseStream<'a> {
-    source: &'a str,
-    tts: Vec<ValueTokenTree<'a>>,
-    position: Cell<usize>,
-}
-
-impl<'a> ValueParseStream<'a> {
-    pub(super) fn new(source: &'a str) -> Result<Self, ParseError> {
-        let mut stream = TokenStream::new(source);
-        let tts = std::iter::from_fn(move || ValueTokenTree::try_next_in(&mut stream).transpose())
-            .collect::<Result<Vec<ValueTokenTree>, ParseError>>()?;
+impl<'a> ParseStream<'a> {
+    fn new(buffer: &'a TokenBuffer<'a>) -> Result<Self, ParseError> {
         Ok(Self {
-            source,
-            tts,
-            position: Cell::new(0),
+            cursor: Cell::new(buffer.start()),
         })
     }
 
-    fn advance_by(&self, count: usize) {
-        self.position.set(self.position.get() + count);
+    fn advance1(&self) {
+        self.cursor.set(self.cursor2());
     }
 
-    fn cursor(&self, offset: usize) -> Cursor {
-        Cursor {
-            stream: self,
-            index: self.position.get() + offset,
-        }
+    fn cursor1(&self) -> Cursor<'a> {
+        self.cursor.get()
+    }
+
+    fn cursor2(&self) -> Cursor<'a> {
+        self.cursor1().next()
     }
 
     fn ensure_end(&self) -> Result<(), ParseError> {
-        let cursor = self.cursor(0);
+        let cursor = self.cursor1();
         if !cursor.eof() {
-            Err(ParseError::unexpected(cursor, &["<eof>"]))
+            Err(ParseError::unexpected(cursor, &["<eof>"], false))
         } else {
             Ok(())
-        }
-    }
-
-    fn end_span(&self) -> Span {
-        Span {
-            start: self.source.len() as u32,
-            end: self.source.len() as u32,
         }
     }
 
@@ -223,49 +69,28 @@ impl<'a> ValueParseStream<'a> {
     }
 
     pub fn peek<T: ValuePeek>(&self) -> bool {
-        T::peek(&self.cursor(0))
+        T::peek(&self.cursor1())
     }
 
     pub fn skip(&self) {
-        self.advance_by(1);
+        self.advance1();
     }
 
     pub fn lookahead1(&self) -> Lookahead {
         Lookahead {
-            cursor: self.cursor(0),
+            cursor: self.cursor1(),
             tried: Vec::new(),
-        }
-    }
-}
-
-struct Cursor<'a> {
-    stream: &'a ValueParseStream<'a>,
-    index: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn tree(&self) -> Option<&'a ValueTokenTree<'a>> {
-        self.stream.tts.get(self.index)
-    }
-
-    fn eof(&self) -> bool {
-        self.tree().is_none()
-    }
-}
-
-impl<'a> Spanned for Cursor<'a> {
-    fn span(&self) -> Span {
-        if let Some(tree) = self.tree() {
-            tree.span()
-        } else {
-            self.stream.end_span()
+            reveal_ident: false,
         }
     }
 }
 
 impl ParseError {
-    fn unexpected(cursor: Cursor, expected: &[&'static str]) -> Self {
-        let found = cursor.tree().map_or("<eof>", ValueTokenTree::name);
+    fn unexpected(cursor: Cursor, expected: &[&'static str], reveal_ident: bool) -> Self {
+        let found = util::fmt_from_fn(|f| match cursor.tree() {
+            Some(tt) => std::fmt::Display::fmt(&tt.display_for_error(reveal_ident), f),
+            None => f.write_str("<eof>"),
+        });
         match expected {
             [] => unreachable!("`Lookahead::error()` called before any `peek()`s"),
             [one] => Self::new(cursor, format_args!("expected `{one}` found `{found}`",)),
@@ -288,7 +113,7 @@ impl ParseError {
 }
 
 pub trait ValueParse<'a>: Sized {
-    fn parse(stream: &'a ValueParseStream<'a>) -> Result<Self, ParseError>;
+    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError>;
 }
 
 pub trait ValuePeek: Sized {
@@ -304,13 +129,13 @@ macro_rules! impl_token {
         |$v: ident| $body: expr
     ) => {
         impl<$lt> ValueParse<$lt> for $ftype {
-            fn parse(stream: &'a ValueParseStream<'a>) -> Result<Self, ParseError> {
-                let next = stream.cursor(0);
+            fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
+                let next = stream.cursor1();
                 if let Some(ValueTokenTree::$kind($v)) = next.tree() {
-                    stream.advance_by(1);
+                    stream.advance1();
                     Ok($body)
                 } else {
-                    Err(ParseError::unexpected(next, &[<$peektype>::name()]))
+                    Err(ParseError::unexpected(next, &[<$peektype>::name()], false))
                 }
             }
         }
@@ -327,18 +152,22 @@ macro_rules! impl_token {
     };
 }
 
-macro_rules! def_simple_token {
-    ($name: ident, $err_name: literal) => {
-        #[derive(Debug, Clone, Copy)]
-        pub struct $name(());
-
-        impl_token!($name, for<'a> $name, $name, ",", |v| *v);
-    };
-}
-
 impl_token!(Ident<'_>, for<'a> &'a Ident<'a>, Ident, "<ident>", |ident| ident);
 impl_token!(StringLit<'_>, for<'a> &'a StringLit<'a>, String, "<ident>", |string| string);
-impl_token!(Number, for<'a> Number, Number, "<number>", |number| *number);
+impl_token!(
+    Number<'_>,
+    for<'a> Number<'a>,
+    Number,
+    "<number>",
+    |number| *number
+);
+impl_token!(
+    Percentage<'_>,
+    for<'a> Percentage<'a>,
+    Percentage,
+    "<dimension>",
+    |dimension| *dimension
+);
 impl_token!(
     Dimension<'_>,
     for<'a> Dimension<'a>,
@@ -346,7 +175,6 @@ impl_token!(
     "<dimension>",
     |dimension| *dimension
 );
-def_simple_token!(Comma, ",");
 
 pub struct End(());
 
@@ -363,6 +191,7 @@ impl ValuePeek for End {
 pub struct Lookahead<'a> {
     cursor: Cursor<'a>,
     tried: Vec<&'static str>,
+    reveal_ident: bool,
 }
 
 impl Lookahead<'_> {
@@ -373,6 +202,7 @@ impl Lookahead<'_> {
 
     pub fn peek_keyword(&mut self, keyword: &'static str) -> bool {
         self.tried.push(keyword);
+        self.reveal_ident = true;
         if let Some(ValueTokenTree::Ident(ident)) = self.cursor.tree() {
             ident.value().eq_ignore_ascii_case(keyword)
         } else {
@@ -381,12 +211,13 @@ impl Lookahead<'_> {
     }
 
     pub fn error(self) -> ParseError {
-        ParseError::unexpected(self.cursor, &self.tried)
+        ParseError::unexpected(self.cursor, &self.tried, self.reveal_ident)
     }
 }
 
 pub fn parse_str<T: for<'a> ValueParse<'a>>(source: &str) -> Result<T, ParseError> {
-    let stream = ValueParseStream::new(source)?;
+    let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source))?;
+    let stream = ParseStream::new(&buffer)?;
     let result = T::parse(&stream)?;
     stream.ensure_end()?;
     Ok(result)

@@ -8,30 +8,36 @@ use crate::{css::value::*, style::computed::Length};
 impl Length {
     // only absolute lengths
     fn try_parse<'a>(
-        stream: &'a ValueParseStream<'a>,
+        stream: &'a ParseStream<'a>,
         mut lk: Lookahead<'a>,
     ) -> Result<Self, ParseError> {
         // TODO: accept 0
         Ok(if lk.peek::<Dimension>() {
             let dim = stream.parse::<Dimension>()?;
             if dim.unit().eq_ignore_ascii_case("pt") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 72.0 }))
+                Length::from_pixels(I26Dot6::from_f64(
+                    dim.value().to_f64() * const { 96.0 / 72.0 },
+                ))
             } else if dim.unit().eq_ignore_ascii_case("px") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value()))
+                Length::from_pixels(I26Dot6::from_f64(dim.value().to_f64()))
             } else if dim.unit().eq_ignore_ascii_case("in") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * 96.0))
+                Length::from_pixels(I26Dot6::from_f64(dim.value().to_f64() * 96.0))
             } else if dim.unit().eq_ignore_ascii_case("mm") {
                 Length::from_pixels(I26Dot6::from_f64(
-                    dim.value() * const { (96.0 / 2.54) / 10.0 },
+                    dim.value().to_f64() * const { (96.0 / 2.54) / 10.0 },
                 ))
             } else if dim.unit().eq_ignore_ascii_case("cm") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 2.54 }))
+                Length::from_pixels(I26Dot6::from_f64(
+                    dim.value().to_f64() * const { 96.0 / 2.54 },
+                ))
             } else if dim.unit().eq_ignore_ascii_case("Q") {
                 Length::from_pixels(I26Dot6::from_f64(
-                    dim.value() * const { (96.0 / 2.54) / 40.0 },
+                    dim.value().to_f64() * const { (96.0 / 2.54) / 40.0 },
                 ))
             } else if dim.unit().eq_ignore_ascii_case("pc") {
-                Length::from_pixels(I26Dot6::from_f64(dim.value() * const { 96.0 / 6.0 }))
+                Length::from_pixels(I26Dot6::from_f64(
+                    dim.value().to_f64() * const { 96.0 / 6.0 },
+                ))
             } else {
                 todo!();
             }
@@ -44,10 +50,7 @@ impl Length {
 pub(super) struct FontFamily(pub Rc<[Rc<str>]>);
 
 impl FontFamily {
-    fn parse<'a>(
-        stream: &'a ValueParseStream<'a>,
-        mut lk: Lookahead<'a>,
-    ) -> Result<Self, ParseError> {
+    fn parse<'a>(stream: &'a ParseStream<'a>, mut lk: Lookahead<'a>) -> Result<Self, ParseError> {
         let mut result: Vec<util::rc::Rc<str>> = Vec::new();
         loop {
             let mut current = String::new();
@@ -87,10 +90,7 @@ impl FontWeight {
     const BOLD: I16Dot16 = I16Dot16::new(700);
 
     // `bolder` and `lighter` relative keywords not supported
-    fn parse<'a>(
-        stream: &'a ValueParseStream<'a>,
-        mut lk: Lookahead<'a>,
-    ) -> Result<Self, ParseError> {
+    fn parse<'a>(stream: &'a ParseStream<'a>, mut lk: Lookahead<'a>) -> Result<Self, ParseError> {
         Ok(if lk.peek_keyword("normal") {
             stream.skip();
             Self(Self::NORMAL)
@@ -108,10 +108,7 @@ impl FontWeight {
 pub(super) struct FontSize(pub I26Dot6);
 
 impl FontSize {
-    fn try_parse<'a>(
-        stream: &'a ValueParseStream<'a>,
-        lk: Lookahead<'a>,
-    ) -> Result<Self, ParseError> {
+    fn try_parse<'a>(stream: &'a ParseStream<'a>, lk: Lookahead<'a>) -> Result<Self, ParseError> {
         Length::try_parse(stream, lk)
             .map(Length::to_unscaled_pixels)
             .map(FontSize)

@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use super::{impl_spanned, Span, Spanned};
+use super::{impl_spanned, Cursor, Parse, Span, Spanned};
 use crate::csssyn::tokenizer::Escaped;
 
 pub enum TokenTree<'a> {
@@ -31,8 +31,8 @@ impl<'a> Spanned for TokenTree<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Ident<'a> {
-    span: Span,
-    value: Escaped<'a>,
+    pub(super) span: Span,
+    pub(super) value: Escaped<'a>,
 }
 
 impl_spanned!(Ident<'_>);
@@ -49,8 +49,8 @@ impl<'a> Ident<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LitString<'a> {
-    span: Span,
-    value: Escaped<'a>,
+    pub(super) span: Span,
+    pub(super) value: Escaped<'a>,
 }
 
 impl_spanned!(LitString<'_>);
@@ -131,7 +131,7 @@ impl<'a> Dimension<'a> {
 pub struct FunctionalNotation<'a> {
     pub(super) span: Span,
     pub(super) function: Escaped<'a>,
-    pub(super) content: Vec<TokenTree<'a>>,
+    pub(super) content: Cursor<'a>,
 }
 
 impl_spanned!(FunctionalNotation<'_>);

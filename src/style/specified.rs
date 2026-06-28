@@ -9,7 +9,7 @@ use crate::{
 
 trait PeekParse: Sized {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError>;
 }
@@ -54,7 +54,7 @@ impl AbsoluteLength {
 
 impl PeekParse for AbsoluteLength {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek(Token![0]) {
@@ -93,7 +93,7 @@ pub struct FontFamily {
 
 impl PeekParse for FontFamily {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         let mut result = Vec::new();
@@ -152,7 +152,7 @@ impl AbsoluteFontWeight {
 impl PeekParse for AbsoluteFontWeight {
     // `bolder` and `lighter` relative keywords not supported
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         mut lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("normal") {
@@ -187,7 +187,7 @@ impl AbsoluteFontSize {
 
 impl PeekParse for AbsoluteFontSize {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(
@@ -219,7 +219,7 @@ impl FontSlant {
 
 impl PeekParse for FontSlant {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("normal") {
@@ -235,7 +235,7 @@ impl PeekParse for FontSlant {
 }
 
 // https://www.w3.org/TR/css-fonts-4/#propdef-font-feature-settings
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FontFeatureSettings {
     Normal,
     Tags(Vec<FontFeatureTag>),
@@ -243,7 +243,7 @@ pub enum FontFeatureSettings {
 
 impl PeekParse for FontFeatureSettings {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("normal") {
@@ -251,8 +251,11 @@ impl PeekParse for FontFeatureSettings {
             Self::Normal
         } else if let Some(tag) = FontFeatureTag::peek_parse(stream, lk)? {
             let mut tags = vec![tag];
-            let mut lk = stream.lookahead1();
-            while !lk.peek(End) {
+            loop {
+                let mut lk = stream.lookahead1();
+                if lk.peek(End) {
+                    break;
+                }
                 let Some(tag) = FontFeatureTag::peek_parse(stream, &mut lk)? else {
                     return Err(lk.error());
                 };
@@ -266,13 +269,13 @@ impl PeekParse for FontFeatureSettings {
 }
 
 // https://www.w3.org/TR/css-fonts-4/#feature-tag-value
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontFeatureTag {
     pub tag: OpenTypeTag,
     pub value: Option<FontFeatureTagValue>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontFeatureTagValue {
     Integer(u32),
     On,
@@ -281,7 +284,7 @@ pub enum FontFeatureTagValue {
 
 impl PeekParse for FontFeatureTag {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         if !lk.peek(LitString) {
@@ -292,7 +295,7 @@ impl PeekParse for FontFeatureTag {
         let name = string.value().to_string();
         let Some(ascii_bytes) = <[u8; 4]>::try_from(name.as_bytes())
             .ok()
-            .filter(|b| b.is_ascii())
+            .filter(|b| b.iter().all(|b| (0x20..0x7E).contains(b)))
         else {
             return Err(ParseError::new(
                 string,
@@ -308,8 +311,10 @@ impl PeekParse for FontFeatureTag {
                 || ParseError::new(string, "OpenType tag value too large (must be < 2^32)"),
             )?))
         } else if stream.peek("on") {
+            stream.skip();
             Some(FontFeatureTagValue::On)
         } else if stream.peek("off") {
+            stream.skip();
             Some(FontFeatureTagValue::Off)
         } else {
             None
@@ -331,7 +336,7 @@ pub enum LineBreak {
 
 impl PeekParse for LineBreak {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("auto") {
@@ -366,7 +371,7 @@ pub enum WordBreak {
 
 impl PeekParse for WordBreak {
     fn peek_parse<'a>(
-        stream: &'a ParseStream<'a>,
+        stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("normal") {
@@ -384,5 +389,68 @@ impl PeekParse for WordBreak {
         } else {
             return Ok(None);
         }))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Specified<I> {
+    Initial,
+    Inherit,
+    Unset,
+    Value(I),
+}
+
+impl<'a, I: PeekParse> Parse<'a> for Specified<I> {
+    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
+        let mut lk = stream.lookahead1();
+        Ok(if lk.peek("initial") {
+            stream.skip();
+            Self::Initial
+        } else if lk.peek("inherit") {
+            stream.skip();
+            Self::Inherit
+        } else if lk.peek("unset") {
+            stream.skip();
+            Self::Unset
+        } else if let Some(value) = I::peek_parse(stream, &mut lk)? {
+            Self::Value(value)
+        } else {
+            return Err(lk.error());
+        })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::csssyn;
+
+    use super::*;
+
+    #[test]
+    fn abcd() {
+        assert_eq!(
+            csssyn::value::parse_str::<Specified::<FontFeatureSettings>>(
+                r#"'ruby' 12 "silf" off "ab\63 d" 'AAAA' on"#
+            )
+            .unwrap(),
+            Specified::Value(FontFeatureSettings::Tags(vec![
+                FontFeatureTag {
+                    tag: OpenTypeTag::FEAT_RUBY,
+                    value: Some(FontFeatureTagValue::Integer(12))
+                },
+                FontFeatureTag {
+                    tag: OpenTypeTag::from_bytes(*b"silf"),
+                    value: Some(FontFeatureTagValue::Off)
+                },
+                FontFeatureTag {
+                    tag: OpenTypeTag::from_bytes(*b"abcd"),
+                    value: None
+                },
+                FontFeatureTag {
+                    tag: OpenTypeTag::from_bytes(*b"AAAA"),
+                    value: Some(FontFeatureTagValue::On)
+                }
+            ]))
+        )
     }
 }

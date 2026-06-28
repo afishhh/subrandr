@@ -43,46 +43,38 @@ pub struct ParseStream<'a> {
 impl<'a> ParseStream<'a> {
     fn new(buffer: &'a TokenBuffer<'a>) -> Result<Self, ParseError> {
         Ok(Self {
-            cursor: Cell::new(buffer.start()),
+            cursor: Cell::new(buffer.start().skip_whitespace()),
         })
     }
 
-    fn advance1(&self) {
-        self.cursor.set(self.cursor2());
-    }
-
-    fn cursor1(&self) -> Cursor<'a> {
+    fn cursor(&self) -> Cursor<'a> {
         self.cursor.get()
     }
 
-    fn cursor2(&self) -> Cursor<'a> {
-        self.cursor1().next()
-    }
-
     fn ensure_end(&self) -> Result<(), ParseError> {
-        let cursor = self.cursor1();
+        let cursor = self.cursor();
         if !cursor.eof() {
-            Err(ParseError::unexpected(cursor, &["<eof>"], false))
+            Err(ParseError::unexpected(cursor, &["<eof>"]))
         } else {
             Ok(())
         }
     }
 
-    pub fn parse<T: Parse<'a>>(&'a self) -> Result<T, ParseError> {
+    pub fn parse<T: Parse<'a>>(&self) -> Result<T, ParseError> {
         T::parse(self)
     }
 
     pub fn peek<T: Peek>(&self, peek: T) -> bool {
-        peek.peek(self.cursor1())
+        peek.peek(self.cursor())
     }
 
     pub fn skip(&self) {
-        self.advance1();
+        _ = self.parse::<TokenTree<'a>>();
     }
 
-    pub fn lookahead1(&self) -> Lookahead {
+    pub fn lookahead1(&self) -> Lookahead<'a> {
         Lookahead {
-            cursor: self.cursor1(),
+            cursor: self.cursor(),
             tried: Vec::new(),
             reveal_ident: false,
         }
@@ -90,7 +82,7 @@ impl<'a> ParseStream<'a> {
 }
 
 pub trait Parse<'a>: Sized {
-    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError>;
+    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError>;
 }
 
 pub trait Peek: Sized {
@@ -116,7 +108,7 @@ impl Peek for &'static str {
     }
 
     fn peek(&self, cursor: Cursor) -> bool {
-        cursor.tree().is_some_and(|tt| match tt {
+        cursor.token_tree().is_some_and(|(tree, _)| match tree {
             TokenTree::Ident(ident) => ident.value() == *self,
             _ => false,
         })
@@ -134,17 +126,16 @@ impl<F: FnOnce(Infallible) -> T, T: token::Token> Peek for F {
 }
 
 macro_rules! impl_token {
-    (for<$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?, $kind: ident, $err_name: literal,
-        |$v: ident| $body: expr
+    (for<$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?, $kind: ident, $err_name: literal
     ) => {
         impl<$lt> Parse<$lt> for $name $(<$ltarg>)? {
-            fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
-                let next = stream.cursor1();
-                if let Some(TokenTree::$kind($v)) = next.tree() {
-                    stream.advance1();
-                    Ok($body)
+            fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
+                let cursor = stream.cursor();
+                if let Some((TokenTree::$kind(token), next)) = cursor.token_tree() {
+                    stream.cursor.set(next);
+                    Ok(token)
                 } else {
-                    Err(ParseError::unexpected(next, &[<$name>::name()], false))
+                    Err(ParseError::unexpected(cursor, &[<$name>::name()]))
                 }
             }
         }
@@ -155,7 +146,7 @@ macro_rules! impl_token {
             }
 
             fn peek(cursor: Cursor) -> bool {
-                matches!(cursor.tree(), Some(TokenTree::$kind(..)))
+                matches!(cursor.token_tree(), Some((TokenTree::$kind(..), _)))
             }
         }
 
@@ -167,21 +158,22 @@ macro_rules! impl_token {
     };
 }
 
-impl_token!(for<'a> Ident<'a>, Ident, "<ident>", |ident| *ident);
-impl_token!(for<'a> LitString<'a>, String, "<ident>", |string| *string);
-impl_token!(for<'a> Number<'a>, Number, "<number>", |number| *number);
-impl_token!(
-    for<'a> Percentage<'a>,
-    Percentage,
-    "<dimension>",
-    |dimension| *dimension
-);
-impl_token!(
-    for<'a> Dimension<'a>,
-    Dimension,
-    "<dimension>",
-    |dimension| *dimension
-);
+impl<'a> Parse<'a> for TokenTree<'a> {
+    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
+        let cursor = stream.cursor();
+        let (tree, next) = cursor.token_tree().ok_or_else(|| {
+            ParseError::new(cursor, format_args!("{cursor} is not valid in values"))
+        })?;
+        stream.cursor.set(next);
+        Ok(tree)
+    }
+}
+
+impl_token!(for<'a> Ident<'a>, Ident, "<ident>");
+impl_token!(for<'a> LitString<'a>, String, "<ident>");
+impl_token!(for<'a> Number<'a>, Number, "<number>");
+impl_token!(for<'a> Percentage<'a>, Percentage, "<dimension>");
+impl_token!(for<'a> Dimension<'a>, Dimension, "<dimension>");
 
 pub mod token {
     #[doc(hidden)]
@@ -203,14 +195,17 @@ pub mod token {
 
         fn peek(&self, cursor: super::Cursor) -> bool {
             matches!(
-                cursor.tree(),
-                Some(super::TokenTree::Number(super::Number {
-                    span: _,
-                    value: super::NumericTokenValue {
-                        value: "0",
-                        integer: true
-                    }
-                }))
+                cursor.token_tree(),
+                Some((
+                    super::TokenTree::Number(super::Number {
+                        span: _,
+                        value: super::NumericTokenValue {
+                            value: "0",
+                            integer: true
+                        }
+                    }),
+                    _
+                ))
             )
         }
     }
@@ -226,10 +221,10 @@ pub mod token {
                 }
 
                 fn peek(&self, cursor: super::Cursor) -> bool {
-                    matches!(cursor.tree(), Some(super::TokenTree::Punct(super::Punct {
+                    matches!(cursor.token_tree(), Some((super::TokenTree::Punct(super::Punct {
                         span: _,
                         value: $value
-                    })))
+                    }), _)))
                 }
             })*
 
@@ -248,6 +243,7 @@ pub mod token {
 
 pub(crate) use token::Token;
 
+#[derive(Debug, Clone, Copy)]
 pub struct LitInt<'a> {
     span: Span,
     value: &'a str,
@@ -257,7 +253,7 @@ impl_spanned!(LitInt<'_>);
 
 impl LitInt<'_> {
     pub fn to_u32(self) -> Option<u32> {
-        self.value.parse().ok()
+        dbg!(self.value).parse().ok()
     }
 }
 
@@ -268,34 +264,40 @@ impl Token for LitInt<'_> {
 
     fn peek(cursor: Cursor) -> bool {
         matches!(
-            cursor.tree(),
-            Some(TokenTree::Number(Number {
-                span: _,
-                value: NumericTokenValue {
-                    value: _,
-                    integer: true
-                }
-            }))
+            cursor.token_tree(),
+            Some((
+                TokenTree::Number(Number {
+                    span: _,
+                    value: NumericTokenValue {
+                        value: _,
+                        integer: true
+                    }
+                }),
+                _
+            ))
         )
     }
 }
 
 impl<'a> Parse<'a> for LitInt<'a> {
-    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
-        let next = stream.cursor1();
-        if let Some(&TokenTree::Number(Number {
-            span,
-            value:
-                NumericTokenValue {
-                    value,
-                    integer: true,
-                },
-        })) = next.tree()
+    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
+        let cursor = stream.cursor();
+        if let Some((
+            TokenTree::Number(Number {
+                span,
+                value:
+                    NumericTokenValue {
+                        value,
+                        integer: true,
+                    },
+            }),
+            next,
+        )) = cursor.token_tree()
         {
-            stream.advance1();
+            stream.cursor.set(next);
             Ok(LitInt { span, value })
         } else {
-            Err(ParseError::unexpected(next, &[Self::name()], false))
+            Err(ParseError::unexpected(cursor, &[Self::name()]))
         }
     }
 }
@@ -334,22 +336,18 @@ impl Lookahead<'_> {
     }
 
     pub fn error(self) -> ParseError {
-        ParseError::unexpected(self.cursor, &self.tried, self.reveal_ident)
+        ParseError::unexpected(self.cursor, &self.tried)
     }
 }
 
 impl ParseError {
-    fn unexpected(cursor: Cursor, expected: &[&'static str], reveal_ident: bool) -> Self {
-        let found = util::fmt_from_fn(|f| match cursor.tree() {
-            Some(tt) => std::fmt::Display::fmt(&tt.display_for_error(reveal_ident), f),
-            None => f.write_str("<eof>"),
-        });
+    fn unexpected(cursor: Cursor, expected: &[&'static str]) -> Self {
         match expected {
             [] => unreachable!("`Lookahead::error()` called before any `peek()`s"),
-            [one] => Self::new(cursor, format_args!("expected `{one}` found `{found}`",)),
+            [one] => Self::new(cursor, format_args!("expected `{one}` found `{cursor}`",)),
             [one, two] => Self::new(
                 cursor,
-                format_args!("expected `{one}` or `{two}`, found `{found}`",),
+                format_args!("expected `{one}` or `{two}`, found `{cursor}`",),
             ),
             [first, ref middle @ .., last] => Self::new(
                 cursor,
@@ -358,7 +356,7 @@ impl ParseError {
                     for &name in middle {
                         write!(f, ", {name}")?;
                     }
-                    write!(f, ", or `{last}`, found `{found}`")
+                    write!(f, ", or `{last}`, found `{cursor}`")
                 }),
             ),
         }

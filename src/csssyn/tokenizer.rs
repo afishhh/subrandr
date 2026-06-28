@@ -53,7 +53,7 @@ impl<'a> Tokenizer<'a> {
         self.source
     }
 
-    pub fn index(&self) -> usize {
+    pub fn position(&self) -> usize {
         self.pos.index
     }
 
@@ -462,7 +462,7 @@ impl<'a> Tokenizer<'a> {
             }
             Some('@') => {
                 if self.peek_would_start_an_ident_sequence() {
-                    let string = self.consume_ident_sequence();
+                    self.consume_ident_sequence();
                     return_token!(AtKeyword);
                 } else {
                     return_token!(Delim);
@@ -520,7 +520,7 @@ impl<'a> Iterator for Tokenizer<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     LParen,
     RParen,
@@ -634,10 +634,11 @@ impl<'a> Escaped<'a> {
             }
 
             let peek = current.as_str();
-            let hex_end = peek.as_bytes()[..peek.len().min(6)]
+            let max_hex = peek.len().min(6);
+            let hex_end = peek.as_bytes()[..max_hex]
                 .iter()
                 .position(|&b| !b.is_ascii_hexdigit())
-                .unwrap_or(6);
+                .unwrap_or(max_hex);
 
             if hex_end == 0 {
                 let next = current.next();

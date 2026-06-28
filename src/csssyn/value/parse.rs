@@ -41,10 +41,10 @@ pub struct ParseStream<'a> {
 }
 
 impl<'a> ParseStream<'a> {
-    fn new(buffer: &'a TokenBuffer<'a>) -> Result<Self, ParseError> {
-        Ok(Self {
-            cursor: Cell::new(buffer.start().skip_whitespace()),
-        })
+    pub fn new(cursor: Cursor<'a>) -> Self {
+        Self {
+            cursor: Cell::new(cursor.skip_whitespace()),
+        }
     }
 
     fn cursor(&self) -> Cursor<'a> {
@@ -69,7 +69,8 @@ impl<'a> ParseStream<'a> {
     }
 
     pub fn skip(&self) {
-        _ = self.parse::<TokenTree<'a>>();
+        let cursor = self.cursor();
+        self.cursor.set(cursor.next().unwrap_or(cursor));
     }
 
     pub fn lookahead1(&self) -> Lookahead<'a> {
@@ -211,8 +212,9 @@ pub mod token {
     }
 
     macro_rules! impl_peeks {
-        ($($name: ident, $value: literal, $value_token: tt)*;) => {
+        ($($name: ident, $value: literal, $value_token: tt;)*) => {
             $(#[doc(hidden)]
+            #[derive(Clone, Copy)]
             pub struct $name;
 
             impl super::Peek for $name {
@@ -238,6 +240,8 @@ pub mod token {
 
     impl_peeks!(
         Comma, ',', ,;
+        Colon, ':', :;
+        Semicolon, ';', ;;
     );
 }
 
@@ -308,6 +312,30 @@ pub fn LitInt(marker: Infallible) -> LitInt<'static> {
     match marker {}
 }
 
+pub struct Whitespace;
+
+impl Peek for Whitespace {
+    fn name(&self) -> &'static str {
+        "}"
+    }
+
+    fn peek(&self, cursor: Cursor) -> bool {
+        cursor.is_whitespace()
+    }
+}
+
+pub struct RightBrace;
+
+impl Peek for RightBrace {
+    fn name(&self) -> &'static str {
+        "}"
+    }
+
+    fn peek(&self, cursor: Cursor) -> bool {
+        cursor.right_brace().is_some()
+    }
+}
+
 pub struct End;
 
 impl Peek for End {
@@ -365,7 +393,7 @@ impl ParseError {
 
 pub fn parse_str<T: for<'a> Parse<'a>>(source: &str) -> Result<T, ParseError> {
     let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source))?;
-    let stream = ParseStream::new(&buffer)?;
+    let stream = ParseStream::new(buffer.start());
     let result = T::parse(&stream)?;
     stream.ensure_end()?;
     Ok(result)

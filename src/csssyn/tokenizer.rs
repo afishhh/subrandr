@@ -410,7 +410,7 @@ impl<'a> Tokenizer<'a> {
                         type_flag: hash_type,
                     });
                 } else {
-                    return_token!(Delim);
+                    return_token!(Punct('#'));
                 }
             }
             Some('(') => return_token!(LParen),
@@ -420,10 +420,10 @@ impl<'a> Tokenizer<'a> {
                     self.reconsume('+');
                     return_token!(with self.consume_numeric_token());
                 } else {
-                    return_token!(Delim)
+                    return_token!(Punct('+'))
                 }
             }
-            Some(',') => return_token!(Comma),
+            Some(',') => return_token!(Punct(',')),
             Some('-') => {
                 if self.peek_would_start_a_number('+') {
                     self.reconsume('+');
@@ -438,7 +438,7 @@ impl<'a> Tokenizer<'a> {
                         return_token!(with self.consume_ident_like());
                     } else {
                         self.pos = old;
-                        return_token!(Delim)
+                        return_token!(Punct('-'))
                     }
                 }
             }
@@ -447,17 +447,17 @@ impl<'a> Tokenizer<'a> {
                     self.reconsume('.');
                     return_token!(with self.consume_numeric_token());
                 } else {
-                    return_token!(Delim);
+                    return_token!(Punct('.'));
                 }
             }
-            Some(':') => return_token!(Colon),
-            Some(';') => return_token!(Semicolon),
+            Some(':') => return_token!(Punct(':')),
+            Some(';') => return_token!(Punct(';')),
             Some('<') => {
                 if self.peek_const("!--") {
                     self.advance_by(3);
                     return_token!(Cdo);
                 } else {
-                    return_token!(Delim);
+                    return_token!(Punct('<'));
                 }
             }
             Some('@') => {
@@ -465,7 +465,7 @@ impl<'a> Tokenizer<'a> {
                     self.consume_ident_sequence();
                     return_token!(AtKeyword);
                 } else {
-                    return_token!(Delim);
+                    return_token!(Punct('@'));
                 }
             }
             Some('[') => return_token!(LBracket),
@@ -477,7 +477,7 @@ impl<'a> Tokenizer<'a> {
                     self.reconsume('\\');
                     return_token!(with self.consume_ident_like());
                 } else {
-                    return_token!(Delim);
+                    return_token!(Punct('\\'));
                 }
             }
             Some('0'..='9') => {
@@ -489,7 +489,7 @@ impl<'a> Tokenizer<'a> {
                 return_token!(with self.consume_ident_like());
             }
             None => None,
-            Some(_) => return_token!(Delim),
+            Some(c) => return_token!(Punct(c)),
         }
     }
 
@@ -524,19 +524,17 @@ impl<'a> Iterator for Tokenizer<'a> {
 pub enum TokenKind {
     LParen,
     RParen,
-    Comma,
-    Cdc,
-    Cdo,
-    Colon,
-    Semicolon,
-    Whitespace,
     LBracket,
     RBracket,
     LBrace,
     RBrace,
+    Cdc,
+    Cdo,
+    Whitespace,
     Ident,
     Function,
     AtKeyword,
+    Punct(char),
     Hash {
         type_flag: HashTypeFlag,
     },
@@ -547,7 +545,6 @@ pub enum TokenKind {
         trailing_len: u16,
     },
     BadUrl,
-    Delim,
     Number {
         integer: bool,
     },
@@ -558,37 +555,6 @@ pub enum TokenKind {
         integer: bool,
         unit_offset: u32,
     },
-}
-
-impl TokenKind {
-    pub fn name(&self) -> &'static str {
-        match self {
-            TokenKind::LParen => "<(-token>",
-            TokenKind::RParen => "<)-token>",
-            TokenKind::Comma => "<comma-token>",
-            TokenKind::Cdc => "<CDC-token>",
-            TokenKind::Cdo => "<CDO-token>",
-            TokenKind::Colon => "<colon-token>",
-            TokenKind::Semicolon => "<semicolon-token>",
-            TokenKind::Whitespace => "<whitespace-token>",
-            TokenKind::LBracket => "<[-token>",
-            TokenKind::RBracket => "<]-token>",
-            TokenKind::LBrace => "<{-token>",
-            TokenKind::RBrace => "<}-token>",
-            TokenKind::Ident => "<ident-token>",
-            TokenKind::Function => "<function-token>",
-            TokenKind::AtKeyword => "<at-keyword-token>",
-            TokenKind::Hash { .. } => "<hash-token>",
-            TokenKind::String => "<string-token>",
-            TokenKind::BadString => "<bad-string-token>",
-            TokenKind::Url { .. } => "<url-token>",
-            TokenKind::BadUrl => "<bad-url-token>",
-            TokenKind::Delim => "<delim-token>",
-            TokenKind::Number { .. } => "<number-token>",
-            TokenKind::Percentage { .. } => "<percentage-token>",
-            TokenKind::Dimension { .. } => "<dimension-token>",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

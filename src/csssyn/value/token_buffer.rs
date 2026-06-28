@@ -1,11 +1,13 @@
-#![allow(unused)]
 use std::{fmt::Display, marker::PhantomData, num::NonZero, ptr::NonNull};
 
 use super::{
     Dimension, FunctionalNotation, Ident, LitString, Number, NumericTokenValue, ParseError,
     Percentage, Punct, Span, Spanned, TokenTree, UnquotedUrl,
 };
-use crate::csssyn::tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer};
+use crate::csssyn::{
+    tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer},
+    value::{Parse, ParseStream, Peek, Token},
+};
 
 // Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
 const SOURCE_LEN_LIMIT: usize = 1 << 20;
@@ -62,7 +64,19 @@ enum EntryTokenKind {
     },
 }
 
-#[derive(Debug)]
+impl EntryTokenKind {
+    fn as_group_start(&self) -> Option<(Delimiter, &GroupStart)> {
+        Some(match self {
+            EntryTokenKind::OpenParenthesis(group_start)
+            | EntryTokenKind::Function(group_start) => (Delimiter::Parenthesis, group_start),
+            EntryTokenKind::OpenBracket(group_start) => (Delimiter::Bracket, group_start),
+            EntryTokenKind::OpenBrace(group_start) => (Delimiter::Brace, group_start),
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 struct GroupStart {
     /// Offset of the entry for the closing delimiter of this group.
     /// `None` if the group was left unclosed.
@@ -166,13 +180,13 @@ impl<'a> TokenBuffer<'a> {
                     integer,
                     unit_offset,
                 },
-                TokenKind::Comma => EntryTokenKind::Punct(','),
-                kind => {
-                    return Err(ParseError::new(
-                        span,
-                        format_args!("`{}` not legal in values", kind.name()),
-                    ))
-                }
+                TokenKind::Cdc => EntryTokenKind::Cdc,
+                TokenKind::Cdo => EntryTokenKind::Cdo,
+                TokenKind::AtKeyword => EntryTokenKind::AtKeyword,
+                TokenKind::Hash { type_flag } => EntryTokenKind::Hash { type_flag },
+                TokenKind::BadString => EntryTokenKind::BadString,
+                TokenKind::BadUrl => EntryTokenKind::BadUrl,
+                TokenKind::Punct(c) => EntryTokenKind::Punct(c),
             };
 
             entries.push(Entry {
@@ -274,6 +288,10 @@ impl<'a> Cursor<'a> {
         Some((inner_cursor, outer_cursor))
     }
 
+    pub fn is_whitespace(self) -> bool {
+        matches!(self.entry().kind, EntryTokenKind::Whitespace)
+    }
+
     pub fn skip_whitespace(mut self) -> Cursor<'a> {
         if matches!(self.entry().kind, EntryTokenKind::Whitespace) {
             self.entry = unsafe { self.entry.add(1) };
@@ -299,6 +317,20 @@ impl<'a> Cursor<'a> {
                 (span.end - span.start) as usize,
             ))
         }
+    }
+
+    pub fn is<T: Peek>(self, peek: T) -> bool {
+        peek.peek(self)
+    }
+
+    pub fn skip<T: Peek>(mut self, peek: T) -> Option<Cursor<'a>> {
+        self.is(peek).then(|| {
+            // TODO: make this part of `<T::peek>`
+            if !self.eof() {
+                self.entry = unsafe { self.entry.add(1) };
+            }
+            self
+        })
     }
 
     pub fn token_tree(self) -> Option<(TokenTree<'a>, Cursor<'a>)> {
@@ -391,6 +423,75 @@ impl<'a> Cursor<'a> {
         };
 
         Some((tree, next.skip_whitespace()))
+    }
+
+    pub fn ident(self) -> Option<(Ident<'a>, Cursor<'a>)> {
+        self.token_tree().and_then(|(tt, next)| match tt {
+            TokenTree::Ident(ident) => Some((ident, next)),
+            _ => None,
+        })
+    }
+
+    pub fn right_brace(self) -> Option<(Punct, Cursor<'a>)> {
+        let entry = self.entry();
+        let EntryTokenKind::Punct(chr) = entry.kind else {
+            return None;
+        };
+
+        Some((
+            Punct {
+                span: entry.span,
+                value: chr,
+            },
+            self.next()?,
+        ))
+    }
+
+    pub fn next(mut self) -> Option<Cursor<'a>> {
+        if self.eof() {
+            return None;
+        }
+
+        match self.entry().kind.as_group_start() {
+            Some((_, group_start)) => {
+                if let Some(end_offset) = group_start.end_offset {
+                    self.entry = unsafe { self.entry.add(end_offset.get() as usize) }.min(self.end);
+                } else {
+                    self.entry = self.end;
+                }
+            }
+            None => self.entry = unsafe { self.entry.add(1) },
+        }
+
+        Some(self)
+    }
+
+    pub fn take_important_from_end(mut self) -> Option<(Ident<'a>, Cursor<'a>)> {
+        if unsafe { self.end.offset_from_unsigned(self.entry) } < 2 {
+            return None;
+        }
+
+        let last_entry = unsafe { &*self.end.sub(1) };
+        let second_to_last_entry = unsafe { &*self.end.sub(2) };
+        if !matches!(second_to_last_entry.kind, EntryTokenKind::Punct('!'))
+            || !matches!(last_entry.kind, EntryTokenKind::Ident)
+        {
+            return None;
+        }
+
+        let last_value = Escaped::new(unsafe { self.span_source(last_entry.span) });
+        if !last_value.eq_ignore_ascii_case("important") {
+            return None;
+        }
+
+        self.end = unsafe { self.end.sub(2) };
+        return Some((
+            Ident {
+                span: last_entry.span,
+                value: last_value,
+            },
+            self,
+        ));
     }
 }
 

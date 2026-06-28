@@ -1,14 +1,7 @@
 use std::{cell::Cell, convert::Infallible};
 
-use crate::css::tokenizer::{Escaped, Tokenizer};
-
-mod error;
-mod token_buffer;
-mod token_tree;
-
-pub use error::ParseError;
-use token_buffer::*;
-pub use token_tree::*;
+use super::*;
+use crate::csssyn::tokenizer::Tokenizer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
@@ -25,6 +18,17 @@ impl Spanned for Span {
         *self
     }
 }
+
+macro_rules! impl_spanned {
+    ($name: ty) => {
+        impl Spanned for $name {
+            fn span(&self) -> Span {
+                self.span
+            }
+        }
+    };
+}
+pub(super) use impl_spanned;
 
 #[derive(Debug)]
 pub struct LineColumn {
@@ -113,7 +117,7 @@ impl Peek for &'static str {
 
     fn peek(&self, cursor: Cursor) -> bool {
         cursor.tree().is_some_and(|tt| match tt {
-            ValueTokenTree::Ident(ident) => ident.value() == *self,
+            TokenTree::Ident(ident) => ident.value() == *self,
             _ => false,
         })
     }
@@ -136,7 +140,7 @@ macro_rules! impl_token {
         impl<$lt> Parse<$lt> for $name $(<$ltarg>)? {
             fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
                 let next = stream.cursor1();
-                if let Some(ValueTokenTree::$kind($v)) = next.tree() {
+                if let Some(TokenTree::$kind($v)) = next.tree() {
                     stream.advance1();
                     Ok($body)
                 } else {
@@ -151,7 +155,7 @@ macro_rules! impl_token {
             }
 
             fn peek(cursor: Cursor) -> bool {
-                matches!(cursor.tree(), Some(ValueTokenTree::$kind(..)))
+                matches!(cursor.tree(), Some(TokenTree::$kind(..)))
             }
         }
 
@@ -200,7 +204,7 @@ pub mod token {
         fn peek(&self, cursor: super::Cursor) -> bool {
             matches!(
                 cursor.tree(),
-                Some(super::ValueTokenTree::Number(super::Number {
+                Some(super::TokenTree::Number(super::Number {
                     span: _,
                     value: super::NumericTokenValue {
                         value: "0",
@@ -222,7 +226,7 @@ pub mod token {
                 }
 
                 fn peek(&self, cursor: super::Cursor) -> bool {
-                    matches!(cursor.tree(), Some(super::ValueTokenTree::Punct(super::Punct {
+                    matches!(cursor.tree(), Some(super::TokenTree::Punct(super::Punct {
                         span: _,
                         value: $value
                     })))
@@ -230,8 +234,8 @@ pub mod token {
             })*
 
             macro_rules! TokenMacro {
-                (0) => { $crate::css::value::token::Zero };
-                $(($value_token) => { $crate::css::value::token::$name };)*
+                (0) => { $crate::csssyn::value::token::Zero };
+                $(($value_token) => { $crate::csssyn::value::token::$name };)*
             }
             pub(crate) use TokenMacro as Token;
         };
@@ -243,6 +247,64 @@ pub mod token {
 }
 
 pub(crate) use token::Token;
+
+pub struct LitInt<'a> {
+    span: Span,
+    value: &'a str,
+}
+
+impl_spanned!(LitInt<'_>);
+
+impl LitInt<'_> {
+    pub fn to_u32(self) -> Option<u32> {
+        self.value.parse().ok()
+    }
+}
+
+impl Token for LitInt<'_> {
+    fn name() -> &'static str {
+        "<integer>"
+    }
+
+    fn peek(cursor: Cursor) -> bool {
+        matches!(
+            cursor.tree(),
+            Some(TokenTree::Number(Number {
+                span: _,
+                value: NumericTokenValue {
+                    value: _,
+                    integer: true
+                }
+            }))
+        )
+    }
+}
+
+impl<'a> Parse<'a> for LitInt<'a> {
+    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
+        let next = stream.cursor1();
+        if let Some(&TokenTree::Number(Number {
+            span,
+            value:
+                NumericTokenValue {
+                    value,
+                    integer: true,
+                },
+        })) = next.tree()
+        {
+            stream.advance1();
+            Ok(LitInt { span, value })
+        } else {
+            Err(ParseError::unexpected(next, &[Self::name()], false))
+        }
+    }
+}
+
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub fn LitInt(marker: Infallible) -> LitInt<'static> {
+    match marker {}
+}
 
 pub struct End;
 

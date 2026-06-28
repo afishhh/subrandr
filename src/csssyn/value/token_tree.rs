@@ -1,18 +1,9 @@
 use std::fmt::Write;
 
-use super::{Escaped, Span, Spanned};
+use super::{impl_spanned, Span, Spanned};
+use crate::csssyn::tokenizer::Escaped;
 
-macro_rules! impl_spanned {
-    ($name: ty) => {
-        impl Spanned for $name {
-            fn span(&self) -> Span {
-                self.span
-            }
-        }
-    };
-}
-
-pub enum ValueTokenTree<'a> {
+pub enum TokenTree<'a> {
     Ident(Ident<'a>),
     String(LitString<'a>),
     Number(Number<'a>),
@@ -23,17 +14,17 @@ pub enum ValueTokenTree<'a> {
     Punct(Punct),
 }
 
-impl<'a> Spanned for ValueTokenTree<'a> {
+impl<'a> Spanned for TokenTree<'a> {
     fn span(&self) -> Span {
         match self {
-            ValueTokenTree::Ident(ident) => ident.span(),
-            ValueTokenTree::String(string) => string.span(),
-            ValueTokenTree::FunctionalNotation(functional_notation) => functional_notation.span(),
-            ValueTokenTree::UnquotedUrl(unquoted_url) => unquoted_url.span(),
-            ValueTokenTree::Number(number) => number.span(),
-            ValueTokenTree::Percentage(percentage) => percentage.span(),
-            ValueTokenTree::Dimension(dimension) => dimension.span(),
-            ValueTokenTree::Punct(punct) => punct.span(),
+            TokenTree::Ident(ident) => ident.span(),
+            TokenTree::String(string) => string.span(),
+            TokenTree::FunctionalNotation(functional_notation) => functional_notation.span(),
+            TokenTree::UnquotedUrl(unquoted_url) => unquoted_url.span(),
+            TokenTree::Number(number) => number.span(),
+            TokenTree::Percentage(percentage) => percentage.span(),
+            TokenTree::Dimension(dimension) => dimension.span(),
+            TokenTree::Punct(punct) => punct.span(),
         }
     }
 }
@@ -140,7 +131,7 @@ impl<'a> Dimension<'a> {
 pub struct FunctionalNotation<'a> {
     pub(super) span: Span,
     pub(super) function: Escaped<'a>,
-    pub(super) content: Vec<ValueTokenTree<'a>>,
+    pub(super) content: Vec<TokenTree<'a>>,
 }
 
 impl_spanned!(FunctionalNotation<'_>);
@@ -166,7 +157,7 @@ impl Punct {
     }
 }
 
-impl<'a> ValueTokenTree<'a> {
+impl<'a> TokenTree<'a> {
     pub(super) fn display_for_error(&self, reveal_ident: bool) -> impl std::fmt::Display + '_ {
         ValueTokenTreeErrorDisplay::Static(match self {
             Self::Ident(ident) => {

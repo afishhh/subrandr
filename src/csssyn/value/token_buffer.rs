@@ -1,15 +1,15 @@
 use super::{
     Dimension, FunctionalNotation, Ident, LitString, Number, NumericTokenValue, ParseError,
-    Percentage, Punct, Span, Spanned, UnquotedUrl, ValueTokenTree,
+    Percentage, Punct, Span, Spanned, TokenTree, UnquotedUrl,
 };
-use crate::css::tokenizer::{Escaped, TokenKind, Tokenizer};
+use crate::csssyn::tokenizer::{Escaped, TokenKind, Tokenizer};
 
 // Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
 const SOURCE_LEN_LIMIT: usize = 1 << 20;
 
 pub(super) struct TokenBuffer<'a> {
     source: &'a str,
-    tokens: Vec<ValueTokenTree<'a>>,
+    tokens: Vec<TokenTree<'a>>,
 }
 
 impl<'a> TokenBuffer<'a> {
@@ -40,10 +40,8 @@ impl<'a> TokenBuffer<'a> {
                     last = span.end;
                     continue;
                 }
-                TokenKind::Ident => {
-                    ValueTokenTree::Ident(Ident::new(span, Escaped::new(token_source)))
-                }
-                TokenKind::String => ValueTokenTree::String(LitString::new(
+                TokenKind::Ident => TokenTree::Ident(Ident::new(span, Escaped::new(token_source))),
+                TokenKind::String => TokenTree::String(LitString::new(
                     span,
                     Escaped::new(&token_source[1..token_source.len() - 1]),
                 )),
@@ -62,26 +60,26 @@ impl<'a> TokenBuffer<'a> {
                         unreachable!()
                     };
 
-                    ValueTokenTree::FunctionalNotation(entry)
+                    TokenTree::FunctionalNotation(entry)
                 }
                 TokenKind::Url {
                     value_offset,
                     trailing_len,
-                } => ValueTokenTree::UnquotedUrl(UnquotedUrl {
+                } => TokenTree::UnquotedUrl(UnquotedUrl {
                     span,
                     value: Escaped::new(
                         &token_source[usize::from(value_offset)
                             ..token_source.len() - usize::from(trailing_len)],
                     ),
                 }),
-                TokenKind::Number { integer } => ValueTokenTree::Number(Number {
+                TokenKind::Number { integer } => TokenTree::Number(Number {
                     span,
                     value: NumericTokenValue {
                         value: token_source,
                         integer,
                     },
                 }),
-                TokenKind::Percentage { integer } => ValueTokenTree::Percentage(Percentage {
+                TokenKind::Percentage { integer } => TokenTree::Percentage(Percentage {
                     span,
                     value: NumericTokenValue {
                         value: token_source,
@@ -91,13 +89,13 @@ impl<'a> TokenBuffer<'a> {
                 TokenKind::Dimension {
                     integer,
                     unit_offset,
-                } => ValueTokenTree::Dimension(Dimension {
+                } => TokenTree::Dimension(Dimension {
                     span,
                     text: token_source,
                     integer,
                     unit_offset,
                 }),
-                TokenKind::Comma => ValueTokenTree::Punct(Punct { span, value: ',' }),
+                TokenKind::Comma => TokenTree::Punct(Punct { span, value: ',' }),
                 kind => {
                     return Err(ParseError::new(
                         span,
@@ -143,7 +141,7 @@ impl<'a> TokenBuffer<'a> {
         })
     }
 
-    pub(super) fn tokens(&self) -> &[ValueTokenTree<'a>] {
+    pub(super) fn tokens(&self) -> &[TokenTree<'a>] {
         &self.tokens
     }
 
@@ -169,7 +167,7 @@ pub struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
-    pub(super) fn tree(&self) -> Option<&'a ValueTokenTree<'a>> {
+    pub(super) fn tree(&self) -> Option<&'a TokenTree<'a>> {
         self.buffer.tokens().get(self.index)
     }
 

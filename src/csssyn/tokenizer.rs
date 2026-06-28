@@ -53,6 +53,10 @@ impl<'a> Tokenizer<'a> {
         self.source
     }
 
+    pub fn index(&self) -> usize {
+        self.pos.index
+    }
+
     fn reconsume(&mut self, codepoint: char) {
         self.pos.index -= codepoint.len_utf8();
         if codepoint == '\n' && self.source.as_bytes()[self.pos.index] == b'\r' {
@@ -690,7 +694,7 @@ impl std::fmt::Display for Escaped<'_> {
 
 #[cfg(test)]
 mod test {
-    use crate::css::tokenizer::{Escaped, TokenKind, Tokenizer};
+    use crate::csssyn::tokenizer::{Escaped, TokenKind, Tokenizer};
 
     #[track_caller]
     fn assert_tokens(text: &str, tokens: &[TokenKind]) {

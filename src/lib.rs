@@ -11,7 +11,7 @@ pub mod srv3;
 pub mod vtt;
 
 mod capi;
-mod css;
+mod csssyn;
 mod display;
 mod html;
 mod layout;

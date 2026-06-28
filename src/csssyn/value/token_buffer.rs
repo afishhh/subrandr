@@ -204,27 +204,6 @@ impl<'a> TokenBuffer<'a> {
             kind: EntryTokenKind::EndOfFile,
         });
 
-        dbg!(&entries);
-        // TODO:
-        // let mut unclosed_groups = group_stack.iter();
-        // if let Some(first) = unclosed_groups.next() {
-        //     let end_span = Span {
-        //         start: source.len() as u32,
-        //         end: source.len() as u32,
-        //     };
-        //     let error = |entry: &GroupEntry| match entry {
-        //         GroupEntry::Function(_) => {
-        //             ParseError::new(end_span, "unclosed functional notation")
-        //         }
-        //     };
-
-        //     let mut result = error(&first);
-        //     for group in unclosed_groups {
-        //         result.append(error(group));
-        //     }
-        //     return Err(result);
-        // }
-
         Ok(Self { source, entries })
     }
 

@@ -11,8 +11,9 @@ impl Length {
         stream: &'a ParseStream<'a>,
         mut lk: Lookahead<'a>,
     ) -> Result<Self, ParseError> {
-        // TODO: accept 0
-        Ok(if lk.peek::<Dimension>() {
+        Ok(if lk.peek(Token![0]) {
+            Length::ZERO
+        } else if lk.peek(Dimension) {
             let dim = stream.parse::<Dimension>()?;
             if dim.unit().eq_ignore_ascii_case("pt") {
                 Length::from_pixels(I26Dot6::from_f64(
@@ -56,10 +57,10 @@ impl FontFamily {
             let mut current = String::new();
             let mut first = true;
 
-            if !result.is_empty() && !current.is_empty() && lk.peek::<End>() {
+            if !result.is_empty() && !current.is_empty() && lk.peek(End) {
                 result.push(current.as_str().into());
                 return Ok(Self(result.into()));
-            } else if !current.is_empty() && lk.peek::<Comma>() {
+            } else if !current.is_empty() && lk.peek(Token![,]) {
                 result.push(current.as_str().into());
                 current.clear();
                 first = true;
@@ -69,10 +70,10 @@ impl FontFamily {
                 }
                 first = false;
 
-                if lk.peek::<Ident>() {
-                    current.extend(stream.parse::<&Ident>()?.value().unescape_iter());
-                } else if lk.peek::<StringLit>() {
-                    current.extend(stream.parse::<&StringLit>()?.value().unescape_iter());
+                if lk.peek(Ident) {
+                    current.extend(stream.parse::<Ident>()?.value().unescape_iter());
+                } else if lk.peek(LitString) {
+                    current.extend(stream.parse::<LitString>()?.value().unescape_iter());
                 } else {
                     return Err(lk.error());
                 }
@@ -91,14 +92,16 @@ impl FontWeight {
 
     // `bolder` and `lighter` relative keywords not supported
     fn parse<'a>(stream: &'a ParseStream<'a>, mut lk: Lookahead<'a>) -> Result<Self, ParseError> {
-        Ok(if lk.peek_keyword("normal") {
+        Ok(if lk.peek("normal") {
             stream.skip();
             Self(Self::NORMAL)
-        } else if lk.peek_keyword("bold") {
+        } else if lk.peek("bold") {
             stream.skip();
             Self(Self::BOLD)
-        } else if lk.peek::<Number>() {
-            Self(I16Dot16::from_f64(stream.parse::<Number>()?.value()))
+        } else if lk.peek(Number) {
+            Self(I16Dot16::from_f64(
+                stream.parse::<Number>()?.value().to_f64(),
+            ))
         } else {
             return Err(lk.error());
         })

@@ -1,6 +1,6 @@
 use super::{
-    Dimension, FunctionalNotation, Ident, Number, NumericTokenValue, ParseError, Percentage, Punct,
-    Span, Spanned, StringLit, UnquotedUrl, ValueTokenTree,
+    Dimension, FunctionalNotation, Ident, LitString, Number, NumericTokenValue, ParseError,
+    Percentage, Punct, Span, Spanned, UnquotedUrl, ValueTokenTree,
 };
 use crate::css::tokenizer::{Escaped, TokenKind, Tokenizer};
 
@@ -43,7 +43,7 @@ impl<'a> TokenBuffer<'a> {
                 TokenKind::Ident => {
                     ValueTokenTree::Ident(Ident::new(span, Escaped::new(token_source)))
                 }
-                TokenKind::String => ValueTokenTree::String(StringLit::new(
+                TokenKind::String => ValueTokenTree::String(LitString::new(
                     span,
                     Escaped::new(&token_source[1..token_source.len() - 1]),
                 )),
@@ -163,7 +163,7 @@ impl<'a> TokenBuffer<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Cursor<'a> {
+pub struct Cursor<'a> {
     buffer: &'a TokenBuffer<'a>,
     index: usize,
 }

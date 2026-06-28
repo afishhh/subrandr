@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::{cell::Cell, convert::Infallible};
 
 use crate::css::tokenizer::{Escaped, Tokenizer};
 
@@ -64,12 +64,12 @@ impl<'a> ParseStream<'a> {
         }
     }
 
-    pub fn parse<T: ValueParse<'a>>(&'a self) -> Result<T, ParseError> {
+    pub fn parse<T: Parse<'a>>(&'a self) -> Result<T, ParseError> {
         T::parse(self)
     }
 
-    pub fn peek<T: ValuePeek>(&self) -> bool {
-        T::peek(&self.cursor1())
+    pub fn peek<T: Peek>(&self, peek: T) -> bool {
+        peek.peek(self.cursor1())
     }
 
     pub fn skip(&self) {
@@ -82,6 +82,197 @@ impl<'a> ParseStream<'a> {
             tried: Vec::new(),
             reveal_ident: false,
         }
+    }
+}
+
+pub trait Parse<'a>: Sized {
+    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError>;
+}
+
+pub trait Peek: Sized {
+    #[doc(hidden)]
+    fn name(&self) -> &'static str;
+
+    #[doc(hidden)]
+    fn is_keyword() -> bool {
+        false
+    }
+
+    #[doc(hidden)]
+    fn peek(&self, cursor: Cursor) -> bool;
+}
+
+impl Peek for &'static str {
+    fn name(&self) -> &'static str {
+        self
+    }
+
+    fn is_keyword() -> bool {
+        true
+    }
+
+    fn peek(&self, cursor: Cursor) -> bool {
+        cursor.tree().is_some_and(|tt| match tt {
+            ValueTokenTree::Ident(ident) => ident.value() == *self,
+            _ => false,
+        })
+    }
+}
+
+impl<F: FnOnce(Infallible) -> T, T: token::Token> Peek for F {
+    fn name(&self) -> &'static str {
+        T::name()
+    }
+
+    fn peek(&self, cursor: Cursor) -> bool {
+        T::peek(cursor)
+    }
+}
+
+macro_rules! impl_token {
+    (for<$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?, $kind: ident, $err_name: literal,
+        |$v: ident| $body: expr
+    ) => {
+        impl<$lt> Parse<$lt> for $name $(<$ltarg>)? {
+            fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
+                let next = stream.cursor1();
+                if let Some(ValueTokenTree::$kind($v)) = next.tree() {
+                    stream.advance1();
+                    Ok($body)
+                } else {
+                    Err(ParseError::unexpected(next, &[<$name>::name()], false))
+                }
+            }
+        }
+
+        impl<$lt> token::Token for $name $(<$ltarg>)? {
+            fn name() -> &'static str {
+                $err_name
+            }
+
+            fn peek(cursor: Cursor) -> bool {
+                matches!(cursor.tree(), Some(ValueTokenTree::$kind(..)))
+            }
+        }
+
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        pub fn $name<$lt>(marker: Infallible) -> $name $(<$ltarg>)? {
+            match marker {}
+        }
+    };
+}
+
+impl_token!(for<'a> Ident<'a>, Ident, "<ident>", |ident| *ident);
+impl_token!(for<'a> LitString<'a>, String, "<ident>", |string| *string);
+impl_token!(for<'a> Number<'a>, Number, "<number>", |number| *number);
+impl_token!(
+    for<'a> Percentage<'a>,
+    Percentage,
+    "<dimension>",
+    |dimension| *dimension
+);
+impl_token!(
+    for<'a> Dimension<'a>,
+    Dimension,
+    "<dimension>",
+    |dimension| *dimension
+);
+
+pub mod token {
+    #[doc(hidden)]
+    pub trait Token: Sized {
+        #[doc(hidden)]
+        fn name() -> &'static str;
+
+        #[doc(hidden)]
+        fn peek(cursor: super::Cursor) -> bool;
+    }
+
+    #[doc(hidden)]
+    pub struct Zero;
+
+    impl super::Peek for Zero {
+        fn name(&self) -> &'static str {
+            "0"
+        }
+
+        fn peek(&self, cursor: super::Cursor) -> bool {
+            matches!(
+                cursor.tree(),
+                Some(super::ValueTokenTree::Number(super::Number {
+                    span: _,
+                    value: super::NumericTokenValue {
+                        value: "0",
+                        integer: true
+                    }
+                }))
+            )
+        }
+    }
+
+    macro_rules! impl_peeks {
+        ($($name: ident, $value: literal, $value_token: tt)*;) => {
+            $(#[doc(hidden)]
+            pub struct $name;
+
+            impl super::Peek for $name {
+                fn name(&self) -> &'static str {
+                    stringify!($value_token)
+                }
+
+                fn peek(&self, cursor: super::Cursor) -> bool {
+                    matches!(cursor.tree(), Some(super::ValueTokenTree::Punct(super::Punct {
+                        span: _,
+                        value: $value
+                    })))
+                }
+            })*
+
+            macro_rules! TokenMacro {
+                (0) => { $crate::css::value::token::Zero };
+                $(($value_token) => { $crate::css::value::token::$name };)*
+            }
+            pub(crate) use TokenMacro as Token;
+        };
+    }
+
+    impl_peeks!(
+        Comma, ',', ,;
+    );
+}
+
+pub(crate) use token::Token;
+
+pub struct End;
+
+impl Peek for End {
+    fn name(&self) -> &'static str {
+        "<eof>"
+    }
+
+    fn peek(&self, cursor: Cursor) -> bool {
+        cursor.eof()
+    }
+}
+
+pub struct Lookahead<'a> {
+    cursor: Cursor<'a>,
+    tried: Vec<&'static str>,
+    reveal_ident: bool,
+}
+
+impl Lookahead<'_> {
+    pub fn peek<T: Peek>(&mut self, peek: T) -> bool {
+        self.tried.push(peek.name());
+        if T::is_keyword() {
+            self.reveal_ident = true;
+        }
+        peek.peek(self.cursor)
+    }
+
+    pub fn error(self) -> ParseError {
+        ParseError::unexpected(self.cursor, &self.tried, self.reveal_ident)
     }
 }
 
@@ -112,110 +303,7 @@ impl ParseError {
     }
 }
 
-pub trait ValueParse<'a>: Sized {
-    fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError>;
-}
-
-pub trait ValuePeek: Sized {
-    #[doc(hidden)]
-    fn peek(tt: &Cursor) -> bool;
-
-    #[doc(hidden)]
-    fn name() -> &'static str;
-}
-
-macro_rules! impl_token {
-    ($peektype: ty, for<$lt: lifetime> $ftype: ty, $kind: ident, $err_name: literal,
-        |$v: ident| $body: expr
-    ) => {
-        impl<$lt> ValueParse<$lt> for $ftype {
-            fn parse(stream: &'a ParseStream<'a>) -> Result<Self, ParseError> {
-                let next = stream.cursor1();
-                if let Some(ValueTokenTree::$kind($v)) = next.tree() {
-                    stream.advance1();
-                    Ok($body)
-                } else {
-                    Err(ParseError::unexpected(next, &[<$peektype>::name()], false))
-                }
-            }
-        }
-
-        impl ValuePeek for $peektype {
-            fn name() -> &'static str {
-                $err_name
-            }
-
-            fn peek(cursor: &Cursor) -> bool {
-                matches!(cursor.tree(), Some(ValueTokenTree::$kind(_)))
-            }
-        }
-    };
-}
-
-impl_token!(Ident<'_>, for<'a> &'a Ident<'a>, Ident, "<ident>", |ident| ident);
-impl_token!(StringLit<'_>, for<'a> &'a StringLit<'a>, String, "<ident>", |string| string);
-impl_token!(
-    Number<'_>,
-    for<'a> Number<'a>,
-    Number,
-    "<number>",
-    |number| *number
-);
-impl_token!(
-    Percentage<'_>,
-    for<'a> Percentage<'a>,
-    Percentage,
-    "<dimension>",
-    |dimension| *dimension
-);
-impl_token!(
-    Dimension<'_>,
-    for<'a> Dimension<'a>,
-    Dimension,
-    "<dimension>",
-    |dimension| *dimension
-);
-
-pub struct End(());
-
-impl ValuePeek for End {
-    fn name() -> &'static str {
-        "<eof>"
-    }
-
-    fn peek(tt: &Cursor) -> bool {
-        tt.eof()
-    }
-}
-
-pub struct Lookahead<'a> {
-    cursor: Cursor<'a>,
-    tried: Vec<&'static str>,
-    reveal_ident: bool,
-}
-
-impl Lookahead<'_> {
-    pub fn peek<T: ValuePeek>(&mut self) -> bool {
-        self.tried.push(T::name());
-        T::peek(&self.cursor)
-    }
-
-    pub fn peek_keyword(&mut self, keyword: &'static str) -> bool {
-        self.tried.push(keyword);
-        self.reveal_ident = true;
-        if let Some(ValueTokenTree::Ident(ident)) = self.cursor.tree() {
-            ident.value().eq_ignore_ascii_case(keyword)
-        } else {
-            false
-        }
-    }
-
-    pub fn error(self) -> ParseError {
-        ParseError::unexpected(self.cursor, &self.tried, self.reveal_ident)
-    }
-}
-
-pub fn parse_str<T: for<'a> ValueParse<'a>>(source: &str) -> Result<T, ParseError> {
+pub fn parse_str<T: for<'a> Parse<'a>>(source: &str) -> Result<T, ParseError> {
     let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source))?;
     let stream = ParseStream::new(&buffer)?;
     let result = T::parse(&stream)?;

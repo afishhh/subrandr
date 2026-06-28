@@ -14,7 +14,7 @@ macro_rules! impl_spanned {
 
 pub enum ValueTokenTree<'a> {
     Ident(Ident<'a>),
-    String(StringLit<'a>),
+    String(LitString<'a>),
     Number(Number<'a>),
     Percentage(Percentage<'a>),
     Dimension(Dimension<'a>),
@@ -57,14 +57,14 @@ impl<'a> Ident<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct StringLit<'a> {
+pub struct LitString<'a> {
     span: Span,
     value: Escaped<'a>,
 }
 
-impl_spanned!(StringLit<'_>);
+impl_spanned!(LitString<'_>);
 
-impl<'a> StringLit<'a> {
+impl<'a> LitString<'a> {
     pub(super) fn new(span: Span, value: Escaped<'a>) -> Self {
         Self { span, value }
     }

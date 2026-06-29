@@ -1,7 +1,12 @@
 use util::math::{I16Dot16, I26Dot6};
 
 use crate::{
-    csssyn::value::*,
+    csssyn::{
+        peek::{End, Token},
+        token::{Dimension, Ident, LitInt, LitString, Number},
+        value::*,
+        ParseError,
+    },
     layout::FixedL,
     style::computed::{FontSlant as ComputedFontSlant, Length as ComputedLength},
     text::OpenTypeTag,
@@ -153,7 +158,7 @@ impl PeekParse for AbsoluteFontWeight {
     // `bolder` and `lighter` relative keywords not supported
     fn peek_parse<'a>(
         stream: &ParseStream<'a>,
-        mut lk: &mut Lookahead<'a>,
+        lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
         Ok(Some(if lk.peek("normal") {
             stream.skip();

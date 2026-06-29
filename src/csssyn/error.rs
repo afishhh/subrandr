@@ -31,7 +31,7 @@ impl std::fmt::Display for ParseError {
         let msg = &self.messages[0];
         write!(f, "{}..{}: {}", msg.span.start, msg.span.end, msg.message)?;
         if let Some(remaining_messages) = self.messages.len().checked_sub(1) {
-            write!(f, " (and {} others)", remaining_messages);
+            write!(f, " (and {} others)", remaining_messages)?;
         }
         Ok(())
     }

@@ -1,11 +1,12 @@
-mod error;
+use crate::csssyn::{
+    buffer::Cursor,
+    peek::{End, RightBrace, Token, Whitespace},
+    token::Ident,
+    Peek,
+};
+
 mod parse;
-mod token_buffer;
-mod token_tree;
-pub use error::ParseError;
 pub use parse::*;
-use token_buffer::*;
-pub use token_tree::*;
 
 // https://drafts.csswg.org/css-syntax-3/#consume-a-component-value
 fn skip_a_component_value<'a>(cursor: Cursor<'a>) -> Cursor<'a> {
@@ -163,10 +164,10 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
 
 #[cfg(test)]
 mod test {
-    use crate::csssyn::{value::TokenBuffer, Tokenizer};
+    use crate::csssyn::TokenBuffer;
 
     fn check_declaration_list_parse(source: &str, expected: &[(&str, &str, bool)]) {
-        let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source)).unwrap();
+        let buffer = TokenBuffer::from_source(source).unwrap();
 
         let left = super::parse_declaration_list(buffer.start())
             .map(|decl| {

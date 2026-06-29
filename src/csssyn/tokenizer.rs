@@ -521,7 +521,7 @@ impl<'a> Iterator for Tokenizer<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenKind {
+pub(super) enum TokenKind {
     LParen,
     LBracket,
     LBrace,

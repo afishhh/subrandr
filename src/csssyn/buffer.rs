@@ -1,13 +1,12 @@
-use std::{fmt::Display, marker::PhantomData, num::NonZero, ptr::NonNull};
+use std::{marker::PhantomData, num::NonZero, ptr::NonNull};
 
-use super::{Ident, ParseError, Span, Spanned};
-use crate::csssyn::{
-    tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer},
-    value::{token::TokenParse, Peek},
+use super::{
+    token::TokenParse,
+    tokenizer::{HashTypeFlag, TokenKind, Tokenizer},
+    ParseError, Peek, Span, Spanned,
 };
 
-// Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
-const SOURCE_LEN_LIMIT: usize = 1 << 20;
+const SOURCE_LEN_LIMIT: u32 = 1 << 20;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Delimiter {
@@ -110,7 +109,7 @@ struct GroupStart {
     end_offset: Option<NonZero<u32>>,
 }
 
-pub(super) struct TokenBuffer<'a> {
+pub struct TokenBuffer<'a> {
     source: &'a str,
     entries: Vec<Entry>,
 }
@@ -118,12 +117,15 @@ pub(super) struct TokenBuffer<'a> {
 impl<'a> TokenBuffer<'a> {
     pub(super) fn from_tokenizer(mut tokenizer: Tokenizer<'a>) -> Result<Self, ParseError> {
         let source = tokenizer.source();
-        if source.len() > SOURCE_LEN_LIMIT {
+        let Some(source_end) = u32::try_from(source.len())
+            .ok()
+            .filter(|&x| x <= SOURCE_LEN_LIMIT)
+        else {
             return Err(ParseError::new(
                 Span { start: 0, end: 0 },
                 format_args!("source longer than {SOURCE_LEN_LIMIT} bytes is unsupported"),
             ));
-        }
+        };
 
         let mut entries: Vec<Entry> = Vec::new();
         let mut group_stack: Vec<(Delimiter, usize)> = Vec::new();
@@ -225,13 +227,17 @@ impl<'a> TokenBuffer<'a> {
 
         entries.push(Entry {
             span: Span {
-                start: source.len() as u32,
-                end: source.len() as u32,
+                start: source_end,
+                end: source_end,
             },
             kind: EntryTokenKind::EndOfFile,
         });
 
         Ok(Self { source, entries })
+    }
+
+    pub fn from_source(source: &'a str) -> Result<Self, ParseError> {
+        Self::from_tokenizer(Tokenizer::new(source))
     }
 
     pub fn start(&self) -> Cursor<'_> {
@@ -246,7 +252,7 @@ impl<'a> TokenBuffer<'a> {
     }
 }
 
-pub struct TokenView<'a> {
+pub(super) struct TokenView<'a> {
     pub span: Span,
     pub source: &'a str,
     pub kind: TokenKind,
@@ -268,29 +274,6 @@ impl<'a> Cursor<'a> {
 
     pub fn eof(self) -> bool {
         std::ptr::eq(self.entry, self.end)
-    }
-
-    unsafe fn group_cursors(self, group_start: &GroupStart) -> Option<(Cursor<'a>, Cursor<'a>)> {
-        let end_offset = group_start.end_offset?;
-        let end_ptr = self.entry.wrapping_add(end_offset.get() as usize);
-        // This could happen if `self` has been `limited` to an entry inside this group.
-        if end_ptr >= self.end {
-            return None;
-        }
-
-        let inner_cursor = Cursor {
-            source_base: self.source_base,
-            entry: self.entry.wrapping_add(1),
-            end: end_ptr,
-            phantom: PhantomData,
-        };
-        let outer_cursor = Cursor {
-            source_base: self.source_base,
-            entry: self.entry.wrapping_add(end_offset.get() as usize + 1),
-            end: self.end,
-            phantom: PhantomData,
-        };
-        Some((inner_cursor, outer_cursor))
     }
 
     pub fn limited(mut self, other: Cursor<'a>) -> Cursor<'a> {
@@ -346,7 +329,7 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
-    pub fn token(self) -> Option<(TokenView<'a>, Cursor<'a>)> {
+    pub(super) fn token(self) -> Option<(TokenView<'a>, Cursor<'a>)> {
         if self.eof() {
             return None;
         }
@@ -447,44 +430,6 @@ impl<'a> Cursor<'a> {
     pub fn end(mut self) -> Cursor<'a> {
         self.entry = self.end;
         self
-    }
-
-    pub fn take_important_from_end(mut self) -> Option<(Ident<'a>, Cursor<'a>)> {
-        let n_entries = unsafe { self.end.offset_from_unsigned(self.entry) };
-        if n_entries < 2 {
-            return None;
-        }
-
-        let mut last = unsafe { self.end.sub(1) };
-        if unsafe { matches!((*last).kind, EntryTokenKind::Whitespace) } {
-            if n_entries < 3 {
-                return None;
-            }
-            last = unsafe { last.sub(1) };
-        }
-        let second_to_last = unsafe { last.sub(1) };
-
-        let last_entry = unsafe { &*last };
-        let second_to_last_entry = unsafe { &*second_to_last };
-        if !matches!(second_to_last_entry.kind, EntryTokenKind::Punct('!'))
-            || !matches!(last_entry.kind, EntryTokenKind::Ident)
-        {
-            return None;
-        }
-
-        let last_value = Escaped::new(unsafe { self.span_source(last_entry.span) });
-        if !last_value.eq_ignore_ascii_case("important") {
-            return None;
-        }
-
-        self.end = second_to_last;
-        Some((
-            Ident {
-                span: last_entry.span,
-                value: last_value,
-            },
-            self,
-        ))
     }
 }
 

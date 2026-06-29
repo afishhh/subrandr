@@ -410,6 +410,17 @@ impl<'a> Cursor<'a> {
         if let Some(group_end) = self.group_end() {
             self = group_end;
             debug_assert!(self.eof(), "group end points at end-of-file token")
+        } else if matches!(
+            self.entry().kind,
+            EntryTokenKind::OpenParenthesis(_)
+                | EntryTokenKind::OpenBracket(_)
+                | EntryTokenKind::OpenBrace(_)
+                | EntryTokenKind::Function(_)
+        ) && !self.eof()
+        {
+            // This is an unclosed group, skip to the end.
+            self.entry = self.end;
+            return Some(self);
         }
 
         self.next()
@@ -424,6 +435,15 @@ impl<'a> Cursor<'a> {
         self.entry = unsafe { self.end.sub(1) };
 
         Some(self)
+    }
+
+    pub fn skip_back<T: Peek>(self, peek: T) -> Cursor<'a> {
+        let last = self.next_back();
+        if let Some(new_end) = last.filter(|x| x.is(peek)) {
+            self.limited(new_end)
+        } else {
+            self
+        }
     }
 
     #[inline]
@@ -486,7 +506,7 @@ impl std::fmt::Debug for Cursor<'_> {
                 if let Some(next) = current.next() {
                     let result = current.entry();
                     current = next;
-                    Some(result)
+                    Some((unsafe { self.span_source(result.span) }, result))
                 } else {
                     None
                 }

@@ -8,25 +8,32 @@ use token_buffer::*;
 pub use token_tree::*;
 
 // https://drafts.csswg.org/css-syntax-3/#consume-a-component-value
-//
-// `Cursor`'s group skipping effectively implements component values.
 fn skip_a_component_value<'a>(cursor: Cursor<'a>) -> Cursor<'a> {
-    cursor.next().unwrap_or(cursor)
+    // `Cursor::next_tree`'s group skipping effectively implements component values.
+    cursor.next_tree().unwrap_or(cursor)
 }
 
 // https://drafts.csswg.org/css-syntax-3/#consume-list-of-components
 fn consume_a_list_of_component_values<'a>(
     mut cursor: Cursor<'a>,
     nested: bool,
-    stop_token: impl LookaheadPeek + Copy,
+    stop_token: impl Peek + Copy,
 ) -> (Cursor<'a>, Cursor<'a>) {
     let start = cursor;
     loop {
         if cursor.eof() || cursor.is(stop_token) {
+            // Return values.
             return (start.limited(cursor), cursor);
-        } else if cursor.is(RightBrace) && nested {
-            return (start.limited(cursor), cursor);
+        } else if cursor.is(RightBrace) {
+            // If nested is true, return values.
+            if nested {
+                return (start.limited(cursor), cursor);
+            } else {
+                // Otherwise, this is a parse error. Consume a token from input and append the result to values.
+                cursor = skip_a_component_value(cursor);
+            }
         } else {
+            // Consume a component value from input, and append the result to values.
             cursor = skip_a_component_value(cursor);
         }
     }
@@ -56,7 +63,7 @@ fn consume_the_remnants_of_a_bad_declaration<'a>(
 pub struct Declaration<'a> {
     pub name: Ident<'a>,
     pub value: Cursor<'a>,
-    pub important: Option<Ident<'a>>,
+    pub important: bool,
 }
 
 fn consume_a_declaration<'a>(
@@ -93,16 +100,25 @@ fn consume_a_declaration<'a>(
     let (mut value, next) = consume_a_list_of_component_values(cursor, nested, Token![;]);
     cursor = next;
 
-    let mut important = None;
     // If the last two non-<whitespace-token>s in decl’s value are a <delim-token> with the value "!" followed by an <ident-token> with a value that is an ASCII case-insensitive match for "important", remove them from decl’s value and set decl’s important flag.
-    if let Some((ident, new_value)) = value.take_important_from_end() {
-        important = Some(ident);
-        value = new_value;
-    }
+    value = value.skip_back(Whitespace);
+    let important = 'important: {
+        let last = value.next_back();
+        let Some(important) = last.filter(|x| x.is("important")) else {
+            break 'important false;
+        };
 
-    // > While the last item in decl’s value is a <whitespace-token>, remove that token.
-    // Parsing of declaration content implicitly ignores whitespace so the above is not necessary.
-    // In fact, it would be problematic with how `Cursor::skip_whitespace` works.
+        let second_to_last = value.limited(important).next_back();
+        let Some(exclamation_mark) = second_to_last.filter(|x| x.is(Token![!])) else {
+            break 'important false;
+        };
+
+        value = value.limited(exclamation_mark);
+        true
+    };
+
+    // While the last item in decl’s value is a <whitespace-token>, remove that token.
+    value = value.skip_back(Whitespace);
 
     // TODO: Otherwise, if decl’s value contains a top-level simple block with an associated token of <{-token>, and also contains any other non-<whitespace-token> value, return nothing. (That is, a top-level {}-block is only allowed as the entire value of a non-custom property.)
 
@@ -151,32 +167,42 @@ mod test {
     fn check_declaration_list_parse(source: &str, expected: &[(&str, &str, bool)]) {
         let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source)).unwrap();
 
-        let mut parser = super::parse_declaration_list(buffer.start());
-        let mut expected_it = expected.iter();
-        loop {
-            let (a, b) = (parser.next(), expected_it.next().copied());
-
-            if matches!((&a, b), (None, None)) {
-                break;
-            }
-
-            let a = a.map(|decl| {
+        let left = super::parse_declaration_list(buffer.start())
+            .map(|decl| {
                 (
                     decl.name.value().to_string(),
                     decl.value.scope_source(),
-                    decl.important.is_some(),
+                    decl.important,
                 )
-            });
+            })
+            .collect::<Vec<_>>();
+        let left_str = left
+            .iter()
+            .map(|&(ref a, b, c)| (a.as_str(), b, c))
+            .collect::<Vec<_>>();
 
-            assert_eq!(a.as_ref().map(|(a, b, c)| (a.as_str(), *b, *c)), b);
-        }
+        assert_eq!(left_str, expected);
     }
 
     #[test]
-    fn abcd() {
+    fn declaration_list() {
         check_declaration_list_parse(
             "hello: world !important ; w: a",
-            &[("hello", "world ", true), ("w", "a", false)],
+            &[("hello", "world", true), ("w", "a", false)],
+        );
+
+        check_declaration_list_parse(
+            concat!(
+                "font-family: 'Ahem';\n",
+                "font-size: 20pt!important;\n",
+                "some junk ;\n",
+                "font-style: italic ;\n"
+            ),
+            &[
+                ("font-family", "'Ahem'", false),
+                ("font-size", "20pt", true),
+                ("font-style", "italic", false),
+            ],
         );
     }
 }

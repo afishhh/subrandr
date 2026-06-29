@@ -403,7 +403,7 @@ pub mod token {
         Comma, ',', ,;
         Colon, ':', :;
         Semicolon, ';', ;;
-        ExclamationMark, '!', ;;
+        ExclamationMark, '!', !;
     );
 }
 

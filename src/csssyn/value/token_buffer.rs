@@ -313,6 +313,17 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub fn scope_source(self) -> &'a str {
+        let start_entry = self.entry();
+        let end_entry = self.end().entry();
+        unsafe {
+            self.span_source(Span {
+                start: start_entry.span.start,
+                end: end_entry.span.start,
+            })
+        }
+    }
+
     pub fn is<T: Peek>(self, peek: T) -> bool {
         peek.peek(self)
     }

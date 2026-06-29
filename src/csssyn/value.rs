@@ -148,13 +148,35 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
 mod test {
     use crate::csssyn::{value::TokenBuffer, Tokenizer};
 
+    fn check_declaration_list_parse(source: &str, expected: &[(&str, &str, bool)]) {
+        let buffer = TokenBuffer::from_tokenizer(Tokenizer::new(source)).unwrap();
+
+        let mut parser = super::parse_declaration_list(buffer.start());
+        let mut expected_it = expected.iter();
+        loop {
+            let (a, b) = (parser.next(), expected_it.next().copied());
+
+            if matches!((&a, b), (None, None)) {
+                break;
+            }
+
+            let a = a.map(|decl| {
+                (
+                    decl.name.value().to_string(),
+                    decl.value.scope_source(),
+                    decl.important.is_some(),
+                )
+            });
+
+            assert_eq!(a.as_ref().map(|(a, b, c)| (a.as_str(), *b, *c)), b);
+        }
+    }
+
     #[test]
     fn abcd() {
-        let buffer =
-            TokenBuffer::from_tokenizer(Tokenizer::new("hello: world !important ; w: a")).unwrap();
-        panic!(
-            "{:?}",
-            super::parse_declaration_list(buffer.start()).collect::<Vec<_>>()
+        check_declaration_list_parse(
+            "hello: world !important ; w: a",
+            &[("hello", "world ", true), ("w", "a", false)],
         );
     }
 }

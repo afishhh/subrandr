@@ -225,6 +225,18 @@ impl<'a> ClassList<'a> {
     pub fn iter(&self) -> impl Iterator<Item = &'a str> {
         self.0.split('.').filter(|class| !class.is_empty())
     }
+
+    #[allow(clippy::inherent_to_string)]
+    pub fn to_string(self) -> String {
+        let mut result = String::with_capacity(self.0.len());
+        for class in self.iter() {
+            if !result.is_empty() {
+                result.push('.');
+            }
+            result.push_str(class);
+        }
+        result
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

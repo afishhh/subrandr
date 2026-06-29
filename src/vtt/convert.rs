@@ -1,14 +1,15 @@
-use std::ops::Range;
+use std::{ops::Range, sync::LazyLock};
 
 use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
-    math::{I16Dot16, I26Dot6, Point2, Rect2},
+    math::{I16Dot16, Point2, Rect2},
     rc::Rc,
     rc_static,
 };
 
 use crate::{
+    csssyn::algorithms::Declaration,
     layout::{
         self,
         block::BlockContainerFragment,
@@ -17,12 +18,17 @@ use crate::{
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     style::{
+        apply_declarations_to,
         computed::{Color, FontSlant, HorizontalAlignment, WhiteSpaceCollapse},
-        ComputedStyle,
+        ComputedStyle, DeclarationFilter,
     },
     text::OpenTypeTag,
-    vtt, SubtitleContext,
+    vtt::{self, convert::stylesheet::Stylesheet},
+    SubtitleContext,
 };
+
+mod selectors;
+mod stylesheet;
 
 #[derive(Debug)]
 enum ComputedLine {
@@ -112,13 +118,59 @@ pub struct Event {
     y: f64,
 }
 
+// https://www.w3.org/TR/webvtt1/#the-cue-pseudo-element
+static WEBVTT_DECLARATION_FILTER: LazyLock<DeclarationFilter> = LazyLock::new(|| {
+    DeclarationFilter::new(
+        // Commented out values are not-yet-implemented.
+        // It is kind of ambiguous whether shorthands are supposed to be supported
+        // so not sure about those.
+        [
+            "color",
+            // "opacity",
+            // "visibility",
+            "text-decoration-line",
+            // "text-decoration-thickness",
+            // "text-decoration-style",
+            "text-decoration-color",
+            // "text-decoration",
+            "text-shadow",
+            // "background-image",
+            // "background-position",
+            // "background-size",
+            // "background-repeat",
+            // "background-origin",
+            // "background-clip",
+            // "background-attachment",
+            "background-color",
+            // "background",
+            // "outline-width",
+            // "outline-style",
+            // "outline-color",
+            // "outline",
+            "font-style",
+            // "font-variant",
+            "font-weight",
+            // "font-width",
+            "font-size",
+            // "line-height",
+            "font-family",
+            // "font",
+            // "white-space",
+            // "text-combine-upright",
+            // "ruby-position"
+        ],
+        "Not allowed in WebVTT",
+    )
+});
+
 impl Event {
     fn layout(
         &self,
-        sctx: &SubtitleContext,
         lctx: &mut layout::LayoutContext<'_>,
-        font_size: I26Dot6,
+        sctx: &SubtitleContext,
         output: &mut Vec<Rect2<FixedL>>,
+        base_style: &ComputedStyle,
+        sc: &StylingContext,
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
         let mut fragment = layout::inline::layout(
             lctx,
@@ -126,12 +178,28 @@ impl Event {
                 size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
             },
             &{
-                let mut builder = InlineContentBuilder::new({
-                    let mut style = self.root.base_style.clone();
-                    *style.make_text_align_mut() = self.horizontal_alignment;
-                    style
-                });
-                self.root.append_to(&mut builder.root(), font_size);
+                let root_style = {
+                    let mut result = base_style.clone();
+                    *result.make_text_align_mut() = self.horizontal_alignment;
+                    result
+                };
+                let root_span_style = {
+                    apply_declarations_to(
+                        lctx.log,
+                        root_style.clone(),
+                        &mut sc.declarations_matching(&self.root),
+                        &ComputedStyle::DEFAULT,
+                        None,
+                        sc.logset,
+                    )
+                };
+
+                let mut builder = InlineContentBuilder::new(root_style);
+                {
+                    let mut root_builder = builder.root();
+                    let mut span_builder = root_builder.push_span(root_span_style);
+                    self.root.append_to(lctx.log, &mut span_builder, sc);
+                }
                 builder.finish()
             },
         )?;
@@ -361,88 +429,63 @@ enum Node {
     Element(Element),
 }
 
-#[derive(Debug)]
-struct Element {
-    base_style: ComputedStyle,
-    kind: ElementKind,
-    children: Vec<Node>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpanKind {
+    Class,
+    Italic,
+    Bold,
+    Underline,
+    Voice,
+    Language,
+    Ruby,
+    Root,
 }
 
 #[derive(Debug)]
 enum ElementKind {
-    Span,
+    Span(SpanKind),
     Ruby,
     RubyText,
 }
 
-fn convert_node(
-    output: &mut Vec<Node>,
-    parent_style: &ComputedStyle,
-    node: &vtt::Node,
-    mut in_ruby: bool,
-) {
+// TODO: Now that styles are always computed in layout, this struct is only here to be
+//       an owned counterpart to the borrowed `text::InternalNode`.
+//       Perhaps `text::InternalNode` should just be made owned?
+#[derive(Debug)]
+struct Element {
+    kind: ElementKind,
+    id: Option<Box<str>>,
+    /// `.`-separated classes
+    classlist: Box<str>,
+    children: Vec<Node>,
+}
+
+fn convert_node(output: &mut Vec<Node>, node: &vtt::Node, mut in_ruby: bool) {
     match node {
         vtt::Node::Internal(internal) => {
-            let mut style = parent_style.create_derived();
-            match internal.kind {
-                vtt::InternalNodeKind::Italic => {
-                    *style.make_font_slant_mut() = FontSlant::Italic;
-                }
-                vtt::InternalNodeKind::Bold => {
-                    *style.make_font_weight_mut() = I16Dot16::new(700);
-                }
-                vtt::InternalNodeKind::Underline => {
-                    style.text_decoration_line().underline = true;
-                }
-                _ => (),
-            }
-
-            for mut class in internal.classes.iter() {
-                let is_background = match class.strip_prefix("bg_") {
-                    Some(unprefixed) => {
-                        class = unprefixed;
-                        true
-                    }
-                    None => false,
-                };
-
-                let color = match class {
-                    "white" => BGRA8::WHITE,
-                    "lime" => BGRA8::LIME,
-                    "cyan" => BGRA8::CYAN,
-                    "red" => BGRA8::RED,
-                    "yellow" => BGRA8::YELLOW,
-                    "magenta" => BGRA8::MAGENTA,
-                    "blue" => BGRA8::BLUE,
-                    "black" => BGRA8::BLACK,
-                    _ => continue,
-                };
-
-                if is_background {
-                    *style.make_background_color_mut() = Color::Srgb(color);
-                } else {
-                    *style.make_color_mut() = color;
-                }
-            }
-
             let mut result = Element {
-                base_style: style.clone(),
                 kind: match internal.kind {
-                    // NOTE: Based on the wording in https://www.w3.org/TR/webvtt1/#webvtt-cue-ruby-span
-                    //       I assume that nested ruby is not allowed, so we don't accept it.
-                    //       Also nested ruby seems to break current inline layout :) (FIXME)
+                    // TODO: Nested ruby is not currently supported by our layout engine.
                     vtt::InternalNodeKind::Ruby if !in_ruby => {
                         in_ruby = true;
                         ElementKind::Ruby
                     }
                     vtt::InternalNodeKind::RubyText => ElementKind::RubyText,
-                    _ => ElementKind::Span,
+                    vtt::InternalNodeKind::Class => ElementKind::Span(SpanKind::Class),
+                    vtt::InternalNodeKind::Italic => ElementKind::Span(SpanKind::Italic),
+                    vtt::InternalNodeKind::Bold => ElementKind::Span(SpanKind::Bold),
+                    vtt::InternalNodeKind::Underline => ElementKind::Span(SpanKind::Underline),
+                    vtt::InternalNodeKind::Voice { .. } => ElementKind::Span(SpanKind::Voice),
+                    vtt::InternalNodeKind::Language => ElementKind::Span(SpanKind::Language),
+                    vtt::InternalNodeKind::Ruby => ElementKind::Span(SpanKind::Ruby),
                 },
+                id: None,
+                classlist: internal.classes.to_string().into_boxed_str(),
                 children: Vec::new(),
             };
 
             for child in &internal.children {
-                convert_node(&mut result.children, &style, child, in_ruby);
+                convert_node(&mut result.children, child, in_ruby);
             }
 
             output.push(Node::Element(result));
@@ -452,70 +495,184 @@ fn convert_node(
     }
 }
 
-fn convert_text(text: &str, base_style: ComputedStyle) -> Element {
+fn build_tree(cue: vtt::Cue) -> Element {
     let mut result = Vec::new();
 
-    for node in vtt::parse_cue_text(text) {
-        convert_node(&mut result, &base_style, &node, false);
+    for node in vtt::parse_cue_text(cue.text) {
+        convert_node(&mut result, &node, false);
     }
 
     Element {
-        base_style,
-        kind: ElementKind::Span,
+        kind: ElementKind::Span(SpanKind::Root),
+        id: Some(cue.track_identifier.into()),
+        classlist: Box::default(),
         children: result,
     }
 }
 
+// https://www.w3.org/TR/webvtt1/#the-cue-pseudo-element
+impl Element {
+    fn type_(&self) -> Option<&str> {
+        Some(match self.kind {
+            ElementKind::Span(SpanKind::Class) => "c",
+            ElementKind::Span(SpanKind::Italic) => "i",
+            ElementKind::Span(SpanKind::Bold) => "b",
+            ElementKind::Span(SpanKind::Underline) => "u",
+            ElementKind::Span(SpanKind::Voice) => "v",
+            ElementKind::Span(SpanKind::Language) => "lang",
+            ElementKind::Ruby | ElementKind::Span(SpanKind::Ruby) => "ruby",
+            ElementKind::RubyText => "rt",
+            ElementKind::Span(SpanKind::Root) => return None,
+        })
+    }
+
+    fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    fn classlist(&self) -> impl Iterator<Item = &str> {
+        self.classlist.split('.')
+    }
+}
+
+struct StylingContext<'a> {
+    stylesheets: &'a [Stylesheet],
+    logset: &'a LogOnceSet,
+}
+
+impl StylingContext<'_> {
+    fn declarations_matching(&self, element: &Element) -> impl Iterator<Item = &[Declaration<'_>]> {
+        let all_rules = self.stylesheets.iter().flat_map(|s| s.rules());
+        let mut matching_rules = all_rules
+            .filter(|x| x.selector().matches(element))
+            .collect::<Vec<_>>();
+
+        matching_rules.sort_by_key(|rule| rule.selector().specificity());
+
+        matching_rules.into_iter().map(|rule| rule.declarations())
+    }
+}
+
 impl Node {
-    fn append_to(&self, span_builder: &mut InlineSpanBuilder, font_size: I26Dot6) {
+    fn append_to(
+        &self,
+        log: &LogContext,
+        span_builder: &mut InlineSpanBuilder,
+        sc: &StylingContext,
+    ) {
         match self {
             Node::Text(text) => span_builder.push_text(text),
-            Node::Element(element) => element.append_to(span_builder, font_size),
+            Node::Element(element) => element.append_to(log, span_builder, sc),
         }
     }
 }
 
 impl Element {
-    fn append_to(&self, span_builder: &mut InlineSpanBuilder, font_size: I26Dot6) {
-        let mut style = self.base_style.clone();
-        *style.make_font_size_mut() = font_size;
+    fn apply_default_style_rules(&self, mut style: ComputedStyle) -> ComputedStyle {
+        match self.kind {
+            ElementKind::Span(SpanKind::Italic) => {
+                *style.make_font_slant_mut() = FontSlant::Italic;
+            }
+            ElementKind::Span(SpanKind::Bold) => {
+                *style.make_font_weight_mut() = I16Dot16::new(700);
+            }
+            ElementKind::Span(SpanKind::Underline) => {
+                style.text_decoration_line().underline = true;
+            }
+            ElementKind::RubyText => {
+                *style.make_font_size_mut() = style.font_size() / 2;
+                style
+                    .make_font_feature_settings_mut()
+                    .set(OpenTypeTag::FEAT_RUBY, 1);
+            }
+            _ => (),
+        }
+
+        for mut class in self.classlist.split('.') {
+            let is_background = match class.strip_prefix("bg_") {
+                Some(unprefixed) => {
+                    class = unprefixed;
+                    true
+                }
+                None => false,
+            };
+
+            let color = match class {
+                "white" => BGRA8::WHITE,
+                "lime" => BGRA8::LIME,
+                "cyan" => BGRA8::CYAN,
+                "red" => BGRA8::RED,
+                "yellow" => BGRA8::YELLOW,
+                "magenta" => BGRA8::MAGENTA,
+                "blue" => BGRA8::BLUE,
+                "black" => BGRA8::BLACK,
+                _ => continue,
+            };
+
+            if is_background {
+                *style.make_background_color_mut() = Color::Srgb(color);
+            } else {
+                *style.make_color_mut() = color;
+            }
+        }
+
+        style
+    }
+
+    fn append_to(
+        &self,
+        log: &LogContext,
+        span_builder: &mut InlineSpanBuilder,
+        sc: &StylingContext,
+    ) {
+        let style = apply_declarations_to(
+            log,
+            self.apply_default_style_rules(span_builder.style().create_derived()),
+            &mut sc.declarations_matching(self),
+            span_builder.style(),
+            Some(&WEBVTT_DECLARATION_FILTER),
+            sc.logset,
+        );
 
         match self.kind {
-            ElementKind::Span | ElementKind::RubyText => {
+            ElementKind::Span(_) | ElementKind::RubyText => {
                 let mut builder = span_builder.push_span(style);
                 for child in &self.children {
-                    child.append_to(&mut builder, font_size);
+                    child.append_to(log, &mut builder, sc);
                 }
             }
             ElementKind::Ruby => {
                 let mut builder = span_builder.push_ruby(style.clone());
-                let annotation_font_size = font_size / 2;
-                let base_style = style.create_derived();
-                let annotation_style = {
-                    let mut result = style.create_derived();
-                    *result.make_font_size_mut() = annotation_font_size;
-                    result
-                        .make_font_feature_settings_mut()
-                        .set(OpenTypeTag::FEAT_RUBY, 1);
-                    result
-                };
+                let child_base_style = style.create_derived();
 
-                let mut current_base = builder.push_base(base_style.clone());
+                let mut current_base = builder.push_base(child_base_style.clone());
                 for child in &self.children {
                     match child {
-                        Node::Element(Element {
-                            kind: ElementKind::RubyText,
-                            ..
-                        }) => {
+                        Node::Element(
+                            child_element @ Element {
+                                kind: ElementKind::RubyText,
+                                ..
+                            },
+                        ) => {
                             drop(current_base);
-                            child.append_to(
-                                &mut builder.push_annotation(annotation_style.clone()),
-                                annotation_font_size,
+                            let annotation_style = apply_declarations_to(
+                                log,
+                                self.apply_default_style_rules(child_base_style.clone()),
+                                &mut sc.declarations_matching(child_element),
+                                &style,
+                                Some(&WEBVTT_DECLARATION_FILTER),
+                                sc.logset,
                             );
-                            current_base = builder.push_base(base_style.clone());
+
+                            child.append_to(
+                                log,
+                                &mut builder.push_annotation(annotation_style.clone()),
+                                sc,
+                            );
+                            current_base = builder.push_base(child_base_style.clone());
                         }
                         _ => {
-                            child.append_to(&mut current_base, font_size);
+                            child.append_to(log, &mut current_base, sc);
                         }
                     }
                 }
@@ -527,34 +684,17 @@ impl Element {
 #[derive(Debug)]
 pub struct Subtitles {
     events: Vec<Event>,
+    stylesheets: Vec<Stylesheet>,
 }
 
 pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
-    let base_style = {
-        let mut result = ComputedStyle::DEFAULT;
-
-        // The font shorthand property on the (root) list of WebVTT Node Objects must be set to 5vh sans-serif.
-        *result.make_font_family_mut() = rc_static!([rc_static!(str b"sans-serif")]);
-        // The color property on the (root) list of WebVTT Node Objects must be set to rgba(255,255,255,1).
-        *result.make_color_mut() = BGRA8::WHITE;
-        // The background shorthand property on the WebVTT cue background box and on WebVTT Ruby Text Objects must be set to rgba(0,0,0,0.8).
-        *result.make_background_color_mut() = Color::Srgb(BGRA8::new(0, 0, 0, 204));
-        // The white-space property on the (root) list of WebVTT Node Objects must be set to pre-line.
-        *result.make_white_space_collapse_mut() = WhiteSpaceCollapse::PreserveBreaks;
-
-        result
+    let mut subtitles = Subtitles {
+        events: Vec::new(),
+        stylesheets: Vec::new(),
     };
-    let mut subtitles = Subtitles { events: Vec::new() };
 
     let logset = LogOnceSet::new();
     log_once_state!(in logset; region_unsupported);
-
-    if !captions.stylesheets.is_empty() {
-        warn!(
-            log,
-            "WebVTT file makes use of stylesheets which are currently not supported and will be ignored."
-        )
-    }
 
     for cue in captions.cues {
         if cue.region.is_some() && !captions.regions.is_empty() {
@@ -631,8 +771,20 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
             size,
             x: x_position / 100.,
             y: y_position / 100.,
-            root: convert_text(cue.text, base_style.clone()),
+            root: build_tree(cue),
         });
+    }
+
+    for source in captions.stylesheets {
+        let stylesheet = match Stylesheet::parse(log, source.into()) {
+            Ok(t) => t,
+            Err(err) => {
+                warn!(log, "Failed to tokenize a `STYLE` block's content: {err}");
+                continue;
+            }
+        };
+
+        subtitles.stylesheets.push(stylesheet);
     }
 
     subtitles
@@ -693,11 +845,16 @@ impl SubtitleEvent for Event {
 
 pub(crate) struct Layouter {
     subtitles: Rc<Subtitles>,
+    // for deduplicating logs about unrecognized declarations
+    styling_log_set: log::LogOnceSet,
 }
 
 impl Layouter {
     pub fn new(subtitles: Rc<Subtitles>) -> Self {
-        Self { subtitles }
+        Self {
+            subtitles,
+            styling_log_set: log::LogOnceSet::new(),
+        }
     }
 
     pub fn subtitles(&self) -> &Rc<Subtitles> {
@@ -708,17 +865,42 @@ impl Layouter {
         // TODO: This should actually be persisted between frames.
         let mut output = Vec::new();
 
-        // Standard says 5vh, but browser engines use 5vmin.
-        // See https://github.com/w3c/webvtt/issues/529
-        let font_size =
-            pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale();
+        let base_style = {
+            let mut result = ComputedStyle::DEFAULT;
+
+            // The font shorthand property on the (root) list of WebVTT Node Objects must be set to 5vh sans-serif.
+            *result.make_font_family_mut() = rc_static!([rc_static!(str b"sans-serif")]);
+            // The color property on the (root) list of WebVTT Node Objects must be set to rgba(255,255,255,1).
+            *result.make_color_mut() = BGRA8::WHITE;
+            // The background shorthand property on the WebVTT cue background box and on WebVTT Ruby Text Objects must be set to rgba(0,0,0,0.8).
+            *result.make_background_color_mut() = Color::Srgb(BGRA8::new(0, 0, 0, 204));
+            // The white-space property on the (root) list of WebVTT Node Objects must be set to pre-line.
+            *result.make_white_space_collapse_mut() = WhiteSpaceCollapse::PreserveBreaks;
+
+            // Standard says 5vh, but browser engines use 5vmin.
+            // See https://github.com/w3c/webvtt/issues/529
+            let font_size =
+                pass.sctx.video_height.min(pass.sctx.video_width) * 0.05 / pass.sctx.pixel_scale();
+            *result.make_font_size_mut() = font_size;
+
+            result
+        };
 
         for event in &self.subtitles.events {
             if !pass.add_event_range(event.range.clone()) {
                 continue;
             }
 
-            let (pos, inline) = event.layout(pass.sctx, pass.lctx, font_size, &mut output)?;
+            let (pos, inline) = event.layout(
+                pass.lctx,
+                pass.sctx,
+                &mut output,
+                &base_style,
+                &StylingContext {
+                    stylesheets: &self.subtitles.stylesheets,
+                    logset: &self.styling_log_set,
+                },
+            )?;
             pass.emit_fragment(pos, BlockContainerFragment::from_inline(inline));
         }
 

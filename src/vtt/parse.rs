@@ -631,7 +631,7 @@ fn collect_block<'a>(
         Some(Block::Cue(cue))
     } else if let Some(()) = stylesheet {
         // Otherwise, if stylesheet is not null, then Parse a stylesheet from buffer. If it returned a list of rules, assign the list as stylesheet’s CSS rules; otherwise, set stylesheet’s CSS rules to an empty list. Finally, return stylesheet.
-        // NOTE: Currently stylesheets are not supported so they're just passed through as is.
+        // NOTE: These are parsed later.
         Some(Block::Stylesheet(buffer))
     } else if let Some(mut region) = region {
         // Otherwise, if region is not null, then collect WebVTT region settings from buffer using region for the results. Construct a WebVTT Region Object from region, and return it.

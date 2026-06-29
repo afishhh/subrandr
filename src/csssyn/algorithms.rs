@@ -181,6 +181,156 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
     })
 }
 
+pub enum BlockItem<'a> {
+    Rule(Rule<'a>),
+    Declaration(Declaration<'a>),
+}
+
+pub enum Rule<'a> {
+    Qualified(QualifiedRule<'a>),
+}
+
+pub struct QualifiedRule<'a> {
+    pub prelude: Cursor<'a>,
+    pub content: BlockContent<'a>,
+}
+
+// https://drafts.csswg.org/css-syntax-3/#consume-block-contents but this is ran on a limited cursor.
+// And returns items one-by-one instead of in chunks.
+fn parse_a_blocks_contents<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item = BlockItem<'a>> {
+    std::iter::from_fn(move || loop {
+        if cursor.eof() {
+            return None;
+        }
+
+        cursor = cursor.skip(Whitespace);
+
+        if let Some(next) = cursor.next_if(Token![;]) {
+            cursor = next;
+            continue;
+        }
+
+        // Consume a declaration from input, with nested set to true.
+        let (decl, next) = consume_a_declaration(cursor, true);
+
+        // If a declaration was returned, append it to decls, and discard a mark from input.
+        if let Some(decl) = decl {
+            cursor = next;
+            return Some(BlockItem::Declaration(decl));
+        }
+
+        // Otherwise, restore a mark from input, then consume a qualified rule from input, with nested set to true, and <semicolon-token> as the stop token.
+        let rule;
+        (rule, cursor) = consume_a_qualified_rule(cursor, true, true);
+
+        if let Some(rule) = rule {
+            return Some(BlockItem::Rule(Rule::Qualified(rule)));
+        }
+    })
+}
+
+pub struct BlockContent<'a>(Cursor<'a>);
+
+impl<'a> BlockContent<'a> {
+    pub fn parse(&self) -> impl Iterator<Item = BlockItem<'a>> {
+        parse_a_blocks_contents(self.0)
+    }
+}
+
+// https://drafts.csswg.org/css-syntax-3/#consume-a-block
+// This deviates a bit from the spec by consuming the whole group at once to
+// make things simpler but should result in the same behavior.
+fn consume_a_block<'a>(mut cursor: Cursor<'a>) -> (BlockContent<'a>, Cursor<'a>) {
+    // Assert: The next token is a <{-token>.
+    let content_start = cursor
+        .next_if(LeftBrace)
+        .expect("The next token is a <{-token>.");
+    let block_end = cursor.group_end().unwrap();
+
+    // Consume a block’s contents from input and let rules be the result.
+    let rules = BlockContent(content_start.limited(block_end));
+    cursor = block_end;
+
+    // Discard a token from input.
+    cursor = cursor.next().unwrap_or(cursor);
+
+    (rules, cursor)
+}
+
+// https://drafts.csswg.org/css-syntax-3/#consume-a-qualified-rule
+fn consume_a_qualified_rule<'a>(
+    mut cursor: Cursor<'a>,
+    nested: bool,
+    stop_on_semicolon: bool,
+) -> (Option<QualifiedRule<'a>>, Cursor<'a>) {
+    let prelude_start = cursor;
+    loop {
+        if cursor.eof() || (stop_on_semicolon && cursor.is(Token![;])) {
+            return (None, cursor);
+        }
+
+        if let Some(next) = cursor.next_if(RightBrace) {
+            if nested {
+                return (None, cursor);
+            } else {
+                cursor = next;
+            }
+        } else if let Some(next) = cursor.next_if(LeftBrace) {
+            let prelude = prelude_start.limited(cursor);
+            // If the first two non-<whitespace-token> values of rule’s prelude are an <ident-token> whose value starts with "--" followed by a <colon-token>, then:
+            if prelude
+                .skip(Whitespace)
+                .take::<Ident>()
+                .is_some_and(|(ident, next)| {
+                    ident.value().starts_with("--") && next.skip(Whitespace).is(Token![:])
+                })
+            {
+                if nested {
+                    // If nested is true, consume the remnants of a bad declaration from input, with nested set to true, and return nothing.
+                    cursor = consume_the_remnants_of_a_bad_declaration(cursor, true);
+                    return (None, cursor);
+                } else {
+                    // If nested is false, consume a block from input, and return nothing.
+                    (_, cursor) = consume_a_block(next);
+                    return (None, cursor);
+                }
+            } else {
+                let content;
+                (content, cursor) = consume_a_block(cursor);
+
+                return (Some(QualifiedRule { prelude, content }), cursor);
+            }
+        } else {
+            // Consume a component value from input and append the result to rule’s prelude.
+            cursor = skip_a_component_value(cursor);
+        }
+    }
+}
+
+// https://drafts.csswg.org/css-syntax-3/#consume-a-stylesheets-contents
+pub fn consume_a_stylesheets_contents<'a>(
+    mut cursor: Cursor<'a>,
+) -> impl Iterator<Item = Rule<'a>> {
+    std::iter::from_fn(move || loop {
+        if let Some(next) = cursor
+            .next_if(Whitespace)
+            .or(cursor.next_if(Token![<!--]))
+            .or(cursor.next_if(Token![-->]))
+        {
+            cursor = next;
+        } else if cursor.eof() {
+            return None;
+        } else {
+            let (rule, next) = consume_a_qualified_rule(cursor, false, false);
+            cursor = next;
+
+            if let Some(rule) = rule {
+                return Some(Rule::Qualified(rule));
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod test {
     use crate::csssyn::TokenBuffer;

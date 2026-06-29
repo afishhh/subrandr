@@ -1,9 +1,8 @@
 use std::convert::Infallible;
 
 use crate::csssyn::{
-    buffer::{Cursor, TokenView},
+    buffer::Cursor,
     token::{End, FunctionalNotation, Token, TokenParse, Whitespace},
-    tokenizer::{Escaped, TokenKind},
     ParseError, Peek,
 };
 
@@ -99,32 +98,9 @@ impl<'a, T: TokenParse<'a>> Parse<'a> for T {
 
 impl<'a> Parse<'a> for FunctionalNotation<'a> {
     fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
-        let cursor = stream.cursor();
-        let Some((
-            TokenView {
-                span,
-                source,
-                kind: TokenKind::Function,
-            },
-            next,
-        )) = cursor.token()
-        else {
-            return Err(ParseError::unexpected(cursor, &[Self::name()]));
-        };
-
-        let Some(group_end) = cursor.group_end() else {
-            return Err(ParseError::new(cursor, "unclosed functional notation"));
-        };
-
-        let inner = next.limited(group_end);
-        stream.advance_to(group_end.next().unwrap());
-
-        Ok(FunctionalNotation {
-            span,
-            function: Escaped::new(&source[..source.len() - 1]),
-
-            content: inner,
-        })
+        let (result, next) = FunctionalNotation::take(stream.cursor())?;
+        stream.advance_to(next);
+        Ok(result)
     }
 }
 

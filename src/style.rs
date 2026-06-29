@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::LazyLock};
 
 use icu_segmenter::options::{LineBreakStrictness, LineBreakWordOption};
-use log::{warn, LogContext};
+use log::{log_once_state, warn, LogContext, LogOnceSet};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6},
@@ -78,14 +78,37 @@ static DECLARATION_HANDLER_MAP: LazyLock<DeclarationHandlerMap> = LazyLock::new(
     result
 });
 
-#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
-pub fn compute_with_declarations(
+pub struct DeclarationFilter(DeclarationHandlerMap, &'static str);
+
+impl DeclarationFilter {
+    pub fn new(allowed: impl IntoIterator<Item = &'static str>, message: &'static str) -> Self {
+        let it = allowed.into_iter();
+        let mut result = HashMap::with_capacity(it.size_hint().0);
+
+        for name in it {
+            result.insert(
+                name,
+                *DECLARATION_HANDLER_MAP.get(name).unwrap_or_else(|| {
+                    unreachable!("unknown name in declaration filter: {name:?}")
+                }),
+            );
+        }
+
+        Self(result, message)
+    }
+}
+
+pub fn apply_declarations_to(
     log: &LogContext,
+    target: ComputedStyle,
     declarations: &mut dyn Iterator<Item = &[Declaration<'_>]>,
     parent: &ComputedStyle,
+    filter: Option<&DeclarationFilter>,
+    logset: &LogOnceSet,
 ) -> ComputedStyle {
-    let mut result = parent.create_derived();
+    log_once_state!(in logset; ignoring_declaration, invalid_declaration_value);
 
+    let handler_map = filter.map_or(&*DECLARATION_HANDLER_MAP, |f| &f.0);
     let mut name_buffer = String::new();
     let mut declarations: Vec<_> = declarations
         .flatten()
@@ -98,8 +121,23 @@ pub fn compute_with_declarations(
                     .map(|x| x.to_ascii_lowercase()),
             );
 
-            let Some(handler) = DECLARATION_HANDLER_MAP.get(&*name_buffer) else {
-                warn!(log, "Ignoring unrecognized declaration for '{name_buffer}'");
+            let Some(handler) = handler_map.get(&*name_buffer) else {
+                if let Some(filter) =
+                    filter.filter(|_| DECLARATION_HANDLER_MAP.contains_key(&*name_buffer))
+                {
+                    warn!(
+                        log,
+                        once(ignoring_declaration, &name_buffer),
+                        "Ignoring declaration for '{name_buffer}': {}",
+                        filter.1
+                    );
+                } else {
+                    warn!(
+                        log,
+                        once(ignoring_declaration, &name_buffer),
+                        "Ignoring unrecognized declaration for '{name_buffer}'"
+                    );
+                }
                 return None;
             };
 
@@ -108,14 +146,37 @@ pub fn compute_with_declarations(
         .collect();
     declarations.sort_by_key(|&(_, _, important)| important);
 
+    let mut result = target;
     for (handler, value, _) in declarations {
         match (handler.parse_and_compute)(&mut result, value, parent) {
             Ok(()) => (),
             Err(error) => {
-                warn!(log, "Failed to parse '{}' value: {}", handler.name, error);
+                let error_string = error.to_string();
+                warn!(
+                    log,
+                    once(invalid_declaration_value, (handler.name, &error_string)),
+                    "Failed to parse '{}' value: {error_string}",
+                    handler.name,
+                );
             }
         }
     }
 
     result
+}
+
+#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+pub fn compute_with_declarations(
+    log: &LogContext,
+    declarations: &mut dyn Iterator<Item = &[Declaration<'_>]>,
+    parent: &ComputedStyle,
+) -> ComputedStyle {
+    apply_declarations_to(
+        log,
+        parent.create_derived(),
+        declarations,
+        parent,
+        None,
+        &LogOnceSet::new(),
+    )
 }

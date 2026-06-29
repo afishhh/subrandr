@@ -214,7 +214,7 @@ impl<'a> InlineSpanBuilder<'a> {
         &self.parent.text_runs[self.run_index]
     }
 
-    fn style(&self) -> &ComputedStyle {
+    pub(crate) fn style(&self) -> &ComputedStyle {
         match self.parent.items.get(self.span_index) {
             Some(InlineItem::Span(span)) => &span.style,
             Some(InlineItem::Text(_) | InlineItem::Block(_) | InlineItem::SpanEnd) => {

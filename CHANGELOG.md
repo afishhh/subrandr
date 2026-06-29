@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - Fixed SRV3 ruby annotations being styled by the annotation segment's pen instead of the base's pen.
+- Added basic support for WebVTT STYLE blocks.
 
 ## [v1.4.0]
 

@@ -252,15 +252,18 @@ impl<'a> Dimension<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FunctionalNotation<'a> {
-    pub(super) span: Span,
-    #[expect(dead_code)]
-    pub(super) function: Escaped<'a>,
-    pub(super) content: Cursor<'a>,
+    span: Span,
+    function: Escaped<'a>,
+    content: Cursor<'a>,
 }
 
 impl_spanned!(FunctionalNotation<'_>);
 
 impl<'a> FunctionalNotation<'a> {
+    pub fn function(&self) -> Escaped<'a> {
+        self.function
+    }
+
     pub fn content(&self) -> Cursor<'a> {
         self.content
     }
@@ -282,6 +285,38 @@ impl<'a> Token for FunctionalNotation<'a> {
                 _
             ))
         )
+    }
+}
+
+impl<'a> FunctionalNotation<'a> {
+    pub fn take(cursor: Cursor<'a>) -> Result<(Self, Cursor<'a>), ParseError> {
+        let Some((
+            TokenView {
+                span,
+                source,
+                kind: TokenKind::Function,
+            },
+            next,
+        )) = cursor.token()
+        else {
+            return Err(ParseError::unexpected(cursor, &[Self::name()]));
+        };
+
+        let Some(group_end) = cursor.group_end() else {
+            return Err(ParseError::new(cursor, "unclosed functional notation"));
+        };
+
+        let inner = next.limited(group_end);
+        let end = group_end.next().unwrap();
+
+        Ok((
+            FunctionalNotation {
+                span,
+                function: Escaped::new(&source[..source.len() - 1]),
+                content: inner,
+            },
+            end,
+        ))
     }
 }
 
@@ -307,14 +342,13 @@ impl<'a> Hash<'a> {
         self.value
     }
 
-    #[expect(dead_code)]
     pub fn type_flag(&self) -> HashTypeFlag {
         self.type_flag
     }
 }
 
 macro_rules! impl_punct_tokens {
-    ($($name: ident [$($kind: tt)*] $err_name: literal $(, $macro_tt: tt)?;)*) => {
+    ($($name: ident [$($kind: tt)*] $err_name: literal $([$($macro_tt: tt)*])?;)*) => {
         $(#[doc(hidden)]
         #[derive(Clone, Copy)]
         pub struct $name {
@@ -333,21 +367,25 @@ macro_rules! impl_punct_tokens {
 
         macro_rules! TokenMacro {
             (0) => { $crate::csssyn::token::Zero };
-            $($(($macro_tt) => { $crate::csssyn::token::$name };)?)*
+            $($(($($macro_tt)*) => { $crate::csssyn::token::$name };)?)*
         }
         pub(crate) use TokenMacro as Token;
     };
 }
 
 impl_punct_tokens!(
-    Whitespace [Whitespace] "<whitespace>";
-    Comma [Punct(',')] ",", ,;
-    Colon [Punct(':')] ":", :;
-    Semicolon [Punct(';')] ";", ;;
-    ExclamationMark [Punct('!')] "!", !;
-    Slash [Punct('/')] "/", /;
-    LeftBrace [LBrace] "{";
-    RightBrace [RBrace] "}";
+    Whitespace      [Whitespace] "<whitespace>";
+    Comma           [Punct(',')] ","    [,];
+    Colon           [Punct(':')] ":"    [:];
+    Semicolon       [Punct(';')]  ";"   [;];
+    ExclamationMark [Punct('!')] "!"    [!];
+    Slash           [Punct('/')] "/"    [/];
+    Asterisk        [Punct('*')] "*"    [*];
+    Dot             [Punct('.')] "."    [.];
+    Cdo             [Cdo]        "<!--" [<!--];
+    Cdc             [Cdc]        "-->"  [-->];
+    LeftBrace       [LBrace]     "{";
+    RightBrace      [RBrace]     "}";
 );
 
 #[doc(hidden)]

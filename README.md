@@ -34,7 +34,7 @@ Currently subrandr is in the [User agents that do not support CSS](https://www.w
 
 The most notable limitations for this format currently are:
 - No vertical text support
-- No CSS (`STYLE` block) support
+- Incomplete CSS selector/property support
 - No region support
 
 ### Usage

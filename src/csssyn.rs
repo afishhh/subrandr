@@ -16,7 +16,6 @@ pub mod peek;
 pub mod token;
 mod tokenizer;
 
-#[cfg_attr(not(test), expect(unused_imports))]
 pub use buffer::TokenBuffer;
 pub use error::ParseError;
 pub use peek::Peek;

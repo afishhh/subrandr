@@ -6,11 +6,13 @@ use crate::csssyn::tokenizer::TokenizerError;
 
 use super::{
     token::TokenParse,
-    tokenizer::{tokenize, HashTypeFlag, TokenKind},
+    tokenizer::{tokenize, TokenKind},
     ParseError, Peek, Span, Spanned,
 };
 
 const SOURCE_LEN_LIMIT: u32 = 1 << 20;
+
+pub use super::tokenizer::HashTypeFlag;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delimiter {
@@ -143,13 +145,13 @@ impl From<BufferTokenizationError> for ParseError {
     }
 }
 
+#[derive(Debug)]
 pub struct TokenBuffer<'a> {
     source: &'a str,
     entries: Vec<Entry>,
 }
 
 impl<'a> TokenBuffer<'a> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn from_source(source: &'a str) -> Result<Self, BufferTokenizationError> {
         let Some(source_end) = u32::try_from(source.len())
             .ok()
@@ -268,7 +270,6 @@ impl<'a> TokenBuffer<'a> {
         Ok(Self { source, entries })
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn start(&self) -> Cursor<'_> {
         unsafe {
             Cursor {
@@ -323,8 +324,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn scope_source(self) -> &'a str {
+    pub fn scope_source(self) -> &'a str {
         let start_entry = self.entry();
         let end_entry = self.end().entry();
         unsafe {

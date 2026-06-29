@@ -249,7 +249,6 @@ pub trait LogOnceKey: Sized + 'static {}
 
 // Allows us to use one hashset instead of many
 // hashsets for each type of event
-#[doc(hidden)]
 pub struct LogOnceSet {
     items: UnsafeCell<HashSet<(std::any::TypeId, u64)>>,
 }

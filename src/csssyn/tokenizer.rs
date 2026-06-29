@@ -580,6 +580,12 @@ impl PartialEq<&str> for Escaped<'_> {
     }
 }
 
+impl From<Escaped<'_>> for Box<str> {
+    fn from(value: Escaped<'_>) -> Self {
+        value.unescape_iter().collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashTypeFlag {
     Id,
@@ -666,6 +672,18 @@ impl<'a> Escaped<'a> {
         self.unescape_iter()
             .map(|x| x.to_ascii_lowercase())
             .eq(string.chars().map(|x| x.to_ascii_lowercase()))
+    }
+
+    pub fn starts_with(self, string: &str) -> bool {
+        let mut u = self.unescape_iter();
+
+        for c in string.chars() {
+            if u.next() != Some(c) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 

@@ -142,31 +142,6 @@ impl<'a, F: FnOnce(Infallible) -> T, T: token::Token> LookaheadPeek for F {
     }
 }
 
-impl<'a> Parse<'a> for TokenTree<'a> {
-    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
-        let mut lk = stream.lookahead1();
-        if lk.peek(Ident) {
-            return stream.parse().map(Self::Ident);
-        } else if lk.peek(LitString) {
-            return stream.parse().map(Self::String);
-        } else if lk.peek(Number) {
-            return stream.parse().map(Self::Number);
-        } else if lk.peek(Percentage) {
-            return stream.parse().map(Self::Percentage);
-        } else if lk.peek(Dimension) {
-            return stream.parse().map(Self::Dimension);
-        } else if lk.peek(FunctionalNotation) {
-            return stream.parse().map(Self::FunctionalNotation);
-        } else if lk.peek(UnquotedUrl) {
-            return stream.parse().map(Self::UnquotedUrl);
-        } else if lk.peek(Punct) {
-            return stream.parse().map(Self::Punct);
-        } else {
-            return Err(lk.error());
-        }
-    }
-}
-
 macro_rules! impl_token {
     (
         for <$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?;
@@ -428,6 +403,28 @@ impl_token! {
 impl LitInt<'_> {
     pub fn to_u32(self) -> Option<u32> {
         self.value.parse().ok()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AtKeyword<'a> {
+    span: Span,
+    value: Escaped<'a>,
+}
+
+impl_spanned!(AtKeyword<'_>);
+
+impl_token! {
+    for<'a> AtKeyword<'a>;
+
+    name = "<at-keyword>";
+    matches TokenView { span, source, kind: TokenKind::AtKeyword };
+    parse AtKeyword { span, value: Escaped::new(&source[1..]) };
+}
+
+impl<'a> AtKeyword<'a> {
+    pub fn value(&self) -> Escaped<'a> {
+        self.value
     }
 }
 

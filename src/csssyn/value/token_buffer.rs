@@ -1,12 +1,9 @@
 use std::{fmt::Display, marker::PhantomData, num::NonZero, ptr::NonNull};
 
-use super::{
-    Dimension, FunctionalNotation, Ident, LitString, Number, NumericTokenValue, ParseError,
-    Percentage, Punct, Span, Spanned, TokenTree, UnquotedUrl,
-};
+use super::{Ident, ParseError, Span, Spanned};
 use crate::csssyn::{
     tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer},
-    value::{token::TokenParse, LookaheadPeek, Parse, ParseStream, Peek, Token},
+    value::{token::TokenParse, Peek},
 };
 
 // Really could be anything <2^32-1 so that `Span` can use 32-bit integers.

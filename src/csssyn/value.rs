@@ -148,7 +148,8 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
             continue;
         }
 
-        // TODO: at-rule
+        // TODO: at-rule's are currently not supported but not parsing them should be
+        //       forwards compatible
 
         let decl;
         (decl, cursor) = consume_a_declaration(cursor, false);

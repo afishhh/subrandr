@@ -1,33 +1,5 @@
-use std::fmt::Write;
-
-use super::{impl_spanned, Cursor, Parse, Span, Spanned};
+use super::{impl_spanned, Cursor, Span, Spanned};
 use crate::csssyn::tokenizer::Escaped;
-
-pub enum TokenTree<'a> {
-    Ident(Ident<'a>),
-    String(LitString<'a>),
-    Number(Number<'a>),
-    Percentage(Percentage<'a>),
-    Dimension(Dimension<'a>),
-    FunctionalNotation(FunctionalNotation<'a>),
-    UnquotedUrl(UnquotedUrl<'a>),
-    Punct(Punct),
-}
-
-impl<'a> Spanned for TokenTree<'a> {
-    fn span(&self) -> Span {
-        match self {
-            TokenTree::Ident(ident) => ident.span(),
-            TokenTree::String(string) => string.span(),
-            TokenTree::FunctionalNotation(functional_notation) => functional_notation.span(),
-            TokenTree::UnquotedUrl(unquoted_url) => unquoted_url.span(),
-            TokenTree::Number(number) => number.span(),
-            TokenTree::Percentage(percentage) => percentage.span(),
-            TokenTree::Dimension(dimension) => dimension.span(),
-            TokenTree::Punct(punct) => punct.span(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Ident<'a> {
@@ -154,48 +126,5 @@ impl_spanned!(Punct);
 impl Punct {
     pub fn value(&self) -> char {
         self.value
-    }
-}
-
-impl<'a> TokenTree<'a> {
-    pub(super) fn display_for_error(&self, reveal_ident: bool) -> impl std::fmt::Display + '_ {
-        ValueTokenTreeErrorDisplay::Static(match self {
-            Self::Ident(ident) => {
-                if reveal_ident {
-                    return ValueTokenTreeErrorDisplay::Ident(ident.value());
-                } else {
-                    "<ident>"
-                }
-            }
-            Self::String(_) => "<string>",
-            Self::FunctionalNotation(_) => "<function>",
-            Self::UnquotedUrl(_) => "<unquoted-url>",
-            &Self::Number(Number {
-                value: NumericTokenValue { integer, .. },
-                ..
-            }) => match integer {
-                true => "<integer>",
-                false => "<number>",
-            },
-            Self::Percentage(_) => "<percentage>",
-            Self::Dimension(_) => "<dimension>",
-            &Self::Punct(Punct { value, .. }) => return ValueTokenTreeErrorDisplay::Punct(value),
-        })
-    }
-}
-
-enum ValueTokenTreeErrorDisplay<'a> {
-    Ident(Escaped<'a>),
-    Static(&'static str),
-    Punct(char),
-}
-
-impl std::fmt::Display for ValueTokenTreeErrorDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            ValueTokenTreeErrorDisplay::Ident(i) => write!(f, "{i}"),
-            ValueTokenTreeErrorDisplay::Static(s) => f.write_str(s),
-            ValueTokenTreeErrorDisplay::Punct(c) => f.write_char(c),
-        }
     }
 }

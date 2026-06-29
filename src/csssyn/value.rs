@@ -20,7 +20,7 @@ fn skip_a_component_value<'a>(cursor: Cursor<'a>) -> Cursor<'a> {
 fn consume_a_list_of_component_values<'a>(
     mut cursor: Cursor<'a>,
     nested: bool,
-    stop_token: impl Peek + Copy,
+    stop_token: impl LookaheadPeek<'a> + Copy,
 ) -> (Cursor<'a>, Cursor<'a>) {
     let start = cursor;
     loop {

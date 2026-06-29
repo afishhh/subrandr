@@ -6,7 +6,7 @@ use super::{
 };
 use crate::csssyn::{
     tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer},
-    value::{Parse, ParseStream, Peek, Token},
+    value::{LookaheadPeek, Parse, ParseStream, Token},
 };
 
 // Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
@@ -34,7 +34,6 @@ enum EntryTokenKind {
     CloseParenthesis,
     CloseBracket,
     CloseBrace,
-    EndOfFile,
 
     Punct(char),
     Cdc,
@@ -62,16 +61,47 @@ enum EntryTokenKind {
         integer: bool,
         unit_offset: u32,
     },
+
+    EndOfFile,
 }
 
 impl EntryTokenKind {
-    fn as_group_start(&self) -> Option<(Delimiter, &GroupStart)> {
+    fn as_token_kind(&self) -> Option<TokenKind> {
         Some(match self {
-            EntryTokenKind::OpenParenthesis(group_start)
-            | EntryTokenKind::Function(group_start) => (Delimiter::Parenthesis, group_start),
-            EntryTokenKind::OpenBracket(group_start) => (Delimiter::Bracket, group_start),
-            EntryTokenKind::OpenBrace(group_start) => (Delimiter::Brace, group_start),
-            _ => return None,
+            EntryTokenKind::OpenParenthesis(_) => TokenKind::LParen,
+            EntryTokenKind::OpenBracket(_) => TokenKind::LBracket,
+            EntryTokenKind::OpenBrace(_) => TokenKind::LBrace,
+            EntryTokenKind::Function(_) => TokenKind::Function,
+            EntryTokenKind::CloseParenthesis => TokenKind::RParen,
+            EntryTokenKind::CloseBracket => TokenKind::RBracket,
+            EntryTokenKind::CloseBrace => TokenKind::RBrace,
+            EntryTokenKind::EndOfFile => return None,
+            &EntryTokenKind::Punct(c) => TokenKind::Punct(c),
+            EntryTokenKind::Cdc => TokenKind::Cdc,
+            EntryTokenKind::Cdo => TokenKind::Cdo,
+            EntryTokenKind::Whitespace => TokenKind::Whitespace,
+            EntryTokenKind::Ident => TokenKind::Ident,
+            EntryTokenKind::AtKeyword => TokenKind::AtKeyword,
+            &EntryTokenKind::Hash { type_flag } => TokenKind::Hash { type_flag },
+            EntryTokenKind::String => TokenKind::String,
+            EntryTokenKind::BadString => TokenKind::BadString,
+            &EntryTokenKind::Url {
+                value_offset,
+                trailing_len,
+            } => TokenKind::Url {
+                value_offset,
+                trailing_len,
+            },
+            EntryTokenKind::BadUrl => TokenKind::BadUrl,
+            &EntryTokenKind::Number { integer } => TokenKind::Number { integer },
+            &EntryTokenKind::Percentage { integer } => TokenKind::Percentage { integer },
+            &EntryTokenKind::Dimension {
+                integer,
+                unit_offset,
+            } => TokenKind::Dimension {
+                integer,
+                unit_offset,
+            },
         })
     }
 }
@@ -207,13 +237,6 @@ impl<'a> TokenBuffer<'a> {
         Ok(Self { source, entries })
     }
 
-    pub(super) fn end_span(&self) -> Span {
-        Span {
-            start: self.source.len() as u32,
-            end: self.source.len() as u32,
-        }
-    }
-
     pub fn start(&self) -> Cursor<'_> {
         unsafe {
             Cursor {
@@ -226,6 +249,12 @@ impl<'a> TokenBuffer<'a> {
     }
 }
 
+pub struct TokenView<'a> {
+    pub span: Span,
+    pub source: &'a str,
+    pub kind: TokenKind,
+}
+
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     source_base: NonNull<u8>,
@@ -233,11 +262,6 @@ pub struct Cursor<'a> {
     end: *const Entry,
     phantom: PhantomData<(&'a str, &'a Entry)>,
 }
-
-// pub trait Peek: Sized {
-//     #[doc(hidden)]
-//     fn peek(&self, ) -> bool;
-// }
 
 impl<'a> Cursor<'a> {
     fn entry(&self) -> &'a Entry {
@@ -301,11 +325,11 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn is<T: Peek>(self, peek: T) -> bool {
+    pub fn is<T: LookaheadPeek<'a>>(self, peek: T) -> bool {
         peek.peek(self)
     }
 
-    pub fn skip<T: Peek>(mut self, peek: T) -> Option<Cursor<'a>> {
+    pub fn skip<T: LookaheadPeek<'a>>(mut self, peek: T) -> Option<Cursor<'a>> {
         self.is(peek).then(|| {
             // TODO: make this part of `<T::peek>`
             if !self.eof() {
@@ -315,104 +339,144 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    pub fn token_tree(self) -> Option<(TokenTree<'a>, Cursor<'a>)> {
+    #[inline]
+    pub fn token(self) -> Option<(TokenView<'a>, Cursor<'a>)> {
+        if self.eof() {
+            return None;
+        }
+
         let entry = self.entry();
-        let span = entry.span;
-        let entry_source = |leading: usize, trailing: usize| unsafe {
-            let start = entry.span.start as usize + leading;
-            let len = entry.span.end as usize - start - trailing;
+        let token_source = unsafe {
             std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                self.source_base.as_ptr().add(start),
-                len,
+                self.source_base.as_ptr().add(entry.span.start as usize),
+                (entry.span.end - entry.span.start) as usize,
             ))
         };
+        // SAFETY: `as_token_kind` can only return `None` on `EndOfFile` but we ensured `!self.eof()` already.
+        let kind = unsafe { entry.kind.as_token_kind().unwrap_unchecked() };
 
-        let mut next = Cursor {
-            entry: self.entry.wrapping_add(1),
-            ..self
-        };
-        let tree = match &entry.kind {
-            EntryTokenKind::OpenParenthesis(_)
-            | EntryTokenKind::OpenBracket(_)
-            | EntryTokenKind::OpenBrace(_)
-            | EntryTokenKind::CloseParenthesis
-            | EntryTokenKind::CloseBracket
-            | EntryTokenKind::CloseBrace
-            | EntryTokenKind::EndOfFile
-            | EntryTokenKind::Cdc
-            | EntryTokenKind::Cdo
-            | EntryTokenKind::Whitespace
-            | EntryTokenKind::AtKeyword
-            | EntryTokenKind::Hash { .. }
-            | EntryTokenKind::BadUrl
-            | EntryTokenKind::BadString => return None,
-            EntryTokenKind::Function(group_start) => {
-                let inner;
-                (inner, next) = unsafe { self.group_cursors(group_start) }?;
-                let end = unsafe { (*inner.end).span.end };
-
-                TokenTree::FunctionalNotation(FunctionalNotation {
-                    span: Span {
-                        start: span.start,
-                        end,
-                    },
-                    function: Escaped::new(entry_source(0, 1)),
-                    content: inner,
-                })
-            }
-            &EntryTokenKind::Punct(value) => TokenTree::Punct(Punct { span, value }),
-            EntryTokenKind::Ident => TokenTree::Ident(Ident {
-                span,
-                value: Escaped::new(entry_source(0, 0)),
-            }),
-            EntryTokenKind::String => TokenTree::String(LitString {
-                span,
-                value: Escaped::new(entry_source(1, 1)),
-            }),
-            &EntryTokenKind::Url {
-                value_offset,
-                trailing_len,
-            } => TokenTree::UnquotedUrl(UnquotedUrl {
-                span,
-                value: Escaped::new(entry_source(
-                    usize::from(value_offset),
-                    usize::from(trailing_len),
-                )),
-            }),
-            &EntryTokenKind::Number { integer } => TokenTree::Number(Number {
-                span,
-                value: NumericTokenValue {
-                    value: entry_source(0, 0),
-                    integer,
-                },
-            }),
-            &EntryTokenKind::Percentage { integer } => TokenTree::Percentage(Percentage {
-                span,
-                value: NumericTokenValue {
-                    value: entry_source(0, 1),
-                    integer,
-                },
-            }),
-            &EntryTokenKind::Dimension {
-                integer,
-                unit_offset,
-            } => TokenTree::Dimension(Dimension {
-                span,
-                text: entry_source(0, 0),
-                integer,
-                unit_offset,
-            }),
-        };
-
-        Some((tree, next.skip_whitespace()))
+        Some((
+            TokenView {
+                span: entry.span,
+                source: token_source,
+                kind,
+            },
+            unsafe { self.next().unwrap_unchecked() },
+        ))
     }
 
-    pub fn ident(self) -> Option<(Ident<'a>, Cursor<'a>)> {
-        self.token_tree().and_then(|(tt, next)| match tt {
-            TokenTree::Ident(ident) => Some((ident, next)),
-            _ => None,
-        })
+    pub fn group_end(mut self) -> Option<Cursor<'a>> {
+        if self.eof() {
+            return None;
+        }
+
+        let (EntryTokenKind::OpenParenthesis(group_start)
+        | EntryTokenKind::OpenBracket(group_start)
+        | EntryTokenKind::OpenBrace(group_start)
+        | EntryTokenKind::Function(group_start)) = &self.entry().kind
+        else {
+            return None;
+        };
+
+        let end_offset = group_start.end_offset?.get() as usize;
+        let new_entry = self.entry.wrapping_add(end_offset).min(self.end);
+        debug_assert!(new_entry >= self.entry);
+        self.entry = new_entry;
+
+        Some(self)
     }
+
+    // pub fn token_tree(self) -> Option<(TokenTree<'a>, Cursor<'a>)> {
+    //     let entry = self.entry();
+    //     let span = entry.span;
+    //     let entry_source = |leading: usize, trailing: usize| unsafe {
+    //         let start = entry.span.start as usize + leading;
+    //         let len = entry.span.end as usize - start - trailing;
+    //         std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+    //             self.source_base.as_ptr().add(start),
+    //             len,
+    //         ))
+    //     };
+
+    //     let mut next = Cursor {
+    //         entry: self.entry.wrapping_add(1),
+    //         ..self
+    //     };
+    //     let tree = match &entry.kind {
+    //         EntryTokenKind::OpenParenthesis(_)
+    //         | EntryTokenKind::OpenBracket(_)
+    //         | EntryTokenKind::OpenBrace(_)
+    //         | EntryTokenKind::CloseParenthesis
+    //         | EntryTokenKind::CloseBracket
+    //         | EntryTokenKind::CloseBrace
+    //         | EntryTokenKind::EndOfFile
+    //         | EntryTokenKind::Cdc
+    //         | EntryTokenKind::Cdo
+    //         | EntryTokenKind::Whitespace
+    //         | EntryTokenKind::AtKeyword
+    //         | EntryTokenKind::Hash { .. }
+    //         | EntryTokenKind::BadUrl
+    //         | EntryTokenKind::BadString => return None,
+    //         EntryTokenKind::Function(group_start) => {
+    //             let inner;
+    //             (inner, next) = unsafe { self.group_cursors(group_start) }?;
+    //             let end = unsafe { (*inner.end).span.end };
+
+    //             TokenTree::FunctionalNotation(FunctionalNotation {
+    //                 span: Span {
+    //                     start: span.start,
+    //                     end,
+    //                 },
+    //                 function: Escaped::new(entry_source(0, 1)),
+    //                 content: inner,
+    //             })
+    //         }
+    //         &EntryTokenKind::Punct(value) => TokenTree::Punct(Punct { span, value }),
+    //         EntryTokenKind::Ident => TokenTree::Ident(Ident {
+    //             span,
+    //             value: Escaped::new(entry_source(0, 0)),
+    //         }),
+    //         EntryTokenKind::String => TokenTree::String(LitString {
+    //             span,
+    //             value: Escaped::new(entry_source(1, 1)),
+    //         }),
+    //         &EntryTokenKind::Url {
+    //             value_offset,
+    //             trailing_len,
+    //         } => TokenTree::UnquotedUrl(UnquotedUrl {
+    //             span,
+    //             value: Escaped::new(entry_source(
+    //                 usize::from(value_offset),
+    //                 usize::from(trailing_len),
+    //             )),
+    //         }),
+    //         &EntryTokenKind::Number { integer } => TokenTree::Number(Number {
+    //             span,
+    //             value: NumericTokenValue {
+    //                 value: entry_source(0, 0),
+    //                 integer,
+    //             },
+    //         }),
+    //         &EntryTokenKind::Percentage { integer } => TokenTree::Percentage(Percentage {
+    //             span,
+    //             value: NumericTokenValue {
+    //                 value: entry_source(0, 1),
+    //                 integer,
+    //             },
+    //         }),
+    //         &EntryTokenKind::Dimension {
+    //             integer,
+    //             unit_offset,
+    //         } => TokenTree::Dimension(Dimension {
+    //             span,
+    //             text: entry_source(0, 0),
+    //             integer,
+    //             unit_offset,
+    //         }),
+    //     };
+
+    //     Some((tree, next.skip_whitespace()))
+    // }
 
     pub fn right_brace(self) -> Option<(Punct, Cursor<'a>)> {
         let entry = self.entry();
@@ -429,23 +493,41 @@ impl<'a> Cursor<'a> {
         ))
     }
 
+    #[inline]
     pub fn next(mut self) -> Option<Cursor<'a>> {
         if self.eof() {
             return None;
         }
 
-        match self.entry().kind.as_group_start() {
-            Some((_, group_start)) => {
-                if let Some(end_offset) = group_start.end_offset {
-                    self.entry = unsafe { self.entry.add(end_offset.get() as usize) }.min(self.end);
-                } else {
-                    self.entry = self.end;
-                }
-            }
-            None => self.entry = unsafe { self.entry.add(1) },
-        }
+        self.entry = unsafe { self.entry.add(1) };
 
         Some(self)
+    }
+
+    pub fn next_tree(mut self) -> Option<Cursor<'a>> {
+        if let Some(group_end) = self.group_end() {
+            self = group_end;
+            debug_assert!(self.eof(), "group end points at end-of-file token")
+        }
+
+        self.next()
+    }
+
+    #[inline]
+    pub fn next_back(mut self) -> Option<Cursor<'a>> {
+        if self.eof() {
+            return None;
+        }
+
+        self.entry = unsafe { self.end.sub(1) };
+
+        Some(self)
+    }
+
+    #[inline]
+    pub fn end(mut self) -> Cursor<'a> {
+        self.entry = self.end;
+        self
     }
 
     pub fn take_important_from_end(mut self) -> Option<(Ident<'a>, Cursor<'a>)> {

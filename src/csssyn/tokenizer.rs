@@ -523,18 +523,19 @@ impl<'a> Iterator for Tokenizer<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     LParen,
-    RParen,
     LBracket,
-    RBracket,
     LBrace,
+    Function,
+    RParen,
+    RBracket,
     RBrace,
+
+    Punct(char),
     Cdc,
     Cdo,
     Whitespace,
     Ident,
-    Function,
     AtKeyword,
-    Punct(char),
     Hash {
         type_flag: HashTypeFlag,
     },

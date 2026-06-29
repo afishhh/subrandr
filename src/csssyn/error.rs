@@ -20,10 +20,6 @@ impl ParseError {
             }],
         }
     }
-
-    pub fn append(&mut self, mut other: ParseError) {
-        self.messages.append(&mut other.messages);
-    }
 }
 
 impl std::fmt::Display for ParseError {

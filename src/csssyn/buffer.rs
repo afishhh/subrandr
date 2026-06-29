@@ -304,10 +304,12 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    #[must_use]
     pub fn is<T: Peek>(self, peek: T) -> bool {
         peek.peek(self)
     }
 
+    #[must_use]
     pub fn next_if<T: Peek>(self, peek: T) -> Option<Cursor<'a>> {
         if self.is(peek) {
             self.next()
@@ -316,6 +318,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    #[must_use]
     pub fn skip<T: Peek>(self, peek: T) -> Cursor<'a> {
         if self.is(peek) {
             self.next().unwrap_or(self)
@@ -324,6 +327,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    #[must_use]
     pub fn take<T: TokenParse<'a>>(self) -> Option<(T, Cursor<'a>)> {
         T::take(self)
     }
@@ -376,6 +380,7 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    #[must_use]
     pub fn next(mut self) -> Option<Cursor<'a>> {
         if self.eof() {
             return None;
@@ -386,6 +391,7 @@ impl<'a> Cursor<'a> {
         Some(self)
     }
 
+    #[must_use]
     pub fn next_tree(mut self) -> Option<Cursor<'a>> {
         if let Some(group_end) = self.group_end() {
             self = group_end;
@@ -407,6 +413,7 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    #[must_use]
     pub fn next_back(mut self) -> Option<Cursor<'a>> {
         if self.eof() {
             return None;
@@ -417,6 +424,7 @@ impl<'a> Cursor<'a> {
         Some(self)
     }
 
+    #[must_use]
     pub fn skip_back<T: Peek>(self, peek: T) -> Cursor<'a> {
         let last = self.next_back();
         if let Some(new_end) = last.filter(|x| x.is(peek)) {

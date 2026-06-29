@@ -7,8 +7,6 @@ pub use parse::*;
 use token_buffer::*;
 pub use token_tree::*;
 
-use crate::csssyn::Tokenizer;
-
 // https://drafts.csswg.org/css-syntax-3/#consume-a-component-value
 //
 // `Cursor`'s group skipping effectively implements component values.
@@ -20,7 +18,7 @@ fn skip_a_component_value<'a>(cursor: Cursor<'a>) -> Cursor<'a> {
 fn consume_a_list_of_component_values<'a>(
     mut cursor: Cursor<'a>,
     nested: bool,
-    stop_token: impl LookaheadPeek<'a> + Copy,
+    stop_token: impl LookaheadPeek + Copy,
 ) -> (Cursor<'a>, Cursor<'a>) {
     let start = cursor;
     loop {
@@ -40,9 +38,9 @@ fn consume_the_remnants_of_a_bad_declaration<'a>(
     nested: bool,
 ) -> Cursor<'a> {
     loop {
-        if let Some(next) = cursor.skip(Token![;]).or(cursor.skip(End)) {
+        if let Some(next) = cursor.next_if(Token![;]).or(cursor.next_if(End)) {
             return next;
-        } else if let Some(next) = cursor.skip(RightBrace) {
+        } else if let Some(next) = cursor.next_if(RightBrace) {
             if nested {
                 return cursor;
             } else {
@@ -66,7 +64,7 @@ fn consume_a_declaration<'a>(
     nested: bool,
 ) -> (Option<Declaration<'a>>, Cursor<'a>) {
     // If the next token is an <ident-token>, consume a token from input and set decl's name to the token’s value.
-    let Some((name, next)) = cursor.ident() else {
+    let Some((name, next)) = cursor.take::<Ident>() else {
         // Otherwise, consume the remnants of a bad declaration from input, with nested, and return nothing.
         return (
             None,
@@ -76,10 +74,10 @@ fn consume_a_declaration<'a>(
     cursor = next;
 
     // Discard whitespace from input.
-    cursor = cursor.skip_whitespace();
+    cursor = cursor.skip(Whitespace);
 
     // If the next token is a <colon-token>, discard a token from input.
-    let Some(next) = cursor.skip(Token![:]) else {
+    let Some(next) = cursor.next_if(Token![:]) else {
         // Otherwise, consume the remnants of a bad declaration from input, with nested, and return nothing.
         return (
             None,
@@ -89,7 +87,7 @@ fn consume_a_declaration<'a>(
     cursor = next;
 
     // Discard whitespace from input.
-    cursor = cursor.skip_whitespace();
+    cursor = cursor.skip(Whitespace);
 
     // Consume a list of component values from input, with nested, and with <semicolon-token> as the stop token, and set decl’s value to the result.
     let (mut value, next) = consume_a_list_of_component_values(cursor, nested, Token![;]);
@@ -127,9 +125,9 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
             return None;
         }
 
-        cursor = cursor.skip_whitespace();
+        cursor = cursor.skip(Whitespace);
 
-        if let Some(next) = cursor.skip(Token![;]) {
+        if let Some(next) = cursor.next_if(Token![;]) {
             cursor = next;
             continue;
         }
@@ -146,12 +144,17 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
     })
 }
 
-#[test]
-fn abcd() {
-    let buffer =
-        TokenBuffer::from_tokenizer(Tokenizer::new("hello: world !important ; w: a")).unwrap();
-    panic!(
-        "{:?}",
-        parse_declaration_list(buffer.start()).collect::<Vec<_>>()
-    );
+#[cfg(test)]
+mod test {
+    use crate::csssyn::{value::TokenBuffer, Tokenizer};
+
+    #[test]
+    fn abcd() {
+        let buffer =
+            TokenBuffer::from_tokenizer(Tokenizer::new("hello: world !important ; w: a")).unwrap();
+        panic!(
+            "{:?}",
+            super::parse_declaration_list(buffer.start()).collect::<Vec<_>>()
+        );
+    }
 }

@@ -278,7 +278,7 @@ impl<'a> Tokenizer<'a> {
                 TokenKind::Url {
                     // TODO: checked cast
                     value_offset: (value_start - start) as u16,
-                    trailing_len: (value_end - start) as u16,
+                    trailing_len: (self.pos.index - value_end) as u16,
                 }
             }
         } else if self.peek_const("(") {

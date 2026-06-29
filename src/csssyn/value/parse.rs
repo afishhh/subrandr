@@ -1,7 +1,10 @@
-use std::{cell::Cell, convert::Infallible};
+use std::{cell::Cell, convert::Infallible, fmt::Display};
 
 use super::*;
-use crate::csssyn::tokenizer::{Escaped, TokenKind, Tokenizer};
+use crate::csssyn::{
+    tokenizer::{Escaped, TokenKind, Tokenizer},
+    value::token::TokenParse,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
@@ -43,12 +46,16 @@ pub struct ParseStream<'a> {
 impl<'a> ParseStream<'a> {
     pub fn new(cursor: Cursor<'a>) -> Self {
         Self {
-            cursor: Cell::new(cursor.skip_whitespace()),
+            cursor: Cell::new(cursor.skip(Whitespace)),
         }
     }
 
     fn cursor(&self) -> Cursor<'a> {
         self.cursor.get()
+    }
+
+    fn advance_to(&self, cursor: Cursor<'a>) {
+        self.cursor.set(cursor.skip(Whitespace))
     }
 
     fn ensure_end(&self) -> Result<(), ParseError> {
@@ -64,13 +71,13 @@ impl<'a> ParseStream<'a> {
         T::parse(self)
     }
 
-    pub fn peek<T: LookaheadPeek<'a>>(&self, peek: T) -> bool {
+    pub fn peek<T: Peek>(&self, peek: T) -> bool {
         peek.peek(self.cursor())
     }
 
     pub fn skip(&self) {
         let cursor = self.cursor();
-        self.cursor.set(cursor.next().unwrap_or(cursor));
+        self.advance_to(cursor.next().unwrap_or(cursor));
     }
 
     pub fn lookahead1(&self) -> Lookahead<'a> {
@@ -85,12 +92,12 @@ pub trait Parse<'a>: Sized {
     fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError>;
 }
 
-impl<'a, T: Token<'a>> Parse<'a> for T {
+impl<'a, T: TokenParse<'a>> Parse<'a> for T {
     fn parse(stream: &super::ParseStream<'a>) -> Result<Self, crate::csssyn::value::ParseError> {
         let cursor = stream.cursor();
         match T::take(cursor) {
             Some((value, next)) => {
-                stream.cursor.set(next);
+                stream.advance_to(next);
                 Ok(value)
             }
             None => Err(ParseError::unexpected(cursor, &[T::name()])),
@@ -98,12 +105,12 @@ impl<'a, T: Token<'a>> Parse<'a> for T {
     }
 }
 
-pub trait Peek<'a>: Sized {
+pub trait Peek: Sized {
     #[doc(hidden)]
-    fn peek(&self, cursor: Cursor<'a>) -> bool;
+    fn peek(&self, cursor: Cursor) -> bool;
 }
 
-impl Peek<'_> for &'static str {
+impl Peek for &'static str {
     fn peek(&self, cursor: Cursor) -> bool {
         cursor.token().is_some_and(|(token, _)| match token.kind {
             TokenKind::Ident => Escaped::new(token.source) == *self,
@@ -112,24 +119,24 @@ impl Peek<'_> for &'static str {
     }
 }
 
-pub trait LookaheadPeek<'a>: Peek<'a> + Sized {
+pub trait LookaheadPeek: Peek + Sized {
     #[doc(hidden)]
     fn name(&self) -> &'static str;
 }
 
-impl LookaheadPeek<'_> for &'static str {
+impl LookaheadPeek for &'static str {
     fn name(&self) -> &'static str {
         self
     }
 }
 
-impl<'a, F: FnOnce(Infallible) -> T, T: token::Token<'a>> Peek<'a> for F {
-    fn peek(&self, cursor: Cursor<'a>) -> bool {
+impl<F: FnOnce(Infallible) -> T, T: token::Token> Peek for F {
+    fn peek(&self, cursor: Cursor) -> bool {
         T::peek(cursor)
     }
 }
 
-impl<'a, F: FnOnce(Infallible) -> T, T: token::Token<'a>> LookaheadPeek<'a> for F {
+impl<'a, F: FnOnce(Infallible) -> T, T: token::Token> LookaheadPeek for F {
     fn name(&self) -> &'static str {
         T::name()
     }
@@ -168,26 +175,26 @@ macro_rules! impl_token {
         matches TokenView { $($pattern_body: tt)* };
         parse $body: expr;
     ) => {
-        impl<$lt> token::Token<$lt> for $name$(<$ltarg>)? {
+        impl<$lt> token::Token for $name$(<$ltarg>)? {
             fn name() -> &'static str {
                 $err_name
             }
 
-            #[allow(unused_variables)] // for pattern variables that are only used in `parse` below
+            #[allow(unused_variables)] // for pattern variables that are only used in `take` below
             fn peek(cursor: Cursor) -> bool {
                 matches!(cursor.token(), Some((TokenView { $($pattern_body)* }, _)))
             }
         }
 
-        impl<$lt> Parse<$lt> for $name$(<$ltarg>)? {
-            fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
-                parse_for_token(stream, |cursor| match cursor.token() {
+        impl<$lt> token::TokenParse<$lt> for $name$(<$ltarg>)? {
+            fn take(cursor: Cursor<$lt>) -> Option<(Self, Cursor<$lt>)> {
+                match cursor.token() {
                     Some((
                         TokenView { $($pattern_body)* },
                         next,
                     )) => Some(($body, next)),
                     _ => None,
-                })
+                }
             }
         }
 
@@ -260,7 +267,7 @@ impl_token!(
     parse Punct { span, value: c };
 );
 
-impl<'a> Token<'a> for FunctionalNotation<'a> {
+impl<'a> Token for FunctionalNotation<'a> {
     fn name() -> &'static str {
         "<function>"
     }
@@ -299,7 +306,7 @@ impl<'a> Parse<'a> for FunctionalNotation<'a> {
         };
 
         let inner = next.limited(group_end);
-        stream.cursor.set(group_end.next().unwrap());
+        stream.advance_to(group_end.next().unwrap());
 
         Ok(FunctionalNotation {
             span,
@@ -316,17 +323,20 @@ pub fn FunctionalNotation<'a>(marker: Infallible) -> FunctionalNotation<'a> {
 }
 
 pub mod token {
-    use super::{Cursor, LookaheadPeek, Parse, Peek};
+    use super::{Cursor, LookaheadPeek, Peek};
     use crate::csssyn::{tokenizer::TokenKind, value::token_buffer::TokenView};
 
     #[doc(hidden)]
-    pub trait Token<'a>: Sized {
+    pub trait Token: Sized {
         #[doc(hidden)]
         fn name() -> &'static str;
 
         #[doc(hidden)]
-        fn peek(cursor: Cursor<'a>) -> bool;
+        fn peek(cursor: Cursor) -> bool;
+    }
 
+    #[doc(hidden)]
+    pub trait TokenParse<'a>: Token + Sized {
         #[doc(hidden)]
         fn take(cursor: Cursor<'a>) -> Option<(Self, Cursor<'a>)>;
     }
@@ -334,7 +344,7 @@ pub mod token {
     #[doc(hidden)]
     pub struct Zero;
 
-    impl Peek<'_> for Zero {
+    impl Peek for Zero {
         fn peek(&self, cursor: Cursor) -> bool {
             matches!(
                 cursor.token(),
@@ -350,7 +360,7 @@ pub mod token {
         }
     }
 
-    impl LookaheadPeek<'_> for Zero {
+    impl LookaheadPeek for Zero {
         fn name(&self) -> &'static str {
             "0"
         }
@@ -362,7 +372,7 @@ pub mod token {
             #[derive(Clone, Copy)]
             pub struct $name;
 
-            impl Peek<'_> for $name {
+            impl Peek for $name {
                 fn peek(&self, cursor: super::Cursor) -> bool {
                     matches!(cursor.token(), Some((
                         TokenView {
@@ -375,7 +385,7 @@ pub mod token {
                 }
             }
 
-            impl LookaheadPeek<'_> for $name {
+            impl LookaheadPeek for $name {
                 fn name(&self) -> &'static str {
                     stringify!($value_token)
                 }
@@ -423,13 +433,15 @@ impl LitInt<'_> {
 
 pub struct Whitespace;
 
-impl Peek<'_> for Whitespace {
+impl Peek for Whitespace {
     fn peek(&self, cursor: Cursor) -> bool {
-        cursor.is_whitespace()
+        cursor
+            .token()
+            .is_some_and(|(view, _)| matches!(view.kind, TokenKind::Whitespace))
     }
 }
 
-impl LookaheadPeek<'_> for Whitespace {
+impl LookaheadPeek for Whitespace {
     fn name(&self) -> &'static str {
         "}"
     }
@@ -437,13 +449,15 @@ impl LookaheadPeek<'_> for Whitespace {
 
 pub struct RightBrace;
 
-impl Peek<'_> for RightBrace {
+impl Peek for RightBrace {
     fn peek(&self, cursor: Cursor) -> bool {
-        cursor.is_whitespace()
+        cursor
+            .token()
+            .is_some_and(|(view, _)| matches!(view.kind, TokenKind::RBrace))
     }
 }
 
-impl LookaheadPeek<'_> for RightBrace {
+impl LookaheadPeek for RightBrace {
     fn name(&self) -> &'static str {
         "}"
     }
@@ -451,13 +465,13 @@ impl LookaheadPeek<'_> for RightBrace {
 
 pub struct End;
 
-impl Peek<'_> for End {
+impl Peek for End {
     fn peek(&self, cursor: Cursor) -> bool {
         cursor.eof()
     }
 }
 
-impl LookaheadPeek<'_> for End {
+impl LookaheadPeek for End {
     fn name(&self) -> &'static str {
         "<eof>"
     }
@@ -469,7 +483,7 @@ pub struct Lookahead<'a> {
 }
 
 impl<'a> Lookahead<'a> {
-    pub fn peek<T: LookaheadPeek<'a>>(&mut self, peek: T) -> bool {
+    pub fn peek<T: LookaheadPeek>(&mut self, peek: T) -> bool {
         self.tried.push(peek.name());
         peek.peek(self.cursor)
     }
@@ -480,13 +494,55 @@ impl<'a> Lookahead<'a> {
 }
 
 impl ParseError {
+    fn display_cursor_name(cursor: Cursor<'_>) -> impl Display + use<'_> {
+        util::fmt_from_fn(move |f| {
+            let Some((token, _)) = cursor.token() else {
+                // TODO: if we're in a block this should be block terminator instead
+                return f.write_str("<eof>");
+            };
+
+            f.write_str(match token.kind {
+                TokenKind::LParen => "(",
+                TokenKind::LBracket => "[",
+                TokenKind::LBrace => "{",
+                TokenKind::Function => "<function>",
+                TokenKind::Ident => {
+                    return Display::fmt(&Escaped::new(token.source), f);
+                }
+                TokenKind::AtKeyword => "<at-keyword>",
+                TokenKind::Hash { .. } => "<hash>",
+                TokenKind::Number { .. } => "<number>",
+                TokenKind::Percentage { .. } => "<percentage>",
+                TokenKind::Dimension { unit_offset, .. } => {
+                    return write!(
+                        f,
+                        "<dimension-{}>",
+                        Escaped::new(&token.source[unit_offset as usize..])
+                    )
+                }
+                TokenKind::Url { .. } => "<unquoted-url>",
+                TokenKind::String => "<string>",
+                TokenKind::RParen => ")",
+                TokenKind::RBracket => "]",
+                TokenKind::RBrace => "}",
+                TokenKind::Punct(chr) => return Display::fmt(&chr, f),
+                TokenKind::Cdc => "-->",
+                TokenKind::Cdo => "<!--",
+                TokenKind::Whitespace => "<whitespace>",
+                TokenKind::BadString => "<bad-string>",
+                TokenKind::BadUrl => "<bad-url>",
+            })
+        })
+    }
+
     fn unexpected(cursor: Cursor, expected: &[&'static str]) -> Self {
+        let found = Self::display_cursor_name(cursor);
         match expected {
             [] => unreachable!("`Lookahead::error()` called before any `peek()`s"),
-            [one] => Self::new(cursor, format_args!("expected `{one}` found `{cursor}`",)),
+            [one] => Self::new(cursor, format_args!("expected `{one}` found `{found}`",)),
             [one, two] => Self::new(
                 cursor,
-                format_args!("expected `{one}` or `{two}`, found `{cursor}`",),
+                format_args!("expected `{one}` or `{two}`, found `{found}`",),
             ),
             [first, ref middle @ .., last] => Self::new(
                 cursor,
@@ -495,7 +551,7 @@ impl ParseError {
                     for &name in middle {
                         write!(f, ", {name}")?;
                     }
-                    write!(f, ", or `{last}`, found `{cursor}`")
+                    write!(f, ", or `{last}`, found `{found}`")
                 }),
             ),
         }

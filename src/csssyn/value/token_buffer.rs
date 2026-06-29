@@ -6,7 +6,7 @@ use super::{
 };
 use crate::csssyn::{
     tokenizer::{Escaped, HashTypeFlag, TokenKind, Tokenizer},
-    value::{LookaheadPeek, Parse, ParseStream, Token},
+    value::{token::TokenParse, LookaheadPeek, Parse, ParseStream, Peek, Token},
 };
 
 // Really could be anything <2^32-1 so that `Span` can use 32-bit integers.
@@ -296,18 +296,6 @@ impl<'a> Cursor<'a> {
         Some((inner_cursor, outer_cursor))
     }
 
-    pub fn is_whitespace(self) -> bool {
-        matches!(self.entry().kind, EntryTokenKind::Whitespace)
-    }
-
-    pub fn skip_whitespace(mut self) -> Cursor<'a> {
-        if !self.eof() && matches!(self.entry().kind, EntryTokenKind::Whitespace) {
-            self.entry = unsafe { self.entry.add(1) };
-        }
-
-        self
-    }
-
     pub fn limited(mut self, other: Cursor<'a>) -> Cursor<'a> {
         assert!(other.entry <= self.end);
 
@@ -325,18 +313,28 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn is<T: LookaheadPeek<'a>>(self, peek: T) -> bool {
+    pub fn is<T: Peek>(self, peek: T) -> bool {
         peek.peek(self)
     }
 
-    pub fn skip<T: LookaheadPeek<'a>>(mut self, peek: T) -> Option<Cursor<'a>> {
-        self.is(peek).then(|| {
-            // TODO: make this part of `<T::peek>`
-            if !self.eof() {
-                self.entry = unsafe { self.entry.add(1) };
-            }
+    pub fn next_if<T: Peek>(self, peek: T) -> Option<Cursor<'a>> {
+        if self.is(peek) {
+            self.next()
+        } else {
+            None
+        }
+    }
+
+    pub fn skip<T: Peek>(self, peek: T) -> Cursor<'a> {
+        if self.is(peek) {
+            self.next().unwrap_or(self)
+        } else {
             self
-        })
+        }
+    }
+
+    pub fn take<T: TokenParse<'a>>(self) -> Option<(T, Cursor<'a>)> {
+        T::take(self)
     }
 
     #[inline]
@@ -384,113 +382,6 @@ impl<'a> Cursor<'a> {
         self.entry = new_entry;
 
         Some(self)
-    }
-
-    // pub fn token_tree(self) -> Option<(TokenTree<'a>, Cursor<'a>)> {
-    //     let entry = self.entry();
-    //     let span = entry.span;
-    //     let entry_source = |leading: usize, trailing: usize| unsafe {
-    //         let start = entry.span.start as usize + leading;
-    //         let len = entry.span.end as usize - start - trailing;
-    //         std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-    //             self.source_base.as_ptr().add(start),
-    //             len,
-    //         ))
-    //     };
-
-    //     let mut next = Cursor {
-    //         entry: self.entry.wrapping_add(1),
-    //         ..self
-    //     };
-    //     let tree = match &entry.kind {
-    //         EntryTokenKind::OpenParenthesis(_)
-    //         | EntryTokenKind::OpenBracket(_)
-    //         | EntryTokenKind::OpenBrace(_)
-    //         | EntryTokenKind::CloseParenthesis
-    //         | EntryTokenKind::CloseBracket
-    //         | EntryTokenKind::CloseBrace
-    //         | EntryTokenKind::EndOfFile
-    //         | EntryTokenKind::Cdc
-    //         | EntryTokenKind::Cdo
-    //         | EntryTokenKind::Whitespace
-    //         | EntryTokenKind::AtKeyword
-    //         | EntryTokenKind::Hash { .. }
-    //         | EntryTokenKind::BadUrl
-    //         | EntryTokenKind::BadString => return None,
-    //         EntryTokenKind::Function(group_start) => {
-    //             let inner;
-    //             (inner, next) = unsafe { self.group_cursors(group_start) }?;
-    //             let end = unsafe { (*inner.end).span.end };
-
-    //             TokenTree::FunctionalNotation(FunctionalNotation {
-    //                 span: Span {
-    //                     start: span.start,
-    //                     end,
-    //                 },
-    //                 function: Escaped::new(entry_source(0, 1)),
-    //                 content: inner,
-    //             })
-    //         }
-    //         &EntryTokenKind::Punct(value) => TokenTree::Punct(Punct { span, value }),
-    //         EntryTokenKind::Ident => TokenTree::Ident(Ident {
-    //             span,
-    //             value: Escaped::new(entry_source(0, 0)),
-    //         }),
-    //         EntryTokenKind::String => TokenTree::String(LitString {
-    //             span,
-    //             value: Escaped::new(entry_source(1, 1)),
-    //         }),
-    //         &EntryTokenKind::Url {
-    //             value_offset,
-    //             trailing_len,
-    //         } => TokenTree::UnquotedUrl(UnquotedUrl {
-    //             span,
-    //             value: Escaped::new(entry_source(
-    //                 usize::from(value_offset),
-    //                 usize::from(trailing_len),
-    //             )),
-    //         }),
-    //         &EntryTokenKind::Number { integer } => TokenTree::Number(Number {
-    //             span,
-    //             value: NumericTokenValue {
-    //                 value: entry_source(0, 0),
-    //                 integer,
-    //             },
-    //         }),
-    //         &EntryTokenKind::Percentage { integer } => TokenTree::Percentage(Percentage {
-    //             span,
-    //             value: NumericTokenValue {
-    //                 value: entry_source(0, 1),
-    //                 integer,
-    //             },
-    //         }),
-    //         &EntryTokenKind::Dimension {
-    //             integer,
-    //             unit_offset,
-    //         } => TokenTree::Dimension(Dimension {
-    //             span,
-    //             text: entry_source(0, 0),
-    //             integer,
-    //             unit_offset,
-    //         }),
-    //     };
-
-    //     Some((tree, next.skip_whitespace()))
-    // }
-
-    pub fn right_brace(self) -> Option<(Punct, Cursor<'a>)> {
-        let entry = self.entry();
-        let EntryTokenKind::Punct(chr) = entry.kind else {
-            return None;
-        };
-
-        Some((
-            Punct {
-                span: entry.span,
-                value: chr,
-            },
-            self.next()?,
-        ))
     }
 
     #[inline]
@@ -590,36 +481,5 @@ impl std::fmt::Debug for Cursor<'_> {
                 }
             }))
             .finish()
-    }
-}
-impl Display for Cursor<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let entry = self.entry();
-        f.write_str(match entry.kind {
-            EntryTokenKind::OpenParenthesis(_) => "(",
-            EntryTokenKind::OpenBracket(_) => "[",
-            EntryTokenKind::OpenBrace(_) => "{",
-            EntryTokenKind::Function(_)
-            | EntryTokenKind::Ident
-            | EntryTokenKind::AtKeyword
-            | EntryTokenKind::Hash { .. }
-            | EntryTokenKind::String
-            | EntryTokenKind::Url { .. }
-            | EntryTokenKind::Number { .. }
-            | EntryTokenKind::Percentage { .. }
-            | EntryTokenKind::Dimension { .. } => {
-                return Display::fmt(&Escaped::new(unsafe { self.span_source(entry.span) }), f);
-            }
-            EntryTokenKind::CloseParenthesis => ")",
-            EntryTokenKind::CloseBracket => "]",
-            EntryTokenKind::CloseBrace => "}",
-            EntryTokenKind::EndOfFile => "<eof>",
-            EntryTokenKind::Punct(chr) => return Display::fmt(&chr, f),
-            EntryTokenKind::Cdc => "-->",
-            EntryTokenKind::Cdo => "<!--",
-            EntryTokenKind::Whitespace => unsafe { self.span_source(entry.span) },
-            EntryTokenKind::BadString => "<bad-string>",
-            EntryTokenKind::BadUrl => "<bad-url>",
-        })
     }
 }

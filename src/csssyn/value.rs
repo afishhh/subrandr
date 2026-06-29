@@ -7,6 +7,8 @@ pub use parse::*;
 use token_buffer::*;
 pub use token_tree::*;
 
+use crate::csssyn::Tokenizer;
+
 // https://drafts.csswg.org/css-syntax-3/#consume-a-component-value
 //
 // `Cursor`'s group skipping effectively implements component values.
@@ -52,10 +54,11 @@ fn consume_the_remnants_of_a_bad_declaration<'a>(
     }
 }
 
-struct Declaration<'a> {
-    name: Ident<'a>,
-    value: Cursor<'a>,
-    important: Option<Ident<'a>>,
+#[derive(Debug, Clone)]
+pub struct Declaration<'a> {
+    pub name: Ident<'a>,
+    pub value: Cursor<'a>,
+    pub important: Option<Ident<'a>>,
 }
 
 fn consume_a_declaration<'a>(
@@ -117,8 +120,7 @@ fn consume_a_declaration<'a>(
     )
 }
 
-// NOTE: This is a lot stricter than https://drafts.csswg.org/css-syntax-3/#consume-block-contents
-//       because I don't want to implement "consume an at-rule" and stuff right now.
+// https://drafts.csswg.org/css-syntax-3/#consume-block-contents but qualified rules are illegal.
 pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item = Declaration<'a>> {
     std::iter::from_fn(move || loop {
         if cursor.eof() {
@@ -142,4 +144,14 @@ pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item 
             None => continue,
         }
     })
+}
+
+#[test]
+fn abcd() {
+    let buffer =
+        TokenBuffer::from_tokenizer(Tokenizer::new("hello: world !important ; w: a")).unwrap();
+    panic!(
+        "{:?}",
+        parse_declaration_list(buffer.start()).collect::<Vec<_>>()
+    );
 }

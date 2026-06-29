@@ -234,6 +234,11 @@ pub struct Cursor<'a> {
     phantom: PhantomData<(&'a str, &'a Entry)>,
 }
 
+// pub trait Peek: Sized {
+//     #[doc(hidden)]
+//     fn peek(&self, ) -> bool;
+// }
+
 impl<'a> Cursor<'a> {
     fn entry(&self) -> &'a Entry {
         assert!(self.entry <= self.end);
@@ -272,7 +277,7 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn skip_whitespace(mut self) -> Cursor<'a> {
-        if matches!(self.entry().kind, EntryTokenKind::Whitespace) {
+        if !self.eof() && matches!(self.entry().kind, EntryTokenKind::Whitespace) {
             self.entry = unsafe { self.entry.add(1) };
         }
 
@@ -281,8 +286,6 @@ impl<'a> Cursor<'a> {
 
     pub fn limited(mut self, other: Cursor<'a>) -> Cursor<'a> {
         assert!(other.entry <= self.end);
-        // We assume that `Whitespace` cannot be an end entry above.
-        assert!(!matches!(other.entry().kind, EntryTokenKind::Whitespace));
 
         self.end = other.entry;
         self
@@ -446,12 +449,22 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn take_important_from_end(mut self) -> Option<(Ident<'a>, Cursor<'a>)> {
-        if unsafe { self.end.offset_from_unsigned(self.entry) } < 2 {
+        let n_entries = unsafe { self.end.offset_from_unsigned(self.entry) };
+        if n_entries < 2 {
             return None;
         }
 
-        let last_entry = unsafe { &*self.end.sub(1) };
-        let second_to_last_entry = unsafe { &*self.end.sub(2) };
+        let mut last = unsafe { self.end.sub(1) };
+        if unsafe { matches!((*last).kind, EntryTokenKind::Whitespace) } {
+            if n_entries < 3 {
+                return None;
+            }
+            last = unsafe { last.sub(1) };
+        }
+        let second_to_last = unsafe { last.sub(1) };
+
+        let last_entry = unsafe { &*last };
+        let second_to_last_entry = unsafe { &*second_to_last };
         if !matches!(second_to_last_entry.kind, EntryTokenKind::Punct('!'))
             || !matches!(last_entry.kind, EntryTokenKind::Ident)
         {
@@ -463,14 +476,14 @@ impl<'a> Cursor<'a> {
             return None;
         }
 
-        self.end = unsafe { self.end.sub(2) };
-        return Some((
+        self.end = second_to_last;
+        Some((
             Ident {
                 span: last_entry.span,
                 value: last_value,
             },
             self,
-        ));
+        ))
     }
 }
 
@@ -480,6 +493,23 @@ impl<'a> Spanned for Cursor<'a> {
     }
 }
 
+impl std::fmt::Debug for Cursor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Cursor ")?;
+        let mut current = *self;
+        f.debug_list()
+            .entries(std::iter::from_fn(|| {
+                if let Some(next) = current.next() {
+                    let result = current.entry();
+                    current = next;
+                    Some(result)
+                } else {
+                    None
+                }
+            }))
+            .finish()
+    }
+}
 impl Display for Cursor<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entry = self.entry();

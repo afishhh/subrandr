@@ -41,6 +41,7 @@ macros::implement_style_module! {
         #[parse(values::FontSize)]
         font_size: I26Dot6 = I26Dot6::new(16),
         font_slant: FontSlant = FontSlant::Regular,
+        #[parse(values::FontFeatureSettings)]
         #[copy(no)] font_feature_settings: FontFeatureSettings = FontFeatureSettings::empty(),
     }
 

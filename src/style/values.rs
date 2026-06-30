@@ -15,7 +15,10 @@ use crate::{
     },
     layout::FixedL,
     style::{
-        computed::{FontSlant as ComputedFontSlant, Length as ComputedLength},
+        computed::{
+            FontFeatureSettings as ComputedFontFeatureSettings, FontSlant as ComputedFontSlant,
+            Length as ComputedLength,
+        },
         ComputedStyle,
     },
     text::OpenTypeTag,
@@ -349,6 +352,28 @@ impl PeekParse for FontFeatureSettings {
         } else {
             return Ok(None);
         }))
+    }
+}
+
+impl PropertyValue<ComputedFontFeatureSettings> for FontFeatureSettings {
+    fn compute(self, _parent: &ComputedFontFeatureSettings) -> ComputedFontFeatureSettings {
+        let mut result = ComputedFontFeatureSettings::empty();
+        match self {
+            FontFeatureSettings::Normal => (),
+            FontFeatureSettings::Tags(tags) => {
+                for tag in tags {
+                    result.set(
+                        tag.tag,
+                        match tag.value {
+                            Some(FontFeatureTagValue::Integer(v)) => v,
+                            Some(FontFeatureTagValue::On) | None => 1,
+                            Some(FontFeatureTagValue::Off) => 0,
+                        },
+                    )
+                }
+            }
+        }
+        result
     }
 }
 

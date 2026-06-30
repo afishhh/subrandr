@@ -39,7 +39,9 @@ sbr_block_builder *sbr_block_builder_create(sbr_layout_context *,
 void sbr_block_builder_push(sbr_block_builder *, sbr_block *);
 sbr_block *sbr_block_builder_finish(sbr_block_builder *);
 void sbr_block_builder_set_style(sbr_inline_builder *, sbr_computed_style *);
-void sbr_block_builder_destroy(sbr_block *, sbr_layout_context *);
+void sbr_block_builder_destroy(sbr_block_builder *, sbr_layout_context *);
+// TODO: reconsider lctx argument. it isn't used by current impl but might be
+//       useful in another possible one
 void sbr_block_destroy(sbr_block *, sbr_layout_context *);
 
 sbr_inline_builder *sbr_inline_builder_create(sbr_layout_context *,

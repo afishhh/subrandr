@@ -509,7 +509,7 @@ pub enum Color {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ColorBase {
+pub enum ColorBase {
     Hex(BGRA8),
 }
 

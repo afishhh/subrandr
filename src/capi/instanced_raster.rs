@@ -1,18 +1,18 @@
 use std::{
     ffi::{c_int, c_void},
     marker::PhantomData,
+    ptr::NonNull,
 };
 
-use log::trace;
+use log::{trace, LogContext};
 use rasterize::{
     color::{Premultiplied, BGRA8},
-    scene::{FixedS, Rect2S},
-    sw::{InstancedOutputBuilder, OutputImage, OutputPiece},
+    scene::{FixedS, Rect2S, Scene},
+    sw::{self, InstancedOutputBuilder, OutputImage, OutputPiece},
 };
 use util::math::{Point2, Rect2, Vec2};
 
-use super::CRenderer;
-use crate::SubtitleContext;
+use crate::capi::{renderer::CRenderer, CError, ErrorKind};
 
 #[repr(C)]
 pub(super) struct COutputImage<'a> {
@@ -38,50 +38,85 @@ union COutputInstanceBase<'a> {
     ptr: *const COutputImage<'a>,
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_renderer_render_instanced(
-    renderer: *mut CRenderer,
-    ctx: *const SubtitleContext,
-    t: u32,
-    clip_rect: Rect2<i32>,
-    flags: u64,
-) -> *mut CRenderer {
-    if flags != 0 {
-        cthrow!(
-            InvalidArgument,
-            "non-zero flags passed to `sbr_renderer_render_instanced`"
-        );
+pub(super) struct CInstancedRasterPass {
+    output_pieces: Vec<OutputPiece>,
+    output_images: Vec<COutputImage<'static>>,
+    output_instances: Vec<COutputInstance<'static>>,
+    current: Option<CInstancedRasterPassContext>,
+}
+
+pub(super) enum CInstancedRasterPassContext {
+    Renderer(NonNull<CRenderer>),
+}
+
+impl CInstancedRasterPassContext {
+    unsafe fn rasterizer(&self) -> *mut sw::Rasterizer {
+        match self {
+            CInstancedRasterPassContext::Renderer(renderer) => {
+                &raw mut (*renderer.as_ptr()).rasterizer
+            }
+        }
     }
 
-    assert!(
-        (*renderer).output_pieces.is_empty(),
-        "Output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
-    );
+    unsafe fn finish(self) {
+        match self {
+            CInstancedRasterPassContext::Renderer(renderer) => {
+                let log = &(*(*renderer.as_ptr()).lib).root_logger.new_ctx();
+                (*renderer.as_ptr()).inner.end_raster(log);
+            }
+        }
+    }
+}
 
-    if !clip_rect.is_empty() {
-        let renderer = &mut (*renderer);
-        let log = &renderer.lib.root_logger.new_ctx();
+impl CInstancedRasterPass {
+    pub(super) unsafe fn new() -> Self {
+        Self {
+            output_pieces: Vec::new(),
+            output_images: Vec::new(),
+            output_instances: Vec::new(),
+            current: None,
+        }
+    }
 
-        ctry!(renderer
-            .inner
-            .render_to_scene(log, &*ctx, t, &mut renderer.rasterizer));
+    #[track_caller]
+    pub(super) unsafe fn render_scene(
+        &mut self,
+        log: &LogContext,
+        rasterizer: &mut sw::Rasterizer,
+        scene: &Scene,
+        clip_rect: Rect2<i32>,
+        flags: u64,
+        context: CInstancedRasterPassContext,
+    ) -> Result<(), CError> {
+        if flags != 0 {
+            return Err(CError::new(
+                ErrorKind::InvalidArgument,
+                "non-zero flags passed to instanced render",
+            ));
+        }
+
+        assert!(
+            (*self).output_pieces.is_empty(),
+            "output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
+        );
+        assert!(self.current.is_none());
 
         let cull_rect = Rect2S::new(
             Point2::new(FixedS::new(clip_rect.min.x), FixedS::new(clip_rect.min.y)),
             Point2::new(FixedS::new(clip_rect.max.x), FixedS::new(clip_rect.max.y)),
         );
-        ctry!(renderer
-            .rasterizer
-            .render_scene_pieces(log, renderer.inner.scene(), cull_rect, &mut |piece| {
+        rasterizer
+            .render_scene_pieces(log, scene, cull_rect, &mut |piece| {
                 if piece.size.x == 0 || piece.size.y == 0 {
                     return;
                 }
 
-                renderer.output_pieces.push(piece);
+                self.output_pieces.push(piece);
             })
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.
-            .inspect_err(|_| renderer.output_pieces.clear()));
+            .inspect_err(|_| self.output_pieces.clear())
+            .map_err(CError::from_error);
 
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,
@@ -121,59 +156,63 @@ unsafe extern "C" fn sbr_renderer_render_instanced(
 
         rasterize::sw::pieces_to_instanced_images(
             &mut CInstancedOutputBuilder {
-                images: &mut renderer.output_images,
-                instances: &mut renderer.output_instances,
+                images: &mut self.output_images,
+                instances: &mut self.output_instances,
                 _lifetime: PhantomData,
             },
-            renderer.output_pieces.iter(),
+            self.output_pieces.iter(),
             clip_rect,
-            &mut renderer.rasterizer,
+            rasterizer,
         );
 
-        renderer.rasterizer.advance_cache_generation();
+        rasterizer.advance_cache_generation();
 
         trace!(
             log,
             "Rasterized to {} images and {} instances",
-            renderer.output_images.len(),
-            renderer.output_instances.len()
+            self.output_images.len(),
+            self.output_instances.len()
         );
 
-        if !renderer.output_instances.is_empty() {
-            let len = renderer.output_instances.len();
-            let mut current = renderer.output_instances.as_mut_ptr();
+        if !self.output_instances.is_empty() {
+            let len = self.output_instances.len();
+            let mut current = self.output_instances.as_mut_ptr();
             let mut next = current.wrapping_add(1);
-            let end = current.add(len);
+            let end = unsafe { current.add(len) };
             loop {
-                (*current).base.ptr = renderer.output_images.as_ptr().add((*current).base.idx);
-                if next == end {
-                    break;
+                unsafe {
+                    (*current).base.ptr = self.output_images.as_ptr().add((*current).base.idx);
+                    if next == end {
+                        break;
+                    }
+                    (*current).next = next;
                 }
-                (*current).next = next;
                 current = next;
                 next = next.wrapping_add(1);
             }
         }
-    }
 
-    renderer
+        self.current = Some(context);
+
+        Ok(())
+    }
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_instanced_raster_pass_get_instances(
-    renderer: *mut CRenderer,
+    pass: *mut CInstancedRasterPass,
 ) -> *const COutputInstance<'static> {
-    if (*renderer).output_instances.is_empty() {
+    if (*pass).output_instances.is_empty() {
         std::ptr::null()
     } else {
-        (*renderer).output_instances.as_ptr()
+        (*pass).output_instances.as_ptr()
     }
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_output_image_rasterize_into(
     image: *const COutputImage,
-    renderer: *mut CRenderer,
+    pass: *mut CInstancedRasterPass,
     off_x: i32,
     off_y: i32,
     buffer: *mut Premultiplied<BGRA8>,
@@ -181,7 +220,7 @@ unsafe extern "C" fn sbr_output_image_rasterize_into(
     height: u32,
     stride: u32,
 ) -> c_int {
-    let rasterizer = &mut (*renderer).rasterizer;
+    let rasterizer = &mut *(*pass).current.as_ref().unwrap().rasterizer();
     let mut target = rasterize::sw::RenderTarget::new(
         std::slice::from_raw_parts_mut(buffer, height as usize * stride as usize),
         width,
@@ -197,10 +236,14 @@ unsafe extern "C" fn sbr_output_image_rasterize_into(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_instanced_raster_pass_finish(renderer: *mut CRenderer) {
-    let log = &(*renderer).lib.root_logger.new_ctx();
-    (*renderer).inner.end_raster(log);
-    (*renderer).output_instances.clear();
-    (*renderer).output_images.clear();
-    (*renderer).output_pieces.clear();
+unsafe extern "C" fn sbr_instanced_raster_pass_finish(pass: *mut CInstancedRasterPass) {
+    (*pass)
+        .current
+        .take()
+        .expect("sbr_instanced_raster_pass_finish called on inactive raster pass")
+        .finish();
+
+    (*pass).output_instances.clear();
+    (*pass).output_images.clear();
+    (*pass).output_pieces.clear();
 }

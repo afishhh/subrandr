@@ -469,6 +469,21 @@ impl PeekParse for LineBreak {
     }
 }
 
+impl PropertyValue<icu_segmenter::options::LineBreakStrictness> for LineBreak {
+    fn compute(
+        self,
+        _parent: &icu_segmenter::options::LineBreakStrictness,
+    ) -> icu_segmenter::options::LineBreakStrictness {
+        match self {
+            LineBreak::Auto => icu_segmenter::options::LineBreakStrictness::Normal,
+            LineBreak::Loose => icu_segmenter::options::LineBreakStrictness::Loose,
+            LineBreak::Normal => icu_segmenter::options::LineBreakStrictness::Normal,
+            LineBreak::Strict => icu_segmenter::options::LineBreakStrictness::Strict,
+            LineBreak::Anywhere => icu_segmenter::options::LineBreakStrictness::Anywhere,
+        }
+    }
+}
+
 // https://www.w3.org/TR/css-text-3/#word-break-property
 #[derive(Debug, Clone, Copy)]
 pub enum WordBreak {

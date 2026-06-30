@@ -76,6 +76,11 @@ struct CLayoutContext {
 
     in_layout_pass: bool,
 
+    // NOTE: self-referencial to `display_scene_builder` but should never
+    //       be `Some` once this is dropped
+    display_pass: Option<DisplayPass<'static>>,
+    display_scene_builder: SceneBuilder,
+
     raster_pass: CInstancedRasterPass,
 }
 
@@ -89,6 +94,9 @@ unsafe extern "C" fn sbr_layout_context_create(lib: *const CLibrary) -> *mut CLa
         dpi: 72,
 
         in_layout_pass: false,
+
+        display_pass: None,
+        display_scene_builder: SceneBuilder::new(),
 
         raster_pass: CInstancedRasterPass::new(),
     }))
@@ -370,9 +378,67 @@ unsafe extern "C" fn sbr_fragment_size(fragment: *mut CFragment) -> Vec2L {
     (*fragment).inner.fbox.size_for_layout()
 }
 
-pub(super) struct FragmentRasterPassContext(NonNull<CLayoutContext>);
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_fragment_destroy(fragment: *mut CFragment) {
+    drop(Box::from_raw(fragment));
+}
 
-impl FragmentRasterPassContext {
+struct CDisplayPass(());
+
+impl CDisplayPass {
+    #[track_caller]
+    unsafe fn ensure<'a>(
+        pass: *mut CDisplayPass,
+    ) -> (*mut CLayoutContext, &'a mut DisplayPass<'static>) {
+        let lctx = pass.cast::<CLayoutContext>();
+
+        let Some(pass) = (*lctx).display_pass.as_mut() else {
+            panic!(
+                "invalid display pass: associated context does not currently have an active display pass"
+            );
+        };
+
+        (lctx, pass)
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_display_pass_begin(
+    lctx: *mut CLayoutContext,
+    dpi: u32,
+) -> *mut CLayoutPass {
+    assert!(
+        (*lctx).display_pass.is_none(),
+        "display pass already in progress"
+    );
+
+    (*lctx).display_scene_builder.reset();
+    (*lctx).display_pass = Some(DisplayPass::new(
+        (*lctx).display_scene_builder.root(),
+        dpi,
+        &(*lctx).glyph_cache,
+        &mut (*lctx).rasterizer,
+    ));
+
+    lctx.cast()
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_fragment_display(
+    fragment: *mut CFragment,
+    dpass: *mut CDisplayPass,
+    offset: Point2L,
+) -> c_int {
+    let (_, dstate) = CDisplayPass::ensure(dpass);
+
+    ctry!((*dstate).display_block_container_fragment(offset, &(*fragment).inner));
+
+    0
+}
+
+pub(super) struct DisplayRasterPassContext(NonNull<CLayoutContext>);
+
+impl DisplayRasterPassContext {
     pub(super) fn rasterizer(&self) -> *mut sw::Rasterizer {
         unsafe { &raw mut (*self.0.as_ptr()).rasterizer }
     }
@@ -381,34 +447,22 @@ impl FragmentRasterPassContext {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_fragment_render_instanced(
-    fragment: *mut CFragment,
-    lctx: *mut CLayoutContext,
-    offset: Point2L,
+unsafe extern "C" fn sbr_display_pass_render_instanced(
+    dpass: *mut CDisplayPass,
     clip_rect: Rect2<i32>,
     flags: u64,
 ) -> *mut CInstancedRasterPass {
-    let scene = {
-        let mut builder = SceneBuilder::new();
+    let (lctx, _) = CDisplayPass::ensure(dpass);
 
-        ctry!(DisplayPass::new(
-            builder.root(),
-            (*lctx).dpi,
-            &(*lctx).glyph_cache,
-            &mut (*lctx).rasterizer,
-        )
-        .display_block_container_fragment(offset, &(*fragment).inner));
-
-        builder.finish()
-    };
+    assert!((*lctx).display_pass.take().is_some());
 
     ctry!((*lctx).raster_pass.render_scene(
         &(*(*lctx).lib).root_logger.new_ctx(),
         &mut (*lctx).rasterizer,
-        &scene,
+        &(*lctx).display_scene_builder.finish(),
         clip_rect,
         flags,
-        CInstancedRasterPassContext::Fragment(FragmentRasterPassContext(NonNull::new_unchecked(
+        CInstancedRasterPassContext::Display(DisplayRasterPassContext(NonNull::new_unchecked(
             lctx,
         ))),
     ));

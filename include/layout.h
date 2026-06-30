@@ -19,6 +19,9 @@ void sbr_layout_context_destroy(sbr_layout_context *);
 typedef struct sbr_computed_style sbr_computed_style;
 
 sbr_computed_style *sbr_computed_style_default(sbr_layout_context *);
+// TODO: consider function for getting just derived style (with no declarations)
+//       you can always just do from_str(lctx, "", 0, parent) so it's not
+//       anything new
 sbr_computed_style *sbr_computed_style_compute_from_str(
     sbr_layout_context *, char const *declarations, size_t declarations_len,
     sbr_computed_style *parent);
@@ -39,7 +42,7 @@ sbr_block_builder *sbr_block_builder_create(sbr_layout_context *,
 void sbr_block_builder_push(sbr_block_builder *, sbr_block *);
 sbr_block *sbr_block_builder_finish(sbr_block_builder *);
 void sbr_block_builder_set_style(sbr_inline_builder *, sbr_computed_style *);
-void sbr_block_builder_destroy(sbr_block_builder *, sbr_layout_context *);
+void sbr_block_builder_destroy(sbr_block_builder *);
 // TODO: reconsider lctx argument. it isn't used by current impl but might be
 //       useful in another possible one
 void sbr_block_destroy(sbr_block *, sbr_layout_context *);
@@ -66,6 +69,8 @@ sbr_span_builder *sbr_ruby_builder_push_annotation(sbr_ruby_builder *,
                                                    sbr_computed_style *);
 void sbr_ruby_builder_finish(sbr_ruby_builder *);
 
+// TODO: expose inline-block
+
 typedef struct sbr_layout_pass sbr_layout_pass;
 typedef struct sbr_fragment sbr_fragment;
 typedef struct sbr_vec2l {
@@ -77,14 +82,20 @@ void sbr_layout_pass_end(sbr_layout_pass *);
 
 sbr_fragment *sbr_block_layout(sbr_block *, sbr_layout_pass *,
                                sbr_vec2l available_size);
-void sbr_fragment_destroy(sbr_fragment *);
 
 sbr_vec2l sbr_fragment_size(sbr_fragment *);
-sbr_instanced_raster_pass *sbr_fragment_render_instanced(sbr_fragment *,
-                                                         sbr_layout_context *,
-                                                         sbr_vec2l offset,
-                                                         sbr_rect2i clip_rect,
-                                                         uint64_t flags);
+void sbr_fragment_destroy(sbr_fragment *);
+
+typedef struct sbr_display_pass sbr_display_pass;
+
+sbr_display_pass *sbr_display_pass_begin(sbr_layout_context *);
+// TODO: allow interupting display pass
+
+int sbr_fragment_display(sbr_fragment *, sbr_display_pass *, sbr_vec2l offset);
+
+sbr_instanced_raster_pass *
+sbr_display_pass_render_instanced(sbr_display_pass *, sbr_rect2i clip_rect,
+                                  uint64_t flags);
 
 #ifdef __cplusplus
 }

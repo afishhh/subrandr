@@ -47,6 +47,7 @@ macros::implement_style_module! {
 
     rc text_inherited {
         #[copy(no)] text_shadows: Rc<[TextShadow]> = rc_static!([]),
+        #[parse(values::LineBreak)]
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: HorizontalAlignment = HorizontalAlignment::Left,

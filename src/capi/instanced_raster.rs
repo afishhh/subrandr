@@ -12,7 +12,7 @@ use rasterize::{
 };
 use util::math::{Point2, Rect2, Vec2};
 
-use crate::capi::{layout::FragmentRasterPassContext, renderer::CRenderer, CError, ErrorKind};
+use crate::capi::{layout::DisplayRasterPassContext, renderer::CRenderer, CError, ErrorKind};
 
 #[repr(C)]
 pub(super) struct COutputImage<'a> {
@@ -50,7 +50,7 @@ pub(super) struct CInstancedRasterPass {
 //        theoretically it should be possible to dance around this but it'd be tricky)
 pub(super) enum CInstancedRasterPassContext {
     Renderer(NonNull<CRenderer>),
-    Fragment(FragmentRasterPassContext),
+    Display(DisplayRasterPassContext),
 }
 
 impl CInstancedRasterPassContext {
@@ -59,7 +59,7 @@ impl CInstancedRasterPassContext {
             CInstancedRasterPassContext::Renderer(renderer) => {
                 &raw mut (*renderer.as_ptr()).rasterizer
             }
-            CInstancedRasterPassContext::Fragment(fragment) => fragment.rasterizer(),
+            CInstancedRasterPassContext::Display(display) => display.rasterizer(),
         }
     }
 
@@ -69,7 +69,7 @@ impl CInstancedRasterPassContext {
                 let log = &(*(*renderer.as_ptr()).lib).root_logger.new_ctx();
                 (*renderer.as_ptr()).inner.end_raster(log);
             }
-            CInstancedRasterPassContext::Fragment(fragment) => fragment.finish(),
+            CInstancedRasterPassContext::Display(display) => display.finish(),
         }
     }
 }
@@ -102,10 +102,9 @@ impl CInstancedRasterPass {
         }
 
         assert!(
-            self.output_pieces.is_empty(),
-            "output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
+            self.output_pieces.is_empty() || self.current.is_none(),
+            "invalid instanced raster state, did you forget to call `sbr_instanced_raster_pass_finish`?"
         );
-        assert!(self.current.is_none());
 
         let cull_rect = Rect2S::new(
             Point2::new(FixedS::new(clip_rect.min.x), FixedS::new(clip_rect.min.y)),

@@ -1,5 +1,9 @@
 use quote::quote;
-use syn::{parse::ParseStream, spanned::Spanned, Token};
+use syn::{
+    parse::{Parse, ParseStream},
+    spanned::Spanned,
+    Token,
+};
 
 use crate::{
     common::{advance_past_punct, parse_yes_no},
@@ -13,12 +17,14 @@ struct Property {
     inherit: bool,
     copy: bool,
     default: Option<syn::Expr>,
+    parser: Option<syn::Type>,
 }
 
 impl Property {
     fn try_parse(buffer: ParseStream, ctx: &mut ParseContext) -> Result<Self, AlreadyReported> {
         let mut inherit = true;
         let mut copy = true;
+        let mut parse_value = None;
 
         let mut errored = false;
         for attr in buffer.call(syn::Attribute::parse_outer).report_in(ctx)? {
@@ -35,6 +41,13 @@ impl Property {
                     .report_in_and_set(ctx, &mut errored)
                 {
                     copy = value;
+                }
+            } else if attr.path().is_ident("parse") {
+                if let Ok(value) = attr
+                    .parse_args_with(syn::Type::parse)
+                    .report_in_and_set(ctx, &mut errored)
+                {
+                    parse_value = Some(value);
                 }
             } else {
                 errored = true;
@@ -61,6 +74,7 @@ impl Property {
                 copy,
                 value_type,
                 default,
+                parser: parse_value,
             })
         } else {
             Err(AlreadyReported)
@@ -228,6 +242,9 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
     let mut create_child_impl = TokenStream2::new();
     let mut default_const_impl = TokenStream2::new();
     let mut debug_fields_impl = TokenStream2::new();
+    let mut properties_module = TokenStream2::new();
+    let mut parsers_array_elements = TokenStream2::new();
+
     for group in &input.groups {
         let group_name = &group.name;
         let group_type_name = snake_case_to_pascal_case(&group.name);
@@ -254,6 +271,32 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
             } else {
                 Some(ampersand.clone())
             };
+
+            let meta_name = syn::Ident::new(
+                &format!("Computed{}", snake_case_to_pascal_case(name)),
+                name.span(),
+            );
+            let inherited = prop.inherit;
+            properties_module.extend(quote! {
+                pub(super) struct #meta_name;
+
+                impl ComputedProperty for #meta_name {
+                    type Value = #type_;
+                    const INHERITED: bool = #inherited;
+                    fn get(style: &ComputedStyle) -> &Self::Value {
+                        &style.0.#group_name.#name
+                    }
+                    fn set(style: &mut ComputedStyle, value: Self::Value) {
+                        *style.#make_mut_name() = value;
+                    }
+                }
+            });
+            if let Some(parse_value) = &prop.parser {
+                let auto_css_name = name.to_string().replace('_', "-");
+                parsers_array_elements.extend(quote! {
+                    (#auto_css_name, values::parse_and_compute::<#meta_name, #parse_value>),
+                });
+            }
 
             computed_style_impl.extend(quote! {
                 pub fn #name(&self) -> #ampersand_if_not_copy #type_ {
@@ -341,6 +384,16 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                     #debug_fields_impl
                     .finish()
             }
+        }
+
+        mod properties {
+            use super::*;
+
+            #properties_module
+
+            pub(super) const PARSERS: &[(&'static str, values::ParseAndComputeFn)] = &[
+                #parsers_array_elements
+            ];
         }
     });
 

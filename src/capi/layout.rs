@@ -6,7 +6,9 @@ use crate::{
 };
 
 #[unsafe(no_mangle)]
-extern "C" fn sbr_computed_style_default(_lib: &CLibrary) -> *const ComputedStyleInner {
+extern "C" fn sbr_computed_style_default(lctx: *const CLayoutContext) -> *const ComputedStyleInner {
+    assert!(!lctx.is_null());
+
     ComputedStyle::DEFAULT.into_raw()
 }
 
@@ -22,23 +24,40 @@ unsafe extern "C" fn sbr_computed_style_unref(style: *const ComputedStyleInner) 
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sbr_computed_style_set(
-    _lib: &CLibrary,
-    style: *mut *const ComputedStyleInner,
-    name: *const c_char,
-    name_len: usize,
-    value: *const c_char,
-    value_len: usize,
-) {
-    let prev = ManuallyDrop::new(unsafe { ComputedStyle::from_raw(style.read()) });
-    // do stuff
-    todo!();
-    style.write(prev.into_raw());
+unsafe extern "C" fn sbr_computed_style_compute_from_str(
+    lctx: *mut CLayoutContext,
+    declarations: *const c_char,
+    declarations_len: usize,
+    parent: *const ComputedStyleInner,
+) -> *const ComputedStyleInner {
+    let lib = &*(*lctx).library;
+
+    let source = ctry!(std::str::from_utf8(std::slice::from_raw_parts(
+        declarations.cast::<u8>(),
+        declarations_len,
+    )));
+    let parent = ManuallyDrop::new(ComputedStyle::from_raw(parent));
+
+    let buffer = ctry!(crate::csssyn::buffer::TokenBuffer::from_source(source));
+    let declarations = crate::csssyn::value::parse_declaration_list(buffer.start()).collect();
+
+    ComputedStyle::into_raw(crate::style::from_declarations(
+        lib.root_logger.new_ctx(),
+        declarations,
+        &parent,
+    ))
 }
 
 struct CLayoutContext {
-    // font db and stuff
-    pass: Option<CLayoutPass>,
+    library: *const CLibrary,
 }
 
-struct CLayoutPass {}
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_layout_context_create(lib: *const CLibrary) -> *mut CLayoutContext {
+    Box::into_raw(Box::new(CLayoutContext { library: lib }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_layout_context_destroy(lctx: *mut CLayoutContext) {
+    drop(unsafe { Box::from_raw(lctx) });
+}

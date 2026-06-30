@@ -19,10 +19,9 @@ void sbr_layout_context_destroy(sbr_layout_context *);
 typedef struct sbr_computed_style sbr_computed_style;
 
 sbr_computed_style *sbr_computed_style_default(sbr_layout_context *);
-sbr_computed_style *sbr_computed_style_from_str(sbr_layout_context *,
-                                                char const *declarations,
-                                                size_t declarations_len,
-                                                sbr_computed_style *parent);
+sbr_computed_style *sbr_computed_style_compute_from_str(
+    sbr_layout_context *, char const *declarations, size_t declarations_len,
+    sbr_computed_style *parent);
 void sbr_computed_style_ref(sbr_computed_style *);
 void sbr_computed_style_unref(sbr_computed_style *);
 

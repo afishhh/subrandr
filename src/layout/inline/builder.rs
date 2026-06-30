@@ -319,6 +319,10 @@ impl<'a> InlineSpanBuilder<'a> {
             block: Box::new(block),
         }));
     }
+
+    pub fn is_root(&self) -> bool {
+        self.span_index == usize::MAX
+    }
 }
 
 impl<'a> std::fmt::Write for InlineSpanBuilder<'a> {
@@ -336,7 +340,7 @@ impl<'a> Drop for InlineSpanBuilder<'a> {
             self.parent.finish_run(self.run_text_item_stack_start);
         }
 
-        if self.span_index != usize::MAX {
+        if !self.is_root() {
             self.parent.items.push(InlineItem::SpanEnd);
         }
     }

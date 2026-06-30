@@ -12,7 +12,7 @@ use rasterize::{
 };
 use util::math::{Point2, Rect2, Vec2};
 
-use crate::capi::{renderer::CRenderer, CError, ErrorKind};
+use crate::capi::{layout::FragmentRasterPassContext, renderer::CRenderer, CError, ErrorKind};
 
 #[repr(C)]
 pub(super) struct COutputImage<'a> {
@@ -45,8 +45,12 @@ pub(super) struct CInstancedRasterPass {
     current: Option<CInstancedRasterPassContext>,
 }
 
+// TODO: this could be made a trait once traits allow pointers as receivers
+//       (we cannot borrow CRenderer without invalidating our raster pass,
+//        theoretically it should be possible to dance around this but it'd be tricky)
 pub(super) enum CInstancedRasterPassContext {
     Renderer(NonNull<CRenderer>),
+    Fragment(FragmentRasterPassContext),
 }
 
 impl CInstancedRasterPassContext {
@@ -55,6 +59,7 @@ impl CInstancedRasterPassContext {
             CInstancedRasterPassContext::Renderer(renderer) => {
                 &raw mut (*renderer.as_ptr()).rasterizer
             }
+            CInstancedRasterPassContext::Fragment(fragment) => fragment.rasterizer(),
         }
     }
 
@@ -64,6 +69,7 @@ impl CInstancedRasterPassContext {
                 let log = &(*(*renderer.as_ptr()).lib).root_logger.new_ctx();
                 (*renderer.as_ptr()).inner.end_raster(log);
             }
+            CInstancedRasterPassContext::Fragment(fragment) => fragment.finish(),
         }
     }
 }
@@ -96,7 +102,7 @@ impl CInstancedRasterPass {
         }
 
         assert!(
-            (*self).output_pieces.is_empty(),
+            self.output_pieces.is_empty(),
             "output piece buffer isn't empty, did you forget to call `sbr_instanced_raster_pass_finish`?"
         );
         assert!(self.current.is_none());
@@ -116,7 +122,7 @@ impl CInstancedRasterPass {
             // Make sure piece buffer is cleared if rendering fails
             // so the above assertion is not triggered in such a case.
             .inspect_err(|_| self.output_pieces.clear())
-            .map_err(CError::from_error);
+            .map_err(CError::from_error)?;
 
         struct CInstancedOutputBuilder<'a, 'o> {
             images: &'o mut Vec<COutputImage<'static>>,

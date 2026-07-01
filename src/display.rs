@@ -8,6 +8,7 @@ use util::math::{I26Dot6, Rect2};
 use crate::{
     layout::{
         block::{BlockContainerFragment, BlockContainerFragmentContent},
+        image::ImageFragment,
         inline::{Baseline, InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
         Axis, FixedL, FragmentBox, IndependentBoxFragment, Point2L, Vec2L, Vec2LW,
         Vec2WritingModeExt as _,
@@ -601,6 +602,20 @@ impl DisplayContext<'_> {
         Ok(())
     }
 
+    fn display_image_fragment(
+        &mut self,
+        mut output: SceneContentBuilder<'_>,
+        fragment: &ImageFragment,
+    ) -> Result<(), DisplayError> {
+        Self::enter_transformable_box(&mut output, &fragment.fbox, &fragment.style);
+
+        fragment
+            .inner
+            .display(&mut output, fragment.fbox.content_size);
+
+        Ok(())
+    }
+
     fn display_independent_box_fragment(
         &mut self,
         output: SceneContentBuilder<'_>,
@@ -610,6 +625,7 @@ impl DisplayContext<'_> {
             IndependentBoxFragment::Block(block) => {
                 self.display_block_container_fragment(output, block)
             }
+            IndependentBoxFragment::Image(image) => self.display_image_fragment(output, image),
         }
     }
 }

@@ -5,7 +5,7 @@ use std::{
 
 use rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
-    scene::SceneBuilder,
+    scene::{Point2S, Rect2S, SceneBuilder},
 };
 
 use crate::{
@@ -43,6 +43,9 @@ macro_rules! make_tree {
     (@map_child inline->block $value: expr) => {
         $value
     };
+    (@map_child inline->image $value: expr) => {
+        $value
+    };
     (@build_all_result_ty inline) => { () };
 
     (@build text [$style: expr; inline=$builder: ident]; $value: literal) => {
@@ -58,12 +61,10 @@ macro_rules! make_tree {
         make_tree!(@build_all ruby [$style; inline=builder]; $($content)*);
     }};
     (@build block [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
-        $builder.push_atomic(
-            crate::layout::block::BlockContainer {
-                style: $style.clone(),
-                content: make_tree!(@build_block_content [$style;] $content_block)
-            }.into()
-        );
+        $builder.push_atomic(make_tree!(@build block [$style;]; $content_block).into());
+    }};
+    (@build image [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
+        $builder.push_atomic(make_tree!(@build image [$style;]; $content_block).into());
     }};
     (@map_child ruby->base $value: expr) => {
         $value
@@ -106,7 +107,29 @@ macro_rules! make_tree {
     (@map_child block->block $value: expr) => {
         crate::layout::IndependentBox::from($value)
     };
+    (@map_child block->image $value: expr) => {
+        crate::layout::IndependentBox::from($value)
+    };
     (@build_all_result_ty block) => { crate::layout::IndependentBox };
+
+    (@build image [$style: expr;]; {
+        natural_size = $natural_size: expr,
+        color = $color: expr
+    }) => {
+        crate::layout::image::Image {
+            style: $style.clone(),
+            natural_dimensions: {
+                let size: crate::layout::Vec2L = $natural_size;
+                crate::layout::image::NaturalDimensions {
+                    width: size.x,
+                    height: size.y,
+                }
+            },
+            inner: std::rc::Rc::new(crate::layout_tests::common::TestImage {
+                color: $color
+            })
+        }
+    };
 
     (@build $what: ident [$parent_style: expr; $($context_rest: tt)*]; [$($class: ident)*] { $($block_content: tt)* }) => {{
         let style = make_tree!(@apply_style $parent_style; $($class)*);
@@ -239,6 +262,17 @@ test_define_style! {
     pub .noto_sans_jp "font-family: Noto Sans JP"
     pub .noto_color_emoji "font-family: Noto Color Emoji"
     pub .bungee_tint "font-family: Bungee Tint"
+}
+
+#[derive(Debug)]
+pub(super) struct TestImage {
+    pub(super) color: BGRA8,
+}
+
+impl layout::image::ImageInner for TestImage {
+    fn display(&self, builder: &mut rasterize::scene::SceneContentBuilder, size: Vec2L) {
+        builder.filled_rect(Rect2S::from_min_size(Point2S::ZERO, size), self.color);
+    }
 }
 
 fn check_fn(
@@ -403,6 +437,7 @@ test_define_style! {
     pub .blue_bg "background-color: blue"
     pub .yellow_bg "background-color: yellow"
     pub .cyan_bg "background-color: cyan"
+    pub .orangered_bg "background-color: orangered"
 
     pub .fs16 "font-size: initial"
     pub .fs20 "font-size: 20px"

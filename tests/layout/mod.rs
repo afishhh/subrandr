@@ -3,6 +3,7 @@ mod common;
 mod block;
 mod font_feature_settings;
 mod hello_world;
+mod image_sizing;
 mod inline_block;
 mod inline_sizing;
 mod inline_spacing;

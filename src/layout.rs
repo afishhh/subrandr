@@ -515,15 +515,23 @@ impl AsLogger for LayoutContext<'_> {
 pub mod inline;
 pub use inline::InlineLayoutError;
 pub mod block;
+pub mod image;
 
 #[derive(Debug)]
 pub enum IndependentBox {
     Block(block::BlockContainer),
+    Image(image::Image),
 }
 
 impl From<block::BlockContainer> for IndependentBox {
     fn from(value: block::BlockContainer) -> Self {
         Self::Block(value)
+    }
+}
+
+impl From<image::Image> for IndependentBox {
+    fn from(value: image::Image) -> Self {
+        Self::Image(value)
     }
 }
 
@@ -536,18 +544,21 @@ impl IndependentBox {
             IndependentBox::Block(block) => {
                 block.layout_initial(lctx).map(PartialIndependentBox::Block)
             }
+            IndependentBox::Image(image) => Ok(PartialIndependentBox::Image(image.clone())),
         }
     }
 }
 
 pub enum PartialIndependentBox<'a> {
     Block(block::PartialBlockContainer<'a>),
+    Image(image::Image),
 }
 
 impl<'a> PartialIndependentBox<'a> {
     pub fn style(&self) -> &ComputedStyle {
         match self {
             PartialIndependentBox::Block(block) => block.style(),
+            PartialIndependentBox::Image(image) => &image.style,
         }
     }
 
@@ -557,9 +568,51 @@ impl<'a> PartialIndependentBox<'a> {
         constraints: Vec2<LayoutConstraint>,
         axes: Axes,
     ) -> Result<Vec2L, InlineLayoutError> {
-        match self {
-            PartialIndependentBox::Block(block) => block.measure(lctx, constraints, axes),
+        let style = self.style();
+        let writing_mode = style.writing_mode();
+
+        let outer_edges = Vec2W::new(
+            style
+                .block_min_padding(writing_mode)
+                .to_physical_pixels(lctx.dpi)
+                + style
+                    .block_max_padding(writing_mode)
+                    .to_physical_pixels(lctx.dpi),
+            style
+                .inline_min_margin(writing_mode)
+                .to_physical_pixels(lctx.dpi)
+                .unwrap_or(FixedL::ZERO)
+                + style
+                    .inline_min_padding(writing_mode)
+                    .to_physical_pixels(lctx.dpi)
+                + style
+                    .inline_max_padding(writing_mode)
+                    .to_physical_pixels(lctx.dpi)
+                + style
+                    .inline_max_margin(writing_mode)
+                    .to_physical_pixels(lctx.dpi)
+                    .unwrap_or(FixedL::ZERO),
+        );
+
+        let mut inner_constraints = constraints;
+        match &mut inner_constraints.inline_mut(writing_mode) {
+            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.inline,
+            LayoutConstraint::MaxContent => (),
         }
+        match &mut inner_constraints.block_mut(writing_mode) {
+            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.block,
+            LayoutConstraint::MaxContent => (),
+        }
+        let mut result = self.measure_inner(lctx, inner_constraints, axes)?;
+
+        if axes.inline(writing_mode) {
+            *result.inline_mut(writing_mode) += outer_edges.inline;
+        }
+        if axes.block(writing_mode) {
+            *result.block_mut(writing_mode) += outer_edges.block;
+        }
+
+        Ok(result)
     }
 
     fn measure_inner(
@@ -570,6 +623,7 @@ impl<'a> PartialIndependentBox<'a> {
     ) -> Result<Vec2L, InlineLayoutError> {
         match self {
             PartialIndependentBox::Block(block) => block.measure_inner(lctx, constraints, axes),
+            PartialIndependentBox::Image(image) => Ok(image.measure_inner(lctx, constraints, axes)),
         }
     }
 
@@ -591,6 +645,11 @@ impl<'a> PartialIndependentBox<'a> {
                     outer_writing_mode,
                 )
                 .map(IndependentBoxFragment::Block),
+            PartialIndependentBox::Image(image) => Ok(IndependentBoxFragment::Image(image.layout(
+                lctx,
+                Vec2W::new(None, Some(outer_inner_inline_size)).to_physical(outer_writing_mode),
+                margins,
+            ))),
         }
     }
 
@@ -616,6 +675,7 @@ impl<'a> PartialIndependentBox<'a> {
 #[derive(Debug)]
 pub enum IndependentBoxFragment {
     Block(block::BlockContainerFragment),
+    Image(image::ImageFragment),
 }
 
 impl IndependentBoxFragment {
@@ -624,12 +684,14 @@ impl IndependentBoxFragment {
     pub fn fbox(&self) -> &FragmentBox {
         match self {
             IndependentBoxFragment::Block(block) => &block.fbox,
+            IndependentBoxFragment::Image(image) => &image.fbox,
         }
     }
 
     fn baselines(&self, outer_writing_mode: WritingMode) -> Option<inline::BoxBaselineSet> {
         match self {
             IndependentBoxFragment::Block(block) => block.baselines(outer_writing_mode),
+            IndependentBoxFragment::Image(image) => image.baselines(outer_writing_mode),
         }
     }
 }

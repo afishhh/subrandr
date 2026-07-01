@@ -7,9 +7,12 @@ use super::{
     InlineLayoutError, LayoutConstraint, LayoutContext, PartialIndependentBox, Vec2L, Vec2LW,
     Vec2W, Vec2WritingModeExt,
 };
-use crate::style::{
-    computed::{BaselineSource, Direction, TextAlign, ToPhysicalPixels, WritingMode},
-    ComputedStyle,
+use crate::{
+    layout::image::NaturalDimensions,
+    style::{
+        computed::{BaselineSource, Direction, TextAlign, ToPhysicalPixels, WritingMode},
+        ComputedStyle,
+    },
 };
 
 #[derive(Debug)]
@@ -130,6 +133,7 @@ enum PartialBlockContainerContent<'a> {
     Block(Vec<PartialIndependentBox<'a>>),
 }
 
+// TODO: rename _start to _min and _end to _max
 #[derive(Debug)]
 pub(super) struct BlockInlineSizes {
     pub(super) margin_min: FixedL,
@@ -137,6 +141,7 @@ pub(super) struct BlockInlineSizes {
     pub(super) margin_max: FixedL,
 }
 
+#[derive(Clone)]
 struct BlockComputedInlineSizes {
     margin_min: Option<FixedL>,
     padding_min: FixedL,
@@ -343,6 +348,68 @@ impl BlockInlineSizes {
         })
     }
 
+    // https://www.w3.org/TR/CSS2/visudet.html#inline-replaced-width
+    fn compute_for_replaced_inline(
+        natural: &NaturalDimensions,
+        BlockComputedInlineSizes {
+            margin_min,
+            padding_min: _,
+            size,
+            padding_max: _,
+            margin_max,
+        }: BlockComputedInlineSizes,
+    ) -> Self {
+        // A computed value of 'auto' for 'margin-left' or 'margin-right' becomes a used value of '0'.
+        let margin_min = margin_min.unwrap_or(FixedL::ZERO);
+        let margin_max = margin_max.unwrap_or(FixedL::ZERO);
+
+        let width = if let Some(width) = size {
+            // TODO: consider height
+            width
+        } else {
+            // If 'height' and 'width' both have computed values of 'auto' and the element also has an intrinsic width, then that intrinsic width is the used value of 'width'.
+            // TODO: from 'height'
+            natural.width
+        };
+
+        Self {
+            margin_min,
+            size: width,
+            margin_max,
+        }
+    }
+
+    // https://www.w3.org/TR/CSS2/visudet.html#block-replaced-width
+    fn compute_for_replaced_block(
+        natural: &NaturalDimensions,
+        computed_sizes: BlockComputedInlineSizes,
+        containing_block_width: FixedL,
+        containing_block_direction: Direction,
+    ) -> Self {
+        // The used value of 'width' is determined as for inline replaced elements.
+        let Self { size, .. } = Self::compute_for_replaced_inline(natural, computed_sizes.clone());
+
+        // The used value of 'width' is determined as for inline replaced elements. Then the rules for non-replaced block-level elements are applied to determine the margins.
+        let Self {
+            margin_min,
+            margin_max,
+            ..
+        } = Self::compute_for_nonreplaced_block(
+            BlockComputedInlineSizes {
+                size: Some(size),
+                ..computed_sizes
+            },
+            containing_block_width,
+            containing_block_direction,
+        );
+
+        Self {
+            margin_min,
+            size,
+            margin_max,
+        }
+    }
+
     pub(super) fn margins(&self, writing_mode: WritingMode) -> EdgeExtents {
         if writing_mode.is_horizontal() {
             EdgeExtents {
@@ -413,11 +480,21 @@ impl PartialIndependentBox<'_> {
     ) -> Result<BlockInlineSizes, InlineLayoutError> {
         let computed =
             BlockComputedInlineSizes::new(self.style(), containing_block_writing_mode, lctx.dpi);
-        Ok(BlockInlineSizes::compute_for_nonreplaced_block(
-            computed,
-            containing_block_width,
-            containing_block_direction,
-        ))
+        match self {
+            PartialIndependentBox::Block(_) => Ok(BlockInlineSizes::compute_for_nonreplaced_block(
+                computed,
+                containing_block_width,
+                containing_block_direction,
+            )),
+            PartialIndependentBox::Image(image) => {
+                Ok(BlockInlineSizes::compute_for_replaced_block(
+                    &image.natural_dimensions,
+                    computed,
+                    containing_block_width,
+                    containing_block_direction,
+                ))
+            }
+        }
     }
 
     pub(super) fn inline_level_block_sizes(
@@ -427,13 +504,18 @@ impl PartialIndependentBox<'_> {
         outer_writing_mode: WritingMode,
     ) -> Result<BlockInlineSizes, InlineLayoutError> {
         let computed = BlockComputedInlineSizes::new(self.style(), outer_writing_mode, lctx.dpi);
-        let width = BlockInlineSizes::compute_for_nonreplaced_inline(
-            lctx,
-            self,
-            computed,
-            constraints,
-            outer_writing_mode,
-        )?;
+        let width = match self {
+            PartialIndependentBox::Block(_) => BlockInlineSizes::compute_for_nonreplaced_inline(
+                lctx,
+                self,
+                computed,
+                constraints,
+                outer_writing_mode,
+            )?,
+            PartialIndependentBox::Image(image) => {
+                BlockInlineSizes::compute_for_replaced_inline(&image.natural_dimensions, computed)
+            }
+        };
 
         Ok(width)
     }
@@ -442,62 +524,6 @@ impl PartialIndependentBox<'_> {
 impl PartialBlockContainer<'_> {
     pub(super) fn style(&self) -> &ComputedStyle {
         &self.style
-    }
-
-    pub fn measure(
-        &self,
-        lctx: &mut LayoutContext,
-        constraints: Vec2<LayoutConstraint>,
-        axes: Axes,
-    ) -> Result<Vec2L, InlineLayoutError> {
-        let writing_mode = self.style.writing_mode();
-
-        let outer_edges = Vec2W::new(
-            self.style
-                .block_min_padding(writing_mode)
-                .to_physical_pixels(lctx.dpi)
-                + self
-                    .style
-                    .block_max_padding(writing_mode)
-                    .to_physical_pixels(lctx.dpi),
-            self.style
-                .inline_min_margin(writing_mode)
-                .to_physical_pixels(lctx.dpi)
-                .unwrap_or(FixedL::ZERO)
-                + self
-                    .style
-                    .inline_min_padding(writing_mode)
-                    .to_physical_pixels(lctx.dpi)
-                + self
-                    .style
-                    .inline_max_padding(writing_mode)
-                    .to_physical_pixels(lctx.dpi)
-                + self
-                    .style
-                    .inline_max_margin(writing_mode)
-                    .to_physical_pixels(lctx.dpi)
-                    .unwrap_or(FixedL::ZERO),
-        );
-
-        let mut inner_constraints = constraints;
-        match &mut inner_constraints.inline_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.inline,
-            LayoutConstraint::MaxContent => (),
-        }
-        match &mut inner_constraints.block_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.block,
-            LayoutConstraint::MaxContent => (),
-        }
-        let mut result = self.measure_inner(lctx, inner_constraints, axes)?;
-
-        if axes.inline(writing_mode) {
-            *result.inline_mut(writing_mode) += outer_edges.inline;
-        }
-        if axes.block(writing_mode) {
-            *result.block_mut(writing_mode) += outer_edges.block;
-        }
-
-        Ok(result)
     }
 
     pub(super) fn measure_inner(

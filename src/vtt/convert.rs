@@ -17,7 +17,7 @@ use crate::{
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     style::{
-        computed::{FontSlant, HorizontalAlignment, TextDecorations, WhiteSpaceCollapse},
+        computed::{Color, FontSlant, HorizontalAlignment, WhiteSpaceCollapse},
         ComputedStyle,
     },
     text::OpenTypeTag,
@@ -392,35 +392,36 @@ fn convert_node(
                     *style.make_font_weight_mut() = I16Dot16::new(700);
                 }
                 vtt::InternalNodeKind::Underline => {
-                    *style.make_text_decoration_mut() = TextDecorations {
-                        underline: true,
-                        underline_color: style.color(),
-                        line_through: false,
-                        line_through_color: BGRA8::ZERO,
-                    };
+                    style.text_decoration_line().underline = true;
                 }
                 _ => (),
             }
 
-            for class in internal.classes.iter() {
-                match class {
-                    "white" => *style.make_color_mut() = BGRA8::WHITE,
-                    "lime" => *style.make_color_mut() = BGRA8::LIME,
-                    "cyan" => *style.make_color_mut() = BGRA8::CYAN,
-                    "red" => *style.make_color_mut() = BGRA8::RED,
-                    "yellow" => *style.make_color_mut() = BGRA8::YELLOW,
-                    "magenta" => *style.make_color_mut() = BGRA8::MAGENTA,
-                    "blue" => *style.make_color_mut() = BGRA8::BLUE,
-                    "black" => *style.make_color_mut() = BGRA8::BLACK,
-                    "bg_white" => *style.make_background_color_mut() = BGRA8::WHITE,
-                    "bg_lime" => *style.make_background_color_mut() = BGRA8::LIME,
-                    "bg_cyan" => *style.make_background_color_mut() = BGRA8::CYAN,
-                    "bg_red" => *style.make_background_color_mut() = BGRA8::RED,
-                    "bg_yellow" => *style.make_background_color_mut() = BGRA8::YELLOW,
-                    "bg_magenta" => *style.make_background_color_mut() = BGRA8::MAGENTA,
-                    "bg_blue" => *style.make_background_color_mut() = BGRA8::BLUE,
-                    "bg_black" => *style.make_background_color_mut() = BGRA8::BLACK,
-                    _ => (),
+            for mut class in internal.classes.iter() {
+                let is_background = match class.strip_prefix("bg_") {
+                    Some(unprefixed) => {
+                        class = unprefixed;
+                        true
+                    }
+                    None => false,
+                };
+
+                let color = match class {
+                    "white" => BGRA8::WHITE,
+                    "lime" => BGRA8::LIME,
+                    "cyan" => BGRA8::CYAN,
+                    "red" => BGRA8::RED,
+                    "yellow" => BGRA8::YELLOW,
+                    "magenta" => BGRA8::MAGENTA,
+                    "blue" => BGRA8::BLUE,
+                    "black" => BGRA8::BLACK,
+                    _ => continue,
+                };
+
+                if is_background {
+                    *style.make_background_color_mut() = Color::Srgb(color);
+                } else {
+                    *style.make_color_mut() = color;
                 }
             }
 
@@ -537,7 +538,8 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
         // The color property on the (root) list of WebVTT Node Objects must be set to rgba(255,255,255,1).
         *result.make_color_mut() = BGRA8::WHITE;
         // The background shorthand property on the WebVTT cue background box and on WebVTT Ruby Text Objects must be set to rgba(0,0,0,0.8).
-        *result.make_background_color_mut() = BGRA8::new(0, 0, 0, /* 255 * 80% */ 204);
+        *result.make_background_color_mut() =
+            Color::Srgb(BGRA8::new(0, 0, 0, /* 255 * 80% */ 204));
         // The white-space property on the (root) list of WebVTT Node Objects must be set to pre-line.
         *result.make_white_space_collapse_mut() = WhiteSpaceCollapse::PreserveBreaks;
 

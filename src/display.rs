@@ -237,7 +237,7 @@ impl DisplayContext<'_> {
         style: &ComputedStyle,
         fragment_box: &FragmentBox,
     ) {
-        let background = style.background_color();
+        let background = style.background_color().to_used(style);
         if style.visibility().is_visible() && background.a > 0 {
             // This seems like reasonable rounding for inline backgrounds because:
             // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.

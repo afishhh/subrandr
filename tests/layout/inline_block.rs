@@ -1,6 +1,9 @@
 use rasterize::color::BGRA8;
 
-use crate::{layout::FixedL, style::computed::Length};
+use crate::{
+    layout::FixedL,
+    style::computed::{Color, Length},
+};
 
 use super::common::*;
 
@@ -14,8 +17,8 @@ test_define_style! {
         padding_right: Length::from_pixels(FixedL::new(20)),
     }
 
-    .transparent_red_bg { background_color: BGRA8::RED.mul_alpha(255 / 2) }
-    .transparent_green_bg { background_color: BGRA8::GREEN.mul_alpha(255 / 2) }
+    .transparent_red_bg { background_color: Color::Srgb(BGRA8::RED.mul_alpha(255 / 2)) }
+    .transparent_green_bg { background_color: Color::Srgb(BGRA8::GREEN.mul_alpha(255 / 2)) }
 }
 
 check_test! {

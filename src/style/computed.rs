@@ -5,6 +5,8 @@ use util::math::{Number, Signed, Vec2};
 
 use crate::{layout::FixedL, text::OpenTypeTag};
 
+use super::ComputedStyle;
+
 pub trait ToPhysicalPixels {
     type Output;
 
@@ -105,6 +107,23 @@ impl ToPhysicalPixels for Vec2<Length> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Color {
+    CurrentColor,
+    Srgb(BGRA8),
+}
+
+impl Color {
+    pub const TRANSPARENT: Self = Self::Srgb(BGRA8::ZERO);
+
+    pub fn to_used(self, style: &ComputedStyle) -> BGRA8 {
+        match self {
+            Color::CurrentColor => style.color(),
+            Color::Srgb(srgb) => srgb,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,23 +155,19 @@ pub struct TextShadow {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct TextDecorations {
+pub struct TextDecorationLines {
     pub underline: bool,
-    pub underline_color: BGRA8,
     pub line_through: bool,
-    pub line_through_color: BGRA8,
 }
 
-impl TextDecorations {
+impl TextDecorationLines {
     pub const NONE: Self = Self {
         underline: false,
-        underline_color: BGRA8::ZERO,
         line_through: false,
-        line_through_color: BGRA8::ZERO,
     };
 }
 
-impl Default for TextDecorations {
+impl Default for TextDecorationLines {
     fn default() -> Self {
         Self::NONE
     }

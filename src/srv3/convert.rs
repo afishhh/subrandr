@@ -19,8 +19,8 @@ use crate::{
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
     style::{
         computed::{
-            Alignment, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length, TextShadow,
-            VerticalAlignment, Visibility,
+            Alignment, Color, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length,
+            TextShadow, VerticalAlignment, Visibility,
         },
         ComputedStyle,
     },
@@ -393,7 +393,7 @@ impl VisualLine {
                                 // If inline-block layout is enabled then background is handled by the
                                 // containing block.
                                 if !pass.srv3_use_inlines {
-                                    *style.make_background_color_mut() = BGRA8::ZERO;
+                                    *style.make_background_color_mut() = Color::TRANSPARENT;
                                 }
                                 *style.make_font_size_mut() /= 2.0;
                                 style
@@ -459,7 +459,7 @@ impl Window {
     {
         let inner_style = {
             let mut result = self.segment_style.clone();
-            *result.make_background_color_mut() = BGRA8::ZERO;
+            *result.make_background_color_mut() = Color::TRANSPARENT;
             result
         };
         let mut lines = Vec::new();
@@ -536,9 +536,7 @@ fn pen_to_size_independent_style(
 
     let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);
     if pen.underline {
-        let decorations = base.make_text_decoration_mut();
-        decorations.underline = true;
-        decorations.underline_color = bgra_foreground_color;
+        base.text_decoration_line().underline = true;
     }
 
     if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {
@@ -546,7 +544,7 @@ fn pen_to_size_independent_style(
     }
 
     if set_default || pen.background_color != Pen::DEFAULT.background_color {
-        *base.make_background_color_mut() = BGRA8::from_rgba32(pen.background_color);
+        *base.make_background_color_mut() = Color::Srgb(BGRA8::from_rgba32(pen.background_color));
     }
 
     base

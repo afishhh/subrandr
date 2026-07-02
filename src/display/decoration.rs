@@ -134,17 +134,18 @@ impl DecorationContext<'_> {
             }
         };
 
-        let decoration = style.text_decoration();
-        if decoration.underline {
+        let decoration_lines = style.text_decoration_line();
+        let decoration_color = style.text_decoration_color().to_used(style);
+        if decoration_lines.underline {
             push_decoration(PropagatedDecoration {
-                color: decoration.underline_color,
+                color: decoration_color,
                 kind: DecorationKind::Underline,
             });
         }
 
-        if decoration.line_through {
+        if decoration_lines.line_through {
             push_decoration(PropagatedDecoration {
-                color: decoration.line_through_color,
+                color: decoration_color,
                 kind: DecorationKind::LineThrough,
             });
         }

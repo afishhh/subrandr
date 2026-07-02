@@ -148,7 +148,7 @@ pub struct RootLogger {
 }
 
 impl RootLogger {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             callback: MessageCallback::Default,
         }

@@ -1,66 +1,37 @@
-use rasterize::color::BGRA8;
-
-use crate::{
-    layout::FixedL,
-    style::computed::{Color, Length, TextDecorationLines},
-};
-
 use super::common::*;
 
 test_define_style! {
-    .vpadding10 {
-        padding_top: Length::from_pixels(FixedL::new(10)),
-        padding_bottom: Length::from_pixels(FixedL::new(10)),
-    }
-    .hpadding5 {
-        padding_left: Length::from_pixels(FixedL::new(5)),
-        padding_right: Length::from_pixels(FixedL::new(5)),
-    }
-    .rpadding16 {
-        padding_right: Length::from_pixels(FixedL::new(16)),
-    }
+    .vpadding10 "
+        padding-top: 10px;
+        padding-bottom: 10px;
+    "
+    .hpadding5 "
+        padding-left: 5px;
+        padding-right: 5px;
+    "
+    .rpadding16 "padding-right: 16px;"
 
-    .red_underline {
-        text_decoration_line: TextDecorationLines {
-            underline: true,
-            ..TextDecorationLines::default()
-        },
-        text_decoration_color: Color::Srgb(BGRA8::RED),
-    }
-    .green_strikethrough {
-        text_decoration_line: TextDecorationLines {
-            line_through: true,
-            ..TextDecorationLines::default()
-        },
-        text_decoration_color: Color::Srgb(BGRA8::GREEN),
-    }
-    .red_strikethrough {
-        text_decoration_line: TextDecorationLines {
-            line_through: true,
-            ..TextDecorationLines::default()
-        },
-        text_decoration_color: Color::Srgb(BGRA8::RED),
-    }
-    .blue_strikethrough {
-        text_decoration_line: TextDecorationLines {
-            line_through: true,
-            ..TextDecorationLines::default()
-        },
-        text_decoration_color: Color::Srgb(BGRA8::BLUE),
-    }
-    .yellow_strikethrough {
-        text_decoration_line: TextDecorationLines {
-            line_through: true,
-            ..TextDecorationLines::default()
-        },
-        text_decoration_color: Color::Srgb(BGRA8::YELLOW),
-    }
-    .currentcolor_strikethrough {
-        text_decoration_line: TextDecorationLines {
-            line_through: true,
-            ..TextDecorationLines::default()
-        },
-    }
+    .red_underline "
+        text-decoration-line: underline;
+        text-decoration-color: red;
+    "
+    .green_strikethrough "
+        text-decoration-line: line-through;
+        text-decoration-color: lime;
+    "
+    .red_strikethrough "
+        text-decoration-line: line-through;
+        text-decoration-color: red;
+    "
+    .blue_strikethrough "
+        text-decoration-line: line-through;
+        text-decoration-color: blue;
+    "
+    .yellow_strikethrough "
+        text-decoration-line: line-through;
+        text-decoration-color: yellow;
+    "
+    .currentcolor_strikethrough "text-decoration-line: line-through"
 }
 
 check_test! {

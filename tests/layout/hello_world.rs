@@ -1,14 +1,10 @@
-use rasterize::color::BGRA8;
-
-use crate::style::computed::{Color, Direction};
-
 use super::common::*;
 
 test_define_style! {
-    .world {
-        color: BGRA8::BLUE,
-        background_color: Color::Srgb(BGRA8::RED),
-    }
+    .world "
+        color: blue;
+        background-color: red;
+    "
 }
 
 check_test! {
@@ -31,7 +27,7 @@ check_test! {
 }
 
 test_define_style! {
-    .hello { color: BGRA8::LIME }
+    .hello "color: lime"
 }
 
 check_test! {
@@ -49,7 +45,7 @@ check_test! {
 }
 
 test_define_style! {
-    .rtl { direction: Direction::Rtl }
+    .rtl "direction: rtl"
 }
 
 check_test! {

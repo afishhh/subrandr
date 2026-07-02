@@ -15,5 +15,5 @@ pub fn test_define_style(ts: proc_macro::TokenStream) -> proc_macro::TokenStream
 
 #[proc_macro]
 pub fn test_apply_style(ts: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    test::test_apply_style(ts)
+    test::test_apply_styles(ts)
 }

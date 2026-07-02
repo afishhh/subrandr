@@ -1,25 +1,10 @@
-use crate::{style::computed::FontFeatureSettings, text::OpenTypeTag};
-
 use super::common::*;
 
-fn make_feature_settings(features: &[([u8; 4], u32)]) -> FontFeatureSettings {
-    let mut result = FontFeatureSettings::empty();
-    for &(tag_bytes, value) in features {
-        result.set(OpenTypeTag::from_bytes(tag_bytes), value);
-    }
-    result
-}
-
 test_define_style! {
-    .frac { font_feature_settings: make_feature_settings(&[(*b"frac", 1)]) }
-    .smcp { font_feature_settings: make_feature_settings(&[(*b"smcp", 1)]) }
-    .sinf { font_feature_settings: make_feature_settings(&[(*b"sinf", 1)]) }
-    .many {
-        font_feature_settings: make_feature_settings(&[
-            (*b"smcp", 1),
-            (*b"onum", 1),
-        ])
-    }
+    .frac "font-feature-settings: 'frac'"
+    .smcp "font-feature-settings: 'smcp' on"
+    .sinf "font-feature-settings: 'sinf' 1"
+    .many "font-feature-settings: 'smcp' 'onum'"
 }
 
 check_test! {

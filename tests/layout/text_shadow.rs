@@ -1,61 +1,11 @@
-use rasterize::color::BGRA8;
-use util::{math::Vec2, rc_static};
-
 use super::common::*;
-use crate::{
-    layout::FixedL,
-    style::computed::{Color, Length, TextShadow},
-};
 
 test_define_style! {
-    .green_shadow {
-        text_shadows: rc_static![[TextShadow {
-            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
-            blur_radius: Length::ZERO,
-            color: Color::Srgb(BGRA8::GREEN),
-        }]],
-    }
-    .green_shadow_blurred {
-        text_shadows: rc_static![[TextShadow {
-            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
-            blur_radius: Length::from_pixels(FixedL::new(3)),
-            color: Color::Srgb(BGRA8::GREEN),
-        }]],
-    }
-    .blue_shadow_blurred {
-        text_shadows: rc_static![[TextShadow {
-            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
-            blur_radius: Length::from_pixels(FixedL::new(3)),
-            color: Color::Srgb(BGRA8::BLUE),
-        }]],
-    }
-    .many_shadows {
-        text_shadows: rc_static![[
-            TextShadow {
-                offset: Vec2::splat(Length::from_pixels(FixedL::new(3))),
-                blur_radius: Length::ZERO,
-                color: Color::Srgb(BGRA8::RED),
-            },
-            TextShadow {
-                offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
-                blur_radius: Length::from_pixels(FixedL::new(3)),
-                color: Color::Srgb(BGRA8::GREEN),
-
-            },
-            TextShadow {
-                offset: Vec2::splat(Length::from_pixels(FixedL::new(7))),
-                blur_radius: Length::ZERO,
-                color: Color::Srgb(BGRA8::BLUE),
-            },
-        ]],
-    }
-    .red_shadow_very_blurred {
-        text_shadows: rc_static![[TextShadow {
-            offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
-            blur_radius: Length::from_pixels(FixedL::new(8)),
-            color: Color::Srgb(BGRA8::RED),
-        }]],
-    }
+    .green_shadow "text-shadow: lime 5px 5px"
+    .green_shadow_blurred "text-shadow: lime 5px 5px 3px"
+    .blue_shadow_blurred "text-shadow: blue 5px 5px 3px"
+    .many_shadows "text-shadow: 3px 3px red, 5px 5px 3px lime, 7px 7px blue"
+    .red_shadow_very_blurred "text-shadow: 5px 5px 8px red"
 }
 
 check_test! {

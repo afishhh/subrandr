@@ -1,10 +1,7 @@
 use super::common::*;
-use crate::style::computed::WhiteSpaceCollapse;
 
 test_define_style! {
-    .break_anywhere {
-        line_break: icu_segmenter::options::LineBreakStrictness::Anywhere,
-    }
+    .break_anywhere "line-break: anywhere"
 }
 
 // [UAX#14 LB7] prohibits breaking before a ZWSP character in the below scenario.
@@ -25,17 +22,9 @@ check_test! {
 }
 
 test_define_style! {
-    .collapse {
-        white_space_collapse: WhiteSpaceCollapse::Collapse,
-    }
-
-    .preserve_breaks {
-        white_space_collapse: WhiteSpaceCollapse::PreserveBreaks,
-    }
-
-    .preserve {
-        white_space_collapse: WhiteSpaceCollapse::Preserve,
-    }
+    .collapse "-sbr-white-space-collapse: collapse"
+    .preserve_breaks "-sbr-white-space-collapse: preserve-breaks"
+    .preserve "-sbr-white-space-collapse: preserve"
 }
 
 // TODO: This result does not actually match browsers but matches my interpretation

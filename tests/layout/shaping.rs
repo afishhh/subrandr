@@ -1,23 +1,8 @@
-use util::rc_static;
-
 use super::common::*;
 
 test_define_style! {
-    .noto_arabic_ahem_emoji {
-        font_family: rc_static!([
-            rc_static!(str b"Noto Sans Arabic"),
-            rc_static!(str b"Ahem"),
-            rc_static!(str b"Noto Color Emoji")
-        ])
-    }
-
-    .noto_serif_ahem_emoji {
-        font_family: rc_static!([
-            rc_static!(str b"Noto Serif"),
-            rc_static!(str b"Ahem"),
-            rc_static!(str b"Noto Color Emoji")
-        ])
-    }
+    .noto_arabic_ahem_emoji "font-family: Noto Sans Arabic, Ahem, Noto Color Emoji"
+    .noto_serif_ahem_emoji "font-family: Noto Serif, Ahem, Noto Color Emoji"
 }
 
 check_test! {

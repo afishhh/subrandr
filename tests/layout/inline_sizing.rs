@@ -1,8 +1,7 @@
 use super::common::*;
-use crate::style::computed::InlineSizing;
 
 test_define_style! {
-    .stretch { inline_sizing: InlineSizing::Stretch }
+    .stretch "-sbr-inline-sizing: stretch"
 }
 
 check_test! {

@@ -1,9 +1,8 @@
 use super::common::*;
-use crate::{layout::FixedL, style::computed::Length};
 
 test_define_style! {
-    .padding_left_16 { padding_left: Length::from_pixels(FixedL::new(16)) }
-    .padding_right_16 { padding_right: Length::from_pixels(FixedL::new(16)) }
+    .padding_left_16 "padding-left: 16px"
+    .padding_right_16 "padding-right: 16px"
 }
 
 check_test! {

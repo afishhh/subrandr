@@ -1,24 +1,11 @@
-use rasterize::color::BGRA8;
-
-use crate::{
-    layout::FixedL,
-    style::computed::{Color, Length},
-};
-
 use super::common::*;
 
 test_define_style! {
-    .vpadding10 {
-        padding_top: Length::from_pixels(FixedL::new(10)),
-        padding_bottom: Length::from_pixels(FixedL::new(10)),
-    }
-    .hpadding20 {
-        padding_left: Length::from_pixels(FixedL::new(20)),
-        padding_right: Length::from_pixels(FixedL::new(20)),
-    }
+    .vpadding10 "padding-top: 10px; padding-bottom: 10px"
+    .hpadding20 "padding-left: 20px; padding-right: 20px"
 
-    .transparent_red_bg { background_color: Color::Srgb(BGRA8::RED.mul_alpha(255 / 2)) }
-    .transparent_green_bg { background_color: Color::Srgb(BGRA8::GREEN.mul_alpha(255 / 2)) }
+    .transparent_red_bg "background-color: #FF00007F"
+    .transparent_green_bg "background-color: #00FF007F"
 }
 
 check_test! {

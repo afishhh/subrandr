@@ -1,27 +1,14 @@
-use rasterize::color::BGRA8;
-
-use crate::{
-    layout::FixedL,
-    style::computed::{Color, HorizontalAlignment, Length},
-};
-
 use super::common::*;
 
 test_define_style! {
-    .black_on_white {
-        color: BGRA8::BLACK,
-        background_color: Color::Srgb(BGRA8::WHITE),
-    }
-    .text_centered { text_align: HorizontalAlignment::Center }
-    .text_right { text_align: HorizontalAlignment::Right }
-    .vpadding10 {
-        padding_top: Length::from_pixels(FixedL::new(10)),
-        padding_bottom: Length::from_pixels(FixedL::new(10)),
-    }
-    .hpadding5 {
-        padding_left: Length::from_pixels(FixedL::new(5)),
-        padding_right: Length::from_pixels(FixedL::new(5)),
-    }
+    .black_on_white "
+        color: black;
+        background-color: white;
+    "
+    .text_centered "text-align: center"
+    .text_right "text-align: right"
+    .vpadding10 "padding-top: 10px; padding-bottom: 10px"
+    .hpadding5 "padding-left: 5px; padding-right: 5px"
 }
 
 check_test! {

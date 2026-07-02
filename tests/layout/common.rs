@@ -1,12 +1,11 @@
-use std::{path::Path, sync::OnceLock};
+use std::{
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
 
 use rasterize::{
     color::{to_straight_rgba, Premultiplied, BGRA8},
     scene::SceneBuilder,
-};
-use util::{
-    math::I26Dot6,
-    rc::{rc_static, Rc},
 };
 
 use crate::{
@@ -15,9 +14,10 @@ use crate::{
         self, block::BlockContainer, inline::InlineContent, LayoutConstraints, LayoutContext,
         Point2L, Vec2L,
     },
-    style::computed::{Color, HorizontalAlignment},
     text::{Face, FaceInfo, FontDb, GlyphCache},
 };
+
+pub(crate) static LOGGER: Mutex<log::RootLogger> = Mutex::new(log::RootLogger::new());
 
 macro_rules! make_tree {
     { $what: ident $(.$class: ident)+ { $($block_content: tt)* } } => {
@@ -171,25 +171,22 @@ macro_rules! make_tree {
         ))
     };
 
-    (@apply_style $parent_style: expr; $($class: ident)+) => {{
-        let mut result = $parent_style.create_derived();
-        $(macros::test_apply_style!(&mut result, $class);)*
-        result
-    }};
+    (@apply_style $parent_style: expr; $($class: ident)+) => {
+        macros::test_apply_style!(
+            &crate::layout_tests::common::LOGGER.lock().unwrap().new_ctx(),
+            &$parent_style,
+            $($class)*
+        )
+    };
     (@apply_style $parent_style: expr;) => { $parent_style.create_derived() };
 }
 
 struct TestFont {
-    family_static_rc: Rc<str>,
     filename: &'static str,
     data: &'static OnceLock<&'static [u8]>,
 }
 
 impl TestFont {
-    const fn family(&self) -> Rc<str> {
-        unsafe { std::ptr::read(&self.family_static_rc) }
-    }
-
     fn load(&self, assets_dir: &Path) -> Face {
         let data = *self
             .data
@@ -205,8 +202,6 @@ macro_rules! test_font {
             static DATA: OnceLock<&'static [u8]> = OnceLock::new();
 
             TestFont {
-                // FIXME: erm? rustfmt?
-        family_static_rc: rc_static!(str $family),
                 filename: $path,
                 data: &DATA,
             }
@@ -241,12 +236,12 @@ const ALL_FONTS: &[&TestFont] = &[
 ];
 
 test_define_style! {
-    pub .ahem { font_family: rc_static!([AHEM.family()]) }
-    pub .noto_serif { font_family: rc_static!([NOTO_SERIF.family()])}
-    pub .noto_sans_arabic { font_family: rc_static!([NOTO_SANS_ARABIC.family()])}
-    pub .noto_sans_jp { font_family: rc_static!([NOTO_SANS_JP.family()])}
-    pub .noto_color_emoji { font_family: rc_static!([NOTO_COLOR_EMOJI.family()])}
-    pub .bungee_tint { font_family: rc_static!([BUNGEE_TINT.family()])}
+    pub .ahem "font-family: Ahem"
+    pub .noto_serif "font-family: Noto Serif"
+    pub .noto_sans_arabic "font-family: Noto Sans Arabic"
+    pub .noto_sans_jp "font-family: Noto Sans JP"
+    pub .noto_color_emoji "font-family: Noto Color Emoji"
+    pub .bungee_tint "font-family: Bungee Tint"
 }
 
 fn check_fn(
@@ -416,21 +411,21 @@ pub(crate) use macros::test_define_style;
 pub(crate) use make_tree;
 
 test_define_style! {
-    pub .red { color: BGRA8::RED }
-    pub .green { color: BGRA8::GREEN }
-    pub .blue { color: BGRA8::BLUE }
-    pub .yellow { color: BGRA8::YELLOW }
+    pub .red "color: red"
+    pub .green "color: lime"
+    pub .blue "color: blue"
+    pub .yellow "color: yellow"
 
-    pub .red_bg { background_color: Color::Srgb(BGRA8::RED) }
-    pub .green_bg { background_color: Color::Srgb(BGRA8::GREEN) }
-    pub .blue_bg { background_color: Color::Srgb(BGRA8::BLUE) }
-    pub .yellow_bg { background_color: Color::Srgb(BGRA8::YELLOW) }
+    pub .red_bg "background-color: red"
+    pub .green_bg "background-color: lime"
+    pub .blue_bg "background-color: blue"
+    pub .yellow_bg "background-color: yellow"
 
-    pub .fs16 /* (default) */ { font_size: I26Dot6::new(16) }
-    pub .fs20 { font_size: I26Dot6::new(20) }
-    pub .fs24 { font_size: I26Dot6::new(24) }
-    pub .fs32 { font_size: I26Dot6::new(32) }
-    pub .fs64 { font_size: I26Dot6::new(64) }
+    pub .fs16 "font-size: initial"
+    pub .fs20 "font-size: 20px"
+    pub .fs24 "font-size: 24px"
+    pub .fs32 "font-size: 32px"
+    pub .fs64 "font-size: 64px"
 
-    pub .align_right { text_align: HorizontalAlignment::Right }
+    pub .align_right "text-align: right"
 }

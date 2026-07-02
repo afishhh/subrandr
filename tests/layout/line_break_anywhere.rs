@@ -1,19 +1,8 @@
-use rasterize::color::BGRA8;
-use util::rc_static;
-
 use super::common::*;
 
 test_define_style! {
-    .break_anywhere {
-        line_break: icu_segmenter::options::LineBreakStrictness::Anywhere,
-    }
-
-    .noto_arabic_and_emoji {
-        font_family: rc_static!([
-            rc_static!(str b"Noto Sans Arabic"),
-            rc_static!(str b"Noto Color Emoji")
-        ])
-    }
+    .break_anywhere "line-break: anywhere"
+    .noto_arabic_and_emoji "font-family: Noto Sans Arabic, Noto Color Emoji"
 }
 
 check_test! {
@@ -96,14 +85,14 @@ check_test! {
 }
 
 test_define_style! {
-    .g1 { color: BGRA8::new(0, 20, 0, 255) }
-    .g2 { color: BGRA8::new(0, 40, 0, 255) }
-    .g3 { color: BGRA8::new(0, 60, 0, 255) }
-    .g4 { color: BGRA8::new(0, 80, 0, 255) }
-    .g5 { color: BGRA8::new(0, 110, 0, 255) }
-    .g6 { color: BGRA8::new(0, 140, 0, 255) }
-    .g7 { color: BGRA8::new(0, 170, 0, 255) }
-    .g8 { color: BGRA8::new(0, 220, 0, 255) }
+    .g1 "color: rgb(0 20 0)"
+    .g2 "color: rgb(0 40 0)"
+    .g3 "color: rgb(0 60 0)"
+    .g4 "color: rgb(0 80 0)"
+    .g5 "color: rgb(0 110 0)"
+    .g6 "color: rgb(0 140 0)"
+    .g7 "color: rgb(0 170 0)"
+    .g8 "color: rgb(0 220 0)"
 }
 
 check_test! {

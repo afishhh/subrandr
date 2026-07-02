@@ -92,7 +92,7 @@ impl Parse<'_> for Option<ColorBase> {
             };
 
             let Ok(found) = NAMED_COLORS.binary_search_by_key(&name.as_str(), |x| x.0) else {
-                stream.extend_attempted(["<named-color>", "transparent"]);
+                stream.extend_attempted(["<named-color>"]);
                 return Ok(None);
             };
 

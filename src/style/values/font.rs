@@ -37,22 +37,20 @@ impl Parse<'_> for Option<FontFamily> {
                 result.push(current.as_str().into());
                 current.clear();
                 first = true;
-            } else {
-                if !first {
-                    current.push(' ');
-                }
-                first = false;
+                continue;
+            }
 
-                if stream.peek(Ident) {
-                    current.extend(stream.parse::<Ident>()?.value().unescape_iter());
-                } else if stream.peek(LitString) {
-                    current.extend(stream.parse::<LitString>()?.value().unescape_iter());
-                } else {
-                    if current.is_empty() && first {
-                        return Ok(None);
-                    }
-                    return Err(stream.lookahead_error());
-                }
+            if !first {
+                current.push(' ');
+            }
+            first = false;
+
+            if stream.peek(Ident) {
+                current.extend(stream.parse::<Ident>()?.value().unescape_iter());
+            } else if stream.peek(LitString) {
+                current.extend(stream.parse::<LitString>()?.value().unescape_iter());
+            } else {
+                return Err(stream.lookahead_error());
             }
         }
     }
@@ -261,10 +259,35 @@ impl Parse<'_> for Option<FontFeatureTag> {
 
 #[cfg(test)]
 mod test {
+    use util::rc_static;
+
     use super::*;
+    use crate::style::properties;
+
+    fn compute_as_font_family(source: &str) -> Result<Rc<[Rc<str>]>, ParseError> {
+        test_parse_and_compute_str::<properties::ComputedFontFamily, FontFamily>(source)
+    }
 
     #[test]
-    fn abcd() {
+    fn font_family() {
+        let expected1: Rc<[Rc<str>]> = rc_static!([rc_static!(str b"Noto Sans Emoji")]);
+        assert_eq!(
+            compute_as_font_family(r#""Noto" Sans 'Emoji'"#).unwrap(),
+            expected1
+        );
+
+        let expected2: Rc<[Rc<str>]> =
+            rc_static!([rc_static!(str b"Ahem"), rc_static!(str b"Noto Sans")]);
+        assert_eq!(
+            compute_as_font_family(r#"Ahem, Noto Sans"#).unwrap(),
+            expected2
+        );
+
+        assert!(compute_as_font_family(r#"Ahem,"#).is_err());
+    }
+
+    #[test]
+    fn font_feature_settings() {
         assert_eq!(
             csssyn::value::parse_str::<GlobalKeywordOr::<FontFeatureSettings>>(
                 r#"'ruby' 12 "silf" off "ab\63 d" 'AAAA' on"#

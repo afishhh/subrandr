@@ -2,7 +2,7 @@ use rasterize::color::BGRA8;
 
 use crate::{
     layout::FixedL,
-    style::computed::{HorizontalAlignment, Length},
+    style::computed::{Color, HorizontalAlignment, Length},
 };
 
 use super::common::*;
@@ -10,7 +10,7 @@ use super::common::*;
 test_define_style! {
     .black_on_white {
         color: BGRA8::BLACK,
-        background_color: BGRA8::WHITE,
+        background_color: Color::Srgb(BGRA8::WHITE),
     }
     .text_centered { text_align: HorizontalAlignment::Center }
     .text_right { text_align: HorizontalAlignment::Right }

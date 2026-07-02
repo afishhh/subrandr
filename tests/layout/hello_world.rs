@@ -1,13 +1,13 @@
 use rasterize::color::BGRA8;
 
-use crate::style::computed::Direction;
+use crate::style::computed::{Color, Direction};
 
 use super::common::*;
 
 test_define_style! {
     .world {
         color: BGRA8::BLUE,
-        background_color: BGRA8::RED,
+        background_color: Color::Srgb(BGRA8::RED),
     }
 }
 

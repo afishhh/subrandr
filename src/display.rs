@@ -135,7 +135,8 @@ impl DisplayContext<'_> {
     ) -> Result<(), DisplayError> {
         // TODO: This should also draw an offset underline I think and possibly strike through?
         for shadow in fragment.style.text_shadows().iter().rev() {
-            if shadow.color.a > 0 {
+            let color = shadow.color.to_used(&fragment.style);
+            if color.a > 0 {
                 let blur_radius = shadow.blur_radius.to_physical_pixels(self.dpi);
                 let stddev = if blur_radius > I26Dot6::from_quotient(1, 16) {
                     // https://drafts.csswg.org/css-backgrounds-3/#shadow-blur
@@ -151,7 +152,7 @@ impl DisplayContext<'_> {
                     round_y(pos + shadow.offset.to_physical_pixels(self.dpi)),
                     fragment,
                     Some(stddev),
-                    shadow.color,
+                    color,
                 )?;
             }
         }
@@ -237,7 +238,7 @@ impl DisplayContext<'_> {
         style: &ComputedStyle,
         fragment_box: &FragmentBox,
     ) {
-        let background = style.background_color();
+        let background = style.background_color().to_used(style);
         if style.visibility().is_visible() && background.a > 0 {
             // This seems like reasonable rounding for inline backgrounds because:
             // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.

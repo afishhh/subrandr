@@ -15,7 +15,7 @@ use crate::{
         self, block::BlockContainer, inline::InlineContent, LayoutConstraints, LayoutContext,
         Point2L, Vec2L,
     },
-    style::computed::HorizontalAlignment,
+    style::computed::{Color, HorizontalAlignment},
     text::{Face, FaceInfo, FontDb, GlyphCache},
 };
 
@@ -421,10 +421,10 @@ test_define_style! {
     pub .blue { color: BGRA8::BLUE }
     pub .yellow { color: BGRA8::YELLOW }
 
-    pub .red_bg { background_color: BGRA8::RED }
-    pub .green_bg { background_color: BGRA8::GREEN }
-    pub .blue_bg { background_color: BGRA8::BLUE }
-    pub .yellow_bg { background_color: BGRA8::YELLOW }
+    pub .red_bg { background_color: Color::Srgb(BGRA8::RED) }
+    pub .green_bg { background_color: Color::Srgb(BGRA8::GREEN) }
+    pub .blue_bg { background_color: Color::Srgb(BGRA8::BLUE) }
+    pub .yellow_bg { background_color: Color::Srgb(BGRA8::YELLOW) }
 
     pub .fs16 /* (default) */ { font_size: I26Dot6::new(16) }
     pub .fs20 { font_size: I26Dot6::new(20) }

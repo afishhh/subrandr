@@ -2,7 +2,7 @@ use rasterize::color::BGRA8;
 
 use crate::{
     layout::FixedL,
-    style::computed::{Length, TextDecorations},
+    style::computed::{Color, Length, TextDecorationLines},
 };
 
 use super::common::*;
@@ -20,47 +20,53 @@ test_define_style! {
         padding_right: Length::from_pixels(FixedL::new(16)),
     }
 
-    .underline {
-        text_decoration: TextDecorations {
+    .red_underline {
+        text_decoration_line: TextDecorationLines {
             underline: true,
-            underline_color: BGRA8::RED,
-            ..TextDecorations::default()
-        }
+            ..TextDecorationLines::default()
+        },
+        text_decoration_color: Color::Srgb(BGRA8::RED),
     }
     .green_strikethrough {
-        text_decoration: TextDecorations {
+        text_decoration_line: TextDecorationLines {
             line_through: true,
-            line_through_color: BGRA8::GREEN,
-            ..TextDecorations::default()
-        }
+            ..TextDecorationLines::default()
+        },
+        text_decoration_color: Color::Srgb(BGRA8::GREEN),
     }
     .red_strikethrough {
-        text_decoration: TextDecorations {
+        text_decoration_line: TextDecorationLines {
             line_through: true,
-            line_through_color: BGRA8::RED,
-            ..TextDecorations::default()
-        }
+            ..TextDecorationLines::default()
+        },
+        text_decoration_color: Color::Srgb(BGRA8::RED),
     }
     .blue_strikethrough {
-        text_decoration: TextDecorations {
+        text_decoration_line: TextDecorationLines {
             line_through: true,
-            line_through_color: BGRA8::BLUE,
-            ..TextDecorations::default()
-        }
+            ..TextDecorationLines::default()
+        },
+        text_decoration_color: Color::Srgb(BGRA8::BLUE),
     }
     .yellow_strikethrough {
-        text_decoration: TextDecorations {
+        text_decoration_line: TextDecorationLines {
             line_through: true,
-            line_through_color: BGRA8::YELLOW,
-            ..TextDecorations::default()
-        }
+            ..TextDecorationLines::default()
+        },
+        text_decoration_color: Color::Srgb(BGRA8::YELLOW),
+    }
+    .currentcolor_strikethrough {
+        text_decoration_line: TextDecorationLines {
+            line_through: true,
+            ..TextDecorationLines::default()
+        },
     }
 }
 
 check_test! {
     name = on_span,
     size = (216, 36),
-    inline.ahem.underline {
+    inline.ahem.red_underline {
         span.blue_strikethrough {
             text "hello   world\n"
             // The underline should not go through this padding
@@ -79,7 +85,7 @@ check_test! {
         // This strike-through should be higher than the one decorating the
         // root inline box
         span.fs24.green_strikethrough  {
-            span.underline {
+            span.red_underline {
                 text "LARGE"
                 span.fs16 {
                     text " world"
@@ -133,6 +139,19 @@ check_test! {
                     }
                 }
                 text "k"
+            }
+        }
+    }
+}
+
+check_test! {
+    name = currentcolor,
+    size = (216, 48),
+    inline.ahem {
+        span.fs24.red_underline {
+            text "横横横横横"
+            span.fs16.green.currentcolor_strikethrough {
+                text " world\n"
             }
         }
     }

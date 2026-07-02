@@ -38,8 +38,9 @@ macros::implement_style_module! {
     }
 
     rc uninherited {
-        #[inherit(no)] background_color: BGRA8 = BGRA8::ZERO,
-        #[inherit(no)] text_decoration: TextDecorations = TextDecorations::NONE,
+        #[inherit(no)] background_color: Color = Color::TRANSPARENT,
+        #[inherit(no)] text_decoration_line: TextDecorationLines = TextDecorationLines::NONE,
+        #[inherit(no)] text_decoration_color: Color = Color::CurrentColor,
         #[inherit(no)] baseline_source: BaselineSource = BaselineSource::Last,
         #[inherit(no)] padding_top: Length = Length::ZERO,
         #[inherit(no)] padding_left: Length = Length::ZERO,

@@ -1,9 +1,15 @@
 ## [Unreleased]
 
-- Fixed infinite recursion when failing to shape an RTL segment if font provider fallback returns a font for the first codepoint.
-- The experimental `wgpu` rasterizer has been removed. Hardware acceleration may be revisited in the future with a revised approach.
+## [v1.4.0]
+
+- Fixed infinite recursion when failing to shape an RTL segment if font fallback returns a font for its first codepoint.
+- Removed experimental `wgpu` rasterizer. Hardware acceleration may be revisited in the future with a revised approach.
 - Fixed glyph y-offset being applied incorrectly. This fixes some glyphs in complex scripts like Arabic being misplaced on the y-axis.
-- WebVTT subtitles now correctly use `white-space-collapse: preserve-breaks` instead of `white-space-collapse: preserve`.
+- Made WebVTT subtitles correctly use `white-space-collapse: preserve-breaks` instead of `white-space-collapse: preserve`.
+- Added early culling to software rasterizer to skip rasterization of offscreen glyphs.
+- Made FreeType glyph rendering switch to internal sparse outline rasterizer for large outline glyphs.
+- Moved FreeType bitmap glyph scaling into rasterizer (out of FreeType font backend).
+- Made software rasterizer defer scaling of unclipped bitmaps to user in instanced mode.
 
 ## [v1.3.0]
 
@@ -83,7 +89,8 @@
 - Fixed pixel scale handling in font matching. After the introduction of the new inline layout engine fonts were being unintentionally scaled *twice* on DPIs other than 72.
 - Added Android NDK font provider for better font matching on Android.
 
-[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/afishhh/subrandr/compare/v1.4.0...HEAD
+[v1.4.0]: https://github.com/afishhh/subrandr/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/afishhh/subrandr/compare/v1.2.0...v1.3.0
 [v1.2.0]: https://github.com/afishhh/subrandr/compare/v1.1.0...v1.2.0
 [v1.1.0]: https://github.com/afishhh/subrandr/compare/v1.0.1...v1.1.0

@@ -109,6 +109,10 @@ macro_rules! define_fixed_for_type {
                 self.0 as f32 / (1 << P) as f32
             }
 
+            pub const fn into_f64(self) -> f64 {
+                self.0 as f64 / (1 << P) as f64
+            }
+
             pub const fn floor(self) -> Self {
                 Self((self.0 >> P) << P)
             }

@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use crate::csssyn::{
     buffer::{Cursor, TokenView},
     tokenizer::{Escaped, HashTypeFlag, TokenKind},
+    ParseError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +49,7 @@ macro_rules! impl_token {
     (
         <$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?;
 
-        name = $err_name: literal;
+        name = $err_name: expr;
         matches TokenView { $($pattern_body: tt)* };
         parse $body: expr;
     ) => {
@@ -76,7 +77,7 @@ macro_rules! impl_token {
         }
 
         #[doc(hidden)]
-        #[allow(non_snake_case)]
+        #[allow(non_snake_case, clippy::extra_unused_lifetimes)]
         pub fn $name<$lt>(marker: Infallible) -> $name$(<$ltarg>)? {
             match marker {}
         }
@@ -141,6 +142,14 @@ impl<'a> NumericTokenValue<'a> {
 
     pub fn to_f64(self) -> f64 {
         self.value.parse().unwrap()
+    }
+
+    pub fn to_finite_f64(self, span: impl Spanned) -> Result<f64, ParseError> {
+        let value = self.to_f64();
+        if !value.is_finite() {
+            return Err(ParseError::new(span, "value outside finite f64 range"));
+        }
+        Ok(value)
     }
 }
 
@@ -308,4 +317,77 @@ impl<'a> Hash<'a> {
     pub fn type_flag(&self) -> HashTypeFlag {
         self.type_flag
     }
+}
+
+macro_rules! impl_punct_tokens {
+    ($($name: ident [$($kind: tt)*] $err_name: literal $(, $macro_tt: tt)?;)*) => {
+        $(#[doc(hidden)]
+        #[derive(Clone, Copy)]
+        pub struct $name {
+            span: Span,
+        }
+
+        impl_spanned!($name);
+
+        impl_token! {
+            <'a> $name;
+
+            name = stringify!($value_token);
+            matches TokenView { span, source: _, kind: TokenKind::$($kind)* };
+            parse $name { span };
+        })*
+
+        macro_rules! TokenMacro {
+            (0) => { $crate::csssyn::token::Zero };
+            $($(($macro_tt) => { $crate::csssyn::token::$name };)?)*
+        }
+        pub(crate) use TokenMacro as Token;
+    };
+}
+
+impl_punct_tokens!(
+    Whitespace [Whitespace] "<whitespace>";
+    Comma [Punct(',')] ",", ,;
+    Colon [Punct(':')] ":", :;
+    Semicolon [Punct(';')] ";", ;;
+    ExclamationMark [Punct('!')] "!", !;
+    Slash [Punct('/')] "/", /;
+    RightBrace [RBrace] "}";
+);
+
+#[doc(hidden)]
+pub struct Zero {
+    span: Span,
+}
+
+impl_spanned!(Zero);
+
+impl_token! {
+    <'a> Zero;
+
+    name = "0";
+    matches TokenView { span, source: "0", kind: TokenKind::Number { integer: true } };
+    parse Zero { span };
+}
+
+pub struct End {
+    span: Span,
+}
+
+impl_spanned!(End);
+
+impl Token for End {
+    fn name() -> &'static str {
+        "<eof>"
+    }
+
+    fn peek(cursor: Cursor) -> bool {
+        cursor.eof()
+    }
+}
+
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub fn End(marker: Infallible) -> End {
+    match marker {}
 }

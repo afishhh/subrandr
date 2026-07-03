@@ -2,8 +2,7 @@ use std::{cell::Cell, convert::Infallible, fmt::Display};
 
 use crate::csssyn::{
     buffer::{Cursor, TokenView},
-    peek::Whitespace,
-    token::{FunctionalNotation, Token, TokenParse},
+    token::{End, FunctionalNotation, Token, TokenParse, Whitespace},
     tokenizer::{Escaped, TokenKind},
     ParseError, Peek, TokenBuffer,
 };
@@ -19,18 +18,19 @@ impl<'a> ParseStream<'a> {
         }
     }
 
-    fn cursor(&self) -> Cursor<'a> {
+    pub fn cursor(&self) -> Cursor<'a> {
         self.cursor.get()
     }
 
-    fn advance_to(&self, cursor: Cursor<'a>) {
+    pub fn advance_to(&self, cursor: Cursor<'a>) {
         self.cursor.set(cursor.skip(Whitespace))
     }
 
     fn ensure_end(&self) -> Result<(), ParseError> {
         let cursor = self.cursor();
+
         if !cursor.eof() {
-            Err(ParseError::unexpected(cursor, &["<eof>"]))
+            Err(ParseError::unexpected(cursor, &[End::name()]))
         } else {
             Ok(())
         }
@@ -118,12 +118,6 @@ pub trait LookaheadPeek: Peek + Sized {
     fn name(&self) -> &'static str;
 }
 
-impl<F: FnOnce(Infallible) -> T, T: Token> Peek for F {
-    fn peek(&self, cursor: Cursor) -> bool {
-        T::peek(cursor)
-    }
-}
-
 impl<F: FnOnce(Infallible) -> T, T: Token> LookaheadPeek for F {
     fn name(&self) -> &'static str {
         T::name()
@@ -146,7 +140,13 @@ impl<'a> Lookahead<'a> {
         stream.peek_skip(peek)
     }
 
-    pub fn error(self) -> ParseError {
+    pub fn extend_attempted(&mut self, attempted: impl IntoIterator<Item = &'static str>) {
+        self.tried.extend(attempted);
+    }
+
+    pub fn error(&mut self) -> ParseError {
+        self.tried.sort_unstable();
+        self.tried.dedup();
         ParseError::unexpected(self.cursor, &self.tried)
     }
 }

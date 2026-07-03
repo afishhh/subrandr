@@ -1,9 +1,5 @@
 use quote::quote;
-use syn::{
-    parse::{Parse, ParseStream},
-    spanned::Spanned,
-    Token,
-};
+use syn::{parse::ParseStream, spanned::Spanned, Token};
 
 use crate::{
     common::{advance_past_punct, parse_yes_no},
@@ -17,7 +13,7 @@ struct Property {
     inherit: bool,
     copy: bool,
     default: Option<syn::Expr>,
-    parser: Option<syn::Type>,
+    parser: Option<(Option<syn::LitStr>, syn::Type)>,
 }
 
 impl Property {
@@ -43,10 +39,19 @@ impl Property {
                     copy = value;
                 }
             } else if attr.path().is_ident("parse") {
-                if let Ok(value) = attr
-                    .parse_args_with(syn::Type::parse)
-                    .report_in_and_set(ctx, &mut errored)
-                {
+                let result = attr.parse_args_with(|stream: &syn::parse::ParseBuffer| {
+                    let rename = if stream.parse::<Option<kw::rename>>()?.is_some() {
+                        stream.parse::<Token![=]>()?;
+                        let s = stream.parse()?;
+                        stream.parse::<Token![,]>()?;
+                        s
+                    } else {
+                        None
+                    };
+
+                    Ok((rename, stream.parse()?))
+                });
+                if let Ok(value) = result.report_in_and_set(ctx, &mut errored) {
                     parse_value = Some(value);
                 }
             } else {
@@ -123,6 +128,7 @@ struct Input {
 
 mod kw {
     syn::custom_keyword!(rc);
+    syn::custom_keyword!(rename);
 }
 
 impl Input {
@@ -291,10 +297,11 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
                     }
                 }
             });
-            if let Some(parse_value) = &prop.parser {
+            if let Some((rename, parse_type)) = &prop.parser {
                 let auto_css_name = name.to_string().replace('_', "-");
+                let css_name = rename.as_ref().map(|x| x.value()).unwrap_or(auto_css_name);
                 parsers_array_elements.extend(quote! {
-                    (#auto_css_name, values::parse_and_compute::<#meta_name, #parse_value>),
+                    (#css_name, values::parse_and_compute::<#meta_name, #parse_type>),
                 });
             }
 

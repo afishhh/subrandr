@@ -151,11 +151,11 @@ pub enum FontSlant {
     Italic,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextShadow {
     pub offset: Vec2<Length>,
     pub blur_radius: Length,
-    pub color: BGRA8,
+    pub color: Color,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,10 +217,6 @@ pub enum Direction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum WhiteSpaceCollapse {
-    #[cfg_attr(
-        not(all(test, feature = "_layout_tests")),
-        expect(dead_code, reason = "not exposed yet")
-    )]
     Collapse,
     PreserveBreaks,
     Preserve,

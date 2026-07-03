@@ -2,8 +2,7 @@
 
 use crate::csssyn::{
     buffer::Cursor,
-    peek::{End, RightBrace, Token, Whitespace},
-    token::Ident,
+    token::{End, Ident, RightBrace, Token, Whitespace},
     Peek,
 };
 

@@ -4,7 +4,7 @@ use util::{math::Vec2, rc_static};
 use super::common::*;
 use crate::{
     layout::FixedL,
-    style::computed::{Length, TextShadow},
+    style::computed::{Color, Length, TextShadow},
 };
 
 test_define_style! {
@@ -12,21 +12,21 @@ test_define_style! {
         text_shadows: rc_static![[TextShadow {
             offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
             blur_radius: Length::ZERO,
-            color: BGRA8::GREEN,
+            color: Color::Srgb(BGRA8::GREEN),
         }]],
     }
     .green_shadow_blurred {
         text_shadows: rc_static![[TextShadow {
             offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
             blur_radius: Length::from_pixels(FixedL::new(3)),
-            color: BGRA8::GREEN,
+            color: Color::Srgb(BGRA8::GREEN),
         }]],
     }
     .blue_shadow_blurred {
         text_shadows: rc_static![[TextShadow {
             offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
             blur_radius: Length::from_pixels(FixedL::new(3)),
-            color: BGRA8::BLUE,
+            color: Color::Srgb(BGRA8::BLUE),
         }]],
     }
     .many_shadows {
@@ -34,17 +34,18 @@ test_define_style! {
             TextShadow {
                 offset: Vec2::splat(Length::from_pixels(FixedL::new(3))),
                 blur_radius: Length::ZERO,
-                color: BGRA8::RED,
+                color: Color::Srgb(BGRA8::RED),
             },
             TextShadow {
                 offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
                 blur_radius: Length::from_pixels(FixedL::new(3)),
-                color: BGRA8::GREEN,
+                color: Color::Srgb(BGRA8::GREEN),
+
             },
             TextShadow {
                 offset: Vec2::splat(Length::from_pixels(FixedL::new(7))),
                 blur_radius: Length::ZERO,
-                color: BGRA8::BLUE,
+                color: Color::Srgb(BGRA8::BLUE),
             },
         ]],
     }
@@ -52,7 +53,7 @@ test_define_style! {
         text_shadows: rc_static![[TextShadow {
             offset: Vec2::splat(Length::from_pixels(FixedL::new(5))),
             blur_radius: Length::from_pixels(FixedL::new(8)),
-            color: BGRA8::RED,
+            color: Color::Srgb(BGRA8::RED),
         }]],
     }
 }

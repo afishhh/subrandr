@@ -234,7 +234,7 @@ impl Segment {
                     out.push(TextShadow {
                         offset: Vec2::new(x, x),
                         blur_radius: Length::ZERO,
-                        color: primary_color,
+                        color: Color::Srgb(primary_color),
                     });
                     x += step;
                 }
@@ -253,19 +253,19 @@ impl Segment {
                 out.push(TextShadow {
                     offset,
                     blur_radius: Length::ZERO,
-                    color: secondary_color,
+                    color: Color::Srgb(secondary_color),
                 });
                 out.push(TextShadow {
                     offset: -offset,
                     blur_radius: Length::ZERO,
-                    color: primary_color,
+                    color: Color::Srgb(primary_color),
                 });
             }
             EdgeType::Glow => out.extend(std::iter::repeat_n(
                 TextShadow {
                     offset: Vec2::ZERO,
                     blur_radius: l2,
-                    color: primary_color,
+                    color: Color::Srgb(primary_color),
                 },
                 5,
             )),
@@ -276,7 +276,7 @@ impl Segment {
                     out.push(TextShadow {
                         offset,
                         blur_radius: x,
-                        color: primary_color,
+                        color: Color::Srgb(primary_color),
                     });
                     x += Length::from_pixels(scale);
                 }
@@ -531,7 +531,7 @@ fn pen_to_size_independent_style(
     }
 
     if pen.italic {
-        *base.make_font_style_mut() = FontSlant::Italic;
+        *base.make_font_slant_mut() = FontSlant::Italic;
     }
 
     let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);

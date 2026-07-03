@@ -116,6 +116,16 @@ impl<'a> Tokenizer<'a> {
             self.advance_by(1);
         }
 
+        let peek = self.peek_bytes(2);
+        if matches!(peek.first(), Some(b'.')) && matches!(peek.get(1), Some(b'0'..=b'9')) {
+            self.advance_by(2);
+            is_integer = false;
+
+            while matches!(self.peek_codepoint(), Some('0'..='9')) {
+                self.advance_by(1);
+            }
+        }
+
         let peek = self.peek_bytes(3);
         let mut i = 1;
         if matches!(peek.first(), Some(b'E' | b'e')) && {
@@ -611,7 +621,9 @@ impl<'a> Escaped<'a> {
     }
 
     pub fn eq_ignore_ascii_case(self, string: &str) -> bool {
-        self.unescape_iter().eq(string.chars())
+        self.unescape_iter()
+            .map(|x| x.to_ascii_lowercase())
+            .eq(string.chars().map(|x| x.to_ascii_lowercase()))
     }
 }
 

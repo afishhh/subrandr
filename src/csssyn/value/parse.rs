@@ -4,15 +4,9 @@ use crate::csssyn::{
     buffer::{Cursor, TokenView},
     peek::Whitespace,
     token::{FunctionalNotation, Token, TokenParse},
-    tokenizer::{Escaped, TokenKind, Tokenizer},
+    tokenizer::{Escaped, TokenKind},
     ParseError, Peek, TokenBuffer,
 };
-
-#[derive(Debug)]
-pub struct LineColumn {
-    pub line: u32,
-    pub column: u32,
-}
 
 pub struct ParseStream<'a> {
     cursor: Cell<Cursor<'a>>,
@@ -48,6 +42,15 @@ impl<'a> ParseStream<'a> {
 
     pub fn peek<T: Peek>(&self, peek: T) -> bool {
         peek.peek(self.cursor())
+    }
+
+    pub fn peek_skip<T: Peek>(&self, peek: T) -> bool {
+        if peek.peek(self.cursor()) {
+            self.skip();
+            true
+        } else {
+            false
+        }
     }
 
     pub fn skip(&self) {
@@ -110,24 +113,9 @@ impl<'a> Parse<'a> for FunctionalNotation<'a> {
     }
 }
 
-impl Peek for &'static str {
-    fn peek(&self, cursor: Cursor) -> bool {
-        cursor.token().is_some_and(|(token, _)| match token.kind {
-            TokenKind::Ident => Escaped::new(token.source) == *self,
-            _ => false,
-        })
-    }
-}
-
 pub trait LookaheadPeek: Peek + Sized {
     #[doc(hidden)]
     fn name(&self) -> &'static str;
-}
-
-impl LookaheadPeek for &'static str {
-    fn name(&self) -> &'static str {
-        self
-    }
 }
 
 impl<F: FnOnce(Infallible) -> T, T: Token> Peek for F {
@@ -155,12 +143,7 @@ impl<'a> Lookahead<'a> {
 
     pub fn peek_skip<T: LookaheadPeek>(&mut self, peek: T, stream: &ParseStream) -> bool {
         self.tried.push(peek.name());
-        if peek.peek(self.cursor) {
-            stream.skip();
-            true
-        } else {
-            false
-        }
+        stream.peek_skip(peek)
     }
 
     pub fn error(self) -> ParseError {
@@ -240,6 +223,7 @@ pub fn parse_cursor<'a, T: Parse<'a>>(cursor: Cursor<'a>) -> Result<T, ParseErro
     Ok(result)
 }
 
+#[cfg(test)]
 pub fn parse_str<T: for<'a> Parse<'a>>(source: &str) -> Result<T, ParseError> {
     let buffer = TokenBuffer::from_source(source)?;
     parse_cursor(buffer.start())

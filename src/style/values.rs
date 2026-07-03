@@ -1,3 +1,4 @@
+use icu_segmenter::options::{LineBreakStrictness, LineBreakWordOption};
 use rasterize::color::BGRA8;
 use util::{
     math::{I16Dot16, I26Dot6},
@@ -9,7 +10,9 @@ use crate::{
         self,
         buffer::Cursor,
         peek::{End, Token},
-        token::{Dimension, Hash, Ident, LitInt, LitString, Number},
+        token::{
+            Dimension, FunctionalNotation, Hash, Ident, LitInt, LitString, Number, Percentage,
+        },
         value::*,
         ParseError,
     },
@@ -292,15 +295,6 @@ pub enum FontSlant {
     Italic,
 }
 
-impl FontSlant {
-    pub fn compute(self) -> ComputedFontSlant {
-        match self {
-            Self::Normal => ComputedFontSlant::Regular,
-            Self::Italic => ComputedFontSlant::Italic,
-        }
-    }
-}
-
 impl PeekParse for FontSlant {
     fn peek_parse<'a>(
         stream: &ParseStream<'a>,
@@ -313,6 +307,15 @@ impl PeekParse for FontSlant {
         } else {
             return Ok(None);
         }))
+    }
+}
+
+impl PropertyValue<ComputedFontSlant> for FontSlant {
+    fn compute(self, _parent: &ComputedFontSlant) -> ComputedFontSlant {
+        match self {
+            FontSlant::Normal => ComputedFontSlant::Regular,
+            FontSlant::Italic => ComputedFontSlant::Italic,
+        }
     }
 }
 
@@ -342,6 +345,7 @@ impl PeekParse for FontFeatureSettings {
                 };
                 tags.push(tag);
             }
+
             Self::Tags(tags)
         } else {
             return Ok(None);
@@ -456,17 +460,14 @@ impl PeekParse for LineBreak {
     }
 }
 
-impl PropertyValue<icu_segmenter::options::LineBreakStrictness> for LineBreak {
-    fn compute(
-        self,
-        _parent: &icu_segmenter::options::LineBreakStrictness,
-    ) -> icu_segmenter::options::LineBreakStrictness {
+impl PropertyValue<LineBreakStrictness> for LineBreak {
+    fn compute(self, _parent: &LineBreakStrictness) -> LineBreakStrictness {
         match self {
-            LineBreak::Auto => icu_segmenter::options::LineBreakStrictness::Normal,
-            LineBreak::Loose => icu_segmenter::options::LineBreakStrictness::Loose,
-            LineBreak::Normal => icu_segmenter::options::LineBreakStrictness::Normal,
-            LineBreak::Strict => icu_segmenter::options::LineBreakStrictness::Strict,
-            LineBreak::Anywhere => icu_segmenter::options::LineBreakStrictness::Anywhere,
+            LineBreak::Auto => LineBreakStrictness::Normal,
+            LineBreak::Loose => LineBreakStrictness::Loose,
+            LineBreak::Normal => LineBreakStrictness::Normal,
+            LineBreak::Strict => LineBreakStrictness::Strict,
+            LineBreak::Anywhere => LineBreakStrictness::Anywhere,
         }
     }
 }
@@ -477,7 +478,7 @@ pub enum WordBreak {
     Normal,
     KeepAll,
     BreakAll,
-    BreakWord,
+    // break-word not supported
 }
 
 impl PeekParse for WordBreak {
@@ -491,24 +492,54 @@ impl PeekParse for WordBreak {
             Self::KeepAll
         } else if lk.peek_skip("break-all", stream) {
             Self::BreakAll
-        } else if lk.peek_skip("break-word", stream) {
-            Self::BreakWord
         } else {
             return Ok(None);
         }))
     }
 }
 
+impl PropertyValue<LineBreakWordOption> for WordBreak {
+    fn compute(self, _parent: &LineBreakWordOption) -> LineBreakWordOption {
+        match self {
+            WordBreak::Normal => LineBreakWordOption::Normal,
+            WordBreak::KeepAll => LineBreakWordOption::KeepAll,
+            WordBreak::BreakAll => LineBreakWordOption::BreakAll,
+        }
+    }
+}
+
 // https://drafts.csswg.org/css-color-5/#typedef-color
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color {
     Base(ColorBase),
     CurrentColor,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorBase {
     Hex(BGRA8),
+    ColorFunction(ColorFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColorFunction {
+    Rgb(RgbColorFunctionContent),
+    Rgba(RgbColorFunctionContent),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RgbColorFunctionContent {
+    r: RgbColorComponent,
+    g: RgbColorComponent,
+    b: RgbColorComponent,
+    a: Option<RgbColorComponent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RgbColorComponent {
+    Number(f32),
+    Percentage(f32),
+    None,
 }
 
 impl PeekParse for ColorBase {
@@ -556,8 +587,71 @@ impl PeekParse for ColorBase {
             }
 
             Some(ColorBase::Hex(BGRA8::from_rgba32(value)))
+        } else if stream.peek(FunctionalNotation) {
+            ColorFunction::peek_parse(stream, lk)?.map(ColorBase::ColorFunction)
         } else {
             None
+        })
+    }
+}
+
+impl PeekParse for ColorFunction {
+    fn peek_parse<'a>(
+        stream: &ParseStream<'a>,
+        lk: &mut Lookahead<'a>,
+    ) -> Result<Option<Self>, ParseError> {
+        let is_rgb = lk.peek("rgb(");
+        Ok(if is_rgb || lk.peek("rgba(") {
+            let fun = stream.parse::<FunctionalNotation>()?;
+            let content = parse_cursor(fun.content())?;
+            Some(if is_rgb {
+                Self::Rgb(content)
+            } else {
+                Self::Rgba(content)
+            })
+        } else {
+            None
+        })
+    }
+}
+
+impl Parse<'_> for RgbColorFunctionContent {
+    fn parse(stream: &ParseStream<'_>) -> Result<Self, ParseError> {
+        let r = stream.parse::<RgbColorComponent>()?;
+        let g = stream.parse::<RgbColorComponent>()?;
+        let b = stream.parse::<RgbColorComponent>()?;
+        let a = if stream.peek_skip(Token![/]) {
+            Some(stream.parse::<RgbColorComponent>()?)
+        } else {
+            None
+        };
+
+        // Values outside these ranges are not invalid, but are clamped to the ranges defined here at parsed-value time.
+        let clamp_component = |c: RgbColorComponent, num_min: f32, num_max: f32| match c {
+            RgbColorComponent::Number(n) => RgbColorComponent::Number(n.clamp(num_min, num_max)),
+            RgbColorComponent::Percentage(p) => RgbColorComponent::Percentage(p.clamp(0.0, 100.0)),
+            RgbColorComponent::None => RgbColorComponent::None,
+        };
+        Ok(Self {
+            r: clamp_component(r, 0.0, 255.0),
+            g: clamp_component(g, 0.0, 255.0),
+            b: clamp_component(b, 0.0, 255.0),
+            a: a.map(|c| clamp_component(c, 0.0, 1.0)),
+        })
+    }
+}
+
+impl Parse<'_> for RgbColorComponent {
+    fn parse(stream: &ParseStream<'_>) -> Result<Self, ParseError> {
+        let mut lk = stream.lookahead1();
+        Ok(if lk.peek(Number) {
+            RgbColorComponent::Number(stream.parse::<Number>()?.value().to_f32())
+        } else if lk.peek(Percentage) {
+            RgbColorComponent::Percentage(stream.parse::<Percentage>()?.value().to_f32())
+        } else if lk.peek_skip("none", stream) {
+            RgbColorComponent::None
+        } else {
+            return Err(lk.error());
         })
     }
 }
@@ -567,22 +661,47 @@ impl PeekParse for Color {
         stream: &ParseStream<'a>,
         lk: &mut Lookahead<'a>,
     ) -> Result<Option<Self>, ParseError> {
-        if lk.peek("currentcolor") {
+        Ok(if lk.peek("currentcolor") {
             stream.skip();
-            Ok(Some(Color::CurrentColor))
+            Some(Color::CurrentColor)
         } else {
-            ColorBase::peek_parse(stream, lk).map(|x| x.map(Color::Base))
-        }
+            ColorBase::peek_parse(stream, lk)?.map(Color::Base)
+        })
     }
 }
 
 impl PropertyValue<ComputedColor> for Color {
     fn compute(self, _parent: &ComputedColor) -> ComputedColor {
         match self {
-            Color::Base(ColorBase::Hex(value)) => ComputedColor::Srgb(value),
+            Self::Base(ColorBase::Hex(value)) => ComputedColor::Srgb(value),
+            Self::Base(ColorBase::ColorFunction(fun)) => match fun {
+                ColorFunction::Rgb(rgb) | ColorFunction::Rgba(rgb) => rgb.compute(),
+            },
             // https://www.w3.org/TR/css-color-4/#resolving-other-colors
             // The currentcolor keyword computes to itself.
-            Color::CurrentColor => ComputedColor::CurrentColor,
+            Self::CurrentColor => ComputedColor::CurrentColor,
+        }
+    }
+}
+
+impl RgbColorFunctionContent {
+    fn compute(self) -> ComputedColor {
+        let r = self.r.to_u8();
+        let g = self.g.to_u8();
+        let b = self.b.to_u8();
+        let a = self.a.map_or(0, RgbColorComponent::to_u8);
+
+        ComputedColor::Srgb(BGRA8::new(r, g, b, a))
+    }
+}
+
+impl RgbColorComponent {
+    fn to_u8(self) -> u8 {
+        // For all other purposes, a missing component behaves as a zero value.
+        match self {
+            RgbColorComponent::Number(n) => n as u8,
+            RgbColorComponent::Percentage(p) => (p * const { 255.0 / 100.0 }) as u8,
+            RgbColorComponent::None => 0,
         }
     }
 }

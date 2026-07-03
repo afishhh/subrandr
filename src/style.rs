@@ -40,7 +40,8 @@ macros::implement_style_module! {
         font_weight: I16Dot16 = I16Dot16::new(400),
         #[parse(values::FontSize)]
         font_size: I26Dot6 = I26Dot6::new(16),
-        font_slant: FontSlant = FontSlant::Regular,
+        #[parse(values::FontSlant)]
+        font_style: FontSlant = FontSlant::Regular,
         #[parse(values::FontFeatureSettings)]
         #[copy(no)] font_feature_settings: FontFeatureSettings = FontFeatureSettings::empty(),
     }
@@ -49,6 +50,7 @@ macros::implement_style_module! {
         #[copy(no)] text_shadows: Rc<[TextShadow]> = rc_static!([]),
         #[parse(values::LineBreak)]
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
+        #[parse(values::WordBreak)]
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: HorizontalAlignment = HorizontalAlignment::Left,
         inline_sizing: InlineSizing = InlineSizing::Normal,
@@ -86,6 +88,7 @@ static PROPERTIES: LazyLock<HashMap<&'static str, values::ParseAndComputeFn>> =
         result
     });
 
+#[expect(dead_code)]
 pub fn compute_with_declarations(
     log: LogContext,
     declarations: Vec<Declaration<'_>>,

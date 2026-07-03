@@ -46,7 +46,7 @@ pub trait TokenParse<'a>: Token + Sized {
 
 macro_rules! impl_token {
     (
-        for <$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?;
+        <$lt: lifetime> $name: ident $(<$ltarg: lifetime>)?;
 
         name = $err_name: literal;
         matches TokenView { $($pattern_body: tt)* };
@@ -92,7 +92,7 @@ pub struct Ident<'a> {
 impl_spanned!(Ident<'_>);
 
 impl_token!(
-    for<'a> Ident<'a>;
+    <'a> Ident<'a>;
 
     name = "<ident>";
     matches TokenView { span, source, kind: TokenKind::Ident };
@@ -114,7 +114,7 @@ pub struct LitString<'a> {
 impl_spanned!(LitString<'_>);
 
 impl_token!(
-    for<'a> LitString<'a>;
+    <'a> LitString<'a>;
 
     name = "<string>";
     matches TokenView { span, source, kind: TokenKind::String };
@@ -130,10 +130,15 @@ impl<'a> LitString<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct NumericTokenValue<'a> {
     pub(super) value: &'a str,
+    #[expect(dead_code)]
     pub(super) integer: bool,
 }
 
 impl<'a> NumericTokenValue<'a> {
+    pub fn to_f32(self) -> f32 {
+        self.value.parse().unwrap()
+    }
+
     pub fn to_f64(self) -> f64 {
         self.value.parse().unwrap()
     }
@@ -148,7 +153,7 @@ pub struct Number<'a> {
 impl_spanned!(Number<'_>);
 
 impl_token!(
-    for<'a> Number<'a>;
+    <'a> Number<'a>;
 
     name = "<number>";
     matches TokenView { span, source, kind: TokenKind::Number { integer } };
@@ -170,7 +175,7 @@ pub struct LitInt<'a> {
 impl_spanned!(LitInt<'_>);
 
 impl_token! {
-    for<'a> LitInt<'a>;
+    <'a> LitInt<'a>;
 
     name = "<integer>";
     matches TokenView { span, source, kind: TokenKind::Number { integer: true } };
@@ -192,7 +197,7 @@ pub struct Percentage<'a> {
 impl_spanned!(Percentage<'_>);
 
 impl_token!(
-    for<'a> Percentage<'a>;
+    <'a> Percentage<'a>;
 
     name = "<percentage>";
     matches TokenView { span, source, kind: TokenKind::Percentage { integer } };
@@ -216,7 +221,7 @@ pub struct Dimension<'a> {
 impl_spanned!(Dimension<'_>);
 
 impl_token!(
-    for<'a> Dimension<'a>;
+    <'a> Dimension<'a>;
 
     name = "<dimension>";
     matches TokenView { span, source, kind: TokenKind::Dimension { integer, unit_offset } };
@@ -236,53 +241,19 @@ impl<'a> Dimension<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct FunctionalNotation<'a> {
     pub(super) span: Span,
+    #[expect(dead_code)]
     pub(super) function: Escaped<'a>,
     pub(super) content: Cursor<'a>,
 }
 
 impl_spanned!(FunctionalNotation<'_>);
 
-pub struct UnquotedUrl<'a> {
-    pub(super) span: Span,
-    pub(super) value: Escaped<'a>,
-}
-
-impl_spanned!(UnquotedUrl<'_>);
-
-impl_token!(
-    for<'a> UnquotedUrl<'a>;
-
-    name = "<unquoted-url>";
-    matches TokenView { span, source, kind: TokenKind::Url { value_offset, trailing_len } };
-    parse UnquotedUrl {
-        span,
-        value: Escaped::new(
-            &source[usize::from(value_offset)..source.len() - usize::from(trailing_len)]
-        )
-    };
-);
-
-#[derive(Debug, Clone)]
-pub struct Punct {
-    pub(super) span: Span,
-    pub(super) value: char,
-}
-
-impl_spanned!(Punct);
-
-impl_token!(
-    for<'a> Punct;
-
-    name = "<punct>";
-    matches TokenView { span, source: _, kind: TokenKind::Punct(c) };
-    parse Punct { span, value: c };
-);
-
-impl Punct {
-    pub fn value(&self) -> char {
-        self.value
+impl<'a> FunctionalNotation<'a> {
+    pub fn content(&self) -> Cursor<'a> {
+        self.content
     }
 }
 
@@ -312,28 +283,6 @@ pub fn FunctionalNotation<'a>(marker: Infallible) -> FunctionalNotation<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AtKeyword<'a> {
-    span: Span,
-    value: Escaped<'a>,
-}
-
-impl_spanned!(AtKeyword<'_>);
-
-impl_token! {
-    for<'a> AtKeyword<'a>;
-
-    name = "<at-keyword>";
-    matches TokenView { span, source, kind: TokenKind::AtKeyword };
-    parse AtKeyword { span, value: Escaped::new(&source[1..]) };
-}
-
-impl<'a> AtKeyword<'a> {
-    pub fn value(&self) -> Escaped<'a> {
-        self.value
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct Hash<'a> {
     span: Span,
     value: Escaped<'a>,
@@ -343,7 +292,7 @@ pub struct Hash<'a> {
 impl_spanned!(Hash<'_>);
 
 impl_token! {
-    for<'a> Hash<'a>;
+    <'a> Hash<'a>;
 
     name = "<hash>";
     matches TokenView { span, source, kind: TokenKind::Hash { type_flag } };
@@ -355,6 +304,7 @@ impl<'a> Hash<'a> {
         self.value
     }
 
+    #[expect(dead_code)]
     pub fn type_flag(&self) -> HashTypeFlag {
         self.type_flag
     }

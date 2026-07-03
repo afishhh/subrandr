@@ -469,7 +469,7 @@ fn font_matcher_from_style(style: &ComputedStyle, lctx: &mut LayoutContext) -> F
         style.font_family().clone(),
         text::FontStyle {
             weight: style.font_weight(),
-            italic: match style.font_slant() {
+            italic: match style.font_style() {
                 FontSlant::Regular => false,
                 FontSlant::Italic => true,
             },

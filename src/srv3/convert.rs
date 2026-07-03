@@ -531,7 +531,7 @@ fn pen_to_size_independent_style(
     }
 
     if pen.italic {
-        *base.make_font_slant_mut() = FontSlant::Italic;
+        *base.make_font_style_mut() = FontSlant::Italic;
     }
 
     let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);

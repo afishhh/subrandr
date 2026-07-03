@@ -135,6 +135,7 @@ fn consume_a_declaration<'a>(
 }
 
 // https://drafts.csswg.org/css-syntax-3/#consume-block-contents but qualified rules are illegal.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn parse_declaration_list<'a>(mut cursor: Cursor<'a>) -> impl Iterator<Item = Declaration<'a>> {
     std::iter::from_fn(move || loop {
         if cursor.eof() {

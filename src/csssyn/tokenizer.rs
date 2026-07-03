@@ -2,6 +2,8 @@
 
 use std::{fmt::Write, ops::Range};
 
+use crate::csssyn::Span;
+
 #[derive(Debug, Clone)]
 struct StreamPosition {
     index: usize,
@@ -9,7 +11,7 @@ struct StreamPosition {
 }
 
 // TODO: had_parse_error boolean?
-pub(super) struct Tokenizer<'a> {
+struct Tokenizer<'a> {
     source: &'a str,
     pos: StreamPosition,
 }
@@ -47,14 +49,6 @@ impl<'a> Tokenizer<'a> {
                 last_was_cr: false,
             },
         }
-    }
-
-    pub fn source(&self) -> &'a str {
-        self.source
-    }
-
-    pub fn position(&self) -> usize {
-        self.pos.index
     }
 
     fn reconsume(&mut self, codepoint: char) {
@@ -372,12 +366,12 @@ impl<'a> Tokenizer<'a> {
     pub fn consume_token(&mut self) -> Option<Token> {
         self.consume_comments();
 
-        let start = self.pos.index;
+        let start = self.pos.index as u32;
         macro_rules! return_token {
             (with $kind: expr) => {
                 return Some(Token {
                     kind: $kind,
-                    len: (self.pos.index - start) as u32,
+                    span: Span { start, end: self.pos.index as u32 }
                 })
             };
             ($($kind: tt)*) => {
@@ -520,6 +514,10 @@ impl<'a> Iterator for Tokenizer<'a> {
     }
 }
 
+pub fn tokenize(source: &str) -> impl Iterator<Item = Token> + '_ {
+    Tokenizer::new(source)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TokenKind {
     LParen,
@@ -561,7 +559,7 @@ pub(super) enum TokenKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub len: u32,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -386,7 +386,7 @@ fn convert_node(
             let mut style = parent_style.create_derived();
             match internal.kind {
                 vtt::InternalNodeKind::Italic => {
-                    *style.make_font_slant_mut() = FontSlant::Italic;
+                    *style.make_font_style_mut() = FontSlant::Italic;
                 }
                 vtt::InternalNodeKind::Bold => {
                     *style.make_font_weight_mut() = I16Dot16::new(700);

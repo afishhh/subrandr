@@ -1,8 +1,10 @@
 use std::{marker::PhantomData, num::NonZero, ptr::NonNull};
 
+use crate::csssyn::tokenizer::tokenize;
+
 use super::{
     token::TokenParse,
-    tokenizer::{HashTypeFlag, TokenKind, Tokenizer},
+    tokenizer::{HashTypeFlag, TokenKind},
     ParseError, Peek, Span, Spanned,
 };
 
@@ -115,8 +117,8 @@ pub struct TokenBuffer<'a> {
 }
 
 impl<'a> TokenBuffer<'a> {
-    fn from_tokenizer(mut tokenizer: Tokenizer<'a>) -> Result<Self, ParseError> {
-        let source = tokenizer.source();
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn from_source(source: &'a str) -> Result<Self, ParseError> {
         let Some(source_end) = u32::try_from(source.len())
             .ok()
             .filter(|&x| x <= SOURCE_LEN_LIMIT)
@@ -129,12 +131,7 @@ impl<'a> TokenBuffer<'a> {
 
         let mut entries: Vec<Entry> = Vec::new();
         let mut group_stack: Vec<(Delimiter, usize)> = Vec::new();
-        let mut last = 0;
-        while let Some(token) = tokenizer.consume_token() {
-            let span = Span {
-                start: last,
-                end: last + token.len,
-            };
+        for token in tokenize(source) {
             let mut close_stack = |expected_delimiter: Delimiter| {
                 // TODO: `pop_if` (MSRV 1.85)
                 let Some((d, idx)) = group_stack.pop() else {
@@ -223,10 +220,9 @@ impl<'a> TokenBuffer<'a> {
             };
 
             entries.push(Entry {
-                span,
+                span: token.span,
                 kind: entry_kind,
             });
-            last = span.end;
         }
 
         entries.push(Entry {
@@ -240,10 +236,7 @@ impl<'a> TokenBuffer<'a> {
         Ok(Self { source, entries })
     }
 
-    pub fn from_source(source: &'a str) -> Result<Self, ParseError> {
-        Self::from_tokenizer(Tokenizer::new(source))
-    }
-
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn start(&self) -> Cursor<'_> {
         unsafe {
             Cursor {
@@ -297,7 +290,8 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn scope_source(self) -> &'a str {
+    #[cfg(test)]
+    pub(super) fn scope_source(self) -> &'a str {
         let start_entry = self.entry();
         let end_entry = self.end().entry();
         unsafe {
@@ -408,8 +402,7 @@ impl<'a> Cursor<'a> {
         ) && !self.eof()
         {
             // This is an unclosed group, skip to the end.
-            self.entry = self.end;
-            return Some(self);
+            return Some(self.end());
         }
 
         self.next()
@@ -438,6 +431,7 @@ impl<'a> Cursor<'a> {
     }
 
     #[inline]
+    #[must_use]
     pub fn end(mut self) -> Cursor<'a> {
         self.entry = self.end;
         self

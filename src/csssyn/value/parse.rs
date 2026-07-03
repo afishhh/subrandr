@@ -223,7 +223,7 @@ pub fn parse_cursor<'a, T: Parse<'a>>(cursor: Cursor<'a>) -> Result<T, ParseErro
     Ok(result)
 }
 
-#[cfg(test)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn parse_str<T: for<'a> Parse<'a>>(source: &str) -> Result<T, ParseError> {
     let buffer = TokenBuffer::from_source(source)?;
     parse_cursor(buffer.start())

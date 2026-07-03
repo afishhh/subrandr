@@ -4,16 +4,10 @@ use std::{fmt::Write, ops::Range};
 
 use crate::csssyn::Span;
 
-#[derive(Debug, Clone)]
-struct StreamPosition {
-    index: usize,
-    last_was_cr: bool,
-}
-
-// TODO: had_parse_error boolean?
+// TODO: Consider reporting parse errors (to output as warnings)
 struct Tokenizer<'a> {
     source: &'a str,
-    pos: StreamPosition,
+    index: usize,
 }
 
 pub fn is_whitespace(codepoint: char) -> bool {
@@ -41,41 +35,34 @@ fn is_valid_escape(a: char, b: char) -> bool {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub(super) const fn new(text: &'a str) -> Self {
+    fn new(text: &'a str) -> Self {
         Self {
             source: text,
-            pos: StreamPosition {
-                index: 0,
-                last_was_cr: false,
-            },
+            index: 0,
         }
     }
 
     fn reconsume(&mut self, codepoint: char) {
-        self.pos.index -= codepoint.len_utf8();
-        if codepoint == '\n' && self.source.as_bytes()[self.pos.index] == b'\r' {
-            self.pos.index -= 1;
+        self.index -= codepoint.len_utf8();
+        if codepoint == '\n' && self.source.as_bytes()[self.index] == b'\r' {
+            self.index -= 1;
         }
     }
 
     fn advance_by(&mut self, count_bytes: usize) {
-        self.pos.index += count_bytes;
+        self.index += count_bytes;
     }
 
     fn peek_bytes(&self, count: usize) -> &[u8] {
-        &self.source.as_bytes()[self.pos.index..(self.pos.index + count).min(self.source.len())]
+        &self.source.as_bytes()[self.index..(self.index + count).min(self.source.len())]
     }
 
     fn consume_comments(&mut self) {
-        loop {
-            if self.source.as_bytes()[self.pos.index..].starts_with(b"/*") {
-                let end = self.source[self.pos.index..]
-                    .find("*/")
-                    .map_or(self.source.len(), |v| v + 2 + self.pos.index);
-                self.pos.index = end;
-            } else {
-                break;
-            }
+        while self.source.as_bytes()[self.index..].starts_with(b"/*") {
+            let end = self.source[self.index..]
+                .find("*/")
+                .map_or(self.source.len(), |v| self.index + 2 + v);
+            self.index = end;
         }
     }
 
@@ -91,9 +78,7 @@ impl<'a> Tokenizer<'a> {
                 Some('\\') => match self.peek_codepoint() {
                     None => (),
                     Some('\n') => self.advance_by(1),
-                    Some(_) => {
-                        self.skip_escaped_codepoint();
-                    }
+                    Some(_) => self.skip_escaped_codepoint(),
                 },
                 Some(_) => {}
             }
@@ -103,7 +88,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn consume_ident_sequence(&mut self) -> Escaped<'a> {
-        let start = self.pos.index;
+        let start = self.index;
 
         loop {
             match self.consume_codepoint() {
@@ -117,7 +102,7 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        Escaped(&self.source[start..self.pos.index])
+        Escaped(&self.source[start..self.index])
     }
 
     fn consume_number(&mut self) -> bool {
@@ -149,11 +134,11 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn consume_numeric_token(&mut self) -> TokenKind {
-        let start = self.pos.index;
+        let start = self.index;
         let integer = self.consume_number();
 
         if self.peek_would_start_an_ident_sequence() {
-            let unit_offset = (self.pos.index - start) as u32;
+            let unit_offset = (self.index - start) as u32;
             self.consume_ident_sequence();
             TokenKind::Dimension {
                 integer,
@@ -184,20 +169,20 @@ impl<'a> Tokenizer<'a> {
             self.advance_by(1);
         }
 
-        let start = self.pos.index;
+        let start = self.index;
         let end;
         loop {
             match self.consume_codepoint() {
                 Some(')') => {
-                    end = self.pos.index - 1;
+                    end = self.index - 1;
                     break;
                 }
                 None => {
-                    end = self.pos.index;
+                    end = self.index;
                     break;
                 }
                 Some(c) if is_whitespace(c) => {
-                    end = self.pos.index - 1;
+                    end = self.index - 1;
 
                     while self.peek_codepoint().is_some_and(is_whitespace) {
                         self.advance_by(1);
@@ -235,17 +220,17 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn consume_ident_like(&mut self) -> TokenKind {
-        let start = self.pos.index;
+        let start = self.index;
         let string = self.consume_ident_sequence();
 
         if string.eq_ignore_ascii_case("url") && self.peek_const("(") {
             self.advance_by(1);
             loop {
-                let old = self.pos.clone();
+                let old_pos = self.index;
                 if !self.consume_codepoint().is_some_and(is_whitespace)
                     || !self.peek_codepoint().is_some_and(is_whitespace)
                 {
-                    self.pos = old;
+                    self.index = old_pos;
                     break;
                 }
             }
@@ -272,11 +257,11 @@ impl<'a> Tokenizer<'a> {
                 TokenKind::Url {
                     // TODO: checked cast
                     value_offset: (value_start - start) as u16,
-                    trailing_len: (self.pos.index - value_end) as u16,
+                    trailing_len: (self.index - value_end) as u16,
                 }
             }
         } else if self.peek_const("(") {
-            self.pos.index += 1;
+            self.index += 1;
             TokenKind::Function
         } else {
             TokenKind::Ident
@@ -284,36 +269,24 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn peek_codepoint(&mut self) -> Option<char> {
-        loop {
-            match self.source[self.pos.index..].chars().next()? {
-                '\0' => {
-                    self.pos.last_was_cr = false;
-                    return Some(char::REPLACEMENT_CHARACTER);
+        let mut chrs = self.source[self.index..].chars();
+        match chrs.next()? {
+            '\0' => Some(char::REPLACEMENT_CHARACTER),
+            '\x0C' => Some('\n'),
+            '\r' => {
+                if chrs.next() == Some('\n') {
+                    self.index += 1;
                 }
-                '\x0C' => {
-                    self.pos.last_was_cr = false;
-                    return Some('\n');
-                }
-                '\r' => {
-                    self.pos.last_was_cr = true;
-                    return Some('\n');
-                }
-                '\n' => {
-                    if self.pos.last_was_cr {
-                        self.pos.last_was_cr = false;
-                        self.pos.index += 1;
-                        continue;
-                    }
-                    return Some('\n');
-                }
-                c => return Some(c),
-            };
+                Some('\n')
+            }
+            '\n' => Some('\n'),
+            c => Some(c),
         }
     }
 
     fn consume_codepoint(&mut self) -> Option<char> {
         if let Some(chr) = self.peek_codepoint() {
-            self.pos.index += chr.len_utf8();
+            self.index += chr.len_utf8();
             Some(chr)
         } else {
             None
@@ -321,9 +294,9 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn lookahead<T>(&mut self, callback: impl FnOnce(&mut Self) -> T) -> T {
-        let old = self.pos.clone();
+        let old = self.index;
         let result = callback(self);
-        self.pos = old;
+        self.index = old;
         result
     }
 
@@ -360,18 +333,18 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn peek_const(&mut self, value: &str) -> bool {
-        self.source.as_bytes()[self.pos.index..].starts_with(value.as_bytes())
+        self.source.as_bytes()[self.index..].starts_with(value.as_bytes())
     }
 
     pub fn consume_token(&mut self) -> Option<Token> {
         self.consume_comments();
 
-        let start = self.pos.index as u32;
+        let start = self.index as u32;
         macro_rules! return_token {
             (with $kind: expr) => {
                 return Some(Token {
                     kind: $kind,
-                    span: Span { start, end: self.pos.index as u32 }
+                    span: Span { start, end: self.index as u32 }
                 })
             };
             ($($kind: tt)*) => {
@@ -423,15 +396,15 @@ impl<'a> Tokenizer<'a> {
                     self.reconsume('+');
                     return_token!(with self.consume_numeric_token());
                 } else if self.peek_const("->") {
-                    self.pos.index += 2;
+                    self.index += 2;
                     return_token!(Cdc);
                 } else {
-                    let old = self.pos.clone();
+                    let old = self.index;
                     self.reconsume('-');
                     if self.peek_would_start_an_ident_sequence() {
                         return_token!(with self.consume_ident_like());
                     } else {
-                        self.pos = old;
+                        self.index = old;
                         return_token!(Punct('-'))
                     }
                 }
@@ -475,7 +448,7 @@ impl<'a> Tokenizer<'a> {
                 }
             }
             Some('0'..='9') => {
-                self.pos.index -= 1;
+                self.index -= 1;
                 return_token!(with self.consume_numeric_token());
             }
             Some(c) if is_ident_start(c) => {
@@ -492,7 +465,7 @@ impl<'a> Tokenizer<'a> {
             .peek_bytes(6)
             .iter()
             .position(|&c| !c.is_ascii_hexdigit())
-            .map_or(6, |v| v);
+            .unwrap_or(6);
 
         if hex_len == 0 {
             self.consume_codepoint();
@@ -506,16 +479,9 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
-impl<'a> Iterator for Tokenizer<'a> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.consume_token()
-    }
-}
-
 pub fn tokenize(source: &str) -> impl Iterator<Item = Token> + '_ {
-    Tokenizer::new(source)
+    let mut tokenizer = Tokenizer::new(source);
+    std::iter::from_fn(move || tokenizer.consume_token())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

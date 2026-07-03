@@ -117,7 +117,6 @@ pub struct TokenBuffer<'a> {
 }
 
 impl<'a> TokenBuffer<'a> {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn from_source(source: &'a str) -> Result<Self, ParseError> {
         let Some(source_end) = u32::try_from(source.len())
             .ok()
@@ -236,7 +235,6 @@ impl<'a> TokenBuffer<'a> {
         Ok(Self { source, entries })
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn start(&self) -> Cursor<'_> {
         unsafe {
             Cursor {

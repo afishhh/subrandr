@@ -12,7 +12,7 @@ use crate::{
     csssyn::algorithms::Declaration,
     layout::{
         self,
-        block::BlockContainerFragment,
+        block::{BlockContainerFragment, ContainingBlock},
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
@@ -174,9 +174,6 @@ impl Event {
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
         let mut fragment = layout::inline::layout(
             lctx,
-            &layout::LayoutConstraints {
-                size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
-            },
             &{
                 let root_style = {
                     let mut result = base_style.clone();
@@ -202,6 +199,10 @@ impl Event {
                 }
                 builder.finish()
             },
+            &ContainingBlock::initial(Vec2L::new(
+                sctx.video_width * self.size as f32 / 100,
+                FixedL::MAX,
+            )),
         )?;
 
         let lines = &mut fragment.lines;

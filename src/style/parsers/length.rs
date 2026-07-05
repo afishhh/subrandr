@@ -77,6 +77,14 @@ static ABSOLUTE_UNITS: &[(&str, f64)] = &[
     ("pc", 96.0 / 6.0),    // picas
 ];
 
+pub(super) fn take_length_or_auto(stream: &mut ParseStream) -> Result<Option<Length>, ParseError> {
+    Ok(if stream.peek_skip("auto") {
+        None
+    } else {
+        Some(take_length(stream)?)
+    })
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

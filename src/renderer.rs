@@ -21,9 +21,9 @@ use crate::{
     display::{DisplayError, DisplayPass},
     layout::{
         self,
-        block::BlockContainerFragment,
+        block::{BlockContainerFragment, ContainingBlock},
         inline::{InlineContentBuilder, InlineContentFragment},
-        FixedL, LayoutConstraints, LayoutContext, Point2L,
+        FixedL, LayoutContext, Point2L,
     },
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
@@ -496,8 +496,8 @@ impl Renderer {
                 Point2L::ZERO,
                 DebugContentFragment::Inline(layout::inline::layout(
                     lctx,
-                    &LayoutConstraints::NONE,
                     &builder.finish(),
+                    &ContainingBlock::infinite_initial(),
                 )?),
             ));
         }
@@ -553,8 +553,11 @@ impl Renderer {
                 draw_times("raster", &perf.raster, BGRA8::ORANGERED);
 
                 drop(root);
-                let perf_text_fragment =
-                    layout::inline::layout(lctx, &LayoutConstraints::NONE, &builder.finish())?;
+                let perf_text_fragment = layout::inline::layout(
+                    lctx,
+                    &builder.finish(),
+                    &ContainingBlock::infinite_initial(),
+                )?;
                 let graph_y = perf_text_fragment.fbox.size_for_layout().y;
                 fragments.push((
                     Point2L::new(

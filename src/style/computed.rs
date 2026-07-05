@@ -46,6 +46,14 @@ impl ToPhysicalPixels for Length {
     }
 }
 
+impl ToPhysicalPixels for Option<Length> {
+    type Output = Option<FixedL>;
+
+    fn to_physical_pixels(self, dpi: u32) -> Self::Output {
+        self.map(|l| l.to_physical_pixels(dpi))
+    }
+}
+
 macro_rules! impl_length_op {
     ($trait: ident, $fun: ident, $trait_assign: ident, $fun_assign: ident, $op: tt, $op_assign: tt, $rhs_ty: ty, $($rhs_field: tt)*) => {
         impl std::ops::$trait<$rhs_ty> for Length {

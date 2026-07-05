@@ -117,30 +117,41 @@ impl Debug for BoxFragmentationPart {
 pub struct FragmentBox {
     pub content_size: Vec2L,
     pub padding: EdgeExtents,
+    pub margin: EdgeExtents,
 }
 
 impl FragmentBox {
     pub const ZERO: Self = Self {
         content_size: Vec2L::ZERO,
         padding: EdgeExtents::ZERO,
+        margin: EdgeExtents::ZERO,
     };
 
     const fn new_content_only(content_size: Vec2L) -> Self {
         Self {
             content_size,
             padding: EdgeExtents::ZERO,
+            margin: EdgeExtents::ZERO,
         }
     }
 
     // TODO: Make a newtype for dpi everywhere
-    fn new_styled(content_size: Vec2L, dpi: u32, style: &ComputedStyle) -> Self {
-        Self::new_styled_fragmented(content_size, dpi, style, BoxFragmentationPart::FULL)
+    // TODO: this is inline-specific
+    fn new_styled(
+        content_size: Vec2L,
+        dpi: u32,
+        style: &ComputedStyle,
+        margin: EdgeExtents,
+    ) -> Self {
+        Self::new_styled_fragmented(content_size, dpi, style, margin, BoxFragmentationPart::FULL)
     }
 
+    // TODO: this is inline-specific
     fn new_styled_fragmented(
         content_size: Vec2L,
         dpi: u32,
         style: &ComputedStyle,
+        margin: EdgeExtents,
         part: BoxFragmentationPart,
     ) -> Self {
         Self {
@@ -152,16 +163,20 @@ impl FragmentBox {
                 || style.padding_left().to_physical_pixels(dpi),
                 || style.padding_right().to_physical_pixels(dpi),
             ),
+            margin,
         }
     }
 
     pub fn content_offset(&self) -> Vec2L {
-        Vec2L::new(self.padding.left, self.padding.top)
+        Vec2L::new(
+            self.padding.left + self.margin.left,
+            self.padding.top + self.margin.top,
+        )
     }
 
     pub fn padding_box(&self) -> Rect2L {
         Rect2L::from_min_size(
-            Point2L::ZERO,
+            Point2L::new(self.margin.left, self.margin.top),
             self.content_size
                 + Vec2L::new(
                     self.padding.left + self.padding.right,
@@ -171,7 +186,12 @@ impl FragmentBox {
     }
 
     pub fn margin_box(&self) -> Rect2L {
-        self.padding_box()
+        let mut result = self.padding_box();
+        result.min.x -= self.margin.left;
+        result.min.y -= self.margin.top;
+        result.max.x += self.margin.right;
+        result.max.y += self.margin.bottom;
+        result
     }
 
     pub fn size_for_layout(&self) -> Vec2L {
@@ -190,17 +210,6 @@ impl AsLogger for LayoutContext<'_> {
     fn as_logger(&self) -> &impl log::Logger {
         self.log.as_logger()
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LayoutConstraints {
-    pub size: Vec2L,
-}
-
-impl LayoutConstraints {
-    pub const NONE: Self = Self {
-        size: Vec2L::splat(FixedL::MAX),
-    };
 }
 
 pub mod inline;

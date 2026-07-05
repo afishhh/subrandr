@@ -41,10 +41,15 @@ macros::implement_style_module! {
         #[inherit(no)] background_color: BGRA8 = BGRA8::ZERO,
         #[inherit(no)] text_decoration: TextDecorations = TextDecorations::NONE,
         #[inherit(no)] baseline_source: BaselineSource = BaselineSource::Last,
+        #[inherit(no)] width: Option<Length> = None,
         #[inherit(no)] padding_top: Length = Length::ZERO,
         #[inherit(no)] padding_left: Length = Length::ZERO,
         #[inherit(no)] padding_right: Length = Length::ZERO,
         #[inherit(no)] padding_bottom: Length = Length::ZERO,
+        #[inherit(no)] margin_top: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] margin_left: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] margin_right: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] margin_bottom: Option<Length> = Some(Length::ZERO),
     }
 
     rc misc {

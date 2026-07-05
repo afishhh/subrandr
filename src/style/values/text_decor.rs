@@ -10,32 +10,27 @@ use crate::{
 use super::*;
 use crate::style::computed::{Length as ComputedLength, TextShadow as ComputedTextShadow};
 
-impl PeekParse for TextDecorationLines {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-        // TODO: don't make property peekparse return option
-    ) -> Result<Option<Self>, ParseError> {
-        let mut result = Self::NONE;
+impl Parse<'_> for Option<TextDecorationLines> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        let mut result = TextDecorationLines::NONE;
 
-        if lk.peek_skip("none", stream) {
+        if stream.peek_skip("none") {
             return Ok(Some(result));
         }
 
         loop {
-            if lk.peek_skip("underline", stream) {
+            if stream.peek_skip("underline") {
                 result.underline = true;
-            } else if lk.peek_skip("line-through", stream) {
+            } else if stream.peek_skip("line-through") {
                 result.line_through = true;
             } else {
-                return Err(lk.error());
+                return Err(stream.lookahead_error());
             }
 
-            *lk = stream.lookahead1();
-            if lk.peek(End) {
+            if stream.peek(End) {
                 break Ok(Some(result));
-            } else if !lk.peek_skip(Token![,], stream) {
-                return Err(lk.error());
+            } else if !stream.peek_skip(Token![,]) {
+                return Err(stream.lookahead_error());
             }
         }
     }
@@ -48,18 +43,17 @@ struct ShadowLengths {
     radius: Option<Length>,
 }
 
-impl ShadowLengths {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        let Some(off_x) = Length::peek_parse(stream, lk)? else {
+impl Parse<'_> for Option<ShadowLengths> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        let Some(off_x) = stream.parse()? else {
             return Ok(None);
         };
-        let off_y = Length::peek_parse(stream, lk)?.ok_or_else(|| lk.error())?;
+        let off_y = stream
+            .parse::<Option<Length>>()?
+            .ok_or_else(|| stream.lookahead_error())?;
 
         // TODO: range check
-        let radius = Length::peek_parse(stream, lk)?;
+        let radius = stream.parse()?;
 
         Ok(Some(ShadowLengths {
             offset: Vec2::new(off_x, off_y),
@@ -68,29 +62,30 @@ impl ShadowLengths {
     }
 }
 
-impl PeekParse for TextShadows {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        if lk.peek_skip("none", stream) {
-            return Ok(Some(Self(Vec::new())));
+impl Parse<'_> for Option<TextShadows> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        if stream.peek_skip("none") {
+            return Ok(Some(TextShadows(Vec::new())));
         }
 
         let mut result = Vec::new();
         loop {
-            if let Some(color) = Color::peek_parse(stream, lk)? {
-                let lengths = ShadowLengths::peek_parse(stream, lk)?.ok_or_else(|| lk.error())?;
+            if let Some(color) = stream.parse::<Option<Color>>()? {
+                let lengths = stream
+                    .parse::<Option<ShadowLengths>>()?
+                    .ok_or_else(|| stream.lookahead_error())?;
                 result.push((color, lengths));
-            } else if let Some(lengths) = ShadowLengths::peek_parse(stream, lk)? {
-                let color = Color::peek_parse(stream, lk)?.ok_or_else(|| lk.error())?;
+            } else if let Some(lengths) = stream.parse()? {
+                let color = stream
+                    .parse::<Option<Color>>()?
+                    .ok_or_else(|| stream.lookahead_error())?;
                 result.push((color, lengths));
             }
 
-            *lk = stream.lookahead1();
-            if lk.peek(End) {
-                break Ok(Some(Self(result)));
+            if stream.peek(End) {
+                break Ok(Some(TextShadows(result)));
             }
+            stream.parse::<Token![,]>()?;
         }
     }
 }

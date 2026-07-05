@@ -14,19 +14,16 @@ pub enum LineBreak {
     Anywhere,
 }
 
-impl PeekParse for LineBreak {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("loose", stream) {
-            Self::Loose
-        } else if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if lk.peek_skip("strict", stream) {
-            Self::Strict
-        } else if lk.peek_skip("anywhere", stream) {
-            Self::Anywhere
+impl Parse<'_> for Option<LineBreak> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("loose") {
+            LineBreak::Loose
+        } else if stream.peek_skip("normal") {
+            LineBreak::Normal
+        } else if stream.peek_skip("strict") {
+            LineBreak::Strict
+        } else if stream.peek_skip("anywhere") {
+            LineBreak::Anywhere
         } else {
             return Ok(None);
         }))
@@ -53,17 +50,14 @@ pub enum WordBreak {
     // break-word not supported
 }
 
-impl PeekParse for WordBreak {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if lk.peek_skip("keep-all", stream) {
-            Self::KeepAll
-        } else if lk.peek_skip("break-all", stream) {
-            Self::BreakAll
+impl Parse<'_> for Option<WordBreak> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("normal") {
+            WordBreak::Normal
+        } else if stream.peek_skip("keep-all") {
+            WordBreak::KeepAll
+        } else if stream.peek_skip("break-all") {
+            WordBreak::BreakAll
         } else {
             return Ok(None);
         }))
@@ -80,17 +74,14 @@ impl PropertyValue<LineBreakWordOption> for WordBreak {
     }
 }
 
-impl PeekParse for WhiteSpaceCollapse {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("collapse", stream) {
-            Self::Collapse
-        } else if lk.peek_skip("preserve", stream) {
-            Self::Preserve
-        } else if lk.peek_skip("preserve-breaks", stream) {
-            Self::PreserveBreaks
+impl Parse<'_> for Option<WhiteSpaceCollapse> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("collapse") {
+            WhiteSpaceCollapse::Collapse
+        } else if stream.peek_skip("preserve") {
+            WhiteSpaceCollapse::Preserve
+        } else if stream.peek_skip("preserve-breaks") {
+            WhiteSpaceCollapse::PreserveBreaks
         } else {
             return Ok(None);
         }))
@@ -106,17 +97,14 @@ pub enum TextAlign {
     Center,
 }
 
-impl PeekParse for TextAlign {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("left", stream) {
-            Self::Left
-        } else if lk.peek_skip("right", stream) {
-            Self::Right
-        } else if lk.peek_skip("center", stream) {
-            Self::Center
+impl Parse<'_> for Option<TextAlign> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("left") {
+            TextAlign::Left
+        } else if stream.peek_skip("right") {
+            TextAlign::Right
+        } else if stream.peek_skip("center") {
+            TextAlign::Center
         } else {
             return Ok(None);
         }))

@@ -4,15 +4,12 @@ use crate::style::computed::Direction;
 
 use super::*;
 
-impl PeekParse for Direction {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("ltr", stream) {
-            Self::Ltr
-        } else if lk.peek_skip("rtl", stream) {
-            Self::Rtl
+impl Parse<'_> for Option<Direction> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("ltr") {
+            Direction::Ltr
+        } else if stream.peek_skip("rtl") {
+            Direction::Rtl
         } else {
             return Ok(None);
         }))

@@ -15,31 +15,28 @@ pub enum AbsoluteLength {
     Pixels(f64),
 }
 
-impl PeekParse for AbsoluteLength {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek(Token![0]) {
-            Self::Zero
-        } else if lk.peek(Dimension) {
+impl Parse<'_> for Option<AbsoluteLength> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip(Token![0]) {
+            AbsoluteLength::Zero
+        } else if stream.peek(Dimension) {
             // TODO: compute eagerly here
             // TODO: update lk here
             let dim = stream.parse::<Dimension>()?;
             if dim.unit().eq_ignore_ascii_case("px") {
-                Self::Pixels(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Pixels(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("pt") {
-                Self::Points(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Points(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("in") {
-                Self::Inches(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Inches(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("mm") {
-                Self::Millimeters(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Millimeters(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("cm") {
-                Self::Centimeters(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Centimeters(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("Q") {
-                Self::QuarterMillmeters(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::QuarterMillmeters(dim.value().to_finite_f64(dim)?)
             } else if dim.unit().eq_ignore_ascii_case("pc") {
-                Self::Picas(dim.value().to_finite_f64(dim)?)
+                AbsoluteLength::Picas(dim.value().to_finite_f64(dim)?)
             } else {
                 return Err(ParseError::new(dim, "invalid absolute length unit"));
             }
@@ -56,12 +53,11 @@ pub enum Length {
     Absolute(AbsoluteLength),
 }
 
-impl PeekParse for Length {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        AbsoluteLength::peek_parse(stream, lk).map(|x| x.map(Length::Absolute))
+impl Parse<'_> for Option<Length> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(stream
+            .parse::<Option<AbsoluteLength>>()?
+            .map(Length::Absolute))
     }
 }
 

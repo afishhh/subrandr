@@ -38,28 +38,18 @@ use crate::{
     style::ComputedStyle,
 };
 
-pub(super) trait PeekParse: Sized {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError>;
-}
-
-pub(super) trait PropertyValue<V>: PeekParse + Sized {
+pub(super) trait PropertyValue<V>: Sized {
     fn compute(self, parent: &V) -> V;
 }
 
-impl<T: PeekParse + Sized> PropertyValue<T> for T {
+impl<'a, T: Sized> PropertyValue<T> for T
+where
+    Option<T>: Parse<'a>,
+{
     fn compute(self, _parent: &T) -> T {
         self
     }
 }
-
-pub(super) type ParseAndComputeFn = fn(
-    result: &mut ComputedStyle,
-    source: Cursor,
-    parent: &ComputedStyle,
-) -> Result<(), ParseError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GlobalKeywordOr<I> {
@@ -69,28 +59,39 @@ enum GlobalKeywordOr<I> {
     Value(I),
 }
 
-impl<'a, I: PeekParse> Parse<'a> for GlobalKeywordOr<I> {
-    fn parse(stream: &ParseStream<'a>) -> Result<Self, ParseError> {
-        let mut lk = stream.lookahead1();
-        Ok(if lk.peek_skip("initial", stream) {
+impl<'a, I> Parse<'a> for GlobalKeywordOr<I>
+where
+    Option<I>: Parse<'a>,
+{
+    fn parse(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        Ok(if stream.peek_skip("initial") {
             Self::Initial
-        } else if lk.peek_skip("inherit", stream) {
+        } else if stream.peek_skip("inherit") {
             Self::Inherit
-        } else if lk.peek_skip("unset", stream) {
+        } else if stream.peek_skip("unset") {
             Self::Unset
-        } else if let Some(value) = I::peek_parse(stream, &mut lk)? {
+        } else if let Some(value) = stream.parse()? {
             Self::Value(value)
         } else {
-            return Err(lk.error());
+            return Err(stream.lookahead_error());
         })
     }
 }
+
+pub(super) type ParseAndComputeFn = fn(
+    result: &mut ComputedStyle,
+    source: Cursor,
+    parent: &ComputedStyle,
+) -> Result<(), ParseError>;
 
 pub(super) fn parse_and_compute<P: super::ComputedProperty, PV: PropertyValue<P::Value>>(
     result: &mut ComputedStyle,
     source: Cursor,
     parent: &ComputedStyle,
-) -> Result<(), ParseError> {
+) -> Result<(), ParseError>
+where
+    Option<PV>: for<'a> Parse<'a>,
+{
     // https://drafts.csswg.org/css-cascade/#defaulting-keywords
     match csssyn::value::parse_cursor::<GlobalKeywordOr<PV>>(source)? {
         GlobalKeywordOr::Initial => P::set(result, P::get(&ComputedStyle::DEFAULT).clone()),
@@ -110,7 +111,10 @@ pub(super) fn parse_and_compute<P: super::ComputedProperty, PV: PropertyValue<P:
 #[cfg(test)]
 fn test_parse_and_compute_str<P: super::ComputedProperty, PV: PropertyValue<P::Value>>(
     source: &str,
-) -> Result<P::Value, ParseError> {
+) -> Result<P::Value, ParseError>
+where
+    Option<PV>: for<'a> Parse<'a>,
+{
     use crate::csssyn::TokenBuffer;
 
     let mut result = ComputedStyle::DEFAULT;

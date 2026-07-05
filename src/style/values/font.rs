@@ -20,23 +20,20 @@ pub struct FontFamily {
     pub families: Rc<[Rc<str>]>,
 }
 
-impl PeekParse for FontFamily {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
+impl Parse<'_> for Option<FontFamily> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
         let mut result = Vec::new();
 
         let mut current = String::new();
         let mut first = true;
         loop {
-            if !current.is_empty() && lk.peek(End) {
+            if !current.is_empty() && stream.peek(End) {
                 result.reserve_exact(1);
                 result.push(current.as_str().into());
-                return Ok(Some(Self {
+                return Ok(Some(FontFamily {
                     families: result.into(),
                 }));
-            } else if !current.is_empty() && lk.peek_skip(Token![,], stream) {
+            } else if !current.is_empty() && stream.peek_skip(Token![,]) {
                 result.push(current.as_str().into());
                 current.clear();
                 first = true;
@@ -46,19 +43,17 @@ impl PeekParse for FontFamily {
                 }
                 first = false;
 
-                if lk.peek(Ident) {
+                if stream.peek(Ident) {
                     current.extend(stream.parse::<Ident>()?.value().unescape_iter());
-                } else if lk.peek(LitString) {
+                } else if stream.peek(LitString) {
                     current.extend(stream.parse::<LitString>()?.value().unescape_iter());
                 } else {
                     if current.is_empty() && first {
                         return Ok(None);
                     }
-                    return Err(lk.error());
+                    return Err(stream.lookahead_error());
                 }
             }
-
-            *lk = stream.lookahead1();
         }
     }
 }
@@ -78,16 +73,13 @@ pub enum FontWeight {
     Value(I16Dot16),
 }
 
-impl PeekParse for FontWeight {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if lk.peek_skip("bold", stream) {
-            Self::Bold
-        } else if lk.peek(Number) {
+impl Parse<'_> for Option<FontWeight> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("normal") {
+            FontWeight::Normal
+        } else if stream.peek_skip("bold") {
+            FontWeight::Bold
+        } else if stream.peek(Number) {
             let number = stream.parse::<Number>()?;
             let value = number.value().to_f64();
             if value < 1.0 || value > 1000.0 {
@@ -96,7 +88,7 @@ impl PeekParse for FontWeight {
                     "number outside allowed range [1, 1000]",
                 ));
             }
-            Self::Value(I16Dot16::from_f64(value))
+            FontWeight::Value(I16Dot16::from_f64(value))
         } else {
             return Ok(None);
         }))
@@ -120,14 +112,11 @@ pub enum FontSize {
     Length(Length),
 }
 
-impl PeekParse for FontSize {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if let Some(lp) = Length::peek_parse(stream, lk)? {
+impl Parse<'_> for Option<FontSize> {
+    fn parse<'a>(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        Ok(Some(if let Some(lp) = stream.parse()? {
             // TODO: must be > 0
-            Self::Length(lp)
+            FontSize::Length(lp)
         } else {
             return Ok(None);
         }))
@@ -150,15 +139,12 @@ pub enum FontStyle {
     Italic,
 }
 
-impl PeekParse for FontStyle {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if lk.peek_skip("italic", stream) {
-            Self::Italic
+impl Parse<'_> for Option<FontStyle> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("normal") {
+            FontStyle::Normal
+        } else if stream.peek_skip("italic") {
+            FontStyle::Italic
         } else {
             return Ok(None);
         }))
@@ -181,27 +167,20 @@ pub enum FontFeatureSettings {
     Tags(Vec<FontFeatureTag>),
 }
 
-impl PeekParse for FontFeatureSettings {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if let Some(tag) = FontFeatureTag::peek_parse(stream, lk)? {
+impl Parse<'_> for Option<FontFeatureSettings> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("normal") {
+            FontFeatureSettings::Normal
+        } else if let Some(tag) = stream.parse()? {
             let mut tags = vec![tag];
-            loop {
-                let mut lk = stream.lookahead1();
-                if lk.peek(End) {
-                    break;
-                }
-                let Some(tag) = FontFeatureTag::peek_parse(stream, &mut lk)? else {
-                    return Err(lk.error());
+            while !stream.peek(End) {
+                let Some(tag) = stream.parse()? else {
+                    return Err(stream.lookahead_error());
                 };
                 tags.push(tag);
             }
 
-            Self::Tags(tags)
+            FontFeatureSettings::Tags(tags)
         } else {
             return Ok(None);
         }))
@@ -244,12 +223,9 @@ pub enum FontFeatureTagValue {
     Off,
 }
 
-impl PeekParse for FontFeatureTag {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        if !lk.peek(LitString) {
+impl Parse<'_> for Option<FontFeatureTag> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        if !stream.peek(LitString) {
             return Ok(None);
         }
 
@@ -266,21 +242,20 @@ impl PeekParse for FontFeatureTag {
         };
         let tag = OpenTypeTag::from_bytes(ascii_bytes);
 
-        *lk = stream.lookahead1();
-        let value = if lk.peek(LitInt) {
+        let value = if stream.peek(LitInt) {
             let int = stream.parse::<LitInt>()?;
             Some(FontFeatureTagValue::Integer(int.to_u32().ok_or_else(
                 || ParseError::new(string, "OpenType tag value too large (must be < 2^32)"),
             )?))
-        } else if lk.peek_skip("on", stream) {
+        } else if stream.peek_skip("on") {
             Some(FontFeatureTagValue::On)
-        } else if lk.peek_skip("off", stream) {
+        } else if stream.peek_skip("off") {
             Some(FontFeatureTagValue::Off)
         } else {
             None
         };
 
-        Ok(Some(Self { tag, value }))
+        Ok(Some(FontFeatureTag { tag, value }))
     }
 }
 

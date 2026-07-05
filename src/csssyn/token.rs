@@ -285,12 +285,6 @@ impl<'a> Token for FunctionalNotation<'a> {
     }
 }
 
-#[doc(hidden)]
-#[allow(non_snake_case)]
-pub fn FunctionalNotation<'a>(marker: Infallible) -> FunctionalNotation<'a> {
-    match marker {}
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Hash<'a> {
     span: Span,
@@ -332,7 +326,7 @@ macro_rules! impl_punct_tokens {
         impl_token! {
             <'a> $name;
 
-            name = stringify!($value_token);
+            name = $err_name;
             matches TokenView { span, source: _, kind: TokenKind::$($kind)* };
             parse $name { span };
         })*

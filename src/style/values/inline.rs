@@ -3,15 +3,12 @@ use crate::style::computed::InlineSizing;
 
 use super::*;
 
-impl PeekParse for InlineSizing {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("normal", stream) {
-            Self::Normal
-        } else if lk.peek_skip("stretch", stream) {
-            Self::Stretch
+impl Parse<'_> for Option<InlineSizing> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("normal") {
+            InlineSizing::Normal
+        } else if stream.peek_skip("stretch") {
+            InlineSizing::Stretch
         } else {
             return Ok(None);
         }))

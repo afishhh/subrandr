@@ -42,12 +42,9 @@ enum RgbComponent {
     None,
 }
 
-impl PeekParse for ColorBase {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(if lk.peek(Hash) {
+impl Parse<'_> for Option<ColorBase> {
+    fn parse(stream: &mut ParseStream<'_>) -> Result<Self, ParseError> {
+        Ok(if stream.peek(Hash) {
             let hash = stream.parse::<Hash>()?;
             let make_error = || {
                 ParseError::new(
@@ -95,33 +92,30 @@ impl PeekParse for ColorBase {
             };
 
             let Ok(found) = NAMED_COLORS.binary_search_by_key(&name.as_str(), |x| x.0) else {
-                lk.extend_attempted(["<named-color>", "transparent"]);
+                stream.extend_attempted(["<named-color>", "transparent"]);
                 return Ok(None);
             };
 
-            stream.parse::<Ident>()?;
+            stream.skip();
             Some(ColorBase::Named(&NAMED_COLORS[found]))
-        } else if stream.peek(FunctionalNotation) {
-            ColorFunction::peek_parse(stream, lk)?.map(ColorBase::ColorFunction)
         } else {
-            None
+            stream
+                .parse::<Option<ColorFunction>>()?
+                .map(ColorBase::ColorFunction)
         })
     }
 }
 
-impl PeekParse for ColorFunction {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        let is_rgb = lk.peek("rgb(");
-        Ok(if is_rgb || lk.peek("rgba(") {
+impl Parse<'_> for Option<ColorFunction> {
+    fn parse<'a>(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        let is_rgb = stream.peek("rgb(");
+        Ok(if is_rgb || stream.peek("rgba(") {
             let fun = stream.parse::<FunctionalNotation>()?;
             let content = parse_cursor(fun.content())?;
             Some(if is_rgb {
-                Self::Rgb(content)
+                ColorFunction::Rgb(content)
             } else {
-                Self::Rgba(content)
+                ColorFunction::Rgba(content)
             })
         } else {
             None
@@ -131,13 +125,12 @@ impl PeekParse for ColorFunction {
 
 // https://drafts.csswg.org/css-color-4/#rgb-functions
 impl Parse<'_> for RgbColorFunctionContent {
-    fn parse(stream: &ParseStream<'_>) -> Result<Self, ParseError> {
+    fn parse(stream: &mut ParseStream<'_>) -> Result<Self, ParseError> {
         let (r, g, b, a);
         r = stream.parse::<RgbComponent>()?;
 
-        let mut lk = stream.lookahead1();
         if matches!(r, RgbComponent::Number(_) | RgbComponent::Percentage(_))
-            && lk.peek_skip(Token![,], stream)
+            && stream.peek_skip(Token![,])
         {
             // legacy syntax
             if matches!(r, RgbComponent::Percentage(_)) {
@@ -151,20 +144,19 @@ impl Parse<'_> for RgbColorFunctionContent {
             }
 
             a = if stream.peek_skip(Token![,]) {
-                lk = stream.lookahead1();
-                Some(if lk.peek(Percentage) {
+                Some(if stream.peek(Percentage) {
                     RgbComponent::from(stream.parse::<Percentage>()?)
-                } else if lk.peek(Number) {
+                } else if stream.peek(Number) {
                     RgbComponent::from(stream.parse::<Number>()?)
                 } else {
-                    return Err(lk.error());
+                    return Err(stream.lookahead_error());
                 })
             } else {
                 None
             };
         } else {
             // modern syntax
-            g = RgbComponent::lk_parse(stream, lk)?;
+            g = stream.parse::<RgbComponent>()?;
             b = stream.parse::<RgbComponent>()?;
             a = if stream.peek_skip(Token![/]) {
                 Some(stream.parse::<RgbComponent>()?)
@@ -200,36 +192,27 @@ impl From<Percentage<'_>> for RgbComponent {
     }
 }
 
-impl RgbComponent {
-    fn lk_parse(stream: &ParseStream, mut lk: Lookahead) -> Result<Self, ParseError> {
-        Ok(if lk.peek(Number) {
+impl Parse<'_> for RgbComponent {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(if stream.peek(Number) {
             stream.parse::<Number>().map(Self::from)?
-        } else if lk.peek(Percentage) {
+        } else if stream.peek(Percentage) {
             stream.parse::<Percentage>().map(Self::from)?
-        } else if lk.peek_skip("none", stream) {
+        } else if stream.peek_skip("none") {
             RgbComponent::None
         } else {
-            return Err(lk.error());
+            return Err(stream.lookahead_error());
         })
     }
 }
 
-impl Parse<'_> for RgbComponent {
-    fn parse(stream: &ParseStream<'_>) -> Result<Self, ParseError> {
-        Self::lk_parse(stream, stream.lookahead1())
-    }
-}
-
-impl PeekParse for Color {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(if lk.peek("currentcolor") {
+impl Parse<'_> for Option<Color> {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        Ok(if stream.peek("currentcolor") {
             stream.skip();
             Some(Color::CurrentColor)
         } else {
-            ColorBase::peek_parse(stream, lk)?.map(Color::Base)
+            stream.parse::<Option<ColorBase>>()?.map(Color::Base)
         })
     }
 }
@@ -305,154 +288,154 @@ impl PropertyValue<BGRA8> for Color {
 // From table in https://www.w3.org/TR/css-color-4/#typedef-named-color
 // + transparent
 const NAMED_COLORS: &[(&str, BGRA8)] = &[
-    ("aliceblue", BGRA8::from_rgba32(0xF0F8FF)),
-    ("antiquewhite", BGRA8::from_rgba32(0xFAEBD7)),
-    ("aqua", BGRA8::from_rgba32(0x00FFFF)),
-    ("aquamarine", BGRA8::from_rgba32(0x7FFFD4)),
-    ("azure", BGRA8::from_rgba32(0xF0FFFF)),
-    ("beige", BGRA8::from_rgba32(0xF5F5DC)),
-    ("bisque", BGRA8::from_rgba32(0xFFE4C4)),
-    ("black", BGRA8::from_rgba32(0x000000)),
-    ("blanchedalmond", BGRA8::from_rgba32(0xFFEBCD)),
-    ("blue", BGRA8::from_rgba32(0x0000FF)),
-    ("blueviolet", BGRA8::from_rgba32(0x8A2BE2)),
-    ("brown", BGRA8::from_rgba32(0xA52A2A)),
-    ("burlywood", BGRA8::from_rgba32(0xDEB887)),
-    ("cadetblue", BGRA8::from_rgba32(0x5F9EA0)),
-    ("chartreuse", BGRA8::from_rgba32(0x7FFF00)),
-    ("chocolate", BGRA8::from_rgba32(0xD2691E)),
-    ("coral", BGRA8::from_rgba32(0xFF7F50)),
-    ("cornflowerblue", BGRA8::from_rgba32(0x6495ED)),
-    ("cornsilk", BGRA8::from_rgba32(0xFFF8DC)),
-    ("crimson", BGRA8::from_rgba32(0xDC143C)),
-    ("cyan", BGRA8::from_rgba32(0x00FFFF)),
-    ("darkblue", BGRA8::from_rgba32(0x00008B)),
-    ("darkcyan", BGRA8::from_rgba32(0x008B8B)),
-    ("darkgoldenrod", BGRA8::from_rgba32(0xB8860B)),
-    ("darkgray", BGRA8::from_rgba32(0xA9A9A9)),
-    ("darkgreen", BGRA8::from_rgba32(0x006400)),
-    ("darkgrey", BGRA8::from_rgba32(0xA9A9A9)),
-    ("darkkhaki", BGRA8::from_rgba32(0xBDB76B)),
-    ("darkmagenta", BGRA8::from_rgba32(0x8B008B)),
-    ("darkolivegreen", BGRA8::from_rgba32(0x556B2F)),
-    ("darkorange", BGRA8::from_rgba32(0xFF8C00)),
-    ("darkorchid", BGRA8::from_rgba32(0x9932CC)),
-    ("darkred", BGRA8::from_rgba32(0x8B0000)),
-    ("darksalmon", BGRA8::from_rgba32(0xE9967A)),
-    ("darkseagreen", BGRA8::from_rgba32(0x8FBC8F)),
-    ("darkslateblue", BGRA8::from_rgba32(0x483D8B)),
-    ("darkslategray", BGRA8::from_rgba32(0x2F4F4F)),
-    ("darkslategrey", BGRA8::from_rgba32(0x2F4F4F)),
-    ("darkturquoise", BGRA8::from_rgba32(0x00CED1)),
-    ("darkviolet", BGRA8::from_rgba32(0x9400D3)),
-    ("deeppink", BGRA8::from_rgba32(0xFF1493)),
-    ("deepskyblue", BGRA8::from_rgba32(0x00BFFF)),
-    ("dimgray", BGRA8::from_rgba32(0x696969)),
-    ("dimgrey", BGRA8::from_rgba32(0x696969)),
-    ("dodgerblue", BGRA8::from_rgba32(0x1E90FF)),
-    ("firebrick", BGRA8::from_rgba32(0xB22222)),
-    ("floralwhite", BGRA8::from_rgba32(0xFFFAF0)),
-    ("forestgreen", BGRA8::from_rgba32(0x228B22)),
-    ("fuchsia", BGRA8::from_rgba32(0xFF00FF)),
-    ("gainsboro", BGRA8::from_rgba32(0xDCDCDC)),
-    ("ghostwhite", BGRA8::from_rgba32(0xF8F8FF)),
-    ("gold", BGRA8::from_rgba32(0xFFD700)),
-    ("goldenrod", BGRA8::from_rgba32(0xDAA520)),
-    ("gray", BGRA8::from_rgba32(0x808080)),
-    ("green", BGRA8::from_rgba32(0x008000)),
-    ("greenyellow", BGRA8::from_rgba32(0xADFF2F)),
-    ("grey", BGRA8::from_rgba32(0x808080)),
-    ("honeydew", BGRA8::from_rgba32(0xF0FFF0)),
-    ("hotpink", BGRA8::from_rgba32(0xFF69B4)),
-    ("indianred", BGRA8::from_rgba32(0xCD5C5C)),
-    ("indigo", BGRA8::from_rgba32(0x4B0082)),
-    ("ivory", BGRA8::from_rgba32(0xFFFFF0)),
-    ("khaki", BGRA8::from_rgba32(0xF0E68C)),
-    ("lavender", BGRA8::from_rgba32(0xE6E6FA)),
-    ("lavenderblush", BGRA8::from_rgba32(0xFFF0F5)),
-    ("lawngreen", BGRA8::from_rgba32(0x7CFC00)),
-    ("lemonchiffon", BGRA8::from_rgba32(0xFFFACD)),
-    ("lightblue", BGRA8::from_rgba32(0xADD8E6)),
-    ("lightcoral", BGRA8::from_rgba32(0xF08080)),
-    ("lightcyan", BGRA8::from_rgba32(0xE0FFFF)),
-    ("lightgoldenrodyellow", BGRA8::from_rgba32(0xFAFAD2)),
-    ("lightgray", BGRA8::from_rgba32(0xD3D3D3)),
-    ("lightgreen", BGRA8::from_rgba32(0x90EE90)),
-    ("lightgrey", BGRA8::from_rgba32(0xD3D3D3)),
-    ("lightpink", BGRA8::from_rgba32(0xFFB6C1)),
-    ("lightsalmon", BGRA8::from_rgba32(0xFFA07A)),
-    ("lightseagreen", BGRA8::from_rgba32(0x20B2AA)),
-    ("lightskyblue", BGRA8::from_rgba32(0x87CEFA)),
-    ("lightslategray", BGRA8::from_rgba32(0x778899)),
-    ("lightslategrey", BGRA8::from_rgba32(0x778899)),
-    ("lightsteelblue", BGRA8::from_rgba32(0xB0C4DE)),
-    ("lightyellow", BGRA8::from_rgba32(0xFFFFE0)),
-    ("lime", BGRA8::from_rgba32(0x00FF00)),
-    ("limegreen", BGRA8::from_rgba32(0x32CD32)),
-    ("linen", BGRA8::from_rgba32(0xFAF0E6)),
-    ("magenta", BGRA8::from_rgba32(0xFF00FF)),
-    ("maroon", BGRA8::from_rgba32(0x800000)),
-    ("mediumaquamarine", BGRA8::from_rgba32(0x66CDAA)),
-    ("mediumblue", BGRA8::from_rgba32(0x0000CD)),
-    ("mediumorchid", BGRA8::from_rgba32(0xBA55D3)),
-    ("mediumpurple", BGRA8::from_rgba32(0x9370DB)),
-    ("mediumseagreen", BGRA8::from_rgba32(0x3CB371)),
-    ("mediumslateblue", BGRA8::from_rgba32(0x7B68EE)),
-    ("mediumspringgreen", BGRA8::from_rgba32(0x00FA9A)),
-    ("mediumturquoise", BGRA8::from_rgba32(0x48D1CC)),
-    ("mediumvioletred", BGRA8::from_rgba32(0xC71585)),
-    ("midnightblue", BGRA8::from_rgba32(0x191970)),
-    ("mintcream", BGRA8::from_rgba32(0xF5FFFA)),
-    ("mistyrose", BGRA8::from_rgba32(0xFFE4E1)),
-    ("moccasin", BGRA8::from_rgba32(0xFFE4B5)),
-    ("navajowhite", BGRA8::from_rgba32(0xFFDEAD)),
-    ("navy", BGRA8::from_rgba32(0x000080)),
-    ("oldlace", BGRA8::from_rgba32(0xFDF5E6)),
-    ("olive", BGRA8::from_rgba32(0x808000)),
-    ("olivedrab", BGRA8::from_rgba32(0x6B8E23)),
-    ("orange", BGRA8::from_rgba32(0xFFA500)),
-    ("orangered", BGRA8::from_rgba32(0xFF4500)),
-    ("orchid", BGRA8::from_rgba32(0xDA70D6)),
-    ("palegoldenrod", BGRA8::from_rgba32(0xEEE8AA)),
-    ("palegreen", BGRA8::from_rgba32(0x98FB98)),
-    ("paleturquoise", BGRA8::from_rgba32(0xAFEEEE)),
-    ("palevioletred", BGRA8::from_rgba32(0xDB7093)),
-    ("papayawhip", BGRA8::from_rgba32(0xFFEFD5)),
-    ("peachpuff", BGRA8::from_rgba32(0xFFDAB9)),
-    ("peru", BGRA8::from_rgba32(0xCD853F)),
-    ("pink", BGRA8::from_rgba32(0xFFC0CB)),
-    ("plum", BGRA8::from_rgba32(0xDDA0DD)),
-    ("powderblue", BGRA8::from_rgba32(0xB0E0E6)),
-    ("purple", BGRA8::from_rgba32(0x800080)),
-    ("rebeccapurple", BGRA8::from_rgba32(0x663399)),
-    ("red", BGRA8::from_rgba32(0xFF0000)),
-    ("rosybrown", BGRA8::from_rgba32(0xBC8F8F)),
-    ("royalblue", BGRA8::from_rgba32(0x4169E1)),
-    ("saddlebrown", BGRA8::from_rgba32(0x8B4513)),
-    ("salmon", BGRA8::from_rgba32(0xFA8072)),
-    ("sandybrown", BGRA8::from_rgba32(0xF4A460)),
-    ("seagreen", BGRA8::from_rgba32(0x2E8B57)),
-    ("seashell", BGRA8::from_rgba32(0xFFF5EE)),
-    ("sienna", BGRA8::from_rgba32(0xA0522D)),
-    ("silver", BGRA8::from_rgba32(0xC0C0C0)),
-    ("skyblue", BGRA8::from_rgba32(0x87CEEB)),
-    ("slateblue", BGRA8::from_rgba32(0x6A5ACD)),
-    ("slategray", BGRA8::from_rgba32(0x708090)),
-    ("slategrey", BGRA8::from_rgba32(0x708090)),
-    ("snow", BGRA8::from_rgba32(0xFFFAFA)),
-    ("springgreen", BGRA8::from_rgba32(0x00FF7F)),
-    ("steelblue", BGRA8::from_rgba32(0x4682B4)),
-    ("tan", BGRA8::from_rgba32(0xD2B48C)),
-    ("teal", BGRA8::from_rgba32(0x008080)),
-    ("thistle", BGRA8::from_rgba32(0xD8BFD8)),
-    ("tomato", BGRA8::from_rgba32(0xFF6347)),
-    ("turquoise", BGRA8::from_rgba32(0x40E0D0)),
-    ("violet", BGRA8::from_rgba32(0xEE82EE)),
-    ("wheat", BGRA8::from_rgba32(0xF5DEB3)),
-    ("white", BGRA8::from_rgba32(0xFFFFFF)),
-    ("whitesmoke", BGRA8::from_rgba32(0xF5F5F5)),
-    ("yellow", BGRA8::from_rgba32(0xFFFF00)),
-    ("yellowgreen", BGRA8::from_rgba32(0x9ACD32)),
+    ("aliceblue", BGRA8::from_rgba32(0xF0F8FFFF)),
+    ("antiquewhite", BGRA8::from_rgba32(0xFAEBD7FF)),
+    ("aqua", BGRA8::from_rgba32(0x00FFFFFF)),
+    ("aquamarine", BGRA8::from_rgba32(0x7FFFD4FF)),
+    ("azure", BGRA8::from_rgba32(0xF0FFFFFF)),
+    ("beige", BGRA8::from_rgba32(0xF5F5DCFF)),
+    ("bisque", BGRA8::from_rgba32(0xFFE4C4FF)),
+    ("black", BGRA8::from_rgba32(0x000000FF)),
+    ("blanchedalmond", BGRA8::from_rgba32(0xFFEBCDFF)),
+    ("blue", BGRA8::from_rgba32(0x0000FFFF)),
+    ("blueviolet", BGRA8::from_rgba32(0x8A2BE2FF)),
+    ("brown", BGRA8::from_rgba32(0xA52A2AFF)),
+    ("burlywood", BGRA8::from_rgba32(0xDEB887FF)),
+    ("cadetblue", BGRA8::from_rgba32(0x5F9EA0FF)),
+    ("chartreuse", BGRA8::from_rgba32(0x7FFF00FF)),
+    ("chocolate", BGRA8::from_rgba32(0xD2691EFF)),
+    ("coral", BGRA8::from_rgba32(0xFF7F50FF)),
+    ("cornflowerblue", BGRA8::from_rgba32(0x6495EDFF)),
+    ("cornsilk", BGRA8::from_rgba32(0xFFF8DCFF)),
+    ("crimson", BGRA8::from_rgba32(0xDC143CFF)),
+    ("cyan", BGRA8::from_rgba32(0x00FFFFFF)),
+    ("darkblue", BGRA8::from_rgba32(0x00008BFF)),
+    ("darkcyan", BGRA8::from_rgba32(0x008B8BFF)),
+    ("darkgoldenrod", BGRA8::from_rgba32(0xB8860BFF)),
+    ("darkgray", BGRA8::from_rgba32(0xA9A9A9FF)),
+    ("darkgreen", BGRA8::from_rgba32(0x006400FF)),
+    ("darkgrey", BGRA8::from_rgba32(0xA9A9A9FF)),
+    ("darkkhaki", BGRA8::from_rgba32(0xBDB76BFF)),
+    ("darkmagenta", BGRA8::from_rgba32(0x8B008BFF)),
+    ("darkolivegreen", BGRA8::from_rgba32(0x556B2FFF)),
+    ("darkorange", BGRA8::from_rgba32(0xFF8C00FF)),
+    ("darkorchid", BGRA8::from_rgba32(0x9932CCFF)),
+    ("darkred", BGRA8::from_rgba32(0x8B0000FF)),
+    ("darksalmon", BGRA8::from_rgba32(0xE9967AFF)),
+    ("darkseagreen", BGRA8::from_rgba32(0x8FBC8FFF)),
+    ("darkslateblue", BGRA8::from_rgba32(0x483D8BFF)),
+    ("darkslategray", BGRA8::from_rgba32(0x2F4F4FFF)),
+    ("darkslategrey", BGRA8::from_rgba32(0x2F4F4FFF)),
+    ("darkturquoise", BGRA8::from_rgba32(0x00CED1FF)),
+    ("darkviolet", BGRA8::from_rgba32(0x9400D3FF)),
+    ("deeppink", BGRA8::from_rgba32(0xFF1493FF)),
+    ("deepskyblue", BGRA8::from_rgba32(0x00BFFFFF)),
+    ("dimgray", BGRA8::from_rgba32(0x696969FF)),
+    ("dimgrey", BGRA8::from_rgba32(0x696969FF)),
+    ("dodgerblue", BGRA8::from_rgba32(0x1E90FFFF)),
+    ("firebrick", BGRA8::from_rgba32(0xB22222FF)),
+    ("floralwhite", BGRA8::from_rgba32(0xFFFAF0FF)),
+    ("forestgreen", BGRA8::from_rgba32(0x228B22FF)),
+    ("fuchsia", BGRA8::from_rgba32(0xFF00FFFF)),
+    ("gainsboro", BGRA8::from_rgba32(0xDCDCDCFF)),
+    ("ghostwhite", BGRA8::from_rgba32(0xF8F8FFFF)),
+    ("gold", BGRA8::from_rgba32(0xFFD700FF)),
+    ("goldenrod", BGRA8::from_rgba32(0xDAA520FF)),
+    ("gray", BGRA8::from_rgba32(0x808080FF)),
+    ("green", BGRA8::from_rgba32(0x008000FF)),
+    ("greenyellow", BGRA8::from_rgba32(0xADFF2FFF)),
+    ("grey", BGRA8::from_rgba32(0x808080FF)),
+    ("honeydew", BGRA8::from_rgba32(0xF0FFF0FF)),
+    ("hotpink", BGRA8::from_rgba32(0xFF69B4FF)),
+    ("indianred", BGRA8::from_rgba32(0xCD5C5CFF)),
+    ("indigo", BGRA8::from_rgba32(0x4B0082FF)),
+    ("ivory", BGRA8::from_rgba32(0xFFFFF0FF)),
+    ("khaki", BGRA8::from_rgba32(0xF0E68CFF)),
+    ("lavender", BGRA8::from_rgba32(0xE6E6FAFF)),
+    ("lavenderblush", BGRA8::from_rgba32(0xFFF0F5FF)),
+    ("lawngreen", BGRA8::from_rgba32(0x7CFC00FF)),
+    ("lemonchiffon", BGRA8::from_rgba32(0xFFFACDFF)),
+    ("lightblue", BGRA8::from_rgba32(0xADD8E6FF)),
+    ("lightcoral", BGRA8::from_rgba32(0xF08080FF)),
+    ("lightcyan", BGRA8::from_rgba32(0xE0FFFFFF)),
+    ("lightgoldenrodyellow", BGRA8::from_rgba32(0xFAFAD2FF)),
+    ("lightgray", BGRA8::from_rgba32(0xD3D3D3FF)),
+    ("lightgreen", BGRA8::from_rgba32(0x90EE90FF)),
+    ("lightgrey", BGRA8::from_rgba32(0xD3D3D3FF)),
+    ("lightpink", BGRA8::from_rgba32(0xFFB6C1FF)),
+    ("lightsalmon", BGRA8::from_rgba32(0xFFA07AFF)),
+    ("lightseagreen", BGRA8::from_rgba32(0x20B2AAFF)),
+    ("lightskyblue", BGRA8::from_rgba32(0x87CEFAFF)),
+    ("lightslategray", BGRA8::from_rgba32(0x778899FF)),
+    ("lightslategrey", BGRA8::from_rgba32(0x778899FF)),
+    ("lightsteelblue", BGRA8::from_rgba32(0xB0C4DEFF)),
+    ("lightyellow", BGRA8::from_rgba32(0xFFFFE0FF)),
+    ("lime", BGRA8::from_rgba32(0x00FF00FF)),
+    ("limegreen", BGRA8::from_rgba32(0x32CD32FF)),
+    ("linen", BGRA8::from_rgba32(0xFAF0E6FF)),
+    ("magenta", BGRA8::from_rgba32(0xFF00FFFF)),
+    ("maroon", BGRA8::from_rgba32(0x800000FF)),
+    ("mediumaquamarine", BGRA8::from_rgba32(0x66CDAAFF)),
+    ("mediumblue", BGRA8::from_rgba32(0x0000CDFF)),
+    ("mediumorchid", BGRA8::from_rgba32(0xBA55D3FF)),
+    ("mediumpurple", BGRA8::from_rgba32(0x9370DBFF)),
+    ("mediumseagreen", BGRA8::from_rgba32(0x3CB371FF)),
+    ("mediumslateblue", BGRA8::from_rgba32(0x7B68EEFF)),
+    ("mediumspringgreen", BGRA8::from_rgba32(0x00FA9AFF)),
+    ("mediumturquoise", BGRA8::from_rgba32(0x48D1CCFF)),
+    ("mediumvioletred", BGRA8::from_rgba32(0xC71585FF)),
+    ("midnightblue", BGRA8::from_rgba32(0x191970FF)),
+    ("mintcream", BGRA8::from_rgba32(0xF5FFFAFF)),
+    ("mistyrose", BGRA8::from_rgba32(0xFFE4E1FF)),
+    ("moccasin", BGRA8::from_rgba32(0xFFE4B5FF)),
+    ("navajowhite", BGRA8::from_rgba32(0xFFDEADFF)),
+    ("navy", BGRA8::from_rgba32(0x000080FF)),
+    ("oldlace", BGRA8::from_rgba32(0xFDF5E6FF)),
+    ("olive", BGRA8::from_rgba32(0x808000FF)),
+    ("olivedrab", BGRA8::from_rgba32(0x6B8E23FF)),
+    ("orange", BGRA8::from_rgba32(0xFFA500FF)),
+    ("orangered", BGRA8::from_rgba32(0xFF4500FF)),
+    ("orchid", BGRA8::from_rgba32(0xDA70D6FF)),
+    ("palegoldenrod", BGRA8::from_rgba32(0xEEE8AAFF)),
+    ("palegreen", BGRA8::from_rgba32(0x98FB98FF)),
+    ("paleturquoise", BGRA8::from_rgba32(0xAFEEEEFF)),
+    ("palevioletred", BGRA8::from_rgba32(0xDB7093FF)),
+    ("papayawhip", BGRA8::from_rgba32(0xFFEFD5FF)),
+    ("peachpuff", BGRA8::from_rgba32(0xFFDAB9FF)),
+    ("peru", BGRA8::from_rgba32(0xCD853FFF)),
+    ("pink", BGRA8::from_rgba32(0xFFC0CBFF)),
+    ("plum", BGRA8::from_rgba32(0xDDA0DDFF)),
+    ("powderblue", BGRA8::from_rgba32(0xB0E0E6FF)),
+    ("purple", BGRA8::from_rgba32(0x800080FF)),
+    ("rebeccapurple", BGRA8::from_rgba32(0x663399FF)),
+    ("red", BGRA8::from_rgba32(0xFF0000FF)),
+    ("rosybrown", BGRA8::from_rgba32(0xBC8F8FFF)),
+    ("royalblue", BGRA8::from_rgba32(0x4169E1FF)),
+    ("saddlebrown", BGRA8::from_rgba32(0x8B4513FF)),
+    ("salmon", BGRA8::from_rgba32(0xFA8072FF)),
+    ("sandybrown", BGRA8::from_rgba32(0xF4A460FF)),
+    ("seagreen", BGRA8::from_rgba32(0x2E8B57FF)),
+    ("seashell", BGRA8::from_rgba32(0xFFF5EEFF)),
+    ("sienna", BGRA8::from_rgba32(0xA0522DFF)),
+    ("silver", BGRA8::from_rgba32(0xC0C0C0FF)),
+    ("skyblue", BGRA8::from_rgba32(0x87CEEBFF)),
+    ("slateblue", BGRA8::from_rgba32(0x6A5ACDFF)),
+    ("slategray", BGRA8::from_rgba32(0x708090FF)),
+    ("slategrey", BGRA8::from_rgba32(0x708090FF)),
+    ("snow", BGRA8::from_rgba32(0xFFFAFAFF)),
+    ("springgreen", BGRA8::from_rgba32(0x00FF7FFF)),
+    ("steelblue", BGRA8::from_rgba32(0x4682B4FF)),
+    ("tan", BGRA8::from_rgba32(0xD2B48CFF)),
+    ("teal", BGRA8::from_rgba32(0x008080FF)),
+    ("thistle", BGRA8::from_rgba32(0xD8BFD8FF)),
+    ("tomato", BGRA8::from_rgba32(0xFF6347FF)),
+    ("turquoise", BGRA8::from_rgba32(0x40E0D0FF)),
+    ("violet", BGRA8::from_rgba32(0xEE82EEFF)),
+    ("wheat", BGRA8::from_rgba32(0xF5DEB3FF)),
+    ("white", BGRA8::from_rgba32(0xFFFFFFFF)),
+    ("whitesmoke", BGRA8::from_rgba32(0xF5F5F5FF)),
+    ("yellow", BGRA8::from_rgba32(0xFFFF00FF)),
+    ("yellowgreen", BGRA8::from_rgba32(0x9ACD32FF)),
     ("transparent", BGRA8::ZERO),
 ];
 

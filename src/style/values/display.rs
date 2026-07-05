@@ -3,15 +3,12 @@ use crate::style::computed::Visibility;
 
 use super::*;
 
-impl PeekParse for Visibility {
-    fn peek_parse<'a>(
-        stream: &ParseStream<'a>,
-        lk: &mut Lookahead<'a>,
-    ) -> Result<Option<Self>, ParseError> {
-        Ok(Some(if lk.peek_skip("visible", stream) {
-            Self::Visible
-        } else if lk.peek_skip("hidden", stream) {
-            Self::Hidden
+impl Parse<'_> for Option<Visibility> {
+    fn parse<'a>(stream: &mut ParseStream<'a>) -> Result<Self, ParseError> {
+        Ok(Some(if stream.peek_skip("visible") {
+            Visibility::Visible
+        } else if stream.peek_skip("hidden") {
+            Visibility::Hidden
         } else {
             return Ok(None);
         }))

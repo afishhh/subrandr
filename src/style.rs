@@ -56,10 +56,13 @@ macros::implement_style_module! {
         #[inherit(no)] text_decoration_line: TextDecorationLines = TextDecorationLines::NONE,
         #[inherit(no)] text_decoration_color: Color = Color::CurrentColor,
         #[inherit(no)] baseline_source: BaselineSource = BaselineSource::Last,
+        #[inherit(no)] width: Option<Length> = None,
         #[inherit(no)] padding_top: Length = Length::ZERO,
         #[inherit(no)] padding_left: Length = Length::ZERO,
         #[inherit(no)] padding_right: Length = Length::ZERO,
         #[inherit(no)] padding_bottom: Length = Length::ZERO,
+        #[inherit(no)] margin_left: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] margin_right: Option<Length> = Some(Length::ZERO),
     }
 
     rc misc {

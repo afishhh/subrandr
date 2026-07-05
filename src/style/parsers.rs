@@ -195,8 +195,19 @@ pub(super) static DECLARATION_HANDLERS: &[DeclarationHandler] = &[
         "background-color",
         color::take_color
     ),
+    longhand!(ComputedWidth, "width", length::take_length_or_auto),
     longhand!(ComputedPaddingLeft, "padding-left", length::take_length),
     longhand!(ComputedPaddingRight, "padding-right", length::take_length),
     longhand!(ComputedPaddingTop, "padding-top", length::take_length),
     longhand!(ComputedPaddingBottom, "padding-bottom", length::take_length),
+    longhand!(
+        ComputedMarginLeft,
+        "margin-left",
+        length::take_length_or_auto
+    ),
+    longhand!(
+        ComputedMarginRight,
+        "margin-right",
+        length::take_length_or_auto
+    ),
 ];

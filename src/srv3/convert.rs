@@ -552,10 +552,15 @@ fn pen_to_size_independent_style(
     base
 }
 
-fn convert_segment(segment: &super::Segment, text: &str, base_style: &ComputedStyle) -> Segment {
+fn convert_segment(
+    segment: &super::Segment,
+    pen: &super::Pen,
+    text: &str,
+    base_style: &ComputedStyle,
+) -> Segment {
     Segment {
-        pen: *segment.pen,
-        base_style: pen_to_size_independent_style(segment.pen, false, base_style.clone()),
+        pen: *pen,
+        base_style: pen_to_size_independent_style(pen, false, base_style.clone()),
         time_offset: segment.time_offset,
         text: text.into(),
     }
@@ -626,10 +631,19 @@ impl WindowBuilder<'_> {
                     };
 
                     _ = it.next().unwrap();
-                    let next = it.next().unwrap();
+                    let base = segment;
+                    let annotation = it.next().unwrap();
                     current_line.segments.push(LineSegment {
-                        inner: convert_segment(segment, &segment.text, &window.segment_style),
-                        annotation: Some(convert_segment(next, &next.text, &window.segment_style)),
+                        inner: convert_segment(base, base.pen, &base.text, &window.segment_style),
+                        annotation: Some(convert_segment(
+                            annotation,
+                            // SRV3 ruby don't have their internal elements styled and both
+                            // the base and annotation just derive their style from the ruby's
+                            // parent inline-block which itself is styled from the base's pen
+                            base.pen,
+                            &annotation.text,
+                            &window.segment_style,
+                        )),
                     });
                     _ = it.next().unwrap();
 
@@ -646,6 +660,7 @@ impl WindowBuilder<'_> {
                 current_line.segments.push(LineSegment {
                     inner: convert_segment(
                         segment,
+                        segment.pen,
                         &segment.text[last..end],
                         &window.segment_style,
                     ),

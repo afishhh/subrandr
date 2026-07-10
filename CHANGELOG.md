@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- Fixed SRV3 ruby annotations being styled by the annotation segment's pen instead of the base's pen.
+
 ## [v1.4.0]
 
 - Fixed infinite recursion when failing to shape an RTL segment if font fallback returns a font for its first codepoint.

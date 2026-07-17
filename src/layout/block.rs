@@ -93,7 +93,7 @@ impl PartialBlockContainer<'_> {
     }
 
     pub fn layout(
-        self,
+        &self,
         lctx: &mut LayoutContext,
         constraints: &LayoutConstraints,
     ) -> Result<BlockContainerFragment, InlineLayoutError> {
@@ -103,7 +103,7 @@ impl PartialBlockContainer<'_> {
             - (self.style.padding_left() + self.style.padding_right()).to_physical_pixels(lctx.dpi);
         let mut height = FixedL::ZERO;
 
-        let content = match self.content {
+        let content = match &self.content {
             PartialBlockContainerContent::Inline(inline) => {
                 let fragment = inline.layout(
                     lctx,
@@ -138,7 +138,7 @@ impl PartialBlockContainer<'_> {
 
         Ok(BlockContainerFragment {
             fbox: FragmentBox::new_styled(Vec2::new(width, height), lctx.dpi, &self.style),
-            style: self.style,
+            style: self.style.clone(),
             content,
         })
     }

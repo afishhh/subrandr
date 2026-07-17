@@ -196,7 +196,7 @@ macro_rules! make_static_outline {
     };
     (@count_command $($anything: tt)*) => { 1 };
     (@count_close_contour($first: expr) $next: expr, $($rest: tt)*) => {
-        $crate::make_static_outline!(@count_close_contour($first) $($rest)*);
+        $crate::make_static_outline!(@count_close_contour($first) $($rest)*)
     };
     (@count_close_contour($first: expr) $last: expr) => {
         if const { $first.x != $last.x || $first.y != $last.y } { 1 } else { 0 }

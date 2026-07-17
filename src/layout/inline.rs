@@ -53,7 +53,7 @@ impl Default for InlineContent {
 }
 
 #[derive(Debug, Clone)]
-pub enum InlineItem {
+enum InlineItem {
     Span(InlineSpan),
     Text(InlineText),
     Block(InlineBlock),
@@ -61,13 +61,13 @@ pub enum InlineItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineSpan {
+struct InlineSpan {
     style: ComputedStyle,
     kind: InlineSpanKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum InlineSpanKind {
+enum InlineSpanKind {
     Span,
     // Contents are interleaved base-annotation pairs of kind `RubyInternal`.
     Ruby {
@@ -80,12 +80,12 @@ pub enum InlineSpanKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineText {
+struct InlineText {
     content_range: Range<usize>,
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineBlock {
+struct InlineBlock {
     content_index: usize,
     block: Box<BlockContainer>,
 }
@@ -203,7 +203,7 @@ impl InitialShapingResult<'_> {
 //       Is the current implementation correct? (everything in visual order)
 /// Holds per-span state prepared during shaping and used during further layout to
 /// calculate span fragmentation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SpanState<'a> {
     style: &'a ComputedStyle,
     primary_font: Font,

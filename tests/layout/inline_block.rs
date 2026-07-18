@@ -1,6 +1,9 @@
 use rasterize::color::BGRA8;
 
-use crate::{layout::FixedL, style::computed::Length};
+use crate::{
+    layout::FixedL,
+    style::computed::{HorizontalAlignment, InlineSizing, Length},
+};
 
 use super::common::*;
 
@@ -94,6 +97,63 @@ check_test! {
         }
         block.yellow {
             inline { text "WW" }
+        }
+    }
+}
+
+test_define_style! {
+    .black_on_white {
+        color: BGRA8::BLACK,
+        background_color: BGRA8::WHITE,
+    }
+
+    .text_center { text_align: HorizontalAlignment::Center }
+    .inline_sizing_stretch { inline_sizing: InlineSizing::Stretch }
+
+    .hmargin5 {
+        margin_left: Some(Length::from_pixels(FixedL::new(5))),
+        margin_right: Some(Length::from_pixels(FixedL::new(5))),
+    }
+    .vmargin5 {
+        margin_top: Some(Length::from_pixels(FixedL::new(5))),
+        margin_bottom: Some(Length::from_pixels(FixedL::new(5))),
+    }
+    .vmargin10 {
+        margin_top: Some(Length::from_pixels(FixedL::new(10))),
+        margin_bottom: Some(Length::from_pixels(FixedL::new(10))),
+    }
+    .tmp {
+        padding_bottom: Length::from_pixels(FixedL::new(1))
+    }
+}
+
+check_test! {
+    name = margins,
+    size = (106, 88),
+    block.ahem.black_on_white.text_center.tmp {
+        inline.ahem {
+            span.inline_sizing_stretch.yellow_bg {
+                text "A"
+                block.hmargin5.vmargin5 {
+                    inline { text "XXXX" }
+                }
+                text "A\n"
+            }
+            span.inline_sizing_stretch.red_bg {
+                text "B"
+                block.hmargin5.vmargin10 {}
+                text "B\n"
+            }
+            span.inline_sizing_stretch.green_bg {
+                text "C"
+                block.vmargin10 {}
+                text "C\n"
+            }
+            span.inline_sizing_stretch.blue_bg {
+                text "D"
+                block.hmargin5 {}
+                text "D"
+            }
         }
     }
 }

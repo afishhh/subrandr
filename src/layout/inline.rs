@@ -1713,7 +1713,7 @@ fn layout_run_full<'a>(
                 }
                 ShapedItemKind::Block(BlockItem { inner: block, .. }) => {
                     let ascender = block.alignment_baseline;
-                    let descender = ascender - block.fragment.fbox.margin_box().height();
+                    let descender = ascender - block.fragment.fbox.margin_box().max.y;
                     self.expand_to(ascender, descender);
                 }
             }

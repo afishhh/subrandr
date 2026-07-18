@@ -4,10 +4,13 @@ use crate::{layout::FixedL, style::computed::Length};
 test_define_style! {
     .padding_left_16 { padding_left: Length::from_pixels(FixedL::new(16)) }
     .padding_right_16 { padding_right: Length::from_pixels(FixedL::new(16)) }
+    .margin_left_16 { margin_left: Some(Length::from_pixels(FixedL::new(16))) }
+    .margin_right_16 { margin_right: Some(Length::from_pixels(FixedL::new(16))) }
+    .margin_right_32 { margin_right: Some(Length::from_pixels(FixedL::new(32))) }
 }
 
 check_test! {
-    name = simple,
+    name = simple_padding,
     size = (16 * 14, 16),
     inline.ahem {
         span.green_bg.padding_left_16.padding_right_16 {
@@ -20,7 +23,7 @@ check_test! {
 }
 
 check_test! {
-    name = line_broken,
+    name = line_broken_padding,
     size = (16 * 6, 16 * 2),
     inline.ahem {
         span.green_bg.padding_left_16.padding_right_16 {
@@ -95,5 +98,20 @@ check_test! {
             text "hello"
         }
         span.padding_right_16 {}
+    }
+}
+
+check_test! {
+    name = margins,
+    size = (16 * 14, 32),
+    inline.ahem {
+        span.yellow_bg {
+            span.green_bg.margin_left_16.margin_right_32 {
+                text "hello"
+            }
+            span.red_bg.padding_left_16.margin_right_16 {
+                text "world"
+            }
+        }
     }
 }

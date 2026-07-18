@@ -296,7 +296,7 @@ impl AsRef<Self> for InitialShapingResult<'_> {
 struct FragmentStage<'partial>(PhantomData<&'partial ()>);
 
 impl<'partial, 'content: 'partial> LayoutStage<'content> for FragmentStage<'partial> {
-    type Block = ShapedItemBlockFragment;
+    type Block = BlockItemFragment;
     type RubyInner = FragmentShapingResult<'partial, 'content>;
 }
 
@@ -346,13 +346,13 @@ impl ShapedItemPadding {
 
 #[derive(Debug)]
 enum ShapedItemKind<'c, S: LayoutStage<'c>> {
-    Text(ShapedItemText),
-    Ruby(ShapedItemRuby<'c, S>),
-    Block(ShapedItemBlock<'c, S>),
+    Text(TextItem),
+    Ruby(RubyItem<'c, S>),
+    Block(BlockItem<'c, S>),
 }
 
 #[derive(Debug, Clone)]
-struct ShapedItemText {
+struct TextItem {
     font_matcher: FontMatcher,
     primary_font: Font,
     glyphs: GlyphString,
@@ -360,32 +360,32 @@ struct ShapedItemText {
 }
 
 #[derive(Debug)]
-struct ShapedItemRuby<'c, S: LayoutStage<'c>> {
+struct RubyItem<'c, S: LayoutStage<'c>> {
     style: ComputedStyle,
-    base_annotation_pairs: Vec<(ShapedRubyBase<'c, S>, ShapedRubyAnnotation<'c, S>)>,
+    base_annotation_pairs: Vec<(RubyItemBase<'c, S>, RubyItemAnnotation<'c, S>)>,
     span_id: usize,
 }
 
 #[derive(Debug)]
-struct ShapedRubyBase<'c, S: LayoutStage<'c>> {
+struct RubyItemBase<'c, S: LayoutStage<'c>> {
     style: &'c ComputedStyle,
     primary_font: Font,
     inner: S::RubyInner,
 }
 
 #[derive(Debug)]
-struct ShapedRubyAnnotation<'c, S: LayoutStage<'c>> {
+struct RubyItemAnnotation<'c, S: LayoutStage<'c>> {
     style: &'c ComputedStyle,
     primary_font: Font,
     inner: S::RubyInner,
 }
 
-struct ShapedItemBlock<'c, S: LayoutStage<'c>> {
+struct BlockItem<'c, S: LayoutStage<'c>> {
     span_id: usize,
     inner: S::Block,
 }
 
-impl<'c, S: LayoutStage<'c>> std::fmt::Debug for ShapedItemBlock<'c, S> {
+impl<'c, S: LayoutStage<'c>> std::fmt::Debug for BlockItem<'c, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ShapedItemBlock")
             .field("span_id", &self.span_id)
@@ -402,12 +402,12 @@ impl AccumulateWidth for PartialBlockContainer<'_> {
     }
 }
 
-struct ShapedItemBlockFragment {
+struct BlockItemFragment {
     alignment_baseline: FixedL,
     fragment: BlockContainerFragment,
 }
 
-impl AccumulateWidth for ShapedItemBlockFragment {
+impl AccumulateWidth for BlockItemFragment {
     fn accumulate_width(&self, result: &mut FixedL, _available_width: FixedL) {
         *result += self.fragment.fbox.size_for_layout().x
     }
@@ -429,7 +429,7 @@ impl AccumulateWidth for FragmentShapingResult<'_, '_> {
     }
 }
 
-impl ShapedItemBlockFragment {
+impl BlockItemFragment {
     fn layout_partial(
         lctx: &mut LayoutContext,
         partial: &PartialBlockContainer,
@@ -455,83 +455,77 @@ impl ShapedItemBlockFragment {
     }
 }
 
-fn finish_block_layout_in_shaped_items<'partial, 'content>(
-    items: &'partial [ShapedItem<'content, PartialStage>],
-    lctx: &mut LayoutContext,
-    constraints: &LayoutConstraints,
-) -> Result<Vec<ShapedItem<'content, FragmentStage<'partial>>>, InlineLayoutError> {
-    items
-        .iter()
-        .map(|item| {
-            let kind: ShapedItemKind<'content, FragmentStage<'partial>> = match &item.kind {
-                ShapedItemKind::Text(text) => ShapedItemKind::Text(text.clone()),
-                ShapedItemKind::Ruby(ruby) => ShapedItemKind::Ruby(ShapedItemRuby {
-                    style: ruby.style.clone(),
-                    span_id: ruby.span_id,
-                    base_annotation_pairs: ruby
-                        .base_annotation_pairs
-                        .iter()
-                        .map(
-                            |(base, annotation)| -> Result<
-                                (
-                                    ShapedRubyBase<'content, FragmentStage<'partial>>,
-                                    ShapedRubyAnnotation<'content, FragmentStage<'partial>>,
-                                ),
-                                InlineLayoutError,
-                            > {
-                                Ok((
-                                    ShapedRubyBase {
-                                        style: base.style,
-                                        primary_font: base.primary_font.clone(),
-                                        inner: FragmentShapingResult {
-                                            initial: &base.inner,
-                                            items: finish_block_layout_in_shaped_items(
-                                                &base.inner.shaped,
-                                                lctx,
-                                                constraints,
-                                            )?,
-                                        },
-                                    },
-                                    ShapedRubyAnnotation {
-                                        style: annotation.style,
-                                        primary_font: annotation.primary_font.clone(),
-                                        inner: FragmentShapingResult {
-                                            initial: &base.inner,
-                                            items: finish_block_layout_in_shaped_items(
-                                                &annotation.inner.shaped,
-                                                lctx,
-                                                constraints,
-                                            )?,
-                                        },
-                                    },
-                                ))
-                            },
-                        )
-                        .collect::<Result<
-                            Vec<(
-                                ShapedRubyBase<'content, FragmentStage<'partial>>,
-                                ShapedRubyAnnotation<'content, FragmentStage<'partial>>,
-                            )>,
+impl<'content> ShapedItemKind<'content, PartialStage> {
+    fn to_fragment_item<'partial>(
+        &'partial self,
+        lctx: &mut LayoutContext,
+        constraints: &LayoutConstraints,
+    ) -> Result<ShapedItemKind<'content, FragmentStage<'partial>>, InlineLayoutError> {
+        Ok(match &self {
+            ShapedItemKind::Text(text) => ShapedItemKind::Text(text.clone()),
+            ShapedItemKind::Ruby(ruby) => ShapedItemKind::Ruby(RubyItem {
+                style: ruby.style.clone(),
+                span_id: ruby.span_id,
+                base_annotation_pairs: ruby
+                    .base_annotation_pairs
+                    .iter()
+                    .map(
+                        |(base, annotation)| -> Result<
+                            (
+                                RubyItemBase<'content, FragmentStage<'partial>>,
+                                RubyItemAnnotation<'content, FragmentStage<'partial>>,
+                            ),
                             InlineLayoutError,
-                        >>()?,
-                }),
-                ShapedItemKind::Block(block) => ShapedItemKind::Block(ShapedItemBlock {
-                    span_id: block.span_id,
-                    inner: ShapedItemBlockFragment::layout_partial(
-                        lctx,
-                        &block.inner,
-                        constraints.size.x,
-                    )?,
-                }),
-            };
-
-            Ok(ShapedItem {
-                range: item.range.clone(),
-                kind,
-                padding: item.padding.clone(),
-            })
+                        > {
+                            Ok((
+                                RubyItemBase {
+                                    style: base.style,
+                                    primary_font: base.primary_font.clone(),
+                                    inner: base.inner.to_fragment_result(lctx, constraints)?,
+                                },
+                                RubyItemAnnotation {
+                                    style: annotation.style,
+                                    primary_font: annotation.primary_font.clone(),
+                                    inner: annotation
+                                        .inner
+                                        .to_fragment_result(lctx, constraints)?,
+                                },
+                            ))
+                        },
+                    )
+                    .collect::<Result<_, InlineLayoutError>>()?,
+            }),
+            ShapedItemKind::Block(block) => ShapedItemKind::Block(BlockItem {
+                span_id: block.span_id,
+                inner: BlockItemFragment::layout_partial(lctx, &block.inner, constraints.size.x)?,
+            }),
         })
-        .collect()
+    }
+}
+
+impl<'content> InitialShapingResult<'content> {
+    fn to_fragment_result(
+        &self,
+        lctx: &mut LayoutContext,
+        constraints: &LayoutConstraints,
+    ) -> Result<FragmentShapingResult<'_, 'content>, InlineLayoutError> {
+        let items = self
+            .shaped
+            .iter()
+            .map(|item| {
+                Ok(ShapedItem {
+                    range: item.range.clone(),
+                    kind: item.kind.to_fragment_item(lctx, constraints)?,
+                    padding: item.padding.clone(),
+                })
+            })
+            .collect::<Result<_, InlineLayoutError>>()?;
+
+        Ok(FragmentShapingResult {
+            initial: self,
+            items,
+        })
+    }
 }
 
 fn font_matcher_from_style(style: &ComputedStyle, lctx: &mut LayoutContext) -> FontMatcher {
@@ -710,7 +704,7 @@ fn shape_run_initial<'a>(
 
                 result.push(ShapedItem {
                     range: range.clone(),
-                    kind: ShapedItemKind::Text(ShapedItemText {
+                    kind: ShapedItemKind::Text(TextItem {
                         font_matcher: self.matcher.clone(),
                         primary_font: self.matcher.primary(lctx.log, lctx.fonts)?,
                         glyphs,
@@ -1004,7 +998,7 @@ fn shape_run_initial<'a>(
                             let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                             self.shaped.push(ShapedItem {
                                 range: content_index..content_end,
-                                kind: ShapedItemKind::Ruby(ShapedItemRuby {
+                                kind: ShapedItemKind::Ruby(RubyItem {
                                     style: span.style.clone(),
                                     span_id: self.current_span_id,
                                     base_annotation_pairs: {
@@ -1023,7 +1017,7 @@ fn shape_run_initial<'a>(
                                                 unreachable!("Illegal ruby base item");
                                             };
 
-                                            let base = ShapedRubyBase {
+                                            let base = RubyItemBase {
                                                 style: base_style,
                                                 primary_font: primary_font_from_style(
                                                     base_style, self.lctx,
@@ -1071,7 +1065,7 @@ fn shape_run_initial<'a>(
                                                     self.span_state,
                                                     annotation_style,
                                                 )?;
-                                                ShapedRubyAnnotation {
+                                                RubyItemAnnotation {
                                                     style: annotation_style,
                                                     primary_font: primary_font_from_style(
                                                         annotation_style,
@@ -1080,7 +1074,7 @@ fn shape_run_initial<'a>(
                                                     inner: result,
                                                 }
                                             } else {
-                                                ShapedRubyAnnotation {
+                                                RubyItemAnnotation {
                                                     style: const { &ComputedStyle::DEFAULT },
                                                     primary_font: primary_font_from_style(
                                                         &ComputedStyle::DEFAULT,
@@ -1185,7 +1179,7 @@ fn shape_run_initial<'a>(
                         let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                         self.shaped.push(ShapedItem {
                             range: content_index..content_end,
-                            kind: ShapedItemKind::Block(ShapedItemBlock {
+                            kind: ShapedItemKind::Block(BlockItem {
                                 span_id: self.current_span_id,
                                 inner: super::block::layout_initial(self.lctx, block)?,
                             }),
@@ -1361,7 +1355,7 @@ impl<'c, S: LayoutStage<'c>> ShapedItem<'c, S> {
     }
 }
 
-impl ShapedItemText {
+impl TextItem {
     fn break_opportunity_to_range(&self, opportunity: usize) -> Range<usize> {
         let text = self.glyphs.text();
         let mut break_start_index = opportunity;
@@ -1436,7 +1430,7 @@ impl ShapedItemText {
 
                         return Ok(BreakOutcome::BreakSplit(ShapedItem {
                             range: opportunity..previous_end,
-                            kind: ShapedItemKind::Text(ShapedItemText {
+                            kind: ShapedItemKind::Text(TextItem {
                                 font_matcher: self.font_matcher.clone(),
                                 primary_font: self.primary_font.clone(),
                                 glyphs: remaining,
@@ -1473,7 +1467,7 @@ fn layout_run_full<'a>(
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
-        shaped: &ShapedItemText,
+        shaped: &TextItem,
         leaves: &[LeafItemRange<'s>],
         mut push_section: impl FnMut(
             &LeafItemRange<'s>,
@@ -1590,7 +1584,7 @@ fn layout_run_full<'a>(
                         // in this way, then true theoreteically correct line-breaking requires unbounded
                         // backtracking so it's not like we have much of a choice.
 
-                        let mut tmp = ShapedItemText {
+                        let mut tmp = TextItem {
                             font_matcher: text.font_matcher.clone(),
                             primary_font: text.primary_font.clone(),
                             glyphs: text.glyphs.clone(),
@@ -1760,7 +1754,7 @@ fn layout_run_full<'a>(
                         }
                     }
                 }
-                ShapedItemKind::Block(ShapedItemBlock { inner: block, .. }) => {
+                ShapedItemKind::Block(BlockItem { inner: block, .. }) => {
                     let ascender = block.alignment_baseline;
                     let descender = ascender - block.fragment.fbox.margin_box().height();
                     self.expand_to(ascender, descender);
@@ -2043,7 +2037,7 @@ fn layout_run_full<'a>(
 
                     Ok(())
                 }
-                &mut ShapedItemKind::Block(ShapedItemBlock {
+                &mut ShapedItemKind::Block(BlockItem {
                     span_id,
                     inner: ref mut block,
                 }) => {
@@ -2108,7 +2102,7 @@ fn layout_run_full<'a>(
                     }
                 }
                 ShapedItemKind::Ruby(ruby) => on_leaf(ruby.span_id, item.range.clone()),
-                &ShapedItemKind::Block(ShapedItemBlock { span_id, .. }) => {
+                &ShapedItemKind::Block(BlockItem { span_id, .. }) => {
                     on_leaf(span_id, item.range.clone())
                 }
             }
@@ -2254,14 +2248,18 @@ fn layout_run_full<'a>(
         }
     }
 
-    let InitialShapingResult {
-        ref shaped,
-        ref break_opportunities,
-        ref text_leaf_items,
-        ref bidi,
-        ref font_feature_events,
-        ref grapheme_cluster_boundaries,
-    } = initial_shaping_result;
+    let FragmentShapingResult {
+        initial:
+            InitialShapingResult {
+                ref break_opportunities,
+                ref text_leaf_items,
+                ref bidi,
+                ref font_feature_events,
+                ref grapheme_cluster_boundaries,
+                ..
+            },
+        mut items,
+    } = initial_shaping_result.to_fragment_result(lctx, constraints)?;
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
@@ -2280,8 +2278,6 @@ fn layout_run_full<'a>(
         available_width: constraints.size.x,
     };
 
-    // Transition block shaped items into `Fragment` state.
-    let mut items = finish_block_layout_in_shaped_items(shaped, lctx, constraints)?;
     let mut items = &mut items[..];
     if constraints.size.x != FixedL::MAX && !break_opportunities.is_empty() {
         let mut breaking_context = BreakingContext {

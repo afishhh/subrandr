@@ -87,3 +87,73 @@ check_test! {
         }
     }
 }
+
+test_define_style! {
+    .black_on_white "color: black; background-color: white"
+    .text_centered "text-align: center"
+    .text_right "text-align: right"
+
+    .inline_sizing_stretch "-sbr-inline-sizing: stretch"
+
+    .hmargin5 "margin-left: 5px; margin-right: 5px"
+    .vpadding5 "padding-top: 5px; padding-bottom: 5px"
+
+    .width32 "width: 32px"
+}
+
+// NOTE: Once/if vertical margins are support these `vpadding`s can be replaced
+//       by the respective `vmargin`s.
+check_test! {
+    name = margins,
+    size = (106, 88),
+    block.ahem.black_on_white.text_centered {
+        inline.ahem {
+            span.inline_sizing_stretch.yellow_bg {
+                text "A"
+                block.hmargin5.vpadding5 {
+                    inline { text "XXXX" }
+                }
+                text "A\n"
+            }
+            span.inline_sizing_stretch.red_bg {
+                text "B"
+                block.hmargin5.vpadding10 {}
+                text "B\n"
+            }
+            span.inline_sizing_stretch.green_bg {
+                text "C"
+                block.vpadding10 {}
+                text "C\n"
+            }
+            span.inline_sizing_stretch.blue_bg {
+                text "D"
+                block.hmargin5 {}
+                text "D"
+            }
+        }
+    }
+}
+
+check_test! {
+    name = width_calculation,
+    size = (64, 48),
+    block.ahem.black_on_white.text_centered {
+        inline.ahem {
+            span.inline_sizing_stretch.yellow_bg {
+                text "A"
+                block {
+                    block {
+                        block.width32 { inline { text "横" } }
+                        block { inline { text "縦" } }
+                    }
+                }
+                text "A\n"
+            }
+            span.inline_sizing_stretch.green_bg {
+                text "B"
+                block { inline { text "BB" } }
+                text "B\n"
+            }
+        }
+    }
+}

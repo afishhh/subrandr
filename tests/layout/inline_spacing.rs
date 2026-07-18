@@ -3,10 +3,13 @@ use super::common::*;
 test_define_style! {
     .padding_left_16 "padding-left: 16px"
     .padding_right_16 "padding-right: 16px"
+    .margin_left_16 "margin-left: 16px"
+    .margin_right_16 "margin-right: 16px"
+    .margin_right_32 "margin-right: 32px"
 }
 
 check_test! {
-    name = simple,
+    name = simple_padding,
     size = (16 * 14, 16),
     inline.ahem {
         span.green_bg.padding_left_16.padding_right_16 {
@@ -19,7 +22,7 @@ check_test! {
 }
 
 check_test! {
-    name = line_broken,
+    name = line_broken_padding,
     size = (16 * 6, 16 * 2),
     inline.ahem {
         span.green_bg.padding_left_16.padding_right_16 {
@@ -94,5 +97,20 @@ check_test! {
             text "hello"
         }
         span.padding_right_16 {}
+    }
+}
+
+check_test! {
+    name = margins,
+    size = (16 * 14, 32),
+    inline.ahem {
+        span.yellow_bg {
+            span.green_bg.margin_left_16.margin_right_32 {
+                text "hello"
+            }
+            span.red_bg.padding_left_16.margin_right_16 {
+                text "world"
+            }
+        }
     }
 }

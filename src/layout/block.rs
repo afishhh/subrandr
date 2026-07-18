@@ -52,16 +52,17 @@ impl BlockContainerFragment {
             BaselineSource::Last => (),
         }
 
+        let content_y = self.fbox.content_offset().y;
         match &self.content {
             BlockContainerFragmentContent::Inline(off, inline_content_fragment) => {
                 let (line_off, line) = inline_content_fragment.lines.last()?;
-                Some(off.y + line_off.y + line.baseline_y)
+                Some(content_y + off.y + line_off.y + line.baseline_y)
             }
             BlockContainerFragmentContent::Block(children) => {
                 children.iter().rev().find_map(|&(child_off, ref child)| {
                     child
                         .alphabetic_baseline()
-                        .map(|child_baseline| child_baseline + child_off.y)
+                        .map(|child_baseline| content_y + child_off.y + child_baseline)
                 })
             }
         }

@@ -269,13 +269,9 @@ pub fn slice_sorted_ranges_intersecting<E: AsRef<Range<usize>>>(
     &ranges[start..end]
 }
 
-trait AccumulateWidth {
-    fn accumulate_width(&self, result: &mut FixedL, available_width: FixedL);
-}
-
 trait LayoutStage<'content> {
-    type Block: AccumulateWidth;
-    type RubyInner: AccumulateWidth + AsRef<InitialShapingResult<'content>> + std::fmt::Debug;
+    type Block;
+    type RubyInner: std::fmt::Debug;
 }
 
 #[derive(Debug)] // these have Debug only to satisfy Debug derive
@@ -286,24 +282,12 @@ impl<'content> LayoutStage<'content> for PartialStage {
     type RubyInner = InitialShapingResult<'content>;
 }
 
-impl AsRef<Self> for InitialShapingResult<'_> {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
-
 #[derive(Debug)]
 struct FragmentStage<'partial>(PhantomData<&'partial ()>);
 
 impl<'partial, 'content: 'partial> LayoutStage<'content> for FragmentStage<'partial> {
     type Block = BlockItemFragment;
     type RubyInner = FragmentShapingResult<'partial, 'content>;
-}
-
-impl<'content> AsRef<InitialShapingResult<'content>> for FragmentShapingResult<'_, 'content> {
-    fn as_ref(&self) -> &InitialShapingResult<'content> {
-        self.initial
-    }
 }
 
 #[derive(Debug)]
@@ -393,35 +377,18 @@ impl<'c, S: LayoutStage<'c>> std::fmt::Debug for BlockItem<'c, S> {
     }
 }
 
-impl AccumulateWidth for PartialBlockContainer<'_> {
-    fn accumulate_width(&self, result: &mut FixedL, available_width: FixedL) {
-        // https://www.w3.org/TR/CSS2/visudet.html#inlineblock-width
-        // TODO: This also needs to take into account minimum intrinsic width
-        //       But this works in *most* cases
-        *result += self.intrinsic_width().min(available_width)
-    }
-}
-
 struct BlockItemFragment {
     alignment_baseline: FixedL,
     fragment: BlockContainerFragment,
 }
 
-impl AccumulateWidth for BlockItemFragment {
+impl BlockItemFragment {
     fn accumulate_width(&self, result: &mut FixedL, _available_width: FixedL) {
         *result += self.fragment.fbox.size_for_layout().x
     }
 }
 
-impl AccumulateWidth for InitialShapingResult<'_> {
-    fn accumulate_width(&self, result: &mut FixedL, available_width: FixedL) {
-        for item in &self.shaped {
-            item.accumulate_width(result, available_width);
-        }
-    }
-}
-
-impl AccumulateWidth for FragmentShapingResult<'_, '_> {
+impl FragmentShapingResult<'_, '_> {
     fn accumulate_width(&self, result: &mut FixedL, available_width: FixedL) {
         for item in &self.items {
             item.accumulate_width(result, available_width);
@@ -1313,9 +1280,7 @@ impl<'p, 'c: 'p> ShapedItem<'c, FragmentStage<'p>> {
             }
         }
     }
-}
 
-impl<'c, S: LayoutStage<'c>> ShapedItem<'c, S> {
     fn accumulate_content_width(&self, result: &mut FixedL, available_width: FixedL) {
         match &self.kind {
             ShapedItemKind::Text(text) => {
@@ -2380,17 +2345,24 @@ pub fn shape<'l, 'b, 'c>(
 }
 
 impl PartialInline<'_> {
-    pub fn intrinsic_width(&self, _lctx: &mut LayoutContext) -> FixedL {
+    pub fn max_content_width(&self, lctx: &mut LayoutContext) -> Result<FixedL, InlineLayoutError> {
+        // TODO: This could actually be avoided (and it was avoided before but removed for simplicity)
+        //       by just measuring the partial items directly.
+        let items = self
+            .initial_shaping_result
+            .to_fragment_result(lctx, &LayoutConstraints::NONE)?
+            .items;
+
         let mut max = FixedL::ZERO;
         let mut current = FixedL::ZERO;
-        for item in &self.initial_shaping_result.shaped {
+        for item in items {
             item.accumulate_width(&mut current, FixedL::MAX);
             if item.forces_line_break_after() {
                 max = max.max(current);
                 current = FixedL::ZERO;
             }
         }
-        max.max(current)
+        Ok(max.max(current))
     }
 
     pub fn layout<'b, 'l>(

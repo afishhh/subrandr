@@ -152,7 +152,7 @@ pub fn layout_initial<'a>(
     let content = match &container.content {
         BlockContainerContent::Inline(inline) => {
             let inline = super::inline::shape(lctx, inline)?;
-            intrinsic_content_width = inline.intrinsic_width(lctx);
+            intrinsic_content_width = inline.max_content_width(lctx)?;
             PartialBlockContainerContent::Inline(inline)
         }
         BlockContainerContent::Block(children) => {

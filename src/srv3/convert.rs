@@ -11,9 +11,9 @@ use util::{
 use crate::{
     layout::{
         self,
-        block::{BlockContainer, BlockContainerContent},
+        block::{BlockContainer, BlockContainerContent, ContainingBlock},
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
-        FixedL, InlineLayoutError, LayoutConstraints, Point2L, Vec2L,
+        FixedL, InlineLayoutError, Point2L, Vec2L,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
@@ -487,11 +487,9 @@ impl Window {
         let partial_window = layout::block::layout_initial(pass.lctx, &window)?;
 
         let width = partial_window
-            .intrinsic_width()
+            .inline_size(pass.lctx, &ContainingBlock::infinite_initial())?
             .min(pass.sctx.player_width() * 96 / 100);
-        let constraints = LayoutConstraints {
-            size: Vec2L::new(width, FixedL::MAX),
-        };
+        let constraints = ContainingBlock::initial(Vec2L::new(width, FixedL::MAX));
 
         let fragment = partial_window.layout(pass.lctx, &constraints)?;
 

@@ -1,15 +1,15 @@
 use core::{convert::AsRef, iter::Iterator};
-use std::{ops::Range, rc::Rc};
+use std::{marker::PhantomData, ops::Range, rc::Rc};
 
 use icu_segmenter::{options::LineBreakOptions, GraphemeClusterSegmenter};
 use thiserror::Error;
 use util::math::{I26Dot6, Vec2};
 
-use super::{FixedL, FragmentBox, LayoutConstraints, LayoutContext, Vec2L};
+use super::{block::BlockLayoutLevel, FixedL, FragmentBox, LayoutContext, Vec2L};
 use crate::{
     layout::{
-        block::{BlockContainer, BlockContainerFragment, PartialBlockContainer},
-        BoxFragmentationPart,
+        block::{BlockContainer, BlockContainerFragment, ContainingBlock, PartialBlockContainer},
+        BoxFragmentationPart, EdgeExtents,
     },
     style::{
         computed::{
@@ -53,7 +53,7 @@ impl Default for InlineContent {
 }
 
 #[derive(Debug, Clone)]
-pub enum InlineItem {
+enum InlineItem {
     Span(InlineSpan),
     Text(InlineText),
     Block(InlineBlock),
@@ -61,13 +61,13 @@ pub enum InlineItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineSpan {
+struct InlineSpan {
     style: ComputedStyle,
     kind: InlineSpanKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum InlineSpanKind {
+enum InlineSpanKind {
     Span,
     // Contents are interleaved base-annotation pairs of kind `RubyInternal`.
     Ruby {
@@ -80,12 +80,12 @@ pub enum InlineSpanKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineText {
+struct InlineText {
     content_range: Range<usize>,
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineBlock {
+struct InlineBlock {
     content_index: usize,
     block: Box<BlockContainer>,
 }
@@ -177,11 +177,11 @@ pub enum InlineLayoutError {
 }
 
 #[derive(Debug)]
-struct InitialShapingResult<'a> {
-    shaped: Vec<ShapedItem<'a>>,
+struct InitialShapingResult<'c> {
+    shaped: Vec<ShapedItem<'c, PartialStage>>,
     break_opportunities: Vec<usize>,
-    text_leaf_items: Vec<LeafItemRange<'a>>,
-    bidi: unicode_bidi::BidiInfo<'a>,
+    text_leaf_items: Vec<LeafItemRange<'c>>,
+    bidi: unicode_bidi::BidiInfo<'c>,
     font_feature_events: Vec<FontFeatureEvent>,
     grapheme_cluster_boundaries: Vec<usize>,
 }
@@ -199,11 +199,17 @@ impl InitialShapingResult<'_> {
     }
 }
 
+#[derive(Debug)]
+struct FragmentShapingResult<'partial, 'content> {
+    initial: &'partial InitialShapingResult<'content>,
+    items: Vec<ShapedItem<'content, FragmentStage<'partial>>>,
+}
+
 // TODO: How should reordering affect padding fragmentation?
 //       Is the current implementation correct? (everything in visual order)
 /// Holds per-span state prepared during shaping and used during further layout to
 /// calculate span fragmentation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SpanState<'a> {
     style: &'a ComputedStyle,
     primary_font: Font,
@@ -263,53 +269,74 @@ pub fn slice_sorted_ranges_intersecting<E: AsRef<Range<usize>>>(
     &ranges[start..end]
 }
 
+trait LayoutStage<'content> {
+    type Block;
+    type RubyInner: std::fmt::Debug;
+}
+
+#[derive(Debug)] // these have Debug only to satisfy Debug derive
+struct PartialStage;
+
+impl<'content> LayoutStage<'content> for PartialStage {
+    type Block = PartialBlockContainer<'content>;
+    type RubyInner = InitialShapingResult<'content>;
+}
+
 #[derive(Debug)]
-struct ShapedItem<'a> {
+struct FragmentStage<'partial>(PhantomData<&'partial ()>);
+
+impl<'partial, 'content: 'partial> LayoutStage<'content> for FragmentStage<'partial> {
+    type Block = BlockItemFragment;
+    type RubyInner = FragmentShapingResult<'partial, 'content>;
+}
+
+#[derive(Debug)]
+struct ShapedItem<'c, S: LayoutStage<'c>> {
     range: Range<usize>,
-    kind: ShapedItemKind<'a>,
+    kind: ShapedItemKind<'c, S>,
     /// Padding metrics used during line breaking, note that due to bidi
     /// reordering this *may not correspond to the final padding* applied
     /// to these glyphs. In fact, since shaped items don't even correspond
     /// to particular spans, this should be entirely ignored as soon as we
     /// leave line breaking!
-    padding: ShapedItemPadding,
+    spacing: ShapedItemSpacing,
 }
 
 #[derive(Debug, Clone)]
-struct ShapedItemPadding {
-    current_padding_left: FixedL,
-    current_padding_right: FixedL,
+struct ShapedItemSpacing {
+    current_spacing_left: FixedL,
+    current_spacing_right: FixedL,
 }
 
-impl ShapedItemPadding {
+impl ShapedItemSpacing {
     // Basically placeholder values for when we don't care about this anymore but
     // need to construct a `ShapedItem`.
     // Must only be used after line-breaking when this information is no longer
     // necessary.
     const MAX: Self = Self {
-        current_padding_left: FixedL::MAX,
-        current_padding_right: FixedL::MAX,
+        current_spacing_left: FixedL::MAX,
+        current_spacing_right: FixedL::MAX,
     };
 
     fn fragment_break(&mut self) -> Self {
         let remainder = Self {
-            current_padding_left: FixedL::ZERO,
+            current_spacing_left: FixedL::ZERO,
             ..*self
         };
-        self.current_padding_right = FixedL::ZERO;
+        self.current_spacing_right = FixedL::ZERO;
         remainder
     }
 }
 
 #[derive(Debug)]
-enum ShapedItemKind<'a> {
-    Text(ShapedItemText),
-    Ruby(ShapedItemRuby<'a>),
-    Block(ShapedItemBlock<'a>),
+enum ShapedItemKind<'c, S: LayoutStage<'c>> {
+    Text(TextItem),
+    Ruby(RubyItem<'c, S>),
+    Block(BlockItem<'c, S>),
 }
 
-#[derive(Debug)]
-struct ShapedItemText {
+#[derive(Debug, Clone)]
+struct TextItem {
     font_matcher: FontMatcher,
     primary_font: Font,
     glyphs: GlyphString,
@@ -317,151 +344,151 @@ struct ShapedItemText {
 }
 
 #[derive(Debug)]
-struct ShapedItemRuby<'a> {
+struct RubyItem<'c, S: LayoutStage<'c>> {
     style: ComputedStyle,
-    base_annotation_pairs: Vec<(ShapedRubyBase<'a>, ShapedRubyAnnotation<'a>)>,
+    base_annotation_pairs: Vec<(RubyItemBase<'c, S>, RubyItemAnnotation<'c, S>)>,
     span_id: usize,
 }
 
 #[derive(Debug)]
-struct ShapedRubyBase<'a> {
-    style: &'a ComputedStyle,
+struct RubyItemBase<'c, S: LayoutStage<'c>> {
+    style: &'c ComputedStyle,
     primary_font: Font,
-    inner: InitialShapingResult<'a>,
+    inner: S::RubyInner,
 }
 
 #[derive(Debug)]
-struct ShapedRubyAnnotation<'a> {
-    style: &'a ComputedStyle,
+struct RubyItemAnnotation<'c, S: LayoutStage<'c>> {
+    style: &'c ComputedStyle,
     primary_font: Font,
-    inner: InitialShapingResult<'a>,
+    inner: S::RubyInner,
 }
 
-#[derive(Debug)]
-struct ShapedItemBlock<'a> {
-    kind: ShapedItemBlockKind<'a>,
+struct BlockItem<'c, S: LayoutStage<'c>> {
     span_id: usize,
+    inner: S::Block,
 }
 
-// This is unfortunate but `ShapedItemBlock` can be in two states:
-// - If we're in the "partially laid out" state (before the containing block size
-//   is calculated) it needs to be in a `Partial` state and store a partial block
-//   container.
-// - If we're performing the second "full" stage of the layout pass it should be
-//   immediately transitioned to the `Fragment` state and remain that way.
-//
-// TODO: This probably *could* be encoded into the type-system with enough effort.
-enum ShapedItemBlockKind<'a> {
-    Partial(PartialBlockContainer<'a>),
-    Fragment(ShapedItemBlockFragment),
-}
-
-impl ShapedItemBlockKind<'_> {
-    const EMPTY: Self = Self::Fragment(ShapedItemBlockFragment {
-        alignment_baseline: FixedL::ZERO,
-        block: BlockContainerFragment::EMPTY,
-    });
-
-    fn width(&self, available_width: FixedL) -> FixedL {
-        match self {
-            // https://www.w3.org/TR/CSS2/visudet.html#inlineblock-width
-            // TODO: This also needs to take into account minimum intrinsic width
-            //       But this works in *most* cases
-            ShapedItemBlockKind::Partial(partial) => partial.intrinsic_width().min(available_width),
-            ShapedItemBlockKind::Fragment(ShapedItemBlockFragment {
-                block: fragment, ..
-            }) => fragment.fbox.size_for_layout().x,
-        }
-    }
-
-    fn assert_as_fragment(&self) -> &ShapedItemBlockFragment {
-        let Self::Fragment(fragment) = self else {
-            unreachable!("`ShapedItemBlock` is a partial block container but a laid-out fragment was expected at this point");
-        };
-
-        fragment
-    }
-
-    fn assert_take_fragment(&mut self) -> ShapedItemBlockFragment {
-        let Self::Fragment(fragment) = std::mem::replace(self, Self::EMPTY) else {
-            unreachable!("`ShapedItemBlock` is a partial block container but a laid-out fragment was expected at this point");
-        };
-
-        fragment
-    }
-
-    fn make_fragment(
-        &mut self,
-        lctx: &mut LayoutContext,
-        available_width: FixedL,
-    ) -> Result<(), InlineLayoutError> {
-        match std::mem::replace(self, Self::EMPTY) {
-            Self::Partial(partial) => {
-                let width = partial.intrinsic_width().min(available_width);
-                let fragment = partial.layout(
-                    lctx,
-                    &LayoutConstraints {
-                        size: Vec2::new(width, FixedL::MAX),
-                    },
-                )?;
-                *self = Self::Fragment(ShapedItemBlockFragment {
-                    alignment_baseline: fragment.alphabetic_baseline().unwrap_or_else(|| {
-                        // https://www.w3.org/TR/css-inline-3/#baseline-synthesis-box
-                        // We assume alphabetic baseline so this is just the bottom of the
-                        // margin box.
-                        fragment.fbox.margin_box().max.y
-                    }),
-                    block: fragment,
-                })
-            }
-            Self::Fragment(_) => {
-                unreachable!("Item is already a fragment in `ShapedItemBlockKind::make_fragment`")
-            }
-        };
-
-        Ok(())
-    }
-}
-
-impl std::fmt::Debug for ShapedItemBlockKind<'_> {
+impl<'c, S: LayoutStage<'c>> std::fmt::Debug for BlockItem<'c, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Partial(_) => f.debug_tuple("Partial").finish_non_exhaustive(),
-            Self::Fragment(_) => f.debug_tuple("Fragment").finish_non_exhaustive(),
-        }
+        f.debug_struct("ShapedItemBlock")
+            .field("span_id", &self.span_id)
+            .finish_non_exhaustive()
     }
 }
 
-struct ShapedItemBlockFragment {
+struct BlockItemFragment {
     alignment_baseline: FixedL,
-    block: BlockContainerFragment,
+    fragment: BlockContainerFragment,
 }
 
-fn finish_block_layout_in_shaped_items(
-    items: &mut [ShapedItem],
-    lctx: &mut LayoutContext,
-    constraints: &LayoutConstraints,
-) -> Result<(), InlineLayoutError> {
-    for item in items {
-        match &mut item.kind {
-            ShapedItemKind::Text(_) => (),
-            ShapedItemKind::Ruby(ruby) => {
-                for (base, annotation) in &mut ruby.base_annotation_pairs {
-                    finish_block_layout_in_shaped_items(&mut base.inner.shaped, lctx, constraints)?;
-                    finish_block_layout_in_shaped_items(
-                        &mut annotation.inner.shaped,
-                        lctx,
-                        constraints,
-                    )?;
-                }
-            }
-            ShapedItemKind::Block(ShapedItemBlock { kind, .. }) => {
-                kind.make_fragment(lctx, constraints.size.x)?
-            }
+impl BlockItemFragment {
+    fn accumulate_width(&self, result: &mut FixedL) {
+        *result += self.fragment.fbox.size_for_layout().x
+    }
+}
+
+impl FragmentShapingResult<'_, '_> {
+    fn accumulate_width(&self, result: &mut FixedL) {
+        for item in &self.items {
+            item.accumulate_width(result);
         }
     }
+}
 
-    Ok(())
+impl BlockItemFragment {
+    fn layout_partial(
+        lctx: &mut LayoutContext,
+        partial: &PartialBlockContainer,
+        containing_block: &ContainingBlock,
+    ) -> Result<Self, InlineLayoutError> {
+        let sizes =
+            partial.inline_sizes_internal(lctx, BlockLayoutLevel::InlineLevel, containing_block)?;
+        let fragment = partial.layout_internal(lctx, sizes)?;
+
+        Ok(Self {
+            alignment_baseline: fragment.alphabetic_baseline().unwrap_or_else(|| {
+                // https://www.w3.org/TR/css-inline-3/#baseline-synthesis-box
+                // We assume alphabetic baseline so this is just the bottom of the
+                // margin box.
+                fragment.fbox.margin_box().max.y
+            }),
+            fragment,
+        })
+    }
+}
+
+impl<'content> ShapedItemKind<'content, PartialStage> {
+    fn to_fragment_item<'partial>(
+        &'partial self,
+        lctx: &mut LayoutContext,
+        containing_block: &ContainingBlock,
+    ) -> Result<ShapedItemKind<'content, FragmentStage<'partial>>, InlineLayoutError> {
+        Ok(match &self {
+            ShapedItemKind::Text(text) => ShapedItemKind::Text(text.clone()),
+            ShapedItemKind::Ruby(ruby) => ShapedItemKind::Ruby(RubyItem {
+                style: ruby.style.clone(),
+                span_id: ruby.span_id,
+                base_annotation_pairs: ruby
+                    .base_annotation_pairs
+                    .iter()
+                    .map(
+                        |(base, annotation)| -> Result<
+                            (
+                                RubyItemBase<'content, FragmentStage<'partial>>,
+                                RubyItemAnnotation<'content, FragmentStage<'partial>>,
+                            ),
+                            InlineLayoutError,
+                        > {
+                            Ok((
+                                RubyItemBase {
+                                    style: base.style,
+                                    primary_font: base.primary_font.clone(),
+                                    inner: base.inner.to_fragment_result(lctx, containing_block)?,
+                                },
+                                RubyItemAnnotation {
+                                    style: annotation.style,
+                                    primary_font: annotation.primary_font.clone(),
+                                    inner: annotation
+                                        .inner
+                                        .to_fragment_result(lctx, containing_block)?,
+                                },
+                            ))
+                        },
+                    )
+                    .collect::<Result<_, InlineLayoutError>>()?,
+            }),
+            ShapedItemKind::Block(block) => ShapedItemKind::Block(BlockItem {
+                span_id: block.span_id,
+                inner: BlockItemFragment::layout_partial(lctx, &block.inner, containing_block)?,
+            }),
+        })
+    }
+}
+
+impl<'content> InitialShapingResult<'content> {
+    fn to_fragment_result(
+        &self,
+        lctx: &mut LayoutContext,
+        containing_block: &ContainingBlock,
+    ) -> Result<FragmentShapingResult<'_, 'content>, InlineLayoutError> {
+        let items = self
+            .shaped
+            .iter()
+            .map(|item| {
+                Ok(ShapedItem {
+                    range: item.range.clone(),
+                    kind: item.kind.to_fragment_item(lctx, containing_block)?,
+                    spacing: item.spacing.clone(),
+                })
+            })
+            .collect::<Result<_, InlineLayoutError>>()?;
+
+        Ok(FragmentShapingResult {
+            initial: self,
+            items,
+        })
+    }
 }
 
 fn font_matcher_from_style(style: &ComputedStyle, lctx: &mut LayoutContext) -> FontMatcher {
@@ -607,8 +634,8 @@ fn shape_run_initial<'a>(
             text: Rc<str>,
             bidi: &unicode_bidi::BidiInfo,
             lctx: &mut LayoutContext,
-            result: &mut Vec<ShapedItem<'_>>,
-            left_padding: &mut FixedL,
+            result: &mut Vec<ShapedItem<'_, PartialStage>>,
+            left_spacing: &mut FixedL,
             shaper: &mut RunShaper,
         ) -> Result<(), InlineLayoutError> {
             let mut current_paragraph = match bidi
@@ -640,18 +667,18 @@ fn shape_run_initial<'a>(
 
                 result.push(ShapedItem {
                     range: range.clone(),
-                    kind: ShapedItemKind::Text(ShapedItemText {
+                    kind: ShapedItemKind::Text(TextItem {
                         font_matcher: self.matcher.clone(),
                         primary_font: self.matcher.primary(lctx.log, lctx.fonts)?,
                         glyphs,
                         break_after,
                     }),
-                    padding: ShapedItemPadding {
-                        current_padding_left: *left_padding,
-                        current_padding_right: FixedL::ZERO,
+                    spacing: ShapedItemSpacing {
+                        current_spacing_left: *left_spacing,
+                        current_spacing_right: FixedL::ZERO,
                     },
                 });
-                *left_padding = FixedL::ZERO;
+                *left_spacing = FixedL::ZERO;
 
                 Ok(())
             };
@@ -683,20 +710,20 @@ fn shape_run_initial<'a>(
         }
     }
 
-    struct ShapedItemBuilder<'a, 's, 'l, 'll> {
-        content: &'a InlineContent,
-        run_text: &'a Rc<str>,
-        bidi: unicode_bidi::BidiInfo<'a>,
+    struct ShapedItemBuilder<'c, 's, 'l, 'll> {
+        content: &'c InlineContent,
+        run_text: &'c Rc<str>,
+        bidi: unicode_bidi::BidiInfo<'c>,
         grapheme_cluster_boundaries: Vec<usize>,
         lctx: &'l mut LayoutContext<'ll>,
 
         break_opportunities: Vec<usize>,
-        shaped: Vec<ShapedItem<'a>>,
-        span_state: &'s mut Vec<SpanState<'a>>,
+        shaped: Vec<ShapedItem<'c, PartialStage>>,
+        span_state: &'s mut Vec<SpanState<'c>>,
         shaping_buffer: ShapingBuffer,
         queued_text: Option<QueuedText>,
         font_feature_events: Vec<FontFeatureEvent>,
-        queued_padding: FixedL,
+        queued_spacing: FixedL,
         current_span_id: usize,
         total_content_bytes_added: usize,
     }
@@ -823,7 +850,7 @@ fn shape_run_initial<'a>(
                     &self.bidi,
                     self.lctx,
                     &mut self.shaped,
-                    &mut self.queued_padding,
+                    &mut self.queued_spacing,
                     &mut RunShaper {
                         buffer: &mut self.shaping_buffer,
                         font_feature_events: &self.font_feature_events,
@@ -836,9 +863,13 @@ fn shape_run_initial<'a>(
         }
 
         fn handle_span_start(&mut self, style: &'a ComputedStyle) -> Result<(), InlineLayoutError> {
-            let left_padding = style.padding_left().to_physical_pixels(self.lctx.dpi);
+            let left_spacing = style
+                .margin_left()
+                .to_physical_pixels(self.lctx.dpi)
+                .unwrap_or(FixedL::ZERO)
+                + style.padding_left().to_physical_pixels(self.lctx.dpi);
 
-            if left_padding != FixedL::ZERO {
+            if left_spacing != FixedL::ZERO {
                 // NOTE: When thinking about this padding system, one may stumble upon the consideration:
                 //       "what if some segment of text needs to have different (cloned) padding but we
                 //        want to shape it along with some preceeding one" or similar.
@@ -848,7 +879,7 @@ fn shape_run_initial<'a>(
                 //       via a side-channel because it may differ inside a single `ShapedItem`.
                 self.flush_queued_text()?;
 
-                self.queued_padding += left_padding;
+                self.queued_spacing += left_spacing;
             }
 
             let next_span_id = self.span_state.len();
@@ -878,18 +909,26 @@ fn shape_run_initial<'a>(
                 //        character immediately preceeding them, thus it should be possible
                 //        to place them in an empty leaf text item or something and then fix
                 //        the "no glyphs" case on text branch reconstruction.
-                let left_padding = style.padding_left().to_physical_pixels(self.lctx.dpi);
-                self.queued_padding -= left_padding;
+                let left_spacing = style
+                    .margin_left()
+                    .to_physical_pixels(self.lctx.dpi)
+                    .unwrap_or(FixedL::ZERO)
+                    + style.padding_left().to_physical_pixels(self.lctx.dpi);
+                self.queued_spacing -= left_spacing;
                 return Ok(());
             };
 
-            let right_padding = style.padding_right().to_physical_pixels(self.lctx.dpi);
+            let right_spacing = style.padding_right().to_physical_pixels(self.lctx.dpi)
+                + style
+                    .margin_right()
+                    .to_physical_pixels(self.lctx.dpi)
+                    .unwrap_or(FixedL::ZERO);
 
-            if right_padding != FixedL::ZERO {
+            if right_spacing != FixedL::ZERO {
                 self.flush_queued_text()?;
 
                 if let Some(item) = self.shaped.last_mut() {
-                    item.padding.current_padding_right += right_padding;
+                    item.spacing.current_spacing_right += right_spacing;
                 }
             }
 
@@ -934,7 +973,7 @@ fn shape_run_initial<'a>(
                             let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                             self.shaped.push(ShapedItem {
                                 range: content_index..content_end,
-                                kind: ShapedItemKind::Ruby(ShapedItemRuby {
+                                kind: ShapedItemKind::Ruby(RubyItem {
                                     style: span.style.clone(),
                                     span_id: self.current_span_id,
                                     base_annotation_pairs: {
@@ -953,7 +992,7 @@ fn shape_run_initial<'a>(
                                                 unreachable!("Illegal ruby base item");
                                             };
 
-                                            let base = ShapedRubyBase {
+                                            let base = RubyItemBase {
                                                 style: base_style,
                                                 primary_font: primary_font_from_style(
                                                     base_style, self.lctx,
@@ -1001,7 +1040,7 @@ fn shape_run_initial<'a>(
                                                     self.span_state,
                                                     annotation_style,
                                                 )?;
-                                                ShapedRubyAnnotation {
+                                                RubyItemAnnotation {
                                                     style: annotation_style,
                                                     primary_font: primary_font_from_style(
                                                         annotation_style,
@@ -1010,7 +1049,7 @@ fn shape_run_initial<'a>(
                                                     inner: result,
                                                 }
                                             } else {
-                                                ShapedRubyAnnotation {
+                                                RubyItemAnnotation {
                                                     style: const { &ComputedStyle::DEFAULT },
                                                     primary_font: primary_font_from_style(
                                                         &ComputedStyle::DEFAULT,
@@ -1029,12 +1068,12 @@ fn shape_run_initial<'a>(
                                         result
                                     },
                                 }),
-                                padding: ShapedItemPadding {
-                                    current_padding_left: self.queued_padding,
-                                    current_padding_right: FixedL::ZERO,
+                                spacing: ShapedItemSpacing {
+                                    current_spacing_left: self.queued_spacing,
+                                    current_spacing_right: FixedL::ZERO,
                                 },
                             });
-                            self.queued_padding = FixedL::ZERO;
+                            self.queued_spacing = FixedL::ZERO;
                             self.total_content_bytes_added += OBJECT_REPLACEMENT_LENGTH;
 
                             if compute_break_opportunities {
@@ -1115,18 +1154,16 @@ fn shape_run_initial<'a>(
                         let content_end = content_index + OBJECT_REPLACEMENT_LENGTH;
                         self.shaped.push(ShapedItem {
                             range: content_index..content_end,
-                            kind: ShapedItemKind::Block(ShapedItemBlock {
-                                kind: ShapedItemBlockKind::Partial(super::block::layout_initial(
-                                    self.lctx, block,
-                                )?),
+                            kind: ShapedItemKind::Block(BlockItem {
                                 span_id: self.current_span_id,
+                                inner: super::block::layout_initial(self.lctx, block)?,
                             }),
-                            padding: ShapedItemPadding {
-                                current_padding_left: self.queued_padding,
-                                current_padding_right: FixedL::ZERO,
+                            spacing: ShapedItemSpacing {
+                                current_spacing_left: self.queued_spacing,
+                                current_spacing_right: FixedL::ZERO,
                             },
                         });
-                        self.queued_padding = FixedL::ZERO;
+                        self.queued_spacing = FixedL::ZERO;
                         self.total_content_bytes_added += OBJECT_REPLACEMENT_LENGTH;
 
                         if compute_break_opportunities {
@@ -1189,7 +1226,7 @@ fn shape_run_initial<'a>(
         shaping_buffer: ShapingBuffer::new(),
         queued_text: None,
         font_feature_events: Vec::new(),
-        queued_padding: FixedL::ZERO,
+        queued_spacing: FixedL::ZERO,
         current_span_id: usize::MAX,
         total_content_bytes_added: 0,
     }
@@ -1203,30 +1240,31 @@ fn shape_run_initial<'a>(
 
 struct BreakingContext<'l, 'a> {
     layout: &'a mut LayoutContext<'l>,
-    constraints: &'a LayoutConstraints,
+    containing_block: &'a ContainingBlock<'a>,
     break_opportunities: &'a [usize],
     shaper: RunShaper<'a>,
 }
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)] // TODO: is this a problem here?
-enum BreakOutcome<'a> {
-    BreakSplit(ShapedItem<'a>),
+enum BreakOutcome<'p, 'c: 'p> {
+    BreakSplit(ShapedItem<'c, FragmentStage<'p>>),
     BreakAfter,
     BreakBefore,
     None,
 }
 
-impl<'a> ShapedItem<'a> {
+impl<'p, 'c: 'p> ShapedItem<'c, FragmentStage<'p>> {
+    // TODO: merge partial -> fragment conversion with line breaking
     fn line_break(
         &mut self,
         current_width: &mut FixedL,
         ctx: &mut BreakingContext<'_, '_>,
-    ) -> Result<BreakOutcome<'a>, InlineLayoutError> {
+    ) -> Result<BreakOutcome<'p, 'c>, InlineLayoutError> {
         let can_break_before = *current_width != FixedL::ZERO;
-        *current_width += self.padding.current_padding_left;
+        *current_width += self.spacing.current_spacing_left;
 
-        if *current_width > ctx.constraints.size.x {
+        if *current_width > ctx.containing_block.width {
             return Ok(BreakOutcome::BreakBefore);
         }
 
@@ -1236,14 +1274,14 @@ impl<'a> ShapedItem<'a> {
                 current_width,
                 can_break_before,
                 ctx,
-                &mut self.padding,
+                &mut self.spacing,
             ),
             ShapedItemKind::Ruby(_) | ShapedItemKind::Block(_) => {
                 // TODO: Implement proper ruby line breaking
                 //       It should only allow breaking between distinct base-annotation pairs.
-                self.accumulate_content_width(current_width, ctx.constraints.size.x);
-                *current_width += self.padding.current_padding_right;
-                if *current_width > ctx.constraints.size.x {
+                self.accumulate_content_width(current_width);
+                *current_width += self.spacing.current_spacing_right;
+                if *current_width > ctx.containing_block.width {
                     Ok(BreakOutcome::BreakBefore)
                 } else {
                     Ok(BreakOutcome::None)
@@ -1252,7 +1290,7 @@ impl<'a> ShapedItem<'a> {
         }
     }
 
-    fn accumulate_content_width(&self, result: &mut FixedL, available_width: FixedL) {
+    fn accumulate_content_width(&self, result: &mut FixedL) {
         match &self.kind {
             ShapedItemKind::Text(text) => {
                 for (_, glyph) in text.glyphs.iter_glyphs_visual() {
@@ -1264,26 +1302,20 @@ impl<'a> ShapedItem<'a> {
                     let mut base_width = FixedL::ZERO;
                     let mut annotation_width = FixedL::ZERO;
 
-                    for item in &base.inner.shaped {
-                        item.accumulate_width(&mut base_width, available_width);
-                    }
-                    for item in &annotation.inner.shaped {
-                        item.accumulate_width(&mut annotation_width, available_width);
-                    }
+                    base.inner.accumulate_width(&mut base_width);
+                    annotation.inner.accumulate_width(&mut annotation_width);
 
                     *result += base_width.max(annotation_width);
                 }
             }
-            ShapedItemKind::Block(ShapedItemBlock { kind, .. }) => {
-                *result += kind.width(available_width);
-            }
+            ShapedItemKind::Block(block) => block.inner.accumulate_width(result),
         }
     }
 
-    fn accumulate_width(&self, result: &mut FixedL, available_width: FixedL) {
-        *result += self.padding.current_padding_left;
-        *result += self.padding.current_padding_right;
-        self.accumulate_content_width(result, available_width);
+    fn accumulate_width(&self, result: &mut FixedL) {
+        *result += self.spacing.current_spacing_left;
+        *result += self.spacing.current_spacing_right;
+        self.accumulate_content_width(result);
     }
 
     fn forces_line_break_after(&self) -> bool {
@@ -1294,7 +1326,7 @@ impl<'a> ShapedItem<'a> {
     }
 }
 
-impl ShapedItemText {
+impl TextItem {
     fn break_opportunity_to_range(&self, opportunity: usize) -> Range<usize> {
         let text = self.glyphs.text();
         let mut break_start_index = opportunity;
@@ -1314,24 +1346,24 @@ impl ShapedItemText {
         break_start_index..break_end_index
     }
 
-    fn line_break<'a>(
+    fn line_break<'a, 'c>(
         &mut self,
         range: &mut Range<usize>,
         current_width: &mut FixedL,
         can_break_before: bool,
         ctx: &mut BreakingContext<'_, '_>,
-        padding: &mut ShapedItemPadding,
-    ) -> Result<BreakOutcome<'a>, InlineLayoutError> {
+        spacing: &mut ShapedItemSpacing,
+    ) -> Result<BreakOutcome<'a, 'c>, InlineLayoutError> {
         let initial_x = *current_width;
         let mut glyph_it = self.glyphs.iter_glyphs_logical().peekable();
         while let Some((_, glyph)) = glyph_it.next() {
             *current_width += glyph.x_advance;
 
             if glyph_it.peek().is_none() {
-                *current_width += padding.current_padding_right;
+                *current_width += spacing.current_spacing_right;
             }
 
-            if *current_width > ctx.constraints.size.x {
+            if *current_width > ctx.containing_block.width {
                 // We want to also consider breaking within the current glyph so let's
                 // start looking for break opportunities anywhere before the *next* glyph.
                 let glyph_end = glyph.cluster + 1;
@@ -1356,7 +1388,7 @@ impl ShapedItemText {
                     let break_range = self.break_opportunity_to_range(opportunity);
                     if let Some((broken, remaining)) = self.glyphs.break_around(
                         break_range,
-                        ctx.constraints.size.x - initial_x,
+                        ctx.containing_block.width - initial_x,
                         &mut ctx.shaper,
                         self.font_matcher.iterator(),
                         ctx.layout,
@@ -1369,13 +1401,13 @@ impl ShapedItemText {
 
                         return Ok(BreakOutcome::BreakSplit(ShapedItem {
                             range: opportunity..previous_end,
-                            kind: ShapedItemKind::Text(ShapedItemText {
+                            kind: ShapedItemKind::Text(TextItem {
                                 font_matcher: self.font_matcher.clone(),
                                 primary_font: self.primary_font.clone(),
                                 glyphs: remaining,
                                 break_after: self.break_after,
                             }),
-                            padding: padding.fragment_break(),
+                            spacing: spacing.fragment_break(),
                         }));
                     }
                 }
@@ -1399,14 +1431,14 @@ impl ShapedItemText {
 
 fn layout_run_full<'a>(
     content: &'a InlineContent,
-    initial_shaping_result: InitialShapingResult<'a>,
+    initial_shaping_result: &InitialShapingResult<'a>,
     span_state: Vec<SpanState<'a>>,
     lctx: &mut LayoutContext,
-    constraints: &LayoutConstraints,
+    containing_block: &ContainingBlock,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
-        shaped: &ShapedItemText,
+        shaped: &TextItem,
         leaves: &[LeafItemRange<'s>],
         mut push_section: impl FnMut(
             &LeafItemRange<'s>,
@@ -1465,10 +1497,12 @@ fn layout_run_full<'a>(
         Ok(())
     }
 
-    fn reorder<'a>(
-        shaped: &mut [ShapedItem<'a>],
+    fn reorder<'p, 'c: 'p>(
+        shaped: &mut [ShapedItem<'c, FragmentStage<'p>>],
         bidi: &unicode_bidi::BidiInfo,
-        mut push_item: impl FnMut(&mut ShapedItem<'a>) -> Result<(), InlineLayoutError>,
+        mut push_item: impl FnMut(
+            &mut ShapedItem<'c, FragmentStage<'p>>,
+        ) -> Result<(), InlineLayoutError>,
     ) -> Result<(), InlineLayoutError> {
         let line_range = {
             if let (Some(first), Some(last)) = (shaped.first(), shaped.last()) {
@@ -1505,7 +1539,7 @@ fn layout_run_full<'a>(
 
         for range in visual_runs {
             let mut push_item_in_range =
-                |item: &mut ShapedItem<'a>| -> Result<(), InlineLayoutError> {
+                |item: &mut ShapedItem<'c, FragmentStage<'p>>| -> Result<(), InlineLayoutError> {
                     if range.start <= item.range.start && range.end >= item.range.end {
                         push_item(item)
                     } else if let ShapedItemKind::Text(text) = &item.kind {
@@ -1521,7 +1555,7 @@ fn layout_run_full<'a>(
                         // in this way, then true theoreteically correct line-breaking requires unbounded
                         // backtracking so it's not like we have much of a choice.
 
-                        let mut tmp = ShapedItemText {
+                        let mut tmp = TextItem {
                             font_matcher: text.font_matcher.clone(),
                             primary_font: text.primary_font.clone(),
                             glyphs: text.glyphs.clone(),
@@ -1544,7 +1578,7 @@ fn layout_run_full<'a>(
                             push_item(&mut ShapedItem {
                                 range: split_range,
                                 kind: ShapedItemKind::Text(tmp),
-                                padding: ShapedItemPadding::MAX,
+                                spacing: ShapedItemSpacing::MAX,
                             })
                         } else {
                             Ok(())
@@ -1590,28 +1624,26 @@ fn layout_run_full<'a>(
     }
 
     #[derive(Debug)]
-    struct FragmentBuilder<'t> {
+    struct FragmentBuilder<'t, 'c> {
         result: InlineContentFragment,
         current_y: FixedL,
         line_align: HorizontalAlignment,
-        bidi: unicode_bidi::BidiInfo<'t>,
-        text_leaf_items: &'t [LeafItemRange<'t>],
+        bidi: &'t unicode_bidi::BidiInfo<'c>,
+        text_leaf_items: &'t [LeafItemRange<'c>],
         dpi: u32,
-        available_width: FixedL,
-        content: &'t InlineContent,
-        span_state: Vec<SpanState<'t>>,
+        content: &'c InlineContent,
+        span_state: Vec<SpanState<'c>>,
     }
 
     #[derive(Debug)]
-    struct InlineItemFragmentBuilder<'o, 'a> {
-        output: &'o mut OffsetInlineItemFragmentVec,
-        min_ruby_y: &'o mut FixedL,
+    struct InlineItemFragmentBuilder<'t, 'c> {
+        output: &'t mut OffsetInlineItemFragmentVec,
+        min_ruby_y: &'t mut FixedL,
         line_metrics: LineHeightMetrics,
         current_top_y: FixedL,
         current_x: FixedL,
-        content: &'a InlineContent,
+        content: &'c InlineContent,
         dpi: u32,
-        available_width: FixedL,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -1647,7 +1679,11 @@ fn layout_run_full<'a>(
         }
 
         // https://drafts.csswg.org/css-inline/#inline-height
-        fn process_item(&mut self, item: &ShapedItem, line_height: LineHeight) {
+        fn process_item<'p, 'c: 'p>(
+            &mut self,
+            item: &ShapedItem<'c, FragmentStage<'p>>,
+            line_height: LineHeight,
+        ) {
             match &item.kind {
                 ShapedItemKind::Text(text) => match line_height {
                     LineHeight::Normal => {
@@ -1682,15 +1718,14 @@ fn layout_run_full<'a>(
                 },
                 ShapedItemKind::Ruby(ruby) => {
                     for (base, _) in &ruby.base_annotation_pairs {
-                        for item in &base.inner.shaped {
+                        for item in &base.inner.items {
                             self.process_item(item, line_height);
                         }
                     }
                 }
-                ShapedItemKind::Block(ShapedItemBlock { kind, .. }) => {
-                    let fragment = kind.assert_as_fragment();
-                    let ascender = fragment.alignment_baseline;
-                    let descender = ascender - fragment.block.fbox.margin_box().height();
+                ShapedItemKind::Block(BlockItem { inner: block, .. }) => {
+                    let ascender = block.alignment_baseline;
+                    let descender = ascender - block.fragment.fbox.margin_box().max.y;
                     self.expand_to(ascender, descender);
                 }
             }
@@ -1703,7 +1738,7 @@ fn layout_run_full<'a>(
         ascender: FixedL,
     }
 
-    impl<'o, 'a> InlineItemFragmentBuilder<'o, 'a> {
+    impl<'o, 'p, 'c: 'p> InlineItemFragmentBuilder<'o, 'c> {
         fn child_builder<'o2>(
             &mut self,
             output: &'o2 mut OffsetInlineItemFragmentVec,
@@ -1711,7 +1746,7 @@ fn layout_run_full<'a>(
             line_metrics: LineHeightMetrics,
             top_y: FixedL,
             current_x: FixedL,
-        ) -> InlineItemFragmentBuilder<'o2, 'a> {
+        ) -> InlineItemFragmentBuilder<'o2, 'c> {
             InlineItemFragmentBuilder {
                 output,
                 min_ruby_y,
@@ -1720,7 +1755,6 @@ fn layout_run_full<'a>(
                 current_x,
                 dpi: self.dpi,
                 content: self.content,
-                available_width: self.available_width,
             }
         }
 
@@ -1780,12 +1814,11 @@ fn layout_run_full<'a>(
                     part |= BoxFragmentationPart::HORIZONTAL_LAST;
                 }
 
-                let fbox = FragmentBox::new_styled_fragmented(
-                    Vec2L::new(inner_width, logical_height),
-                    self.dpi,
-                    state.style,
-                    part,
-                );
+                let fbox = FragmentBox {
+                    content_size: Vec2L::new(inner_width, logical_height),
+                    padding: EdgeExtents::padding_fragmented(part, state.style, self.dpi),
+                    margin: EdgeExtents::horizontal_margins_fragmented(part, state.style, self.dpi),
+                };
                 inner_width = fbox.size_for_layout().x;
                 result = util::rc::Rc::new(InlineItemFragment::Span(SpanFragment {
                     content: vec![(
@@ -1803,14 +1836,13 @@ fn layout_run_full<'a>(
             (result, inner_width, y_correction)
         }
 
-        fn reorder_and_append(
+        fn push_reordered(
             &mut self,
-            shaped: &mut [ShapedItem],
-            bidi: &'a unicode_bidi::BidiInfo<'a>,
-            text_leaf_items: &'a [LeafItemRange<'a>],
+            item: &mut ShapedItem<'c, FragmentStage<'p>>,
+            text_leaf_items: &[LeafItemRange<'c>],
             span_state: &mut [SpanState],
         ) -> Result<(), InlineLayoutError> {
-            reorder(shaped, bidi, |item| match &mut item.kind {
+            match &mut item.kind {
                 ShapedItemKind::Text(text) => split_on_leaves(
                     item.range.clone(),
                     text,
@@ -1853,12 +1885,12 @@ fn layout_run_full<'a>(
                         let mut base_metrics = LineHeightMetrics::ZERO;
                         let mut annotation_width = FixedL::ZERO;
                         let mut annotation_metrics = LineHeightMetrics::ZERO;
-                        for item in &base.inner.shaped {
-                            item.accumulate_width(&mut base_width, self.available_width);
+                        for item in &base.inner.items {
+                            item.accumulate_width(&mut base_width);
                             base_metrics.process_item(item, LineHeight::ONE);
                         }
-                        for item in &annotation.inner.shaped {
-                            item.accumulate_width(&mut annotation_width, self.available_width);
+                        for item in &annotation.inner.items {
+                            item.accumulate_width(&mut annotation_width);
                             annotation_metrics.process_item(item, LineHeight::RUBY_ANNOTATION);
                         }
 
@@ -1895,11 +1927,11 @@ fn layout_run_full<'a>(
                         //        However I'm not certain what this means for ruby base
                         //        boxes? Should they just fit their contents?
                         let mut base_fragment = RubyBaseFragment {
-                            fbox: FragmentBox::new_styled(
-                                Vec2::new(ruby_width, base_height),
-                                self.dpi,
-                                base.style,
-                            ),
+                            fbox: FragmentBox {
+                                content_size: Vec2::new(ruby_width, base_height),
+                                padding: EdgeExtents::padding(base.style, self.dpi),
+                                margin: EdgeExtents::horizontal_margins(base.style, self.dpi),
+                            },
                             style: base.style.clone(),
                             primary_font: base.primary_font.clone(),
                             children: Vec::new(),
@@ -1914,18 +1946,18 @@ fn layout_run_full<'a>(
                             base_half_padding,
                         )
                         .reorder_and_append(
-                            &mut base.inner.shaped,
-                            &base.inner.bidi,
-                            &base.inner.text_leaf_items,
+                            &mut base.inner.items,
+                            &base.inner.initial.bidi,
+                            &base.inner.initial.text_leaf_items,
                             span_state,
                         )?;
 
                         let mut annotation_fragment = RubyAnnotationFragment {
-                            fbox: FragmentBox::new_styled(
-                                Vec2::new(ruby_width, annotation_height),
-                                self.dpi,
-                                annotation.style,
-                            ),
+                            fbox: FragmentBox {
+                                content_size: Vec2::new(ruby_width, annotation_height),
+                                padding: EdgeExtents::padding(annotation.style, self.dpi),
+                                margin: EdgeExtents::horizontal_margins(annotation.style, self.dpi),
+                            },
                             style: annotation.style.clone(),
                             primary_font: annotation.primary_font.clone(),
                             baseline_y: annotation_metrics.max_ascender,
@@ -1941,9 +1973,9 @@ fn layout_run_full<'a>(
                             annotation_half_padding,
                         )
                         .reorder_and_append(
-                            &mut annotation.inner.shaped,
-                            &annotation.inner.bidi,
-                            &annotation.inner.text_leaf_items,
+                            &mut annotation.inner.items,
+                            &annotation.inner.initial.bidi,
+                            &annotation.inner.initial.text_leaf_items,
                             span_state,
                         )?;
 
@@ -1972,17 +2004,20 @@ fn layout_run_full<'a>(
 
                     Ok(())
                 }
-                &mut ShapedItemKind::Block(ShapedItemBlock {
-                    ref mut kind,
+                &mut ShapedItemKind::Block(BlockItem {
                     span_id,
+                    inner: ref mut block,
                 }) => {
-                    let fragment_item = kind.assert_take_fragment();
-                    let inner_width = fragment_item.block.fbox.size_for_layout().x;
+                    let inner_width = block.fragment.fbox.size_for_layout().x;
                     let (fragment, width, y_correction) = self.rebuild_leaf_branch(
                         span_id,
                         inner_width,
-                        self.current_top_y - fragment_item.alignment_baseline,
-                        InlineItemFragment::Block(fragment_item.block).into(),
+                        self.current_top_y - block.alignment_baseline,
+                        InlineItemFragment::Block(std::mem::replace(
+                            &mut block.fragment,
+                            BlockContainerFragment::EMPTY,
+                        ))
+                        .into(),
                         OBJECT_REPLACEMENT_LENGTH,
                         span_state,
                     );
@@ -1992,15 +2027,27 @@ fn layout_run_full<'a>(
 
                     Ok(())
                 }
+            }
+        }
+
+        fn reorder_and_append(
+            &mut self,
+            shaped: &mut [ShapedItem<'c, FragmentStage<'p>>],
+            bidi: &unicode_bidi::BidiInfo<'c>,
+            text_leaf_items: &[LeafItemRange<'c>],
+            span_state: &mut [SpanState],
+        ) -> Result<(), InlineLayoutError> {
+            reorder(shaped, bidi, |item| {
+                self.push_reordered(item, text_leaf_items, span_state)
             })?;
 
             Ok(())
         }
     }
 
-    impl<'t> FragmentBuilder<'t> {
+    impl<'t, 'p, 'c: 'p> FragmentBuilder<'t, 'c> {
         fn split_on_leaves_for_fragmentation(
-            item: &ShapedItem<'t>,
+            item: &ShapedItem<'c, FragmentStage<'p>>,
             leaves: &[LeafItemRange],
             mut on_leaf: impl FnMut(usize, Range<usize>),
         ) {
@@ -2022,7 +2069,7 @@ fn layout_run_full<'a>(
                     }
                 }
                 ShapedItemKind::Ruby(ruby) => on_leaf(ruby.span_id, item.range.clone()),
-                &ShapedItemKind::Block(ShapedItemBlock { span_id, .. }) => {
+                &ShapedItemKind::Block(BlockItem { span_id, .. }) => {
                     on_leaf(span_id, item.range.clone())
                 }
             }
@@ -2030,7 +2077,7 @@ fn layout_run_full<'a>(
 
         fn update_line_fragmentation_state_pre(
             &mut self,
-            shaped_item: &ShapedItem<'t>,
+            shaped_item: &ShapedItem<'c, FragmentStage<'p>>,
             leaves: &[LeafItemRange],
         ) {
             Self::split_on_leaves_for_fragmentation(shaped_item, leaves, |span_id, range| {
@@ -2044,25 +2091,31 @@ fn layout_run_full<'a>(
 
             if let ShapedItemKind::Ruby(ruby) = &shaped_item.kind {
                 for (base, annotation) in &ruby.base_annotation_pairs {
-                    for item in &base.inner.shaped {
-                        self.update_line_fragmentation_state_pre(item, &base.inner.text_leaf_items);
-                    }
-
-                    for item in &annotation.inner.shaped {
+                    for item in &base.inner.items {
                         self.update_line_fragmentation_state_pre(
                             item,
-                            &annotation.inner.text_leaf_items,
+                            &base.inner.initial.text_leaf_items,
+                        );
+                    }
+
+                    for item in &annotation.inner.items {
+                        self.update_line_fragmentation_state_pre(
+                            item,
+                            &annotation.inner.initial.text_leaf_items,
                         );
                     }
                 }
             }
         }
 
-        fn push_line(&mut self, shaped: &mut [ShapedItem<'t>]) -> Result<(), InlineLayoutError> {
+        fn push_line(
+            &mut self,
+            shaped: &mut [ShapedItem<'c, FragmentStage<'p>>],
+        ) -> Result<(), InlineLayoutError> {
             let mut line_width = FixedL::ZERO;
             let mut line_metrics = LineHeightMetrics::ZERO;
             for item in &*shaped {
-                item.accumulate_width(&mut line_width, self.available_width);
+                item.accumulate_width(&mut line_width);
                 line_metrics.process_item(item, LineHeight::Normal);
                 self.update_line_fragmentation_state_pre(item, self.text_leaf_items);
             }
@@ -2084,11 +2137,10 @@ fn layout_run_full<'a>(
                     current_x: FixedL::ZERO,
                     content: self.content,
                     dpi: self.dpi,
-                    available_width: self.available_width,
                 }
                 .reorder_and_append(
                     shaped,
-                    &self.bidi,
+                    self.bidi,
                     self.text_leaf_items,
                     &mut self.span_state,
                 )?;
@@ -2162,17 +2214,18 @@ fn layout_run_full<'a>(
         }
     }
 
-    let InitialShapingResult {
-        mut shaped,
-        ref break_opportunities,
-        ref text_leaf_items,
-        bidi,
-        ref font_feature_events,
-        ref grapheme_cluster_boundaries,
-    } = initial_shaping_result;
-
-    // Transition block shaped items into `Fragment` state.
-    finish_block_layout_in_shaped_items(&mut shaped, lctx, constraints)?;
+    let FragmentShapingResult {
+        initial:
+            InitialShapingResult {
+                ref break_opportunities,
+                ref text_leaf_items,
+                ref bidi,
+                ref font_feature_events,
+                ref grapheme_cluster_boundaries,
+                ..
+            },
+        mut items,
+    } = initial_shaping_result.to_fragment_result(lctx, containing_block)?;
 
     let mut builder = FragmentBuilder {
         current_y: FixedL::ZERO,
@@ -2187,15 +2240,13 @@ fn layout_run_full<'a>(
         dpi: lctx.dpi,
         content,
         span_state,
-        // available width is the width of the containing block here
-        available_width: constraints.size.x,
     };
 
-    let mut shaped = &mut shaped[..];
-    if constraints.size.x != FixedL::MAX && !break_opportunities.is_empty() {
+    let mut items = &mut items[..];
+    if containing_block.width != FixedL::MAX && !break_opportunities.is_empty() {
         let mut breaking_context = BreakingContext {
             layout: lctx,
-            constraints,
+            containing_block,
             break_opportunities,
             shaper: RunShaper {
                 buffer: &mut text::ShapingBuffer::new(),
@@ -2206,8 +2257,8 @@ fn layout_run_full<'a>(
 
         'break_loop: loop {
             let mut current_width = FixedL::ZERO;
-            'item_loop: for mut i in 0..shaped.len() {
-                let item = &mut shaped[i];
+            'item_loop: for mut i in 0..items.len() {
+                let item = &mut items[i];
                 let remaining = match item.line_break(&mut current_width, &mut breaking_context)? {
                     BreakOutcome::BreakSplit(item) => Some(item),
                     BreakOutcome::BreakAfter => None,
@@ -2218,35 +2269,35 @@ fn layout_run_full<'a>(
                     BreakOutcome::None => continue 'item_loop,
                 };
 
-                builder.push_line(&mut shaped[..=i])?;
+                builder.push_line(&mut items[..=i])?;
 
                 if let Some(remaining) = remaining {
-                    shaped = &mut shaped[i..];
-                    *shaped.first_mut().unwrap() = remaining;
+                    items = &mut items[i..];
+                    *items.first_mut().unwrap() = remaining;
                 } else {
-                    shaped = &mut shaped[i + 1..];
+                    items = &mut items[i + 1..];
                 }
 
                 continue 'break_loop;
             }
 
-            if !shaped.is_empty() {
-                builder.push_line(shaped)?;
+            if !items.is_empty() {
+                builder.push_line(items)?;
             }
             break;
         }
     } else {
         'break_loop: loop {
-            for i in 0..shaped.len() {
-                if shaped[i].forces_line_break_after() {
-                    builder.push_line(&mut shaped[..=i])?;
-                    shaped = &mut shaped[i + 1..];
+            for i in 0..items.len() {
+                if items[i].forces_line_break_after() {
+                    builder.push_line(&mut items[..=i])?;
+                    items = &mut items[i + 1..];
                     continue 'break_loop;
                 }
             }
 
-            if !shaped.is_empty() {
-                builder.push_line(shaped)?;
+            if !items.is_empty() {
+                builder.push_line(items)?;
             }
             break;
         }
@@ -2293,38 +2344,45 @@ pub fn shape<'l, 'b, 'c>(
 }
 
 impl PartialInline<'_> {
-    pub fn intrinsic_width(&self, _lctx: &mut LayoutContext) -> FixedL {
+    pub fn max_width(&self, lctx: &mut LayoutContext) -> Result<FixedL, InlineLayoutError> {
+        // TODO: This could actually be avoided (and it was avoided before but removed for simplicity)
+        //       by just measuring the partial items directly.
+        let items = self
+            .initial_shaping_result
+            .to_fragment_result(lctx, &ContainingBlock::infinite_initial())?
+            .items;
+
         let mut max = FixedL::ZERO;
         let mut current = FixedL::ZERO;
-        for item in &self.initial_shaping_result.shaped {
-            item.accumulate_width(&mut current, FixedL::MAX);
+        for item in items {
+            item.accumulate_width(&mut current);
             if item.forces_line_break_after() {
                 max = max.max(current);
                 current = FixedL::ZERO;
             }
         }
-        max.max(current)
+        Ok(max.max(current))
     }
 
     pub fn layout<'b, 'l>(
-        self,
+        &self,
         lctx: &'b mut LayoutContext<'l>,
-        constraints: &LayoutConstraints,
+        containing_block: &ContainingBlock,
     ) -> Result<InlineContentFragment, InlineLayoutError> {
         layout_run_full(
             self.content,
-            self.initial_shaping_result,
-            self.span_state,
+            &self.initial_shaping_result,
+            self.span_state.clone(),
             lctx,
-            constraints,
+            containing_block,
         )
     }
 }
 
 pub fn layout<'l, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l>,
-    constraints: &LayoutConstraints,
     content: &'c InlineContent,
+    containing_block: &ContainingBlock,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
-    shape(lctx, content).and_then(|s| s.layout(lctx, constraints))
+    shape(lctx, content).and_then(|s| s.layout(lctx, containing_block))
 }

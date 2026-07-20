@@ -12,8 +12,10 @@ use util::{
 use crate::{
     display::DisplayPass,
     layout::{
-        self, block::BlockContainer, inline::InlineContent, LayoutConstraints, LayoutContext,
-        Point2L, Vec2L,
+        self,
+        block::{BlockContainer, ContainingBlock},
+        inline::InlineContent,
+        LayoutContext, Point2L, Vec2L,
     },
     style::computed::HorizontalAlignment,
     text::{Face, FaceInfo, FontDb, GlyphCache},
@@ -255,7 +257,7 @@ fn check_fn(
     dpi: u32,
     fun: impl FnOnce(
         &mut LayoutContext,
-        &LayoutConstraints,
+        &ContainingBlock,
         &mut SceneBuilder,
         &mut dyn rasterize::Rasterizer,
     ),
@@ -284,9 +286,7 @@ fn check_fn(
                 dpi,
                 fonts: &mut fonts,
             },
-            &LayoutConstraints {
-                size: viewport_size,
-            },
+            &ContainingBlock::initial(viewport_size),
             &mut scene_builder,
             &mut rasterizer,
         );
@@ -322,9 +322,9 @@ pub fn check_inline(
         name,
         viewport_size,
         dpi,
-        |lctx, constraints, output, rasterizer| {
-            let fragment =
-                layout::inline::layout(lctx, constraints, &inline).expect("Inline layout failed");
+        |lctx, containing_block, output, rasterizer| {
+            let fragment = layout::inline::layout(lctx, &inline, containing_block)
+                .expect("Inline layout failed");
 
             DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)
                 .display_inline_content_fragment(pos, &fragment)
@@ -344,8 +344,9 @@ pub fn check_block(
         name,
         viewport_size,
         dpi,
-        |lctx, constraints, output, rasterizer| {
-            let fragment = layout::block::layout(lctx, constraints, &block).expect("Layout failed");
+        |lctx, containing_block, output, rasterizer| {
+            let fragment =
+                layout::block::layout(lctx, &block, containing_block).expect("Layout failed");
 
             DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)
                 .display_block_container_fragment(pos, &fragment)

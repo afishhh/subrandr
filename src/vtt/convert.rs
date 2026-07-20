@@ -11,7 +11,7 @@ use util::{
 use crate::{
     layout::{
         self,
-        block::BlockContainerFragment,
+        block::{BlockContainerFragment, ContainingBlock},
         inline::{InlineContentBuilder, InlineContentFragment, InlineSpanBuilder, LineBoxFragment},
         FixedL, InlineLayoutError, Point2L, Vec2L,
     },
@@ -122,9 +122,6 @@ impl Event {
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
         let mut fragment = layout::inline::layout(
             lctx,
-            &layout::LayoutConstraints {
-                size: Vec2L::new(sctx.video_width * self.size as f32 / 100, FixedL::MAX),
-            },
             &{
                 let mut builder = InlineContentBuilder::new({
                     let mut style = self.root.base_style.clone();
@@ -134,6 +131,10 @@ impl Event {
                 self.root.append_to(&mut builder.root(), font_size);
                 builder.finish()
             },
+            &ContainingBlock::initial(Vec2L::new(
+                sctx.video_width * self.size as f32 / 100,
+                FixedL::MAX,
+            )),
         )?;
 
         let lines = &mut fragment.lines;

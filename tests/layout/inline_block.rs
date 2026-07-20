@@ -1,6 +1,9 @@
 use rasterize::color::BGRA8;
 
-use crate::{layout::FixedL, style::computed::Length};
+use crate::{
+    layout::FixedL,
+    style::computed::{HorizontalAlignment, InlineSizing, Length},
+};
 
 use super::common::*;
 
@@ -94,6 +97,86 @@ check_test! {
         }
         block.yellow {
             inline { text "WW" }
+        }
+    }
+}
+
+test_define_style! {
+    .black_on_white {
+        color: BGRA8::BLACK,
+        background_color: BGRA8::WHITE,
+    }
+
+    .text_center { text_align: HorizontalAlignment::Center }
+    .inline_sizing_stretch { inline_sizing: InlineSizing::Stretch }
+
+    .hmargin5 {
+        margin_left: Some(Length::from_pixels(FixedL::new(5))),
+        margin_right: Some(Length::from_pixels(FixedL::new(5))),
+    }
+    .vpadding5 {
+        padding_top: Length::from_pixels(FixedL::new(5)),
+        padding_bottom: Length::from_pixels(FixedL::new(5)),
+    }
+
+    .width32 {
+        width: Some(Length::from_pixels(FixedL::new(32)))
+    }
+}
+
+// NOTE: Once/if vertical margins are support these `vpadding`s can be replaced
+//       by the respective `vmargin`s.
+check_test! {
+    name = margins,
+    size = (106, 88),
+    block.ahem.black_on_white.text_center {
+        inline.ahem {
+            span.inline_sizing_stretch.yellow_bg {
+                text "A"
+                block.hmargin5.vpadding5 {
+                    inline { text "XXXX" }
+                }
+                text "A\n"
+            }
+            span.inline_sizing_stretch.red_bg {
+                text "B"
+                block.hmargin5.vpadding10 {}
+                text "B\n"
+            }
+            span.inline_sizing_stretch.green_bg {
+                text "C"
+                block.vpadding10 {}
+                text "C\n"
+            }
+            span.inline_sizing_stretch.blue_bg {
+                text "D"
+                block.hmargin5 {}
+                text "D"
+            }
+        }
+    }
+}
+
+check_test! {
+    name = width_calculation,
+    size = (64, 48),
+    block.ahem.black_on_white.text_center {
+        inline.ahem {
+            span.inline_sizing_stretch.yellow_bg {
+                text "A"
+                block {
+                    block {
+                        block.width32 { inline { text "横" } }
+                        block { inline { text "縦" } }
+                    }
+                }
+                text "A\n"
+            }
+            span.inline_sizing_stretch.green_bg {
+                text "B"
+                block { inline { text "BB" } }
+                text "B\n"
+            }
         }
     }
 }

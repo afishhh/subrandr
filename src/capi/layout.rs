@@ -22,7 +22,7 @@ use crate::{
         image::Image,
         inline::{InlineContentBuilder, InlineRubyBuilder, InlineSpanBuilder},
         Axes, FixedL, IndependentBox, IndependentBoxFragment, LayoutConstraint, LayoutContext,
-        Point2L, Vec2L,
+        Point2L, UserContainerBuilder, Vec2L,
     },
     style::{ComputedStyle, ComputedStyleInner},
     text::{FontDb, GlyphCache},
@@ -480,8 +480,8 @@ unsafe extern "C" fn sbr_box_measure(
     let MeasureFlags { measure_axes } = ctry!(MeasureFlags::parse(flags));
 
     let constraints = Vec2::new(
-        LayoutConstraint::Fixed(constraints.x),
-        LayoutConstraint::Fixed(constraints.y),
+        LayoutConstraint::Exact(constraints.x),
+        LayoutConstraint::Exact(constraints.y),
     );
 
     let result = ctry!(CLayoutPass::with_core_lctx(lpass, |lctx| {
@@ -503,10 +503,13 @@ struct CFragment {
 unsafe extern "C" fn sbr_box_layout(
     cbox: *mut CBox,
     lpass: *mut CLayoutPass,
-    available_size: Vec2L,
+    size: Vec2L,
 ) -> *mut CFragment {
     let fragment = ctry!(CLayoutPass::with_core_lctx(lpass, |lctx| {
-        Box::from_raw(cbox).inner.layout(lctx, available_size)
+        Box::from_raw(cbox)
+            .inner
+            .layout_initial(lctx)?
+            .layout_fixed(lctx, size)
     }));
 
     Box::into_raw(Box::new(CFragment { inner: fragment }))
@@ -633,4 +636,52 @@ unsafe extern "C" fn sbr_sw_rasterizer_render_instanced(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_sw_rasterizer_destroy(rasterizer: *mut CSwRasterizer) {
     drop(Box::from_raw(rasterizer));
+}
+
+struct CUserBuilder {
+    lpass: *mut CLayoutPass,
+    inner: UserContainerBuilder,
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_create(
+    lpass: *mut CLayoutPass,
+    style: *const ComputedStyleInner,
+) -> *mut CUserBuilder {
+    CLayoutPass::ensure(lpass);
+    Box::into_raw(Box::new(CUserBuilder {
+        lpass,
+        inner: UserContainerBuilder::new(
+            (*ManuallyDrop::new(ComputedStyle::from_raw(style))).clone(),
+        ),
+    }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_destroy(builder: *mut CUserBuilder) {
+    drop(Box::from_raw(builder));
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_place(
+    builder: *mut CUserBuilder,
+    offset: Vec2L,
+    fragment: *mut CFragment,
+) -> c_int {
+    CLayoutPass::ensure((*builder).lpass);
+
+    let fragment_inner = Box::from_raw(fragment).inner;
+    (*builder).inner.place(offset, fragment_inner);
+
+    0
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_finish(
+    builder: *mut CUserBuilder,
+    size: Vec2L,
+) -> *mut CBox {
+    Box::into_raw(Box::new(CBox {
+        inner: IndependentBox::User((*builder).inner.finish(size)),
+    }))
 }

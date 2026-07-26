@@ -151,6 +151,14 @@ impl std::ops::BitOrAssign for BoxFragmentationPart {
     }
 }
 
+impl std::ops::BitAnd for BoxFragmentationPart {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
 impl Debug for BoxFragmentationPart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "BoxFragmentationPart(")?;
@@ -524,6 +532,7 @@ pub mod image;
 pub enum IndependentBox {
     Block(block::BlockContainer),
     Image(image::Image),
+    User(UserContainer),
 }
 
 impl From<block::BlockContainer> for IndependentBox {
@@ -548,6 +557,7 @@ impl IndependentBox {
                 block.layout_initial(lctx).map(PartialIndependentBox::Block)
             }
             IndependentBox::Image(image) => Ok(PartialIndependentBox::Image(image.clone())),
+            IndependentBox::User(container) => Ok(PartialIndependentBox::User(container.clone())),
         }
     }
 }
@@ -555,6 +565,7 @@ impl IndependentBox {
 pub enum PartialIndependentBox<'a> {
     Block(block::PartialBlockContainer<'a>),
     Image(image::Image),
+    User(UserContainer),
 }
 
 impl<'a> PartialIndependentBox<'a> {
@@ -562,6 +573,7 @@ impl<'a> PartialIndependentBox<'a> {
         match self {
             PartialIndependentBox::Block(block) => block.style(),
             PartialIndependentBox::Image(image) => &image.style,
+            PartialIndependentBox::User(user) => &user.style,
         }
     }
 
@@ -599,12 +611,12 @@ impl<'a> PartialIndependentBox<'a> {
 
         let mut inner_constraints = constraints;
         match &mut inner_constraints.inline_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.inline,
-            LayoutConstraint::MaxContent => (),
+            LayoutConstraint::Exact(fixed) => *fixed -= outer_edges.inline,
+            LayoutConstraint::Scroll { fallback_size: _ } => (),
         }
         match &mut inner_constraints.block_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.block,
-            LayoutConstraint::MaxContent => (),
+            LayoutConstraint::Exact(fixed) => *fixed -= outer_edges.block,
+            LayoutConstraint::Scroll { fallback_size: _ } => (),
         }
         let mut result = self.measure_inner(lctx, inner_constraints, axes)?;
 
@@ -627,6 +639,7 @@ impl<'a> PartialIndependentBox<'a> {
         match self {
             PartialIndependentBox::Block(block) => block.measure_inner(lctx, constraints, axes),
             PartialIndependentBox::Image(image) => Ok(image.measure_inner(lctx, constraints, axes)),
+            PartialIndependentBox::User(user) => Ok(user.size),
         }
     }
 
@@ -635,7 +648,7 @@ impl<'a> PartialIndependentBox<'a> {
         lctx: &mut LayoutContext,
         outer_inner_inline_size: FixedL,
         margins: EdgeExtents,
-        available_block_space: LayoutConstraint,
+        outer_available_block_space: LayoutConstraint,
         outer_writing_mode: WritingMode,
     ) -> Result<IndependentBoxFragment, InlineLayoutError> {
         match self {
@@ -644,7 +657,7 @@ impl<'a> PartialIndependentBox<'a> {
                     lctx,
                     outer_inner_inline_size,
                     margins,
-                    available_block_space,
+                    outer_available_block_space,
                     outer_writing_mode,
                 )
                 .map(IndependentBoxFragment::Block),
@@ -653,6 +666,17 @@ impl<'a> PartialIndependentBox<'a> {
                 Vec2W::new(None, Some(outer_inner_inline_size)).to_physical(outer_writing_mode),
                 margins,
             ))),
+            PartialIndependentBox::User(user) => Ok(IndependentBoxFragment::Block(
+                block::BlockContainerFragment {
+                    fbox: FragmentBox {
+                        content_size: user.size,
+                        padding: EdgeExtents::padding(&user.style, lctx.dpi),
+                        margin: margins,
+                    },
+                    style: user.style.clone(),
+                    content: block::BlockContainerFragmentContent::Block(user.content.clone()),
+                },
+            )),
         }
     }
 
@@ -662,10 +686,14 @@ impl<'a> PartialIndependentBox<'a> {
         size: Vec2L,
     ) -> Result<IndependentBoxFragment, InlineLayoutError> {
         let writing_mode = self.style().writing_mode();
-        let margin_part = if writing_mode.is_horizontal() {
-            BoxFragmentationPart::HORIZONTAL_FULL
+        let margin_part = if matches!(self, PartialIndependentBox::Block(_)) {
+            if writing_mode.is_horizontal() {
+                BoxFragmentationPart::HORIZONTAL_FULL
+            } else {
+                BoxFragmentationPart::VERTICAL_FULL
+            }
         } else {
-            BoxFragmentationPart::VERTICAL_FULL
+            BoxFragmentationPart::FULL
         };
         let margins =
             EdgeExtents::margins_auto_to_zero_fragmented(margin_part, self.style(), lctx.dpi);
@@ -690,11 +718,28 @@ impl<'a> PartialIndependentBox<'a> {
                     margins,
                 )
                 .map(IndependentBoxFragment::Block),
+            PartialIndependentBox::Image(image) => Ok(IndependentBoxFragment::Image(image.layout(
+                lctx,
+                Vec2::new(Some(inner_size.x), Some(inner_size.y)),
+                margins,
+            ))),
+            PartialIndependentBox::User(user) => Ok(IndependentBoxFragment::Block(
+                block::BlockContainerFragment {
+                    fbox: FragmentBox {
+                        content_size: inner_size,
+                        padding: EdgeExtents::padding(&user.style, lctx.dpi),
+                        margin: margins,
+                    },
+                    style: user.style.clone(),
+                    content: block::BlockContainerFragmentContent::Block(user.content.clone()),
+                },
+            )),
         }
     }
 }
 
-#[derive(Debug)]
+// TODO: don't clone this whole thing actually
+#[derive(Debug, Clone)]
 pub enum IndependentBoxFragment {
     Block(block::BlockContainerFragment),
     Image(image::ImageFragment),
@@ -718,15 +763,36 @@ impl IndependentBoxFragment {
     }
 }
 
-impl IndependentBox {
-    pub fn layout(
-        &self,
-        lctx: &mut LayoutContext,
-        initial_containing_block_size: Vec2L,
-    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
-        let partial = self.layout_initial(lctx)?;
-        lctx.initial_containing_block_size = initial_containing_block_size;
+#[derive(Debug, Clone)]
+pub struct UserContainer {
+    style: ComputedStyle,
+    size: Vec2L,
+    content: Vec<(Vec2L, IndependentBoxFragment)>,
+}
 
-        partial.layout_fixed(lctx, initial_containing_block_size)
+#[derive(Debug, Clone)]
+pub struct UserContainerBuilder {
+    style: ComputedStyle,
+    content: Vec<(Vec2L, IndependentBoxFragment)>,
+}
+
+impl UserContainerBuilder {
+    pub fn new(style: ComputedStyle) -> Self {
+        Self {
+            style,
+            content: Vec::new(),
+        }
+    }
+
+    pub fn place(&mut self, offset: Vec2L, fragment: IndependentBoxFragment) {
+        self.content.push((offset, fragment));
+    }
+
+    pub fn finish(&mut self, size: Vec2L) -> UserContainer {
+        UserContainer {
+            style: self.style.clone(),
+            size,
+            content: std::mem::take(&mut self.content),
+        }
     }
 }

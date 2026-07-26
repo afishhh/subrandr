@@ -27,7 +27,7 @@ pub enum BlockContainerContent {
     Block(Vec<IndependentBox>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
@@ -90,7 +90,7 @@ impl BlockContainerFragment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockContainerFragmentContent {
     Inline(Vec2L, InlineContentFragment),
     Block(Vec<(Vec2L, IndependentBoxFragment)>),
@@ -470,6 +470,15 @@ impl PartialIndependentBox<'_> {
                     containing_block_direction,
                 ))
             }
+            PartialIndependentBox::User(user) => Ok(BlockInlineSizes::compute_for_replaced_block(
+                &NaturalDimensions {
+                    width: user.size.x,
+                    height: user.size.y,
+                },
+                computed,
+                containing_block_width,
+                containing_block_direction,
+            )),
         }
     }
 
@@ -491,6 +500,13 @@ impl PartialIndependentBox<'_> {
             PartialIndependentBox::Image(image) => {
                 BlockInlineSizes::compute_for_replaced_inline(&image.natural_dimensions, computed)
             }
+            PartialIndependentBox::User(user) => BlockInlineSizes::compute_for_replaced_inline(
+                &NaturalDimensions {
+                    width: user.size.x,
+                    height: user.size.y,
+                },
+                computed,
+            ),
         };
 
         Ok(width)

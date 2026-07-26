@@ -39,10 +39,16 @@ sbr_image *sbr_image_from_bgra(sbr_library *, void *data, uint32_t width,
 void sbr_image_ref(sbr_image *);
 void sbr_image_unref(sbr_image *);
 
+typedef struct sbr_vec2l {
+  sbr_26dot6 x, y;
+} sbr_vec2l;
+
 typedef struct sbr_inline_builder sbr_inline_builder;
 typedef struct sbr_span_builder sbr_span_builder;
 typedef struct sbr_ruby_builder sbr_ruby_builder;
 typedef struct sbr_block_builder sbr_block_builder;
+// TODO: better name
+typedef struct sbr_custom_container_builder sbr_custom_container_builder;
 
 // A single box in the box tree.
 //
@@ -177,12 +183,21 @@ void sbr_ruby_builder_finish(sbr_ruby_builder *);
 typedef struct sbr_layout_pass sbr_layout_pass;
 // TODO: box_fragment or fragment? make functions consistent with choice
 typedef struct sbr_box_fragment sbr_box_fragment;
-typedef struct sbr_vec2l {
-  sbr_26dot6 x, y;
-} sbr_vec2l;
 
 sbr_layout_pass *sbr_layout_pass_begin(sbr_layout_context *);
 void sbr_layout_pass_end(sbr_layout_pass *);
+
+sbr_custom_container_builder *
+sbr_custom_container_builder_create(sbr_layout_pass *, sbr_computed_style *);
+// TODO: really this should take a fragment instead
+int sbr_custom_container_builder_place(sbr_custom_container_builder *,
+                                       sbr_vec2l offset, sbr_box *,
+                                       sbr_vec2l size);
+sbr_box *sbr_custom_container_builder_finish(sbr_custom_container_builder *,
+                                             sbr_vec2l container_size);
+void sbr_custom_container_builder_set_style(sbr_inline_builder *,
+                                            sbr_computed_style *);
+void sbr_custom_container_builder_destroy(sbr_custom_container_builder *);
 
 // Return size measurement for the X-axis.
 //

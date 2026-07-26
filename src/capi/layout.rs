@@ -22,7 +22,7 @@ use crate::{
         image::Image,
         inline::{InlineContentBuilder, InlineRubyBuilder, InlineSpanBuilder},
         Axes, FixedL, IndependentBox, IndependentBoxFragment, LayoutConstraint, LayoutContext,
-        Point2L, Vec2L,
+        Point2L, UserContainerBuilder, Vec2L,
     },
     style::{ComputedStyle, ComputedStyleInner},
     text::{FontDb, GlyphCache},
@@ -633,4 +633,54 @@ unsafe extern "C" fn sbr_sw_rasterizer_render_instanced(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_sw_rasterizer_destroy(rasterizer: *mut CSwRasterizer) {
     drop(Box::from_raw(rasterizer));
+}
+
+struct CUserBuilder {
+    lpass: *mut CLayoutPass,
+    inner: UserContainerBuilder,
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_create(
+    lpass: *mut CLayoutPass,
+    style: *const ComputedStyleInner,
+) -> *mut CUserBuilder {
+    CLayoutPass::ensure(lpass);
+    Box::into_raw(Box::new(CUserBuilder {
+        lpass,
+        inner: UserContainerBuilder::new(
+            (*ManuallyDrop::new(ComputedStyle::from_raw(style))).clone(),
+        ),
+    }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_destroy(builder: *mut CUserBuilder) {
+    drop(Box::from_raw(builder));
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_place(
+    builder: *mut CUserBuilder,
+    offset: Vec2L,
+    block: *mut CBox,
+    size: Vec2L,
+) -> c_int {
+    ctry!(CLayoutPass::with_core_lctx((*builder).lpass, |lctx| {
+        let box_inner = Box::from_raw(block).inner;
+        let partial = box_inner.layout_initial(lctx)?;
+        (*builder).inner.place(lctx, offset, partial, size)
+    }));
+
+    0
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_custom_container_builder_finish(
+    builder: *mut CUserBuilder,
+    size: Vec2L,
+) -> *mut CBox {
+    Box::into_raw(Box::new(CBox {
+        inner: IndependentBox::User((*builder).inner.finish(size)),
+    }))
 }

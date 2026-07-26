@@ -151,6 +151,14 @@ impl std::ops::BitOrAssign for BoxFragmentationPart {
     }
 }
 
+impl std::ops::BitAnd for BoxFragmentationPart {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
 impl Debug for BoxFragmentationPart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "BoxFragmentationPart(")?;
@@ -521,6 +529,7 @@ pub mod image;
 pub enum IndependentBox {
     Block(block::BlockContainer),
     Image(image::Image),
+    User(UserContainer),
 }
 
 impl From<block::BlockContainer> for IndependentBox {
@@ -545,6 +554,7 @@ impl IndependentBox {
                 block.layout_initial(lctx).map(PartialIndependentBox::Block)
             }
             IndependentBox::Image(image) => Ok(PartialIndependentBox::Image(image.clone())),
+            IndependentBox::User(container) => Ok(PartialIndependentBox::User(container.clone())),
         }
     }
 }
@@ -552,6 +562,7 @@ impl IndependentBox {
 pub enum PartialIndependentBox<'a> {
     Block(block::PartialBlockContainer<'a>),
     Image(image::Image),
+    User(UserContainer),
 }
 
 impl<'a> PartialIndependentBox<'a> {
@@ -559,6 +570,7 @@ impl<'a> PartialIndependentBox<'a> {
         match self {
             PartialIndependentBox::Block(block) => block.style(),
             PartialIndependentBox::Image(image) => &image.style,
+            PartialIndependentBox::User(user) => &user.style,
         }
     }
 
@@ -624,6 +636,7 @@ impl<'a> PartialIndependentBox<'a> {
         match self {
             PartialIndependentBox::Block(block) => block.measure_inner(lctx, constraints, axes),
             PartialIndependentBox::Image(image) => Ok(image.measure_inner(lctx, constraints, axes)),
+            PartialIndependentBox::User(user) => Ok(user.size),
         }
     }
 
@@ -632,17 +645,19 @@ impl<'a> PartialIndependentBox<'a> {
         lctx: &mut LayoutContext,
         outer_inner_inline_size: FixedL,
         margins: EdgeExtents,
-        available_block_space: Option<FixedL>,
+        outer_available_block_space: Option<FixedL>,
         outer_writing_mode: WritingMode,
     ) -> Result<IndependentBoxFragment, InlineLayoutError> {
         match self {
             PartialIndependentBox::Block(block) => block
                 .layout(
                     lctx,
-                    outer_inner_inline_size,
+                    block::FlowLayoutConstraints::Normal {
+                        outer_inner_inline_size,
+                        outer_available_block_space,
+                        outer_writing_mode,
+                    },
                     margins,
-                    available_block_space,
-                    outer_writing_mode,
                 )
                 .map(IndependentBoxFragment::Block),
             PartialIndependentBox::Image(image) => Ok(IndependentBoxFragment::Image(image.layout(
@@ -650,6 +665,56 @@ impl<'a> PartialIndependentBox<'a> {
                 Vec2W::new(None, Some(outer_inner_inline_size)).to_physical(outer_writing_mode),
                 margins,
             ))),
+            PartialIndependentBox::User(user) => Ok(IndependentBoxFragment::Block(
+                block::BlockContainerFragment {
+                    fbox: FragmentBox {
+                        content_size: user.size,
+                        padding: EdgeExtents::padding(&user.style, lctx.dpi),
+                        margin: margins,
+                    },
+                    style: user.style.clone(),
+                    content: block::BlockContainerFragmentContent::Block(user.content.clone()),
+                },
+            )),
+        }
+    }
+
+    fn layout_fixed(
+        &self,
+        lctx: &mut LayoutContext,
+        outer_size: Vec2L,
+        margins: EdgeExtents,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        let padding = EdgeExtents::padding(self.style(), lctx.dpi);
+        let inner_size = Vec2::new(
+            outer_size.x - padding.left - padding.right - margins.left - margins.right,
+            outer_size.y - padding.top - padding.bottom - margins.top - margins.bottom,
+        );
+
+        match self {
+            PartialIndependentBox::Block(block) => block
+                .layout(
+                    lctx,
+                    block::FlowLayoutConstraints::Fixed { inner_size },
+                    margins,
+                )
+                .map(IndependentBoxFragment::Block),
+            PartialIndependentBox::Image(image) => Ok(IndependentBoxFragment::Image(image.layout(
+                lctx,
+                Vec2::new(Some(inner_size.x), Some(inner_size.y)),
+                margins,
+            ))),
+            PartialIndependentBox::User(user) => Ok(IndependentBoxFragment::Block(
+                block::BlockContainerFragment {
+                    fbox: FragmentBox {
+                        content_size: inner_size,
+                        padding: EdgeExtents::padding(&user.style, lctx.dpi),
+                        margin: margins,
+                    },
+                    style: user.style.clone(),
+                    content: block::BlockContainerFragmentContent::Block(user.content.clone()),
+                },
+            )),
         }
     }
 
@@ -672,7 +737,8 @@ impl<'a> PartialIndependentBox<'a> {
     }
 }
 
-#[derive(Debug)]
+// TODO: don't clone this whole thing actually
+#[derive(Debug, Clone)]
 pub enum IndependentBoxFragment {
     Block(block::BlockContainerFragment),
     Image(image::ImageFragment),
@@ -713,5 +779,53 @@ impl IndependentBox {
             writing_mode,
             direction,
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UserContainer {
+    style: ComputedStyle,
+    size: Vec2L,
+    content: Vec<(Vec2L, IndependentBoxFragment)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserContainerBuilder {
+    style: ComputedStyle,
+    content: Vec<(Vec2L, IndependentBoxFragment)>,
+}
+
+impl UserContainerBuilder {
+    pub fn new(style: ComputedStyle) -> Self {
+        Self {
+            style,
+            content: Vec::new(),
+        }
+    }
+
+    pub fn place(
+        &mut self,
+        lctx: &mut LayoutContext<'_>,
+        offset: Vec2L,
+        child: PartialIndependentBox,
+        size: Vec2L,
+    ) -> Result<(), InlineLayoutError> {
+        let fragment = child.layout_fixed(
+            lctx,
+            size,
+            EdgeExtents::margins_auto_to_zero(child.style(), lctx.dpi),
+        )?;
+
+        self.content.push((offset, fragment));
+
+        Ok(())
+    }
+
+    pub fn finish(&mut self, size: Vec2L) -> UserContainer {
+        UserContainer {
+            style: self.style.clone(),
+            size,
+            content: std::mem::take(&mut self.content),
+        }
     }
 }

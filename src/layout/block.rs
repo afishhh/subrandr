@@ -27,7 +27,7 @@ pub enum BlockContainerContent {
     Block(Vec<IndependentBox>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockContainerFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
@@ -90,7 +90,7 @@ impl BlockContainerFragment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockContainerFragmentContent {
     Inline(Vec2L, InlineContentFragment),
     Block(Vec<(Vec2L, IndependentBoxFragment)>),
@@ -494,6 +494,15 @@ impl PartialIndependentBox<'_> {
                     containing_block_direction,
                 ))
             }
+            PartialIndependentBox::User(user) => Ok(BlockInlineSizes::compute_for_replaced_block(
+                &NaturalDimensions {
+                    width: user.size.x,
+                    height: user.size.y,
+                },
+                computed,
+                containing_block_width,
+                containing_block_direction,
+            )),
         }
     }
 
@@ -504,21 +513,38 @@ impl PartialIndependentBox<'_> {
         outer_writing_mode: WritingMode,
     ) -> Result<BlockInlineSizes, InlineLayoutError> {
         let computed = BlockComputedInlineSizes::new(self.style(), outer_writing_mode, lctx.dpi);
-        let width = match self {
+
+        match self {
             PartialIndependentBox::Block(_) => BlockInlineSizes::compute_for_nonreplaced_inline(
                 lctx,
                 self,
                 computed,
                 constraints,
                 outer_writing_mode,
-            )?,
-            PartialIndependentBox::Image(image) => {
-                BlockInlineSizes::compute_for_replaced_inline(&image.natural_dimensions, computed)
-            }
-        };
-
-        Ok(width)
+            ),
+            PartialIndependentBox::Image(image) => Ok(
+                BlockInlineSizes::compute_for_replaced_inline(&image.natural_dimensions, computed),
+            ),
+            PartialIndependentBox::User(user) => Ok(BlockInlineSizes::compute_for_replaced_inline(
+                &NaturalDimensions {
+                    width: user.size.x,
+                    height: user.size.y,
+                },
+                computed,
+            )),
+        }
     }
+}
+
+pub(super) enum FlowLayoutConstraints {
+    Normal {
+        outer_inner_inline_size: FixedL,
+        outer_available_block_space: Option<FixedL>,
+        outer_writing_mode: WritingMode,
+    },
+    Fixed {
+        inner_size: Vec2<FixedL>,
+    },
 }
 
 impl PartialBlockContainer<'_> {
@@ -592,11 +618,10 @@ impl PartialBlockContainer<'_> {
     pub(super) fn layout(
         &self,
         lctx: &mut LayoutContext,
-        // Refers to the inner inline size in the parent's (outer) writing mode.
-        outer_inner_inline_size: FixedL,
+        // TODO: just make this two functions that pass parameters to one
+        //       (currently this function is structured to make that very possible)
+        flow_constraints: FlowLayoutConstraints,
         margins: EdgeExtents,
-        outer_available_block_space: Option<FixedL>,
-        outer_writing_mode: WritingMode,
     ) -> Result<BlockContainerFragment, InlineLayoutError> {
         let writing_mode = self.style.writing_mode();
         let mut base_inner_size = Vec2W::new(None, None);
@@ -608,24 +633,41 @@ impl PartialBlockContainer<'_> {
             base_inner_size.block = Some(explicit_block_size.to_physical_pixels(lctx.dpi));
         }
 
-        if outer_writing_mode.perpendicular(writing_mode) {
-            base_inner_size.block = Some(outer_inner_inline_size);
-        } else {
-            base_inner_size.inline = Some(outer_inner_inline_size);
-        }
+        let (available_inline_space, mut available_block_space);
+        match flow_constraints {
+            FlowLayoutConstraints::Normal {
+                outer_inner_inline_size,
+                outer_available_block_space,
+                outer_writing_mode,
+            } => {
+                if outer_writing_mode.perpendicular(writing_mode) {
+                    base_inner_size.block = Some(outer_inner_inline_size);
+                } else {
+                    base_inner_size.inline = Some(outer_inner_inline_size);
+                }
 
-        let available_inline_space = base_inner_size.inline.unwrap_or_else(|| {
-            assert!(outer_writing_mode.perpendicular(writing_mode));
-            outer_available_block_space
-                .unwrap_or_else(|| fallback_inline_space_in_orthogonal_flow(lctx, writing_mode))
-        });
-        let mut available_block_space = base_inner_size.block.or_else(|| {
-            if outer_writing_mode.perpendicular(writing_mode) {
-                Some(outer_inner_inline_size)
-            } else {
-                outer_available_block_space
+                available_inline_space = base_inner_size.inline.unwrap_or_else(|| {
+                    assert!(outer_writing_mode.perpendicular(writing_mode));
+                    outer_available_block_space.unwrap_or_else(|| {
+                        fallback_inline_space_in_orthogonal_flow(lctx, writing_mode)
+                    })
+                });
+                available_block_space = base_inner_size.block.or_else(|| {
+                    if outer_writing_mode.perpendicular(writing_mode) {
+                        Some(outer_inner_inline_size)
+                    } else {
+                        outer_available_block_space
+                    }
+                });
             }
-        });
+            FlowLayoutConstraints::Fixed { inner_size } => {
+                let inner_sizew = Vec2W::from_physical(inner_size, writing_mode);
+                base_inner_size.inline = Some(inner_sizew.inline);
+                base_inner_size.block = Some(inner_sizew.block);
+                available_inline_space = inner_sizew.inline;
+                available_block_space = Some(inner_sizew.block);
+            }
+        }
 
         // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
         // If this block contains only inline children then this will be used for laying

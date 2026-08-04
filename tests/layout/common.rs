@@ -401,6 +401,7 @@ test_define_style! {
     pub .green_bg "background-color: lime"
     pub .blue_bg "background-color: blue"
     pub .yellow_bg "background-color: yellow"
+    pub .cyan_bg "background-color: cyan"
 
     pub .fs16 "font-size: initial"
     pub .fs20 "font-size: 20px"

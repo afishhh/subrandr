@@ -107,9 +107,7 @@ impl Direction {
 // FIXME: If this isn't `(crate)` pub then a bunch of stuff is considered public, why?
 pub(crate) struct Glyph {
     pub index: hb_codepoint_t,
-    /// Position of the directionally-first byte where this glyph starts in the original UTF-8 string.
-    /// If left-to-right, this will be the first byte of the relevant codepoint.
-    /// If right-to-left, this will be the last byte of the relevant codepoint.
+    /// Position of the first byte of this glyph in the original UTF-8 string.
     pub cluster: usize,
     pub x_advance: I26Dot6,
     pub y_advance: I26Dot6,

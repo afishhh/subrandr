@@ -348,56 +348,30 @@ impl ShapingPass<'_> {
                 self.buffer.0,
                 self.features.as_ptr(),
                 self.features.len() as u32,
-            );
-        }
-
-        type ItemIter<'a> = std::iter::Zip<
-            std::slice::Iter<'a, hb_glyph_info_t>,
-            std::slice::Iter<'a, hb_glyph_position_t>,
-        >;
+            )
+        };
 
         let (infos, positions) = self.buffer.items();
         if infos.is_empty() {
             return Ok(());
         }
 
-        let first_cluster = infos[0].cluster as usize;
-        let is_reverse = first_cluster != cluster_range.start;
-        let is_dir_reverse =
-            Direction::try_from_hb(self.properties.direction).is_some_and(|d| d.is_reverse());
+        let is_reverse = Direction::try_from_hb(self.properties.direction)
+            .unwrap()
+            .is_reverse();
+        if is_reverse {
+            unsafe { hb_buffer_reverse(self.buffer.0) };
+        }
 
-        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t, it: &ItemIter| {
+        let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {
             let cluster = &self.cluster_map[info.cluster as usize];
-            Glyph::from_info_and_position(
-                info,
-                position,
-                if !is_dir_reverse {
-                    cluster.utf8_index
-                } else {
-                    it.clone()
-                        .find(|x| x.0.cluster != info.cluster)
-                        .map_or_else(
-                            || self.cluster_map[cluster_range.start].utf8_index,
-                            |c| self.cluster_map[c.0.cluster as usize + 1].utf8_index,
-                        )
-                },
-                &font,
-            )
+            Glyph::from_info_and_position(info, position, cluster.utf8_index, &font)
         };
 
-        let is_cluster_initial = |cluster: u32| {
-            // If `is_reverse` is true then HarfBuzz gave us final-cluster values in reverse order
-            // so if the cluster after this one is a grapheme start that must mean this cluster
-            // is a grapheme end hence it is an initial cluster in this direction.
-            // Otherwise, if `is_reverse` is false, we just check whether this cluster is
-            // a grapheme start since we're operating on first-cluster values.
-            self.cluster_map
-                .get(cluster as usize + usize::from(is_reverse))
-                .is_none_or(|c| c.is_grapheme_start)
-        };
+        let is_cluster_initial =
+            |cluster: u32| self.cluster_map[cluster as usize].is_grapheme_start;
 
         let mut glyph_buffer_last = self.glyph_buffer.len();
-        // These ranges are [min, max) if !is_reverse and otherwise they are [max, min].
         let mut successful_ranges = Vec::new();
         let mut it = std::iter::zip(infos, positions);
         while let Some((info, position)) = it.next() {
@@ -422,8 +396,8 @@ impl ShapingPass<'_> {
             // Number of glyphs that haven't yet been "flushed" by a grapheme start.
             // If we don't see a grapheme start at the end of the valid subrange then we
             // will roll back `len` by this value to get rid of the partial ending.
-            let mut pending_glyphs = 0;
-            self.glyph_buffer.push(make_glyph(info, position, &it));
+            let mut pending_glyphs = 1;
+            self.glyph_buffer.push(make_glyph(info, position));
             let cluster_subrange_start = info.cluster as usize;
             let mut cluster_subrange_end = cluster_subrange_start;
             loop {
@@ -431,12 +405,11 @@ impl ShapingPass<'_> {
                     Some((info, position)) => {
                         if is_cluster_initial(info.cluster) {
                             pending_glyphs = 0;
-                            cluster_subrange_end =
-                                (info.cluster as usize).wrapping_add(usize::from(is_reverse));
+                            cluster_subrange_end = info.cluster as usize;
                         }
 
                         if info.codepoint != 0 {
-                            self.glyph_buffer.push(make_glyph(info, position, &it));
+                            self.glyph_buffer.push(make_glyph(info, position));
                             len += 1;
                             pending_glyphs += 1;
                         } else {
@@ -445,11 +418,7 @@ impl ShapingPass<'_> {
                     }
                     None => {
                         pending_glyphs = 0;
-                        cluster_subrange_end = if !is_reverse {
-                            cluster_range.end
-                        } else {
-                            cluster_range.start
-                        };
+                        cluster_subrange_end = cluster_range.end;
                         break;
                     }
                 }
@@ -469,7 +438,7 @@ impl ShapingPass<'_> {
         }
 
         let mut broken_subrange_start = cluster_range.start;
-        if !is_reverse {
+        {
             let text_utf8_end = self.cluster_map.get(cluster_range.end).map_or_else(
                 || self.cluster_map.last().unwrap().end_utf8_index(),
                 |x| x.utf8_index,
@@ -504,32 +473,7 @@ impl ShapingPass<'_> {
             }
 
             self.glyph_buffer.truncate(truncate_to);
-        } else {
-            let cluster_range_to_utf8 = |start: usize, end: usize| {
-                self.cluster_map[end].utf8_index..self.cluster_map[start].end_utf8_index()
-            };
-
-            for (cluster_subrange_start, cluster_subrange_end, len) in
-                successful_ranges.into_iter().rev()
-            {
-                if broken_subrange_start != cluster_subrange_end {
-                    self.retry_shaping(
-                        broken_subrange_start..cluster_subrange_end,
-                        font_iterator.clone(),
-                        force_tofu,
-                    )?;
-                }
-                broken_subrange_start = cluster_subrange_start + 1;
-
-                let text_range =
-                    cluster_range_to_utf8(cluster_subrange_start, cluster_subrange_end);
-                let glyphs_start = self.glyph_buffer.len() - len;
-                let glyphs = &mut self.glyph_buffer[glyphs_start..];
-                glyphs.reverse();
-                self.output.append(text_range, &font, glyphs);
-                self.glyph_buffer.truncate(glyphs_start);
-            }
-        };
+        }
 
         if broken_subrange_start != cluster_range.end {
             assert!(!force_tofu, "Tofu font failed to shape any characters");

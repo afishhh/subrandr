@@ -13,3 +13,4 @@ mod shaping;
 mod text_decoration;
 mod text_shadow;
 mod whitespace;
+mod writing_modes;

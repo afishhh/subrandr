@@ -11,9 +11,10 @@ use util::{
 use crate::{
     layout::{
         self,
-        block::{BlockContainer, BlockContainerContent, ContainingBlock},
+        block::{BlockContainer, BlockContainerContent},
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
-        FixedL, InlineLayoutError, Point2L, Vec2L,
+        Axes, Axis, FixedL, InlineLayoutError, LayoutConstraint, Point2L, Vec2W,
+        Vec2WritingModeExt,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     srv3::{BodyParser, Event, ModeHint, RubyPosition},
@@ -486,12 +487,34 @@ impl Window {
         };
         let partial_window = layout::block::layout_initial(pass.lctx, &window)?;
 
+        // TODO: This will not be necessary once we have `max-{width,height}`
+        pass.lctx.initial_containing_block_size = Vec2::new(
+            pass.sctx.player_width() * 96 / 100,
+            pass.sctx.player_height() * 96 / 100,
+        );
+        let writing_mode = window.style.writing_mode();
         let width = partial_window
-            .inline_size(pass.lctx, &ContainingBlock::infinite_initial())?
+            .measure(
+                pass.lctx,
+                Vec2W::new(
+                    LayoutConstraint::Fixed(
+                        pass.lctx.initial_containing_block_size.block(writing_mode),
+                    ),
+                    LayoutConstraint::MaxContent,
+                )
+                .to_physical(writing_mode),
+                Axes::from(Axis::inline(writing_mode)),
+            )?
+            .inline(writing_mode)
             .min(pass.sctx.player_width() * 96 / 100);
-        let constraints = ContainingBlock::initial(Vec2L::new(width, FixedL::MAX));
+        let height = pass.sctx.player_height();
 
-        let fragment = partial_window.layout(pass.lctx, &constraints)?;
+        let fragment = partial_window.layout_in(
+            pass.lctx,
+            Vec2W::from_physical(Vec2::new(width, height), writing_mode),
+            writing_mode,
+            Direction::Ltr,
+        )?;
 
         let mut pos = Point2L::new(
             (self.x * pass.sctx.player_width().into_f32()).into(),

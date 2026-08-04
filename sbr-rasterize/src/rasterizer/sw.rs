@@ -306,7 +306,7 @@ impl<'a, P> RenderTargetView<'a, P> {
         })
     }
 
-    pub fn row(&mut self, y: i32) -> Option<&mut [P]> {
+    pub fn row(&mut self, y: i32) -> Option<(&mut [P], &mut [P])> {
         let y = u32::try_from(y).ok()?;
 
         if y >= self.height {
@@ -316,7 +316,8 @@ impl<'a, P> RenderTargetView<'a, P> {
         let start = y as usize * self.stride as usize;
         Some(unsafe {
             self.buffer
-                .get_unchecked_mut(start..start + self.width as usize)
+                .get_unchecked_mut(start..start + self.stride as usize)
+                .split_at_mut_unchecked(self.width as usize)
         })
     }
 }

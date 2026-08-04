@@ -847,13 +847,15 @@ unsafe fn copy_glyph_slot_bitmap_to_texture(
     Ok(rasterizer.create_texture_mapped(
         Vec2::new(glyph.bitmap.width, glyph.bitmap.rows),
         pixel_format,
-        Box::new(|mut target| {
+        Box::new(|mut dst| {
             let mut ptr = glyph.bitmap.buffer;
             let src_width = usize::from(pixel_format.width()) * glyph.bitmap.width as usize;
 
             for y in 0..glyph.bitmap.rows {
-                let row = std::slice::from_raw_parts(ptr.cast(), src_width);
-                target.row(y as i32).unwrap().copy_from_slice(row);
+                let src_row = std::slice::from_raw_parts(ptr.cast(), src_width);
+                let (dst_row, dst_padding) = dst.row(y as i32).unwrap();
+                dst_row.copy_from_slice(src_row);
+                dst_padding.fill(MaybeUninit::zeroed());
                 ptr = ptr.add(src_stride);
             }
         }),

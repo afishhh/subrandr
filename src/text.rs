@@ -1,12 +1,7 @@
 use std::fmt::{Debug, Display};
 
-use rasterize::{
-    color::BGRA8,
-    scene::{SceneContentBuilder, SceneFilter},
-    Rasterizer,
-};
 use text_sys::*;
-use util::math::{I26Dot6, Vec2};
+use util::math::I26Dot6;
 
 mod face;
 mod ft_utils;
@@ -52,6 +47,8 @@ impl OpenTypeTag {
     pub const AXIS_ITALIC: OpenTypeTag = OpenTypeTag::from_bytes(*b"ital");
 
     pub const FEAT_RUBY: OpenTypeTag = OpenTypeTag::from_bytes(*b"ruby");
+    pub const FEAT_VERT: OpenTypeTag = OpenTypeTag::from_bytes(*b"vert");
+    pub const FEAT_VRTR: OpenTypeTag = OpenTypeTag::from_bytes(*b"vrtr");
 }
 
 impl Display for OpenTypeTag {
@@ -157,29 +154,4 @@ impl Glyph {
     pub fn unsafe_to_concat(&self) -> bool {
         (self.flags & HB_GLYPH_FLAG_UNSAFE_TO_CONCAT) != 0
     }
-}
-
-pub fn display<'g>(
-    mut output: SceneContentBuilder,
-    glyphs: &mut dyn Iterator<Item = (&'g Font, &'g Glyph)>,
-    scene_filter: Option<SceneFilter>,
-    color: BGRA8,
-    cache: &GlyphCache,
-    rasterizer: &mut dyn Rasterizer,
-) -> Result<(), GlyphDisplayError> {
-    for (font, glyph) in glyphs {
-        let offset = Vec2::new(glyph.x_offset, -glyph.y_offset);
-        let advance = Vec2::new(glyph.x_advance, -glyph.y_advance);
-
-        output
-            .with_translation(offset)
-            .try_subscene(scene_filter, color, |subpixel_pos, _| {
-                font.glyph_subscene(cache, glyph.index, subpixel_pos.x, false, rasterizer)
-                    .map(|x| x.0.clone())
-            })?;
-
-        output.apply_translation(advance);
-    }
-
-    Ok(())
 }

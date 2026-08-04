@@ -4,7 +4,11 @@
 
 use rasterize::color::BGRA8;
 
-use crate::{layout::FixedL, style::ComputedStyle, text::FontMetrics};
+use crate::{
+    layout::{inline::Baseline, FixedL},
+    style::{computed::WritingMode, ComputedStyle},
+    text::FontMetrics,
+};
 
 pub struct DecorationTracker {
     propagated: Vec<PropagatedDecoration>,
@@ -78,19 +82,39 @@ impl DecorationContext<'_> {
 
     fn push_active_decoration(
         active: &mut Vec<ActiveDecoration>,
-        font_metrics: &FontMetrics,
+        (font_metrics, writing_mode): (&FontMetrics, WritingMode),
         decoration: &PropagatedDecoration,
     ) {
-        let (baseline_offset, thickness) = match decoration.kind {
-            DecorationKind::Underline => (
-                font_metrics.underline_top_offset,
-                font_metrics.underline_thickness,
-            ),
-            DecorationKind::LineThrough => (
-                font_metrics.strikeout_top_offset,
-                font_metrics.strikeout_thickness,
-            ),
+        let (mut baseline_offset, thickness);
+
+        thickness = match decoration.kind {
+            DecorationKind::Underline => font_metrics.underline_thickness,
+            DecorationKind::LineThrough => font_metrics.strikeout_thickness,
         };
+
+        if writing_mode.is_typographic_mode_horizontal() {
+            baseline_offset = match decoration.kind {
+                DecorationKind::Underline => font_metrics.underline_top_offset,
+                DecorationKind::LineThrough => font_metrics.strikeout_top_offset,
+            };
+
+            if writing_mode.is_line_flipped() {
+                baseline_offset = -baseline_offset;
+            }
+        } else {
+            debug_assert!(writing_mode.is_line_flipped());
+
+            baseline_offset = match decoration.kind {
+                DecorationKind::Underline => {
+                    Baseline::IdeographicUnder
+                        .metrics(font_metrics, true)
+                        .descender
+                        + Baseline::Central.metrics(font_metrics, true).descender
+                        - thickness
+                }
+                DecorationKind::LineThrough => -thickness / 2,
+            };
+        }
 
         active.push(ActiveDecoration {
             baseline_offset,
@@ -103,7 +127,7 @@ impl DecorationContext<'_> {
     pub fn push_decorations(
         &mut self,
         style: &ComputedStyle,
-        font_metrics_if_inline: Option<&FontMetrics>,
+        font_metrics_if_inline: Option<(&FontMetrics, WritingMode)>,
     ) -> DecorationContext<'_> {
         let scope = if font_metrics_if_inline.is_some() {
             DecorationScope::Inline {
@@ -116,19 +140,19 @@ impl DecorationContext<'_> {
             }
         };
 
-        if let Some(font_metrics) = font_metrics_if_inline {
+        if let Some(inline_args) = font_metrics_if_inline {
             let to_activate = &self.tracker.propagated[self.tracker.first_inactive_propagated..];
 
             for decoration in to_activate {
-                Self::push_active_decoration(&mut self.tracker.active, font_metrics, decoration);
+                Self::push_active_decoration(&mut self.tracker.active, inline_args, decoration);
             }
 
             self.tracker.first_inactive_propagated = self.tracker.propagated.len();
         }
 
         let mut push_decoration = |decoration: PropagatedDecoration| {
-            if let Some(font_metrics) = font_metrics_if_inline {
-                Self::push_active_decoration(&mut self.tracker.active, font_metrics, &decoration);
+            if let Some(inline_args) = font_metrics_if_inline {
+                Self::push_active_decoration(&mut self.tracker.active, inline_args, &decoration);
             } else {
                 self.tracker.propagated.push(decoration);
             }

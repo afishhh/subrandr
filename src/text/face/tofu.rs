@@ -1,16 +1,16 @@
 use std::ffi::c_void;
 
-use rasterize::scene::{SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
+use rasterize::scene::{Rotation, SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
 use text_sys::*;
 use util::{
     make_static_outline,
     math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
 };
 
-use super::{FontMetrics, GlyphMetrics};
+use super::FontMetrics;
 use crate::{
     layout::{FixedL, Vec2L},
-    text::{FontSizeKey, GlyphSubscene},
+    text::{BaselineMetrics, FontSizeKey, GlyphSubscene},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -44,6 +44,18 @@ impl Face {
 
 static TOFU_HB_FONT_USERDATA_KEY: hb_user_data_key_t = hb_user_data_key_t { unused: 104 };
 
+#[derive(Debug, Clone, Copy)]
+struct GlyphMetrics {
+    width: I26Dot6,
+    height: I26Dot6,
+    hori_bearing_x: I26Dot6,
+    hori_bearing_y: I26Dot6,
+    hori_advance: I26Dot6,
+    vert_bearing_x: I26Dot6,
+    vert_bearing_y: I26Dot6,
+    vert_advance: I26Dot6,
+}
+
 struct FontShared {
     point_size: I26Dot6,
     dpi: u32,
@@ -76,23 +88,27 @@ impl Font {
                     hori_bearing_x: pixel_height / 12,
                     hori_bearing_y: -ascender,
                     hori_advance: pixel_width,
-                    vert_bearing_x: I26Dot6::ZERO,
-                    vert_bearing_y: I26Dot6::ZERO,
+                    vert_bearing_x: pixel_width / 2,
+                    vert_bearing_y: pixel_height,
                     vert_advance: pixel_height,
                 },
-                font_metrics: {
-                    FontMetrics {
+                font_metrics: FontMetrics {
+                    alphabetic_baseline: BaselineMetrics {
                         ascender,
                         descender,
-                        height: ascender - descender,
-                        max_advance: pixel_width,
-                        underline_top_offset: (descender - decoration_thickness) / 2,
-                        underline_thickness: decoration_thickness,
-                        strikeout_top_offset: (ascender - descender) / 2
-                            - ascender
-                            - decoration_thickness / 2,
-                        strikeout_thickness: decoration_thickness,
-                    }
+                    },
+                    horiz_height: ascender - descender,
+                    central_baseline: BaselineMetrics {
+                        ascender: pixel_width / 2,
+                        descender: (pixel_width / 2) - pixel_width,
+                    },
+
+                    underline_top_offset: (descender - decoration_thickness) / 2,
+                    underline_thickness: decoration_thickness,
+                    strikeout_top_offset: (ascender - descender) / 2
+                        - ascender
+                        - decoration_thickness / 2,
+                    strikeout_thickness: decoration_thickness,
                 },
             }
         }));
@@ -111,7 +127,7 @@ impl Font {
             macro_rules! set {
                 (
                     $hb_setter: ident,
-                    $Self: ident :: $name: ident($($param: ident : $param_ty: ty),*) -> $ret: ty
+                    $Self: ident :: $name: ident($($param: ident : $param_ty: ty),* $(,)?) -> $ret: ty
                 ) => {{
                     unsafe extern "C" fn wrapper(font: *mut hb_font_t, fontdata: *mut c_void $(, $param: $param_ty)*, userdata: *mut c_void) -> $ret {
                         _ = font;
@@ -134,8 +150,16 @@ impl Font {
             );
 
             set!(
+                hb_font_funcs_set_font_v_extents_func,
+                Font::hb_font_v_extents_func(extents: *mut hb_font_extents_t) -> hb_bool_t
+            );
+
+            set!(
                 hb_font_funcs_set_nominal_glyph_func,
-                Font::hb_nominal_glyph_func(unicode: hb_codepoint_t, glyph: *mut hb_codepoint_t) -> hb_bool_t
+                Font::hb_nominal_glyph_func(
+                    unicode: hb_codepoint_t,
+                    glyph: *mut hb_codepoint_t,
+                ) -> hb_bool_t
             );
 
             set!(
@@ -143,7 +167,7 @@ impl Font {
                 Font::hb_variation_glyph_func(
                     unicode: hb_codepoint_t,
                     variation_selector: hb_codepoint_t,
-                    glyph: *mut hb_codepoint_t
+                    glyph: *mut hb_codepoint_t,
                 ) -> hb_bool_t
             );
 
@@ -157,13 +181,30 @@ impl Font {
                 Font::hb_glyph_h_origin_func(
                     glyph: hb_codepoint_t,
                     x: *mut hb_position_t,
-                    y: *mut hb_position_t
+                    y: *mut hb_position_t,
+                ) -> hb_bool_t
+            );
+
+            set!(
+                hb_font_funcs_set_glyph_v_advance_func,
+                Font::hb_glyph_v_advance_func(glyph: hb_codepoint_t) -> hb_position_t
+            );
+
+            set!(
+                hb_font_funcs_set_glyph_v_origin_func,
+                Font::hb_glyph_v_origin_func(
+                    glyph: hb_codepoint_t,
+                    x: *mut hb_position_t,
+                    y: *mut hb_position_t,
                 ) -> hb_bool_t
             );
 
             set!(
                 hb_font_funcs_set_glyph_extents_func,
-                Font::hb_glyphs_extents_func(glyph: hb_codepoint_t, extents: *mut hb_glyph_extents_t) -> i32
+                Font::hb_glyphs_extents_func(
+                    glyph: hb_codepoint_t,
+                    extents: *mut hb_glyph_extents_t,
+                ) -> i32
             );
 
             let face = hb_face_create(hb_blob_get_empty(), 0);
@@ -193,12 +234,26 @@ impl Font {
     }
 
     unsafe fn hb_font_h_extents_func(shared: &FontShared, extents: *mut hb_font_extents_t) -> i32 {
+        let metrics = &shared.font_metrics;
         let out = &mut *extents;
-        out.ascender = shared.font_metrics.ascender.into_raw();
-        out.descender = shared.font_metrics.descender.into_raw();
-        out.line_gap = (shared.font_metrics.height - shared.font_metrics.ascender
-            + shared.font_metrics.descender)
+
+        out.ascender = metrics.alphabetic_baseline.ascender.into_raw();
+        out.descender = metrics.alphabetic_baseline.descender.into_raw();
+        out.line_gap = 0;
+
+        1
+    }
+
+    unsafe fn hb_font_v_extents_func(shared: &FontShared, extents: *mut hb_font_extents_t) -> i32 {
+        let metrics = &shared.font_metrics;
+        let out = &mut *extents;
+
+        out.ascender = metrics.central_baseline.ascender.into_raw();
+        out.descender = metrics.central_baseline.descender.into_raw();
+        out.line_gap = (metrics.horiz_height - metrics.central_baseline.ascender
+            + metrics.central_baseline.descender)
             .into_raw();
+
         1
     }
 
@@ -237,6 +292,24 @@ impl Font {
     ) -> hb_bool_t {
         *x = 0;
         *y = shared.glyph_metrics.hori_bearing_y.into_raw();
+        1
+    }
+
+    unsafe fn hb_glyph_v_advance_func(
+        shared: &FontShared,
+        _glyph: hb_codepoint_t,
+    ) -> hb_position_t {
+        shared.glyph_metrics.vert_advance.into_raw()
+    }
+
+    unsafe fn hb_glyph_v_origin_func(
+        shared: &FontShared,
+        _glyph: hb_codepoint_t,
+        x: *mut hb_position_t,
+        y: *mut hb_position_t,
+    ) -> hb_bool_t {
+        *x = shared.glyph_metrics.vert_bearing_x.into_raw();
+        *y = shared.glyph_metrics.vert_bearing_y.into_raw();
         1
     }
 
@@ -403,10 +476,19 @@ impl Font {
         &self,
         index: u32,
         subpixel_offset: rasterize::scene::Vec2S,
+        rotation: Rotation,
         _rasterizer: &mut dyn rasterize::Rasterizer,
     ) -> GlyphSubscene {
         let mut builder = SceneBuilder::new();
-        self.build_glyph_outline(builder.root().with_translation(subpixel_offset), index);
+        self.build_glyph_outline(
+            {
+                let mut root = builder.root();
+                root.apply_translation(subpixel_offset);
+                root.apply_rotation(rotation, Vec2::ZERO);
+                root
+            },
+            index,
+        );
         GlyphSubscene(SubsceneKind::Scene(builder.finish()))
     }
 }

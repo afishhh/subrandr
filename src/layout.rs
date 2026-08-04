@@ -1,10 +1,13 @@
 use std::fmt::Debug;
 
 use log::{AsLogger, LogContext};
-use util::math::{BoolExt, I26Dot6, Point2, Rect2, Vec2};
+use util::math::{BoolExt, I26Dot6, Number, Point2, Rect2, Vec2};
 
 use crate::{
-    style::{computed::ToPhysicalPixels, ComputedStyle},
+    style::{
+        computed::{Length, ToPhysicalPixels, WritingMode},
+        ComputedStyle,
+    },
     text::FontDb,
 };
 
@@ -58,15 +61,25 @@ impl EdgeExtents {
         Self::padding_fragmented(BoxFragmentationPart::FULL, style, dpi)
     }
 
-    fn horizontal_margins_fragmented(
+    fn margins_auto_to_zero_fragmented(
         part: BoxFragmentationPart,
         style: &ComputedStyle,
         dpi: u32,
     ) -> Self {
         Self::compute_fragmented(
             part,
-            || FixedL::ZERO,
-            || FixedL::ZERO,
+            || {
+                style
+                    .margin_top()
+                    .to_physical_pixels(dpi)
+                    .unwrap_or(FixedL::ZERO)
+            },
+            || {
+                style
+                    .margin_bottom()
+                    .to_physical_pixels(dpi)
+                    .unwrap_or(FixedL::ZERO)
+            },
             || {
                 style
                     .margin_left()
@@ -82,8 +95,8 @@ impl EdgeExtents {
         )
     }
 
-    fn horizontal_margins(style: &ComputedStyle, dpi: u32) -> Self {
-        Self::horizontal_margins_fragmented(BoxFragmentationPart::FULL, style, dpi)
+    fn margins_auto_to_zero(style: &ComputedStyle, dpi: u32) -> Self {
+        Self::margins_auto_to_zero_fragmented(BoxFragmentationPart::FULL, style, dpi)
     }
 }
 
@@ -115,6 +128,12 @@ impl BoxFragmentationPart {
 
     fn is_rightmost(self) -> bool {
         self.0 & Self::HORIZONTAL_LAST.0 != 0
+    }
+
+    fn swap_axes(self) -> Self {
+        let horiz = self.0 & Self::HORIZONTAL_FULL.0;
+        let vert = self.0 & Self::VERTICAL_FULL.0;
+        Self((vert >> 2) | (horiz << 2))
     }
 }
 
@@ -209,11 +228,267 @@ impl FragmentBox {
     }
 }
 
+impl WritingMode {
+    #[inline]
+    pub(crate) fn is_horizontal(self) -> bool {
+        matches!(self, WritingMode::HorizontalTtb)
+    }
+
+    #[inline]
+    pub(crate) fn is_vertical(self) -> bool {
+        !self.is_horizontal()
+    }
+
+    fn parallel(self, other: WritingMode) -> bool {
+        matches!(
+            (self, other),
+            (WritingMode::HorizontalTtb, WritingMode::HorizontalTtb)
+                | (
+                    WritingMode::VerticalRtl | WritingMode::VerticalLtr | WritingMode::SidewaysRtl,
+                    WritingMode::VerticalRtl | WritingMode::VerticalLtr | WritingMode::SidewaysRtl,
+                )
+        )
+    }
+
+    fn perpendicular(self, other: WritingMode) -> bool {
+        !self.parallel(other)
+    }
+}
+
+pub(crate) trait Vec2WritingModeExt<T> {
+    fn inline(self, writing_mode: WritingMode) -> T;
+    fn inline_mut(&mut self, writing_mode: WritingMode) -> &mut T;
+    fn block(self, writing_mode: WritingMode) -> T;
+    fn block_mut(&mut self, writing_mode: WritingMode) -> &mut T;
+}
+
+macro_rules! impl_writing_mode_ext {
+    ($for: ident) => {
+        impl<T> Vec2WritingModeExt<T> for $for<T> {
+            #[inline]
+            fn inline(self, writing_mode: WritingMode) -> T {
+                if writing_mode.is_horizontal() {
+                    self.x
+                } else {
+                    self.y
+                }
+            }
+
+            #[inline]
+            fn inline_mut(&mut self, writing_mode: WritingMode) -> &mut T {
+                if writing_mode.is_horizontal() {
+                    &mut self.x
+                } else {
+                    &mut self.y
+                }
+            }
+
+            #[inline]
+            fn block(self, writing_mode: WritingMode) -> T {
+                if writing_mode.is_horizontal() {
+                    self.y
+                } else {
+                    self.x
+                }
+            }
+
+            #[inline]
+            fn block_mut(&mut self, writing_mode: WritingMode) -> &mut T {
+                if writing_mode.is_horizontal() {
+                    &mut self.y
+                } else {
+                    &mut self.x
+                }
+            }
+        }
+    };
+}
+
+impl_writing_mode_ext!(Vec2);
+impl_writing_mode_ext!(Point2);
+
+impl FragmentBox {
+    pub(crate) fn inline_size(&self, writing_mode: WritingMode) -> FixedL {
+        self.margin_box().max.inline(writing_mode)
+    }
+
+    fn block_size(&self, writing_mode: WritingMode) -> FixedL {
+        self.margin_box().max.block(writing_mode)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Vec2W<T> {
+    pub block: T,
+    pub inline: T,
+}
+
+pub(crate) type Vec2LW = Vec2W<FixedL>;
+
+impl<T> Vec2W<T> {
+    pub(crate) const fn new(block: T, inline: T) -> Self {
+        Self { block, inline }
+    }
+
+    pub(crate) fn from_physical(physical: Vec2<T>, writing_mode: WritingMode) -> Self {
+        if writing_mode.is_horizontal() {
+            Self::new(physical.y, physical.x)
+        } else {
+            Self::new(physical.x, physical.y)
+        }
+    }
+}
+
+impl<T: Number> Vec2W<T> {
+    pub(crate) const ZERO: Self = Self::new(T::ZERO, T::ZERO);
+}
+
+impl<T: Copy> Vec2W<T> {
+    pub(crate) fn to_physical(self, writing_mode: WritingMode) -> Vec2<T> {
+        match writing_mode {
+            WritingMode::HorizontalTtb => Vec2::new(self.inline, self.block),
+            WritingMode::VerticalRtl | WritingMode::SidewaysRtl | WritingMode::VerticalLtr => {
+                Vec2::new(self.block, self.inline)
+            }
+        }
+    }
+}
+
+impl ComputedStyle {
+    pub(crate) fn inline_size(&self, writing_mode: WritingMode) -> Option<Length> {
+        if writing_mode.is_horizontal() {
+            self.width()
+        } else {
+            self.height()
+        }
+    }
+
+    pub(crate) fn block_size(&self, writing_mode: WritingMode) -> Option<Length> {
+        if writing_mode.is_horizontal() {
+            self.height()
+        } else {
+            self.width()
+        }
+    }
+
+    pub(crate) fn inline_min_padding(&self, writing_mode: WritingMode) -> Length {
+        if writing_mode.is_vertical() {
+            self.padding_top()
+        } else {
+            self.padding_left()
+        }
+    }
+
+    pub(crate) fn inline_max_padding(&self, writing_mode: WritingMode) -> Length {
+        if writing_mode.is_vertical() {
+            self.padding_bottom()
+        } else {
+            self.padding_right()
+        }
+    }
+
+    pub(crate) fn inline_min_margin(&self, writing_mode: WritingMode) -> Option<Length> {
+        if writing_mode.is_vertical() {
+            self.margin_top()
+        } else {
+            self.margin_left()
+        }
+    }
+
+    pub(crate) fn inline_max_margin(&self, writing_mode: WritingMode) -> Option<Length> {
+        if writing_mode.is_vertical() {
+            self.margin_bottom()
+        } else {
+            self.margin_right()
+        }
+    }
+
+    pub(crate) fn block_min_padding(&self, writing_mode: WritingMode) -> Length {
+        if writing_mode.is_vertical() {
+            self.padding_left()
+        } else {
+            self.padding_top()
+        }
+    }
+
+    pub(crate) fn block_max_padding(&self, writing_mode: WritingMode) -> Length {
+        if writing_mode.is_vertical() {
+            self.padding_right()
+        } else {
+            self.padding_bottom()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Axis {
+    X,
+    Y,
+}
+
+impl Axis {
+    pub(crate) fn inline(writing_mode: WritingMode) -> Self {
+        if writing_mode.is_vertical() {
+            Self::Y
+        } else {
+            Self::X
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Axes {
+    pub x: bool,
+    pub y: bool,
+}
+
+impl Axes {
+    pub(crate) const NONE: Self = Self { x: false, y: false };
+
+    fn inline(self, writing_mode: WritingMode) -> bool {
+        Vec2::new(self.x, self.y).inline(writing_mode)
+    }
+
+    fn block(self, writing_mode: WritingMode) -> bool {
+        Vec2::new(self.x, self.y).block(writing_mode)
+    }
+
+    fn block_mut(&mut self, writing_mode: WritingMode) -> &mut bool {
+        Vec2::new(&mut self.x, &mut self.y).block(writing_mode)
+    }
+}
+
+impl From<Axis> for Axes {
+    fn from(value: Axis) -> Self {
+        match value {
+            Axis::X => Axes { x: true, y: false },
+            Axis::Y => Axes { x: false, y: true },
+        }
+    }
+}
+
+impl std::ops::BitOr for Axes {
+    type Output = Self;
+
+    fn bitor(mut self, rhs: Self) -> Self::Output {
+        self.x |= rhs.x;
+        self.y |= rhs.y;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutConstraint {
+    Fixed(FixedL),
+    MaxContent,
+}
+
 #[derive(Debug)]
 pub struct LayoutContext<'l> {
     pub log: &'l LogContext<'l>,
     pub dpi: u32,
     pub fonts: &'l mut FontDb,
+    pub initial_containing_block_size: Vec2L,
 }
 
 impl AsLogger for LayoutContext<'_> {

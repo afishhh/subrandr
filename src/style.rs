@@ -48,6 +48,8 @@ macros::implement_style_module! {
         text_align: HorizontalAlignment = HorizontalAlignment::Left,
         inline_sizing: InlineSizing = InlineSizing::Normal,
         direction: Direction = Direction::Ltr,
+        writing_mode: WritingMode = WritingMode::HorizontalTtb,
+        text_orientation: TextOrientation = TextOrientation::Mixed,
         white_space_collapse: WhiteSpaceCollapse = WhiteSpaceCollapse::Preserve,
     }
 
@@ -56,13 +58,16 @@ macros::implement_style_module! {
         #[inherit(no)] text_decoration_line: TextDecorationLines = TextDecorationLines::NONE,
         #[inherit(no)] text_decoration_color: Color = Color::CurrentColor,
         #[inherit(no)] baseline_source: BaselineSource = BaselineSource::Last,
+        #[inherit(no)] height: Option<Length> = None,
         #[inherit(no)] width: Option<Length> = None,
         #[inherit(no)] padding_top: Length = Length::ZERO,
         #[inherit(no)] padding_left: Length = Length::ZERO,
         #[inherit(no)] padding_right: Length = Length::ZERO,
         #[inherit(no)] padding_bottom: Length = Length::ZERO,
+        #[inherit(no)] margin_top: Option<Length> = Some(Length::ZERO),
         #[inherit(no)] margin_left: Option<Length> = Some(Length::ZERO),
         #[inherit(no)] margin_right: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] margin_bottom: Option<Length> = Some(Length::ZERO),
     }
 
     rc misc {

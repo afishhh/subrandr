@@ -6,7 +6,7 @@ use std::{
 
 use util::{math::I26Dot6, rev_if::RevIf};
 
-use super::RunShaper;
+use super::{RunShaper, VerticalTypesetting};
 use crate::{
     layout::LayoutContext,
     text::{Direction, Font, FontMatchIterator, Glyph, ShapingError, ShapingSink},
@@ -155,6 +155,7 @@ impl GlyphStringSegment {
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
+        vertical_typesetting: Option<VerticalTypesetting>,
     ) -> Result<Vec<Self>, ShapingError> {
         // If the break is within a glyph (like a long ligature), we must
         // use the slow reshaping path.
@@ -171,7 +172,12 @@ impl GlyphStringSegment {
                     let reshape_cluster = self[i + 1].cluster;
                     let reshape_range = reshape_cluster..break_index;
 
-                    shaper.set_buffer_content(&text, reshape_range, direction);
+                    shaper.set_buffer_content(
+                        &text,
+                        reshape_range,
+                        direction,
+                        vertical_typesetting,
+                    );
                     if let Some(result) =
                         self.try_concat_with_reshaped_end(i, shaper, font_iterator.clone(), lctx)?
                     {
@@ -183,7 +189,12 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = self.text_range.start..break_index;
-        shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
+        shaper.set_buffer_content(
+            text.as_ref(),
+            reshape_range,
+            direction,
+            vertical_typesetting,
+        );
         let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
@@ -221,6 +232,7 @@ impl GlyphStringSegment {
         font_iterator: FontMatchIterator<'_>,
         lctx: &mut LayoutContext,
         direction: Direction,
+        vertical_typesetting: Option<VerticalTypesetting>,
     ) -> Result<Vec<GlyphStringSegment>, ShapingError> {
         let can_reuse_split_glyph = self[glyph_index].cluster == break_index;
         if !self[glyph_index].unsafe_to_break() && can_reuse_split_glyph {
@@ -231,7 +243,12 @@ impl GlyphStringSegment {
                     let reshape_cluster = self[i].cluster;
                     let reshape_range = break_index..reshape_cluster;
 
-                    shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
+                    shaper.set_buffer_content(
+                        text.as_ref(),
+                        reshape_range,
+                        direction,
+                        vertical_typesetting,
+                    );
                     if let Some(result) =
                         self.try_concat_with_reshaped_start(i, shaper, font_iterator.clone(), lctx)?
                     {
@@ -243,7 +260,12 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = break_index..self.text_range.end;
-        shaper.set_buffer_content(text.as_ref(), reshape_range, direction);
+        shaper.set_buffer_content(
+            text.as_ref(),
+            reshape_range,
+            direction,
+            vertical_typesetting,
+        );
         let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
@@ -402,6 +424,7 @@ impl GlyphString {
         max_width: I26Dot6,
         shaper: &mut RunShaper,
         font_iter: FontMatchIterator<'_>,
+        vertical_typesetting: Option<VerticalTypesetting>,
         lctx: &mut LayoutContext,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         assert!(!self.is_empty());
@@ -425,12 +448,13 @@ impl GlyphString {
                     font_iter.clone(),
                     lctx,
                     self.direction,
+                    vertical_typesetting,
                 )?;
 
                 if left_candidate
                     .iter()
                     .flat_map(|s| &s[..])
-                    .map(|g| g.x_advance)
+                    .map(|g| g.inline_advance(vertical_typesetting))
                     .fold(current_x, I26Dot6::add)
                     <= max_width
                 {
@@ -444,7 +468,7 @@ impl GlyphString {
             }
 
             for glyph in segment {
-                current_x += glyph.x_advance;
+                current_x += glyph.inline_advance(vertical_typesetting);
             }
 
             next = it.next();
@@ -465,6 +489,7 @@ impl GlyphString {
                     font_iter,
                     lctx,
                     self.direction,
+                    vertical_typesetting,
                 )?;
 
                 right_segments.extend_from_slice(&self.segments[i + 1..]);

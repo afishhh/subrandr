@@ -1,24 +1,32 @@
 use core::{convert::AsRef, iter::Iterator};
 use std::{marker::PhantomData, ops::Range, rc::Rc};
 
+use icu_properties::{
+    props::{GeneralCategory, VerticalOrientation},
+    CodePointMapDataBorrowed,
+};
 use icu_segmenter::{options::LineBreakOptions, GraphemeClusterSegmenter};
+use rasterize::scene::Rotation;
 use thiserror::Error;
 use util::math::{I26Dot6, Vec2};
 
-use super::{block::BlockLayoutLevel, FixedL, FragmentBox, LayoutContext, Vec2L};
+use super::{
+    block::{BlockContainer, BlockContainerFragment, PartialBlockContainer},
+    Axes, BoxFragmentationPart, EdgeExtents, FixedL, FragmentBox, LayoutConstraint, LayoutContext,
+    Vec2L, Vec2LW, Vec2W, Vec2WritingModeExt,
+};
 use crate::{
-    layout::{
-        block::{BlockContainer, BlockContainerFragment, ContainingBlock, PartialBlockContainer},
-        BoxFragmentationPart, EdgeExtents,
-    },
     style::{
         computed::{
             self, FontSlant, HorizontalAlignment, InlineSizing, ToPhysicalPixels,
-            WhiteSpaceCollapse,
+            WhiteSpaceCollapse, WritingMode,
         },
         ComputedStyle,
     },
-    text::{self, Direction, Font, FontMatcher, FontMetrics, OpenTypeTag, ShapingBuffer},
+    text::{
+        self, BaselineMetrics, Direction, Font, FontMatcher, FontMetrics, OpenTypeTag,
+        ShapingBuffer,
+    },
 };
 
 mod glyph_string;
@@ -28,6 +36,11 @@ pub use glyph_string::*;
 // this includes ruby containers and `inline-block`s.
 const OBJECT_REPLACEMENT_CHARACTER: char = '\u{FFFC}';
 const OBJECT_REPLACEMENT_LENGTH: usize = OBJECT_REPLACEMENT_CHARACTER.len_utf8();
+
+const GENERAL_CATEGORY_MAP: CodePointMapDataBorrowed<GeneralCategory> =
+    CodePointMapDataBorrowed::new();
+const VERTICAL_ORIENTATION_MAP: CodePointMapDataBorrowed<VerticalOrientation> =
+    CodePointMapDataBorrowed::new();
 
 /// A flat representation of inline content.
 ///
@@ -93,6 +106,111 @@ struct InlineBlock {
 mod builder;
 pub use builder::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Baseline {
+    Alphabetic,
+    Central,
+    IdeographicUnder,
+    IdeographicOver,
+}
+
+impl Baseline {
+    pub fn metrics(self, metrics: &FontMetrics, vertical: bool) -> BaselineMetrics {
+        let alphabetic = metrics.alphabetic_baseline;
+        let central = metrics.central_baseline;
+        match (self, vertical) {
+            (Baseline::Alphabetic, false) => alphabetic,
+            (Baseline::Central, false) => {
+                let mid = alphabetic.height() / 2;
+
+                BaselineMetrics {
+                    ascender: mid,
+                    descender: -mid,
+                }
+            }
+            (Baseline::IdeographicUnder, false) => BaselineMetrics {
+                ascender: alphabetic.height(),
+                descender: FixedL::ZERO,
+            },
+            (Baseline::IdeographicOver, false) => BaselineMetrics {
+                ascender: FixedL::ZERO,
+                descender: -alphabetic.height(),
+            },
+
+            (Baseline::IdeographicUnder, true) => BaselineMetrics {
+                ascender: central.height(),
+                descender: FixedL::ZERO,
+            },
+            (Baseline::IdeographicOver, true) => BaselineMetrics {
+                ascender: FixedL::ZERO,
+                descender: -central.height(),
+            },
+            (Baseline::Central, true) => metrics.central_baseline,
+            // TODO: Yes this can produce bad results but even the spec doesn't
+            //       know what to do here:
+            //   https://drafts.csswg.org/css-inline-3/#issue-2ffa7534
+            //   https://github.com/w3c/csswg-drafts/issues/5424
+            (Baseline::Alphabetic, true) => metrics.central_baseline,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BoxBaselineSet {
+    alphabetic: FixedL,
+    central: FixedL,
+    ideographic_under: FixedL,
+    ideographic_over: FixedL,
+}
+
+impl BoxBaselineSet {
+    const ZERO: Self = Self {
+        alphabetic: FixedL::ZERO,
+        central: FixedL::ZERO,
+        ideographic_under: FixedL::ZERO,
+        ideographic_over: FixedL::ZERO,
+    };
+
+    fn new(metrics: &FontMetrics, writing_mode: WritingMode) -> Self {
+        let vertical = writing_mode.is_typographic_mode_vertical();
+        let alphabetic_offset = Baseline::Alphabetic
+            .metrics(metrics, vertical)
+            .block_start_offset(writing_mode);
+
+        Self {
+            alphabetic: alphabetic_offset,
+            central: Baseline::Central
+                .metrics(metrics, vertical)
+                .block_start_offset(writing_mode)
+                - alphabetic_offset,
+            ideographic_under: Baseline::IdeographicUnder
+                .metrics(metrics, vertical)
+                .block_start_offset(writing_mode)
+                - alphabetic_offset,
+            ideographic_over: Baseline::IdeographicOver
+                .metrics(metrics, vertical)
+                .block_start_offset(writing_mode)
+                - alphabetic_offset,
+        }
+    }
+
+    pub fn offset(&self, amount: FixedL) -> Self {
+        Self {
+            alphabetic: self.alphabetic + amount,
+            ..*self
+        }
+    }
+
+    pub fn get(&self, baseline: Baseline) -> FixedL {
+        match baseline {
+            Baseline::Alphabetic => self.alphabetic,
+            Baseline::Central => self.central + self.alphabetic,
+            Baseline::IdeographicUnder => self.ideographic_under + self.alphabetic,
+            Baseline::IdeographicOver => self.ideographic_over + self.alphabetic,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SpanFragment {
     pub fbox: FragmentBox,
@@ -105,6 +223,29 @@ pub struct SpanFragment {
 pub struct TextFragment {
     pub style: ComputedStyle,
     pub glyphs: GlyphString,
+    pub inline_size: FixedL,
+    pub align_to: Baseline,
+    vertical_typesetting: Option<VerticalTypesetting>,
+}
+
+impl TextFragment {
+    pub fn glyph_transform(&self) -> Rotation {
+        match self.vertical_typesetting {
+            Some(VerticalTypesetting::Sideways { clockwise: true }) => Rotation::Clockwise90,
+            Some(VerticalTypesetting::Sideways { clockwise: false }) => {
+                Rotation::CounterClockwise90
+            }
+            Some(VerticalTypesetting::Upright) | None => Rotation::None,
+        }
+    }
+
+    pub fn is_typographic_mode_vertical(&self) -> bool {
+        self.vertical_typesetting.is_typographic_mode_vertical()
+    }
+
+    pub fn is_vertical(&self) -> bool {
+        self.vertical_typesetting.is_some()
+    }
 }
 
 #[derive(Debug)]
@@ -127,7 +268,7 @@ pub struct RubyAnnotationFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
     pub primary_font: Font,
-    pub baseline_y: FixedL,
+    pub baseline_block_offset: FixedL,
     pub children: OffsetInlineItemFragmentVec,
 }
 
@@ -144,7 +285,7 @@ type OffsetInlineItemFragmentVec = Vec<(Vec2L, util::rc::Rc<InlineItemFragment>)
 #[derive(Debug, Clone)]
 pub struct LineBoxFragment {
     pub fbox: FragmentBox,
-    pub baseline_y: FixedL,
+    pub dominant_baseline_offset: FixedL,
     pub children: OffsetInlineItemFragmentVec,
 }
 
@@ -152,6 +293,8 @@ pub struct LineBoxFragment {
 pub struct InlineContentFragment {
     pub fbox: FragmentBox,
     pub style: ComputedStyle,
+    // https://drafts.csswg.org/css-align-3/#baseline-export
+    pub line_baselines: BoxBaselineSet,
     // NOTE: due to const reasons this can't be `Font`
     pub primary_font_metrics: FontMetrics,
     pub lines: Vec<(Vec2L, util::rc::Rc<LineBoxFragment>)>,
@@ -161,6 +304,7 @@ impl InlineContentFragment {
     pub const EMPTY: Self = Self {
         fbox: FragmentBox::ZERO,
         style: ComputedStyle::DEFAULT,
+        line_baselines: BoxBaselineSet::ZERO,
         primary_font_metrics: FontMetrics::ZERO,
         lines: Vec::new(),
     };
@@ -174,6 +318,8 @@ pub enum InlineLayoutError {
     Shaping(#[from] text::ShapingError),
     #[error(transparent)]
     FreeType(#[from] text::FreeTypeError),
+    #[error("Orthogonal flows are not supported yet")]
+    OrthogonalFlow,
 }
 
 #[derive(Debug)]
@@ -341,6 +487,38 @@ struct TextItem {
     primary_font: Font,
     glyphs: GlyphString,
     break_after: bool,
+    vertical_typesetting: Option<VerticalTypesetting>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerticalTypesetting {
+    Upright,
+    Sideways { clockwise: bool },
+}
+
+trait VerticalTypesettingExt {
+    fn is_typographic_mode_vertical(&self) -> bool;
+}
+
+impl VerticalTypesettingExt for Option<VerticalTypesetting> {
+    fn is_typographic_mode_vertical(&self) -> bool {
+        matches!(self, Some(VerticalTypesetting::Upright))
+    }
+}
+
+impl TextItem {
+    fn is_typographic_mode_vertical(&self) -> bool {
+        self.vertical_typesetting.is_typographic_mode_vertical()
+    }
+}
+
+impl text::Glyph {
+    fn inline_advance(&self, typesetting: Option<VerticalTypesetting>) -> FixedL {
+        match typesetting {
+            Some(VerticalTypesetting::Upright) => -self.y_advance,
+            Some(VerticalTypesetting::Sideways { .. }) | None => self.x_advance,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -378,13 +556,14 @@ impl<'c, S: LayoutStage<'c>> std::fmt::Debug for BlockItem<'c, S> {
 }
 
 struct BlockItemFragment {
-    alignment_baseline: FixedL,
+    dominant_baseline_block_offset: FixedL,
+    inline_size: FixedL,
     fragment: BlockContainerFragment,
 }
 
 impl BlockItemFragment {
     fn accumulate_width(&self, result: &mut FixedL) {
-        *result += self.fragment.fbox.size_for_layout().x
+        *result += self.inline_size;
     }
 }
 
@@ -400,19 +579,38 @@ impl BlockItemFragment {
     fn layout_partial(
         lctx: &mut LayoutContext,
         partial: &PartialBlockContainer,
-        containing_block: &ContainingBlock,
+        constraints: Vec2<LayoutConstraint>,
+        writing_mode: WritingMode,
+        dominant_baseline: Baseline,
     ) -> Result<Self, InlineLayoutError> {
-        let sizes =
-            partial.inline_sizes_internal(lctx, BlockLayoutLevel::InlineLevel, containing_block)?;
-        let fragment = partial.layout_internal(lctx, sizes)?;
+        let sizes = partial.inline_level_block_sizes(lctx, constraints, writing_mode)?;
+        let available_block_space = match constraints.block(writing_mode) {
+            LayoutConstraint::Fixed(fixed) => Some(fixed),
+            LayoutConstraint::MaxContent => None,
+        };
+        let fragment = partial.layout(
+            lctx,
+            sizes.size,
+            sizes.margins(writing_mode),
+            available_block_space,
+            writing_mode,
+        )?;
 
         Ok(Self {
-            alignment_baseline: fragment.alphabetic_baseline().unwrap_or_else(|| {
-                // https://www.w3.org/TR/css-inline-3/#baseline-synthesis-box
-                // We assume alphabetic baseline so this is just the bottom of the
-                // margin box.
-                fragment.fbox.margin_box().max.y
-            }),
+            inline_size: fragment.fbox.inline_size(writing_mode),
+            dominant_baseline_block_offset: fragment.baselines(writing_mode).map_or_else(
+                || {
+                    let block_size = fragment.fbox.block_size(writing_mode);
+
+                    // https://www.w3.org/TR/css-inline-3/#baseline-synthesis-box
+                    match dominant_baseline {
+                        Baseline::Alphabetic | Baseline::IdeographicUnder => block_size,
+                        Baseline::Central => block_size / 2,
+                        Baseline::IdeographicOver => FixedL::ZERO,
+                    }
+                },
+                |set| set.get(dominant_baseline),
+            ),
             fragment,
         })
     }
@@ -422,7 +620,9 @@ impl<'content> ShapedItemKind<'content, PartialStage> {
     fn to_fragment_item<'partial>(
         &'partial self,
         lctx: &mut LayoutContext,
-        containing_block: &ContainingBlock,
+        constraints: Vec2<LayoutConstraint>,
+        writing_mode: WritingMode,
+        dominant_baseline: Baseline,
     ) -> Result<ShapedItemKind<'content, FragmentStage<'partial>>, InlineLayoutError> {
         Ok(match &self {
             ShapedItemKind::Text(text) => ShapedItemKind::Text(text.clone()),
@@ -444,14 +644,22 @@ impl<'content> ShapedItemKind<'content, PartialStage> {
                                 RubyItemBase {
                                     style: base.style,
                                     primary_font: base.primary_font.clone(),
-                                    inner: base.inner.to_fragment_result(lctx, containing_block)?,
+                                    inner: base.inner.to_fragment_result(
+                                        lctx,
+                                        constraints,
+                                        writing_mode,
+                                        dominant_baseline,
+                                    )?,
                                 },
                                 RubyItemAnnotation {
                                     style: annotation.style,
                                     primary_font: annotation.primary_font.clone(),
-                                    inner: annotation
-                                        .inner
-                                        .to_fragment_result(lctx, containing_block)?,
+                                    inner: annotation.inner.to_fragment_result(
+                                        lctx,
+                                        constraints,
+                                        writing_mode,
+                                        dominant_baseline,
+                                    )?,
                                 },
                             ))
                         },
@@ -460,7 +668,13 @@ impl<'content> ShapedItemKind<'content, PartialStage> {
             }),
             ShapedItemKind::Block(block) => ShapedItemKind::Block(BlockItem {
                 span_id: block.span_id,
-                inner: BlockItemFragment::layout_partial(lctx, &block.inner, containing_block)?,
+                inner: BlockItemFragment::layout_partial(
+                    lctx,
+                    &block.inner,
+                    constraints,
+                    writing_mode,
+                    dominant_baseline,
+                )?,
             }),
         })
     }
@@ -470,7 +684,9 @@ impl<'content> InitialShapingResult<'content> {
     fn to_fragment_result(
         &self,
         lctx: &mut LayoutContext,
-        containing_block: &ContainingBlock,
+        constraints: Vec2<LayoutConstraint>,
+        writing_mode: WritingMode,
+        dominant_baseline: Baseline,
     ) -> Result<FragmentShapingResult<'_, 'content>, InlineLayoutError> {
         let items = self
             .shaped
@@ -478,7 +694,12 @@ impl<'content> InitialShapingResult<'content> {
             .map(|item| {
                 Ok(ShapedItem {
                     range: item.range.clone(),
-                    kind: item.kind.to_fragment_item(lctx, containing_block)?,
+                    kind: item.kind.to_fragment_item(
+                        lctx,
+                        constraints,
+                        writing_mode,
+                        dominant_baseline,
+                    )?,
                     spacing: item.spacing.clone(),
                 })
             })
@@ -535,10 +756,29 @@ struct RunShaper<'a> {
 }
 
 impl RunShaper<'_> {
-    fn set_buffer_content(&mut self, text: &str, range: Range<usize>, direction: Direction) {
+    fn set_buffer_content(
+        &mut self,
+        text: &str,
+        range: Range<usize>,
+        direction: Direction,
+        vertical_typesetting: Option<VerticalTypesetting>,
+    ) {
         self.buffer.clear();
         self.buffer.set_direction(direction);
         self.buffer.set_pre_context(&text[..range.start]);
+
+        // https://drafts.csswg.org/css-writing-modes-4/#vertical-font-features
+        // TODO: Disallow setting VERT and VRTR manually if vertical typesetting is enabled?
+        //       Not sure whether "must be enabled" means it also can't be manually disabled
+        match vertical_typesetting {
+            Some(VerticalTypesetting::Upright) => {
+                self.buffer.set_feature(OpenTypeTag::FEAT_VERT, 1);
+            }
+            Some(VerticalTypesetting::Sideways { .. }) => {
+                self.buffer.set_feature(OpenTypeTag::FEAT_VRTR, 1);
+            }
+            None => (),
+        }
 
         let next_grapheme_boundary_idx =
             match self.grapheme_cluster_boundaries.binary_search(&range.start) {
@@ -613,6 +853,63 @@ impl RunShaper<'_> {
     }
 }
 
+impl BaselineMetrics {
+    fn block_start_offset(self, writing_mode: WritingMode) -> FixedL {
+        if !writing_mode.is_line_flipped() {
+            self.ascender
+        } else {
+            -self.descender
+        }
+    }
+
+    fn block_end_offset(self, writing_mode: WritingMode) -> FixedL {
+        if !writing_mode.is_line_flipped() {
+            self.descender
+        } else {
+            -self.ascender
+        }
+    }
+
+    fn height(&self) -> FixedL {
+        self.ascender - self.descender
+    }
+}
+
+impl WritingMode {
+    // https://drafts.csswg.org/css-writing-modes-4/#text-baselines
+    // our `text-orientation` is always `mixed` for now.
+    fn auto_dominant_baseline(self) -> Baseline {
+        // In vertical typographic mode,
+        if self.is_typographic_mode_vertical() {
+            // the central baseline is used as the dominant baseline when text-orientation is mixed or upright.
+            Baseline::Central
+        } else {
+            // Otherwise the alphabetic baseline is used.
+            Baseline::Alphabetic
+        }
+    }
+
+    pub(crate) fn is_typographic_mode_horizontal(self) -> bool {
+        match self {
+            WritingMode::HorizontalTtb => true,
+            WritingMode::VerticalLtr | WritingMode::VerticalRtl => false,
+            WritingMode::SidewaysRtl => true,
+        }
+    }
+
+    fn is_typographic_mode_vertical(self) -> bool {
+        !self.is_typographic_mode_horizontal()
+    }
+
+    pub(crate) fn is_block_reversed(self) -> bool {
+        matches!(self, WritingMode::VerticalRtl | WritingMode::SidewaysRtl)
+    }
+
+    pub(crate) fn is_line_flipped(self) -> bool {
+        self.is_vertical()
+    }
+}
+
 fn shape_run_initial<'a>(
     content: &'a InlineContent,
     run_index: usize,
@@ -625,6 +922,7 @@ fn shape_run_initial<'a>(
 ) -> Result<InitialShapingResult<'a>, InlineLayoutError> {
     struct QueuedText {
         matcher: FontMatcher,
+        vertical_typesetting: Option<VerticalTypesetting>,
         range: Range<usize>,
     }
 
@@ -650,15 +948,21 @@ fn shape_run_initial<'a>(
                             range: Range<usize>,
                             break_after: bool|
              -> Result<(), InlineLayoutError> {
-                let direction = if level.is_ltr() {
-                    Direction::Ltr
-                } else {
-                    Direction::Rtl
+                let direction = match (self.vertical_typesetting, level.is_ltr()) {
+                    (Some(VerticalTypesetting::Sideways { .. }) | None, true) => Direction::Ltr,
+                    (Some(VerticalTypesetting::Sideways { .. }) | None, false) => Direction::Rtl,
+                    (Some(VerticalTypesetting::Upright), true) => Direction::Ttb,
+                    (Some(VerticalTypesetting::Upright), false) => Direction::Btt,
                 };
 
                 let glyphs = {
                     shaper.buffer.guess_properties();
-                    shaper.set_buffer_content(&text, range.clone(), direction);
+                    shaper.set_buffer_content(
+                        &text,
+                        range.clone(),
+                        direction,
+                        self.vertical_typesetting,
+                    );
                     let mut output = GlyphString::new(text.clone(), direction);
                     shaper.shape(&mut output, self.matcher.iterator(), lctx)?;
                     output
@@ -672,6 +976,7 @@ fn shape_run_initial<'a>(
                         primary_font: self.matcher.primary(lctx.log, lctx.fonts)?,
                         glyphs,
                         break_after,
+                        vertical_typesetting: self.vertical_typesetting,
                     }),
                     spacing: ShapedItemSpacing {
                         current_spacing_left: *left_spacing,
@@ -716,6 +1021,7 @@ fn shape_run_initial<'a>(
         bidi: unicode_bidi::BidiInfo<'c>,
         grapheme_cluster_boundaries: Vec<usize>,
         lctx: &'l mut LayoutContext<'ll>,
+        writing_mode: WritingMode,
 
         break_opportunities: Vec<usize>,
         shaped: Vec<ShapedItem<'c, PartialStage>>,
@@ -864,10 +1170,12 @@ fn shape_run_initial<'a>(
 
         fn handle_span_start(&mut self, style: &'a ComputedStyle) -> Result<(), InlineLayoutError> {
             let left_spacing = style
-                .margin_left()
+                .inline_min_margin(self.writing_mode)
                 .to_physical_pixels(self.lctx.dpi)
                 .unwrap_or(FixedL::ZERO)
-                + style.padding_left().to_physical_pixels(self.lctx.dpi);
+                + style
+                    .inline_min_padding(self.writing_mode)
+                    .to_physical_pixels(self.lctx.dpi);
 
             if left_spacing != FixedL::ZERO {
                 // NOTE: When thinking about this padding system, one may stumble upon the consideration:
@@ -910,17 +1218,21 @@ fn shape_run_initial<'a>(
                 //        to place them in an empty leaf text item or something and then fix
                 //        the "no glyphs" case on text branch reconstruction.
                 let left_spacing = style
-                    .margin_left()
+                    .inline_min_margin(self.writing_mode)
                     .to_physical_pixels(self.lctx.dpi)
                     .unwrap_or(FixedL::ZERO)
-                    + style.padding_left().to_physical_pixels(self.lctx.dpi);
+                    + style
+                        .inline_min_padding(self.writing_mode)
+                        .to_physical_pixels(self.lctx.dpi);
                 self.queued_spacing -= left_spacing;
                 return Ok(());
             };
 
-            let right_spacing = style.padding_right().to_physical_pixels(self.lctx.dpi)
+            let right_spacing = style
+                .inline_max_padding(self.writing_mode)
+                .to_physical_pixels(self.lctx.dpi)
                 + style
-                    .margin_right()
+                    .inline_max_margin(self.writing_mode)
                     .to_physical_pixels(self.lctx.dpi)
                     .unwrap_or(FixedL::ZERO);
 
@@ -942,6 +1254,7 @@ fn shape_run_initial<'a>(
             compute_break_opportunities: bool,
             inner_style: &'a ComputedStyle,
         ) -> Result<InitialShapingResult<'a>, InlineLayoutError> {
+            let writing_mode = self.content.root_style.writing_mode();
             let items = &self.content.items;
             let mut current_item = item_index;
             let mut current_style = inner_style;
@@ -1091,23 +1404,122 @@ fn shape_run_initial<'a>(
 
                         match self.queued_text {
                             Some(ref mut queued)
-                                if queued.matcher == font_matcher
-                                    && queued.range.end == text.content_range.start =>
+                                if queued.matcher != font_matcher
+                                    || queued.range.end != text.content_range.start =>
                             {
-                                queued.range.end = text.content_range.end
-                            }
-                            Some(_) => {
                                 self.flush_queued_text()?;
-                                self.queued_text = Some(QueuedText {
-                                    matcher: font_matcher,
-                                    range: text.content_range.clone(),
-                                });
                             }
-                            None => {
-                                self.queued_text = Some(QueuedText {
-                                    matcher: font_matcher,
-                                    range: text.content_range.clone(),
-                                })
+                            _ => {}
+                        }
+
+                        // https://drafts.csswg.org/css-writing-modes-3/#text-orientation
+                        // This property specifies the orientation of text within a line.
+                        // Current values only have an effect in vertical typographic modes: the property has no effect in horizontal typographic modes.
+                        if writing_mode.is_horizontal() {
+                            match self.queued_text {
+                                Some(ref mut queued) => queued.range.end = text.content_range.end,
+                                None => {
+                                    self.queued_text = Some(QueuedText {
+                                        matcher: font_matcher,
+                                        range: text.content_range.clone(),
+                                        vertical_typesetting: None,
+                                    })
+                                }
+                            }
+                        } else if writing_mode.is_typographic_mode_horizontal() {
+                            let vertical_typesetting = match writing_mode {
+                                WritingMode::HorizontalTtb
+                                | WritingMode::VerticalRtl
+                                | WritingMode::VerticalLtr => unreachable!(),
+                                WritingMode::SidewaysRtl => {
+                                    VerticalTypesetting::Sideways { clockwise: true }
+                                }
+                            };
+
+                            match self.queued_text {
+                                Some(ref mut queued)
+                                    if queued.vertical_typesetting
+                                        == Some(vertical_typesetting) =>
+                                {
+                                    queued.range.end = text.content_range.end
+                                }
+                                Some(_) | None => {
+                                    self.flush_queued_text()?;
+                                    self.queued_text = Some(QueuedText {
+                                        matcher: font_matcher.clone(),
+                                        range: text.content_range.clone(),
+                                        vertical_typesetting: Some(vertical_typesetting),
+                                    })
+                                }
+                            }
+                        } else {
+                            match current_style.text_orientation() {
+                                computed::TextOrientation::Mixed => (),
+                            }
+
+                            let mut next_grapheme_end_idx = match self
+                                .grapheme_cluster_boundaries
+                                .binary_search(&text.content_range.start)
+                            {
+                                Ok(i) => i + 1,
+                                Err(i) => i,
+                            };
+
+                            let mut current = text.content_range.start;
+                            while current != text.content_range.end {
+                                let end = self
+                                    .grapheme_cluster_boundaries
+                                    .get(next_grapheme_end_idx)
+                                    .copied()
+                                    .map_or(text.content_range.end, |end| {
+                                        end.min(text.content_range.end)
+                                    });
+
+                                let grapheme = &self.run_text[current..end];
+
+                                // https://www.unicode.org/reports/tr50/#grapheme_clusters
+                                // If the cluster contains an enclosing combining mark (general category Me), then the whole cluster has the Vertical_Orientation property value U.
+                                let unicode_orientation = if grapheme.chars().any(|c| {
+                                    GENERAL_CATEGORY_MAP.get(c) == GeneralCategory::EnclosingMark
+                                }) {
+                                    VerticalOrientation::Upright
+                                } else {
+                                    VERTICAL_ORIENTATION_MAP.get(grapheme.chars().next().unwrap())
+                                };
+
+                                // (back to CSS spec)
+                                // typesetting it upright if its orientation property is U, Tu, or Tr; or typesetting it sideways (90° clockwise from horizontal) if its orientation property is R.
+                                let vertical_typesetting = if unicode_orientation
+                                    == VerticalOrientation::Upright
+                                    || unicode_orientation
+                                        == VerticalOrientation::TransformedUpright
+                                    || unicode_orientation
+                                        == VerticalOrientation::TransformedRotated
+                                {
+                                    VerticalTypesetting::Upright
+                                } else {
+                                    VerticalTypesetting::Sideways { clockwise: true }
+                                };
+
+                                match self.queued_text {
+                                    Some(ref mut queued)
+                                        if queued.vertical_typesetting
+                                            == Some(vertical_typesetting) =>
+                                    {
+                                        queued.range.end = end
+                                    }
+                                    Some(_) | None => {
+                                        self.flush_queued_text()?;
+                                        self.queued_text = Some(QueuedText {
+                                            matcher: font_matcher.clone(),
+                                            range: current..end,
+                                            vertical_typesetting: Some(vertical_typesetting),
+                                        })
+                                    }
+                                }
+
+                                next_grapheme_end_idx += 1;
+                                current = end;
                             }
                         }
 
@@ -1219,6 +1631,7 @@ fn shape_run_initial<'a>(
             result
         },
         lctx,
+        writing_mode: content.root_style.writing_mode(),
 
         break_opportunities: Vec::new(),
         shaped: Vec::new(),
@@ -1240,7 +1653,7 @@ fn shape_run_initial<'a>(
 
 struct BreakingContext<'l, 'a> {
     layout: &'a mut LayoutContext<'l>,
-    containing_block: &'a ContainingBlock<'a>,
+    available_space: FixedL,
     break_opportunities: &'a [usize],
     shaper: RunShaper<'a>,
 }
@@ -1264,7 +1677,7 @@ impl<'p, 'c: 'p> ShapedItem<'c, FragmentStage<'p>> {
         let can_break_before = *current_width != FixedL::ZERO;
         *current_width += self.spacing.current_spacing_left;
 
-        if *current_width > ctx.containing_block.width {
+        if *current_width > ctx.available_space {
             return Ok(BreakOutcome::BreakBefore);
         }
 
@@ -1281,7 +1694,7 @@ impl<'p, 'c: 'p> ShapedItem<'c, FragmentStage<'p>> {
                 //       It should only allow breaking between distinct base-annotation pairs.
                 self.accumulate_content_width(current_width);
                 *current_width += self.spacing.current_spacing_right;
-                if *current_width > ctx.containing_block.width {
+                if *current_width > ctx.available_space {
                     Ok(BreakOutcome::BreakBefore)
                 } else {
                     Ok(BreakOutcome::None)
@@ -1294,7 +1707,7 @@ impl<'p, 'c: 'p> ShapedItem<'c, FragmentStage<'p>> {
         match &self.kind {
             ShapedItemKind::Text(text) => {
                 for (_, glyph) in text.glyphs.iter_glyphs_visual() {
-                    *result += glyph.x_advance;
+                    *result += glyph.inline_advance(text.vertical_typesetting)
                 }
             }
             ShapedItemKind::Ruby(ruby) => {
@@ -1357,13 +1770,13 @@ impl TextItem {
         let initial_x = *current_width;
         let mut glyph_it = self.glyphs.iter_glyphs_logical().peekable();
         while let Some((_, glyph)) = glyph_it.next() {
-            *current_width += glyph.x_advance;
+            *current_width += glyph.inline_advance(self.vertical_typesetting);
 
             if glyph_it.peek().is_none() {
                 *current_width += spacing.current_spacing_right;
             }
 
-            if *current_width > ctx.containing_block.width {
+            if *current_width > ctx.available_space {
                 // We want to also consider breaking within the current glyph so let's
                 // start looking for break opportunities anywhere before the *next* glyph.
                 let glyph_end = glyph.cluster + 1;
@@ -1388,9 +1801,10 @@ impl TextItem {
                     let break_range = self.break_opportunity_to_range(opportunity);
                     if let Some((broken, remaining)) = self.glyphs.break_around(
                         break_range,
-                        ctx.containing_block.width - initial_x,
+                        ctx.available_space - initial_x,
                         &mut ctx.shaper,
                         self.font_matcher.iterator(),
+                        self.vertical_typesetting,
                         ctx.layout,
                     )? {
                         drop(glyph_it);
@@ -1406,6 +1820,7 @@ impl TextItem {
                                 primary_font: self.primary_font.clone(),
                                 glyphs: remaining,
                                 break_after: self.break_after,
+                                vertical_typesetting: self.vertical_typesetting,
                             }),
                             spacing: spacing.fragment_break(),
                         }));
@@ -1434,7 +1849,7 @@ fn layout_run_full<'a>(
     initial_shaping_result: &InitialShapingResult<'a>,
     span_state: Vec<SpanState<'a>>,
     lctx: &mut LayoutContext,
-    containing_block: &ContainingBlock,
+    constraints: Vec2<LayoutConstraint>,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
     fn split_on_leaves<'s, 'f>(
         range: Range<usize>,
@@ -1560,6 +1975,7 @@ fn layout_run_full<'a>(
                             primary_font: text.primary_font.clone(),
                             glyphs: text.glyphs.clone(),
                             break_after: false,
+                            vertical_typesetting: text.vertical_typesetting,
                         };
                         let split_range = if range.start > item.range.start {
                             tmp.glyphs.split_off_logical_end(range.start).map(|after| {
@@ -1626,7 +2042,7 @@ fn layout_run_full<'a>(
     #[derive(Debug)]
     struct FragmentBuilder<'t, 'c> {
         result: InlineContentFragment,
-        current_y: FixedL,
+        current_block_offset: FixedL,
         line_align: HorizontalAlignment,
         bidi: &'t unicode_bidi::BidiInfo<'c>,
         text_leaf_items: &'t [LeafItemRange<'c>],
@@ -1638,11 +2054,14 @@ fn layout_run_full<'a>(
     #[derive(Debug)]
     struct InlineItemFragmentBuilder<'t, 'c> {
         output: &'t mut OffsetInlineItemFragmentVec,
-        min_ruby_y: &'t mut FixedL,
+        min_ruby_edge: &'t mut FixedL,
+        max_ruby_edge: &'t mut FixedL,
         line_metrics: LineHeightMetrics,
-        current_top_y: FixedL,
-        current_x: FixedL,
+        line_baseline: Baseline,
+        line_baseline_block_offset: FixedL,
+        current_inline_offset: FixedL,
         content: &'c InlineContent,
+        writing_mode: WritingMode,
         dpi: u32,
     }
 
@@ -1683,59 +2102,85 @@ fn layout_run_full<'a>(
             &mut self,
             item: &ShapedItem<'c, FragmentStage<'p>>,
             line_height: LineHeight,
+            dominant_baseline: Baseline,
+            writing_mode: WritingMode,
         ) {
             match &item.kind {
                 ShapedItemKind::Text(text) => match line_height {
                     LineHeight::Normal => {
                         let primary_metrics = text.primary_font.metrics();
-                        let half_leading = (primary_metrics.line_gap() / 2).max(FixedL::ZERO);
+                        let baseline = dominant_baseline
+                            .metrics(primary_metrics, text.is_typographic_mode_vertical());
+                        // NOTE: The `css-inline` spec doesn't say anything about writing modes here.
+                        //       All browsers seem to agree on staying on horizontal metrics even
+                        //       though it does feel kinda weird.
+                        //       But I tried using vertical metrics and that has surprising behavior
+                        //       with mixed upright and sideways text so maybe this is better.
+                        let line_gap =
+                            primary_metrics.horiz_height - baseline.ascender + baseline.descender;
+                        let half_leading = (line_gap / 2).max(FixedL::ZERO);
 
                         self.expand_to(
-                            primary_metrics.ascender + half_leading,
-                            primary_metrics.descender - half_leading,
+                            baseline.ascender + half_leading,
+                            baseline.descender - half_leading,
                         );
 
                         for font in text.glyphs.iter_fonts_logical() {
+                            let glyph_metrics = font.metrics();
+                            let glyph_baseline = dominant_baseline
+                                .metrics(glyph_metrics, text.is_typographic_mode_vertical());
                             self.expand_to(
-                                font.metrics().ascender + half_leading,
-                                font.metrics().descender - half_leading,
+                                glyph_baseline.ascender + half_leading,
+                                glyph_baseline.descender - half_leading,
                             );
                         }
                     }
                     LineHeight::Value(value) => {
                         let computed_font_size =
                             text.font_matcher.size() * text.font_matcher.dpi() as i32 / 72;
-                        let metrics = text.primary_font.metrics();
+                        let baseline = dominant_baseline.metrics(
+                            text.primary_font.metrics(),
+                            text.is_typographic_mode_vertical(),
+                        );
                         let half_leading = ((computed_font_size * value)
-                            - (metrics.ascender - metrics.descender))
+                            - (baseline.ascender - baseline.descender))
                             / 2;
 
                         self.expand_to(
-                            metrics.ascender + half_leading,
-                            metrics.descender - half_leading,
+                            baseline.ascender + half_leading,
+                            baseline.descender - half_leading,
                         );
                     }
                 },
                 ShapedItemKind::Ruby(ruby) => {
                     for (base, _) in &ruby.base_annotation_pairs {
                         for item in &base.inner.items {
-                            self.process_item(item, line_height);
+                            self.process_item(item, line_height, dominant_baseline, writing_mode);
                         }
                     }
                 }
                 ShapedItemKind::Block(BlockItem { inner: block, .. }) => {
-                    let ascender = block.alignment_baseline;
-                    let descender = ascender - block.fragment.fbox.margin_box().max.y;
+                    let ascender = block.dominant_baseline_block_offset;
+                    let descender = ascender - block.fragment.fbox.block_size(writing_mode);
                     self.expand_to(ascender, descender);
                 }
             }
         }
-    }
 
-    struct InlineBoxSizingMetrics {
-        top_y_offset: FixedL,
-        box_height: FixedL,
-        ascender: FixedL,
+        fn as_baseline_metrics(&self) -> BaselineMetrics {
+            BaselineMetrics {
+                ascender: self.max_ascender,
+                descender: self.min_descender,
+            }
+        }
+
+        fn block_start_offset(&self, writing_mode: WritingMode) -> FixedL {
+            self.as_baseline_metrics().block_start_offset(writing_mode)
+        }
+
+        fn block_end_offset(&self, writing_mode: WritingMode) -> FixedL {
+            self.as_baseline_metrics().block_end_offset(writing_mode)
+        }
     }
 
     impl<'o, 'p, 'c: 'p> InlineItemFragmentBuilder<'o, 'c> {
@@ -1743,66 +2188,61 @@ fn layout_run_full<'a>(
             &mut self,
             output: &'o2 mut OffsetInlineItemFragmentVec,
             min_ruby_y: &'o2 mut FixedL,
+            max_ruby_y: &'o2 mut FixedL,
             line_metrics: LineHeightMetrics,
             top_y: FixedL,
-            current_x: FixedL,
+            current_inline_offset: FixedL,
         ) -> InlineItemFragmentBuilder<'o2, 'c> {
             InlineItemFragmentBuilder {
                 output,
-                min_ruby_y,
+                min_ruby_edge: min_ruby_y,
+                max_ruby_edge: max_ruby_y,
                 line_metrics,
-                current_top_y: top_y,
-                current_x,
+                line_baseline_block_offset: top_y,
+                current_inline_offset,
                 dpi: self.dpi,
+                writing_mode: self.writing_mode,
+                line_baseline: self.line_baseline,
                 content: self.content,
             }
         }
 
-        fn compute_inline_box_sizing_metrics(
+        fn inline_box_sizing_metrics(
             &self,
             style: &ComputedStyle,
             font_metrics: &FontMetrics,
-        ) -> InlineBoxSizingMetrics {
+        ) -> BaselineMetrics {
             // https://drafts.csswg.org/css-inline/#line-fill
-            let (ascender, descender) = match style.inline_sizing() {
-                InlineSizing::Normal => (font_metrics.ascender, font_metrics.descender),
-                InlineSizing::Stretch => (
-                    self.line_metrics.max_ascender,
-                    self.line_metrics.min_descender,
-                ),
-            };
-
-            InlineBoxSizingMetrics {
-                top_y_offset: self.current_top_y - ascender,
-                box_height: ascender - descender,
-                ascender,
+            match style.inline_sizing() {
+                InlineSizing::Normal => self.line_baseline.metrics(font_metrics, false),
+                InlineSizing::Stretch => self.line_metrics.as_baseline_metrics(),
             }
         }
 
         fn rebuild_leaf_branch(
             &mut self,
             mut span_id: usize,
-            mut inner_width: FixedL,
-            y_offset: FixedL,
+            leaf_inline_size: FixedL,
+            leaf_block_offset: FixedL,
             leaf: util::rc::Rc<InlineItemFragment>,
             content_len: usize,
             // NOTE: I tried putting this in `InlineItemFragmentBuilder` but lifetime hell
             //       ensued. Maybe try taming that at some point in the future.
             span_state: &mut [SpanState],
-        ) -> (util::rc::Rc<InlineItemFragment>, FixedL, FixedL) {
+        ) {
             let mut result = leaf;
-            let mut y_correction = y_offset;
+
+            let mut current_inner_inline_size = leaf_inline_size;
+            let mut current_block_offset = leaf_block_offset;
 
             // NOTE: can't use `SpanState::walk_up` because of `result` moving shenanigans
             while span_id != usize::MAX {
                 let state = &mut span_state[span_id];
                 let font_metrics = state.primary_font.metrics();
 
-                let InlineBoxSizingMetrics {
-                    top_y_offset,
-                    box_height: logical_height,
-                    ascender: _,
-                } = self.compute_inline_box_sizing_metrics(state.style, font_metrics);
+                let sizing_metrics = self.inline_box_sizing_metrics(state.style, font_metrics);
+                let top_block_offset = self.line_baseline_block_offset
+                    - sizing_metrics.block_start_offset(self.writing_mode);
 
                 let mut part = BoxFragmentationPart::VERTICAL_FULL;
                 if !state.seen_first {
@@ -1814,26 +2254,42 @@ fn layout_run_full<'a>(
                     part |= BoxFragmentationPart::HORIZONTAL_LAST;
                 }
 
+                if self.writing_mode.is_vertical() {
+                    part = part.swap_axes();
+                }
+
                 let fbox = FragmentBox {
-                    content_size: Vec2L::new(inner_width, logical_height),
+                    content_size: Vec2LW::new(sizing_metrics.height(), current_inner_inline_size)
+                        .to_physical(self.writing_mode),
                     padding: EdgeExtents::padding_fragmented(part, state.style, self.dpi),
-                    margin: EdgeExtents::horizontal_margins_fragmented(part, state.style, self.dpi),
+                    margin: EdgeExtents::margins_auto_to_zero_fragmented(
+                        part,
+                        state.style,
+                        self.dpi,
+                    ),
                 };
-                inner_width = fbox.size_for_layout().x;
+                current_inner_inline_size = fbox.inline_size(self.writing_mode);
                 result = util::rc::Rc::new(InlineItemFragment::Span(SpanFragment {
                     content: vec![(
-                        Vec2L::new(FixedL::ZERO, y_correction - top_y_offset),
+                        Vec2LW::new(current_block_offset - top_block_offset, FixedL::ZERO)
+                            .to_physical(self.writing_mode),
                         result,
                     )],
                     fbox,
                     style: state.style.clone(),
                     primary_font: state.primary_font.clone(),
                 }));
-                y_correction = top_y_offset - fbox.content_offset().y;
+                current_block_offset =
+                    top_block_offset - fbox.content_offset().block(self.writing_mode);
                 span_id = state.parent;
             }
 
-            (result, inner_width, y_correction)
+            self.output.push((
+                Vec2LW::new(current_block_offset, self.current_inline_offset)
+                    .to_physical(self.writing_mode),
+                result,
+            ));
+            self.current_inline_offset += current_inner_inline_size;
         }
 
         fn push_reordered(
@@ -1848,24 +2304,27 @@ fn layout_run_full<'a>(
                     text,
                     text_leaf_items,
                     |leaf, glyphs, range| {
-                        let inner_width: FixedL =
-                            glyphs.iter_glyphs_visual().map(|(_, g)| g.x_advance).sum();
+                        let inner_inline_size: FixedL = glyphs
+                            .iter_glyphs_visual()
+                            .map(|(_, g)| g.inline_advance(text.vertical_typesetting))
+                            .sum();
+
                         let fragment = TextFragment {
                             style: leaf.style.clone(),
                             glyphs,
+                            inline_size: inner_inline_size,
+                            vertical_typesetting: text.vertical_typesetting,
+                            align_to: self.line_baseline,
                         };
 
-                        let (fragment, width, y_correction) = self.rebuild_leaf_branch(
+                        self.rebuild_leaf_branch(
                             leaf.span_id,
-                            inner_width,
-                            self.current_top_y,
+                            inner_inline_size,
+                            self.line_baseline_block_offset,
                             InlineItemFragment::Text(fragment).into(),
                             range.len(),
                             span_state,
                         );
-                        self.output
-                            .push((Vec2L::new(self.current_x, y_correction), fragment));
-                        self.current_x += width;
 
                         Ok(())
                     },
@@ -1879,46 +2338,69 @@ fn layout_run_full<'a>(
                         content: Vec::new(),
                     };
 
-                    let mut ruby_current_x = FixedL::ZERO;
+                    let mut ruby_current_inline_offset = FixedL::ZERO;
                     for (base, annotation) in &mut ruby.base_annotation_pairs {
-                        let mut base_width = FixedL::ZERO;
+                        let mut base_inner_inline_size = FixedL::ZERO;
                         let mut base_metrics = LineHeightMetrics::ZERO;
-                        let mut annotation_width = FixedL::ZERO;
+                        let mut annotation_inner_inline_size = FixedL::ZERO;
                         let mut annotation_metrics = LineHeightMetrics::ZERO;
                         for item in &base.inner.items {
-                            item.accumulate_width(&mut base_width);
-                            base_metrics.process_item(item, LineHeight::ONE);
+                            item.accumulate_width(&mut base_inner_inline_size);
+                            base_metrics.process_item(
+                                item,
+                                LineHeight::ONE,
+                                self.line_baseline,
+                                self.writing_mode,
+                            );
                         }
                         for item in &annotation.inner.items {
-                            item.accumulate_width(&mut annotation_width);
-                            annotation_metrics.process_item(item, LineHeight::RUBY_ANNOTATION);
+                            item.accumulate_width(&mut annotation_inner_inline_size);
+                            annotation_metrics.process_item(
+                                item,
+                                LineHeight::RUBY_ANNOTATION,
+                                self.line_baseline,
+                                self.writing_mode,
+                            );
                         }
 
                         let base_font_metrics = base.primary_font.metrics();
-                        let InlineBoxSizingMetrics {
-                            top_y_offset: mut base_y_offset,
-                            box_height: mut base_height,
-                            ascender: mut base_box_ascender,
-                        } = self.compute_inline_box_sizing_metrics(base.style, base_font_metrics);
-                        let annotation_height = annotation_metrics.height();
-                        let annotation_y_offset = self.current_top_y
-                            - base_metrics.max_ascender
-                            - annotation_metrics.max_ascender
-                            + annotation_metrics.min_descender;
-                        let signed_half_padding = (annotation_width - base_width) / 2;
+                        let base_sizing_metrics =
+                            self.inline_box_sizing_metrics(base.style, base_font_metrics);
+                        let mut base_inner_block_offset =
+                            base_sizing_metrics.block_start_offset(self.writing_mode);
+                        let mut base_block_offset = -base_inner_block_offset;
+                        let mut base_block_size = base_sizing_metrics.height();
+
+                        let annotation_block_size = annotation_metrics.height();
+                        let annotation_block_offset = if !self.writing_mode.is_line_flipped() {
+                            -base_metrics.max_ascender - annotation_block_size
+                        } else {
+                            base_metrics.max_ascender
+                        };
+                        let signed_half_padding =
+                            (annotation_inner_inline_size - base_inner_inline_size) / 2;
                         let base_half_padding = signed_half_padding.max(FixedL::ZERO);
                         let annotation_half_padding = (-signed_half_padding).max(FixedL::ZERO);
-                        let ruby_width = base_width.max(annotation_width);
+                        let ruby_inner_inline_size =
+                            base_inner_inline_size.max(annotation_inner_inline_size);
 
                         // HACK: This is to make ruby base and annotation backgrounds not overlap.
                         //       The correct solution is block layout (#111) or a subrandr-specific
                         //       style property.
-                        let background_overlap = (annotation_y_offset - base_y_offset
-                            + annotation_height)
+                        let background_overlap = (annotation_block_offset - base_block_offset
+                            + annotation_block_size)
                             .max(FixedL::ZERO);
-                        base_y_offset += background_overlap;
-                        base_box_ascender -= background_overlap;
-                        base_height -= background_overlap;
+                        base_block_offset += background_overlap;
+                        base_inner_block_offset -= background_overlap;
+                        base_block_size -= background_overlap;
+
+                        if !self.writing_mode.is_line_flipped() {
+                            *self.min_ruby_edge =
+                                (*self.min_ruby_edge).min(annotation_block_offset);
+                        } else {
+                            *self.max_ruby_edge = (*self.max_ruby_edge)
+                                .max(annotation_block_offset + annotation_block_size);
+                        }
 
                         // FIXME: Apparently ruby internal boxes are not supposed to use
                         //        inline-sizing sizing. Now this makes sense with the ruby
@@ -1928,9 +2410,10 @@ fn layout_run_full<'a>(
                         //        boxes? Should they just fit their contents?
                         let mut base_fragment = RubyBaseFragment {
                             fbox: FragmentBox {
-                                content_size: Vec2::new(ruby_width, base_height),
+                                content_size: Vec2LW::new(base_block_size, ruby_inner_inline_size)
+                                    .to_physical(self.writing_mode),
                                 padding: EdgeExtents::padding(base.style, self.dpi),
-                                margin: EdgeExtents::horizontal_margins(base.style, self.dpi),
+                                margin: EdgeExtents::margins_auto_to_zero(base.style, self.dpi),
                             },
                             style: base.style.clone(),
                             primary_font: base.primary_font.clone(),
@@ -1941,8 +2424,9 @@ fn layout_run_full<'a>(
                             &mut base_fragment.children,
                             // TODO: ruby nested in base
                             &mut { FixedL::ZERO },
+                            &mut { FixedL::ZERO },
                             self.line_metrics,
-                            base_box_ascender,
+                            base_inner_block_offset,
                             base_half_padding,
                         )
                         .reorder_and_append(
@@ -1952,15 +2436,24 @@ fn layout_run_full<'a>(
                             span_state,
                         )?;
 
+                        let annotation_line_baseline_offset =
+                            annotation_metrics.block_start_offset(self.writing_mode);
                         let mut annotation_fragment = RubyAnnotationFragment {
                             fbox: FragmentBox {
-                                content_size: Vec2::new(ruby_width, annotation_height),
+                                content_size: Vec2LW::new(
+                                    annotation_block_size,
+                                    ruby_inner_inline_size,
+                                )
+                                .to_physical(self.writing_mode),
                                 padding: EdgeExtents::padding(annotation.style, self.dpi),
-                                margin: EdgeExtents::horizontal_margins(annotation.style, self.dpi),
+                                margin: EdgeExtents::margins_auto_to_zero(
+                                    annotation.style,
+                                    self.dpi,
+                                ),
                             },
                             style: annotation.style.clone(),
                             primary_font: annotation.primary_font.clone(),
-                            baseline_y: annotation_metrics.max_ascender,
+                            baseline_block_offset: annotation_line_baseline_offset,
                             children: Vec::new(),
                         };
 
@@ -1968,8 +2461,9 @@ fn layout_run_full<'a>(
                             &mut annotation_fragment.children,
                             // TODO: ruby nested in annotation
                             &mut { FixedL::ZERO },
+                            &mut { FixedL::ZERO },
                             annotation_metrics,
-                            annotation_metrics.max_ascender,
+                            annotation_line_baseline_offset,
                             annotation_half_padding,
                         )
                         .reorder_and_append(
@@ -1979,28 +2473,32 @@ fn layout_run_full<'a>(
                             span_state,
                         )?;
 
-                        let width_for_layout = base_fragment.fbox.size_for_layout().x;
-                        *self.min_ruby_y = (*self.min_ruby_y).min(annotation_y_offset);
+                        let base_inline_size = base_fragment.fbox.inline_size(self.writing_mode);
                         result.content.push((
-                            Vec2::new(ruby_current_x, base_y_offset),
+                            Vec2LW::new(
+                                self.line_baseline_block_offset + base_block_offset,
+                                ruby_current_inline_offset,
+                            )
+                            .to_physical(self.writing_mode),
                             base_fragment,
-                            Vec2::new(ruby_current_x, annotation_y_offset),
+                            Vec2LW::new(
+                                self.line_baseline_block_offset + annotation_block_offset,
+                                ruby_current_inline_offset,
+                            )
+                            .to_physical(self.writing_mode),
                             annotation_fragment,
                         ));
-                        ruby_current_x += width_for_layout;
+                        ruby_current_inline_offset += base_inline_size;
                     }
 
-                    let (fragment, width, y_correction) = self.rebuild_leaf_branch(
+                    self.rebuild_leaf_branch(
                         ruby.span_id,
-                        ruby_current_x,
+                        ruby_current_inline_offset,
                         FixedL::ZERO,
                         InlineItemFragment::Ruby(result).into(),
                         OBJECT_REPLACEMENT_LENGTH,
                         span_state,
                     );
-                    self.output
-                        .push((Vec2L::new(self.current_x, y_correction), fragment));
-                    self.current_x += width;
 
                     Ok(())
                 }
@@ -2008,11 +2506,11 @@ fn layout_run_full<'a>(
                     span_id,
                     inner: ref mut block,
                 }) => {
-                    let inner_width = block.fragment.fbox.size_for_layout().x;
-                    let (fragment, width, y_correction) = self.rebuild_leaf_branch(
+                    let inner_inline_size = block.fragment.fbox.inline_size(self.writing_mode);
+                    self.rebuild_leaf_branch(
                         span_id,
-                        inner_width,
-                        self.current_top_y - block.alignment_baseline,
+                        inner_inline_size,
+                        self.line_baseline_block_offset - block.dominant_baseline_block_offset,
                         InlineItemFragment::Block(std::mem::replace(
                             &mut block.fragment,
                             BlockContainerFragment::EMPTY,
@@ -2021,9 +2519,6 @@ fn layout_run_full<'a>(
                         OBJECT_REPLACEMENT_LENGTH,
                         span_state,
                     );
-                    self.output
-                        .push((Vec2L::new(self.current_x, y_correction), fragment));
-                    self.current_x += width;
 
                     Ok(())
                 }
@@ -2112,30 +2607,38 @@ fn layout_run_full<'a>(
             &mut self,
             shaped: &mut [ShapedItem<'c, FragmentStage<'p>>],
         ) -> Result<(), InlineLayoutError> {
-            let mut line_width = FixedL::ZERO;
+            let writing_mode = self.content.root_style.writing_mode();
+            let line_baseline = writing_mode.auto_dominant_baseline();
+            let mut line_inline_size = FixedL::ZERO;
             let mut line_metrics = LineHeightMetrics::ZERO;
             for item in &*shaped {
-                item.accumulate_width(&mut line_width);
-                line_metrics.process_item(item, LineHeight::Normal);
+                item.accumulate_width(&mut line_inline_size);
+                line_metrics.process_item(item, LineHeight::Normal, line_baseline, writing_mode);
                 self.update_line_fragmentation_state_pre(item, self.text_leaf_items);
             }
+            let line_block_size = line_metrics.height();
 
-            let line_height = line_metrics.height();
             let mut line_box = LineBoxFragment {
-                fbox: FragmentBox::new_content_only(Vec2::new(line_width, line_height)),
-                baseline_y: line_metrics.max_ascender,
+                fbox: FragmentBox::new_content_only(
+                    Vec2LW::new(line_block_size, line_inline_size).to_physical(writing_mode),
+                ),
+                dominant_baseline_offset: line_metrics.block_start_offset(writing_mode),
                 children: Vec::new(),
             };
 
-            let mut min_ruby_y = FixedL::ZERO;
+            let mut min_ruby_edge = FixedL::ZERO;
+            let mut max_ruby_edge = FixedL::ZERO;
             {
                 InlineItemFragmentBuilder {
                     output: &mut line_box.children,
-                    min_ruby_y: &mut min_ruby_y,
+                    min_ruby_edge: &mut min_ruby_edge,
+                    max_ruby_edge: &mut max_ruby_edge,
                     line_metrics,
-                    current_top_y: line_metrics.max_ascender,
-                    current_x: FixedL::ZERO,
+                    line_baseline_block_offset: line_metrics.block_start_offset(writing_mode),
+                    current_inline_offset: FixedL::ZERO,
                     content: self.content,
+                    writing_mode,
+                    line_baseline,
                     dpi: self.dpi,
                 }
                 .reorder_and_append(
@@ -2165,26 +2668,30 @@ fn layout_run_full<'a>(
                 );
             }
 
-            let aligning_x_offset = match self.line_align {
+            let aligning_inline_offset = match self.line_align {
                 HorizontalAlignment::Left => I26Dot6::ZERO,
-                HorizontalAlignment::Center => -line_width / 2,
-                HorizontalAlignment::Right => -line_width,
+                HorizontalAlignment::Center => -line_inline_size / 2,
+                HorizontalAlignment::Right => -line_inline_size,
             };
 
-            let ruby_leading = (-min_ruby_y).max(FixedL::ZERO);
-            self.result.fbox.content_size.x = self
-                .result
-                .fbox
-                .content_size
-                .x
-                .max(line_box.fbox.size_for_layout().x);
-            self.current_y += ruby_leading;
-            self.result.lines.push((
-                Vec2L::new(aligning_x_offset, self.current_y),
-                line_box.into(),
-            ));
-            self.current_y += line_height;
-            self.result.fbox.content_size.y = self.current_y;
+            min_ruby_edge += line_metrics.block_start_offset(writing_mode);
+            max_ruby_edge += line_metrics.block_end_offset(writing_mode);
+
+            let ruby_leading_start = (-min_ruby_edge).max(FixedL::ZERO);
+            let ruby_leading_end = max_ruby_edge.max(FixedL::ZERO);
+
+            let max_inline_size = self.result.fbox.content_size.inline_mut(writing_mode);
+            *max_inline_size = (*max_inline_size).max(line_inline_size);
+
+            self.current_block_offset += ruby_leading_start;
+            let mut offset = Vec2LW::new(self.current_block_offset, aligning_inline_offset)
+                .to_physical(writing_mode);
+            self.current_block_offset += line_block_size;
+            self.current_block_offset += ruby_leading_end;
+            if writing_mode.is_block_reversed() {
+                *offset.block_mut(writing_mode) = -self.current_block_offset;
+            }
+            self.result.lines.push((offset, line_box.into()));
 
             Ok(())
         }
@@ -2202,18 +2709,28 @@ fn layout_run_full<'a>(
                 );
             }
 
-            let mut min = FixedL::ZERO;
+            let writing_mode = self.content.root_style.writing_mode();
+            let mut min_inline = FixedL::ZERO;
             for (offset, _) in &fragment.lines {
-                min = min.min(offset.x);
+                min_inline = min_inline.min(offset.inline(writing_mode));
             }
             for (offset, _) in &mut fragment.lines {
-                offset.x -= min;
+                *offset.inline_mut(writing_mode) -= min_inline;
             }
+
+            if writing_mode.is_block_reversed() {
+                for (offset, _) in &mut fragment.lines {
+                    *offset.block_mut(writing_mode) += self.current_block_offset;
+                }
+            }
+
+            *fragment.fbox.content_size.block_mut(writing_mode) = self.current_block_offset;
 
             fragment
         }
     }
 
+    let writing_mode = content.root_style.writing_mode();
     let FragmentShapingResult {
         initial:
             InitialShapingResult {
@@ -2225,13 +2742,25 @@ fn layout_run_full<'a>(
                 ..
             },
         mut items,
-    } = initial_shaping_result.to_fragment_result(lctx, containing_block)?;
+    } = initial_shaping_result.to_fragment_result(
+        lctx,
+        constraints,
+        writing_mode,
+        writing_mode.auto_dominant_baseline(),
+    )?;
 
+    let root_primary_font = primary_font_from_style(&content.root_style, lctx)?;
     let mut builder = FragmentBuilder {
-        current_y: FixedL::ZERO,
+        current_block_offset: FixedL::ZERO,
         result: InlineContentFragment {
             style: content.root_style.clone(),
-            primary_font_metrics: *primary_font_from_style(&content.root_style, lctx)?.metrics(),
+            line_baselines: {
+                let alphabetic_centered_set =
+                    BoxBaselineSet::new(root_primary_font.metrics(), writing_mode);
+                alphabetic_centered_set
+                    .offset(-alphabetic_centered_set.get(writing_mode.auto_dominant_baseline()))
+            },
+            primary_font_metrics: *root_primary_font.metrics(),
             ..InlineContentFragment::EMPTY
         },
         line_align: content.root_style.text_align(),
@@ -2243,10 +2772,14 @@ fn layout_run_full<'a>(
     };
 
     let mut items = &mut items[..];
-    if containing_block.width != FixedL::MAX && !break_opportunities.is_empty() {
+    let available_space = match constraints.inline(writing_mode) {
+        LayoutConstraint::Fixed(fixed) => fixed,
+        LayoutConstraint::MaxContent => FixedL::MAX,
+    };
+    if available_space != FixedL::MAX && !break_opportunities.is_empty() {
         let mut breaking_context = BreakingContext {
             layout: lctx,
-            containing_block,
+            available_space,
             break_opportunities,
             shaper: RunShaper {
                 buffer: &mut text::ShapingBuffer::new(),
@@ -2344,12 +2877,27 @@ pub fn shape<'l, 'b, 'c>(
 }
 
 impl PartialInline<'_> {
-    pub fn max_width(&self, lctx: &mut LayoutContext) -> Result<FixedL, InlineLayoutError> {
+    pub(super) fn root_style(&self) -> &ComputedStyle {
+        &self.content.root_style
+    }
+
+    fn max_inline_size(
+        &self,
+        lctx: &mut LayoutContext,
+        block_constraint: LayoutConstraint,
+    ) -> Result<FixedL, InlineLayoutError> {
         // TODO: This could actually be avoided (and it was avoided before but removed for simplicity)
         //       by just measuring the partial items directly.
+        let writing_mode = self.content.root_style.writing_mode();
         let items = self
             .initial_shaping_result
-            .to_fragment_result(lctx, &ContainingBlock::infinite_initial())?
+            .to_fragment_result(
+                lctx,
+                Vec2W::new(block_constraint, LayoutConstraint::MaxContent)
+                    .to_physical(writing_mode),
+                writing_mode,
+                writing_mode.auto_dominant_baseline(),
+            )?
             .items;
 
         let mut max = FixedL::ZERO;
@@ -2364,17 +2912,44 @@ impl PartialInline<'_> {
         Ok(max.max(current))
     }
 
-    pub fn layout<'b, 'l>(
+    pub(crate) fn measure(
+        &self,
+        lctx: &mut LayoutContext<'_>,
+        constraints: Vec2<LayoutConstraint>,
+        axes: Axes,
+    ) -> Result<Vec2L, InlineLayoutError> {
+        let writing_mode = self.content.root_style.writing_mode();
+        if constraints.inline(writing_mode) == LayoutConstraint::MaxContent
+            && !axes.block(writing_mode)
+        {
+            return Ok(Vec2LW::new(
+                FixedL::ZERO,
+                self.max_inline_size(lctx, constraints.block(writing_mode))?,
+            )
+            .to_physical(writing_mode));
+        }
+
+        layout_run_full(
+            self.content,
+            &self.initial_shaping_result,
+            self.span_state.clone(),
+            lctx,
+            constraints,
+        )
+        .map(|x| x.fbox.size_for_layout())
+    }
+
+    pub(super) fn layout<'b, 'l>(
         &self,
         lctx: &'b mut LayoutContext<'l>,
-        containing_block: &ContainingBlock,
+        constraints: Vec2<LayoutConstraint>,
     ) -> Result<InlineContentFragment, InlineLayoutError> {
         layout_run_full(
             self.content,
             &self.initial_shaping_result,
             self.span_state.clone(),
             lctx,
-            containing_block,
+            constraints,
         )
     }
 }
@@ -2382,7 +2957,13 @@ impl PartialInline<'_> {
 pub fn layout<'l, 'b, 'c>(
     lctx: &'b mut LayoutContext<'l>,
     content: &'c InlineContent,
-    containing_block: &ContainingBlock,
+    initial_containing_block_size: Vec2L,
 ) -> Result<InlineContentFragment, InlineLayoutError> {
-    shape(lctx, content).and_then(|s| s.layout(lctx, containing_block))
+    lctx.initial_containing_block_size = initial_containing_block_size;
+
+    let constraints = Vec2::new(
+        LayoutConstraint::Fixed(initial_containing_block_size.x),
+        LayoutConstraint::Fixed(initial_containing_block_size.y),
+    );
+    shape(lctx, content).and_then(|s| s.layout(lctx, constraints))
 }

@@ -219,10 +219,28 @@ pub enum BaselineSource {
     Last,
 }
 
+// https://drafts.csswg.org/css-writing-modes-4/#propdef-direction
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Ltr,
     Rtl,
+}
+
+// https://drafts.csswg.org/css-writing-modes-4/#propdef-writing-mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingMode {
+    HorizontalTtb,
+    VerticalRtl,
+    VerticalLtr,
+    SidewaysRtl,
+    // TODO: SidewaysLtr
+}
+
+// https://drafts.csswg.org/css-writing-modes-4/#text-orientation
+#[derive(Debug, Clone, Copy)]
+pub enum TextOrientation {
+    Mixed,
+    // TODO: Upright
 }
 
 #[derive(Debug, Clone, Copy)]

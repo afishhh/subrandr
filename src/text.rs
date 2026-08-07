@@ -173,7 +173,7 @@ pub fn display<'g>(
 
         output
             .with_translation(offset)
-            .try_subscene(scene_filter, color, |subpixel_pos| {
+            .try_subscene(scene_filter, color, |subpixel_pos, _| {
                 font.glyph_subscene(cache, glyph.index, subpixel_pos.x, false, rasterizer)
                     .map(|x| x.0.clone())
             })?;

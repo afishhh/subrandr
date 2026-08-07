@@ -68,6 +68,7 @@ macros::implement_style_module! {
         #[inherit(no)] margin_left: Option<Length> = Some(Length::ZERO),
         #[inherit(no)] margin_right: Option<Length> = Some(Length::ZERO),
         #[inherit(no)] margin_bottom: Option<Length> = Some(Length::ZERO),
+        #[inherit(no)] transform: Option<Transform> = None,
     }
 
     rc misc {

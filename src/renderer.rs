@@ -26,7 +26,7 @@ use crate::{
         FixedL, LayoutContext, Point2L, Vec2L,
     },
     srv3,
-    style::{computed::HorizontalAlignment, ComputedStyle},
+    style::{computed::TextAlign, ComputedStyle},
     text::{self, platform_font_provider},
     vtt, DebugFlags,
 };
@@ -503,7 +503,7 @@ impl Renderer {
         if debug_flags.draw_perf_info {
             let mut builder = InlineContentBuilder::new({
                 let mut style = base_style.clone();
-                *style.make_text_align_mut() = HorizontalAlignment::Right;
+                *style.make_text_align_mut() = TextAlign::Right;
                 style
             });
             let mut root = builder.root();

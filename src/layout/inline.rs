@@ -18,7 +18,7 @@ use super::{
 use crate::{
     style::{
         computed::{
-            self, FontSlant, HorizontalAlignment, InlineSizing, TextOrientation, ToPhysicalPixels,
+            self, FontSlant, InlineSizing, TextAlign, TextOrientation, ToPhysicalPixels,
             WhiteSpaceCollapse, WritingMode,
         },
         ComputedStyle,
@@ -2064,7 +2064,7 @@ fn layout_run_full<'a>(
     struct FragmentBuilder<'t, 'c> {
         result: InlineContentFragment,
         current_block_offset: FixedL,
-        line_align: HorizontalAlignment,
+        line_align: TextAlign,
         bidi: &'t unicode_bidi::BidiInfo<'c>,
         text_leaf_items: &'t [LeafItemRange<'c>],
         dpi: u32,
@@ -2690,9 +2690,9 @@ fn layout_run_full<'a>(
             }
 
             let aligning_inline_offset = match self.line_align {
-                HorizontalAlignment::Left => I26Dot6::ZERO,
-                HorizontalAlignment::Center => -line_inline_size / 2,
-                HorizontalAlignment::Right => -line_inline_size,
+                TextAlign::Left => I26Dot6::ZERO,
+                TextAlign::Center => -line_inline_size / 2,
+                TextAlign::Right => -line_inline_size,
             };
 
             min_ruby_edge += line_metrics.block_start_offset(writing_mode);

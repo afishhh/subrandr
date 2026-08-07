@@ -19,7 +19,7 @@ use crate::{
     renderer::{FrameLayoutPass, SubtitleEvent},
     style::{
         apply_declarations_to,
-        computed::{Color, FontSlant, HorizontalAlignment, WhiteSpaceCollapse},
+        computed::{Color, FontSlant, TextAlign, WhiteSpaceCollapse},
         ComputedStyle, DeclarationFilter,
     },
     text::OpenTypeTag,
@@ -110,7 +110,6 @@ pub struct Event {
     range: Range<u32>,
     writing_direction: vtt::WritingDirection,
     text_alignment: vtt::TextAlignment,
-    horizontal_alignment: HorizontalAlignment,
     line: vtt::Line,
     size: f64,
     root: Element,
@@ -172,12 +171,18 @@ impl Event {
         base_style: &ComputedStyle,
         sc: &StylingContext,
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
+        let text_align = match self.text_alignment {
+            // TODO: Start and End alignment is not supported yet
+            vtt::TextAlignment::Start | vtt::TextAlignment::Left => TextAlign::Left,
+            vtt::TextAlignment::End | vtt::TextAlignment::Right => TextAlign::Right,
+            vtt::TextAlignment::Center => TextAlign::Center,
+        };
         let mut fragment = layout::inline::layout(
             lctx,
             &{
                 let root_style = {
                     let mut result = base_style.clone();
-                    *result.make_text_align_mut() = self.horizontal_alignment;
+                    *result.make_text_align_mut() = text_align;
                     result
                 };
                 let root_span_style = {
@@ -234,10 +239,10 @@ impl Event {
             };
         }
 
-        match self.horizontal_alignment {
-            HorizontalAlignment::Left => (),
-            HorizontalAlignment::Center => result.x -= fragment.fbox.size_for_layout().x / 2,
-            HorizontalAlignment::Right => result.x -= fragment.fbox.size_for_layout().x,
+        match text_align {
+            TextAlign::Left => (),
+            TextAlign::Center => result.x -= fragment.fbox.size_for_layout().x / 2,
+            TextAlign::Right => result.x -= fragment.fbox.size_for_layout().x,
         }
 
         Self::process_cue_settings_adjust_boxes(
@@ -749,22 +754,12 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
             },
         }
 
-        let horizontal_alignment = match cue.text_alignment {
-            // TODO: Start and End alignment is not supported yet
-            vtt::TextAlignment::Start => HorizontalAlignment::Left,
-            vtt::TextAlignment::End => HorizontalAlignment::Right,
-            vtt::TextAlignment::Left => HorizontalAlignment::Left,
-            vtt::TextAlignment::Right => HorizontalAlignment::Right,
-            vtt::TextAlignment::Center => HorizontalAlignment::Center,
-        };
-
         subtitles.events.push(Event {
             range: cue.start_time..cue.end_time,
             // The text-align property on the (root) list of WebVTT Node Objects must be set to the value in the second cell of the row of the table below whose first cell is the value of the corresponding cue’s WebVTT cue text alignment:
             // Table at https://www.w3.org/TR/webvtt1/#applying-css-properties
             writing_direction: cue.writing_direction,
             text_alignment: cue.text_alignment,
-            horizontal_alignment,
             line: cue.line,
             size,
             x: x_position / 100.,

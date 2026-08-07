@@ -14,7 +14,7 @@ Note that the library is still under heavy development so beware of bugs and the
 
 YouTube's subtitle format in its XML form.
 
-Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConverter) are supported (with the exception of vertical text). Some additional features found in auto-generated subtitles are also supported.
+Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConverter) are supported. Some additional features found in auto-generated subtitles are also supported.
 
 > [!WARNING]
 > Since the SRV3 format is entirely undocumented, the format is implemented on a best-effort basis and many features are known to be handled incorrectly/unimplemented.
@@ -22,9 +22,8 @@ Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConv
 > However subrandr is generally more accurate (for the features it supports) than all implementations I know of that are not browser-based.
 
 The most notable limitations for this format currently are:
-- No vertical text[^2] or justification support.
-
-[^2]: I have never encountered a YouTube video with subtitles which actually use SRV3 vertical text, so it is not very high-priority.
+- Partial vertical text support
+- No justification support
 
 #### WebVTT
 

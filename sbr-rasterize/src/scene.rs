@@ -1,7 +1,10 @@
-use std::{convert::Infallible, fmt::Debug, rc::Rc};
+use std::{convert::Infallible, fmt::Debug, ops::Mul, rc::Rc};
 
 use util::{
-    math::{I16Dot16, I26Dot6, Outline, OutlineEvent, OutlineIterExt, Point2, Rect2, Vec2},
+    math::{
+        I16Dot16, I26Dot6, Number, Outline, OutlineEvent, OutlineIterExt, Point2, Rect2, Signed,
+        Vec2,
+    },
     AnyError,
 };
 
@@ -170,6 +173,7 @@ impl SceneBuilder {
         SceneContentBuilder {
             parent: self,
             current_translation: Vec2S::ZERO,
+            current_rotation: Rotation::None,
         }
     }
 
@@ -182,9 +186,80 @@ impl SceneBuilder {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Rotation {
+    #[default]
+    None = 0,
+    Clockwise90 = 1,
+    FlipXY = 2,
+    CounterClockwise90 = 3,
+}
+
+impl Mul<Rotation> for Rotation {
+    type Output = Rotation;
+
+    fn mul(self, rhs: Rotation) -> Self::Output {
+        match (self as u8 + rhs as u8) % 4 {
+            0 => Rotation::None,
+            1 => Rotation::Clockwise90,
+            2 => Rotation::FlipXY,
+            3 => Rotation::CounterClockwise90,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Rotation {
+    pub fn inverse(self) -> Self {
+        match self {
+            Rotation::None => Rotation::None,
+            Rotation::Clockwise90 => Rotation::CounterClockwise90,
+            Rotation::FlipXY => Rotation::FlipXY,
+            Rotation::CounterClockwise90 => Rotation::Clockwise90,
+        }
+    }
+}
+
+impl<N: Signed> Mul<Vec2<N>> for Rotation {
+    type Output = Vec2<N>;
+
+    fn mul(self, rhs: Vec2<N>) -> Self::Output {
+        match self {
+            Rotation::None => rhs,
+            Rotation::Clockwise90 => Vec2::new(-rhs.y, rhs.x),
+            Rotation::FlipXY => Vec2::new(-rhs.x, -rhs.y),
+            Rotation::CounterClockwise90 => Vec2::new(rhs.y, -rhs.x),
+        }
+    }
+}
+
+impl<N: Number + Signed> Mul<Rect2<N>> for Rotation {
+    type Output = Rect2<N>;
+
+    fn mul(self, rhs: Rect2<N>) -> Self::Output {
+        match self {
+            Rotation::None => Rect2::new(rhs.min, rhs.max),
+            Rotation::Clockwise90 => Rect2::new(
+                Point2::new(-rhs.max.y, rhs.min.x),
+                Point2::new(-rhs.min.y, rhs.max.x),
+            ),
+            Rotation::FlipXY => Rect2::new(
+                Point2::new(-rhs.max.x, -rhs.max.y),
+                Point2::new(-rhs.min.x, -rhs.min.y),
+            ),
+            Rotation::CounterClockwise90 => Rect2::new(
+                Point2::new(rhs.min.y, -rhs.max.x),
+                Point2::new(rhs.max.y, -rhs.min.x),
+            ),
+        }
+    }
+}
+
 pub struct SceneContentBuilder<'a> {
     parent: &'a mut SceneBuilder,
     current_translation: Vec2S,
+    // Our transformation matrix. Yes, it only has four values :)
+    current_rotation: Rotation,
 }
 
 impl<'a> SceneContentBuilder<'a> {
@@ -196,7 +271,18 @@ impl<'a> SceneContentBuilder<'a> {
     }
 
     pub fn apply_translation(&mut self, translation: Vec2S) -> &mut SceneContentBuilder<'a> {
-        self.current_translation += translation;
+        self.current_translation += self.current_rotation * translation;
+        self
+    }
+
+    pub fn apply_rotation(
+        &mut self,
+        rotation: Rotation,
+        origin: Vec2S,
+    ) -> &mut SceneContentBuilder<'a> {
+        self.apply_translation(origin);
+        self.current_rotation = rotation * self.current_rotation;
+        self.apply_translation(-origin);
         self
     }
 
@@ -204,6 +290,14 @@ impl<'a> SceneContentBuilder<'a> {
         let mut child = self.child();
         child.apply_translation(translation);
         child
+    }
+
+    pub fn current_transform(&self) -> Rotation {
+        self.current_rotation
+    }
+
+    pub fn current_translation(&self) -> Vec2S {
+        self.current_translation
     }
 
     fn rounded_translation(&self) -> Vec2<i32> {
@@ -216,15 +310,32 @@ impl<'a> SceneContentBuilder<'a> {
     pub fn bitmap(
         &mut self,
         texture: Texture,
-        scaled_size: Vec2<u32>,
+        mut scaled_size: Vec2<u32>,
         filter: Option<BitmapFilter>,
         color: impl Into<SceneColor>,
     ) {
+        let mut pos = self.rounded_translation().to_point();
+
+        match self.current_rotation {
+            Rotation::None => (),
+            Rotation::Clockwise90 => {
+                pos.x -= scaled_size.y as i32;
+                std::mem::swap(&mut scaled_size.x, &mut scaled_size.y);
+            }
+
+            Rotation::FlipXY => pos -= Vec2::new(scaled_size.x as i32, scaled_size.y as i32),
+            Rotation::CounterClockwise90 => {
+                pos.y -= scaled_size.x as i32;
+                std::mem::swap(&mut scaled_size.x, &mut scaled_size.y);
+            }
+        }
+
         self.parent.nodes.push(SceneNode::Bitmap(Bitmap {
-            pos: self.rounded_translation().to_point(),
+            pos,
             scaled_size,
             texture,
             filter,
+            rotation: self.current_rotation,
             color: color.into(),
         }));
     }
@@ -260,7 +371,9 @@ impl<'a> SceneContentBuilder<'a> {
             .push(SceneNode::FilledOutline(FilledOutline {
                 events: outline
                     .into_iter()
-                    .map_points(|point| point + transf)
+                    .map_points(|point| {
+                        (self.current_rotation * point.to_vec() + transf).to_point()
+                    })
                     .collect(),
                 color: color.into(),
             }));
@@ -268,7 +381,7 @@ impl<'a> SceneContentBuilder<'a> {
 
     pub fn filled_rect(&mut self, rect: Rect2S, color: impl Into<SceneColor>) {
         self.parent.nodes.push(SceneNode::FilledRect(FilledRect {
-            rect: rect.translate(self.current_translation),
+            rect: (self.current_rotation * rect).translate(self.current_translation),
             color: color.into(),
         }));
     }
@@ -277,17 +390,24 @@ impl<'a> SceneContentBuilder<'a> {
         &mut self,
         scene_filter: Option<SceneFilter>,
         active_color: impl Into<SceneColor>,
-        content_fn: impl FnOnce(Point2S) -> Result<SubsceneKind, E>,
+        content_fn: impl FnOnce(Point2S, Rotation) -> Result<SubsceneKind, E>,
     ) -> Result<(), E> {
         let floored_pos = Vec2::new(
             self.current_translation.x.floor_to_inner(),
             self.current_translation.y.floor_to_inner(),
         );
 
+        // TODO: We should actually only pass rotation to the callback if
+        //       scene_filter is None because the filter is supossed to
+        //       operate on a bitmap conceptually.
+        //       This doesn't matter for rotations though (with current filters).
         self.parent.nodes.push(SceneNode::Subscene(Subscene {
             pos: floored_pos.to_point(),
             scene_filter,
-            kind: content_fn((self.current_translation - floored_pos).to_point())?,
+            kind: content_fn(
+                (self.current_translation - floored_pos).to_point(),
+                self.current_rotation,
+            )?,
             active_color: active_color.into(),
         }));
 
@@ -298,10 +418,10 @@ impl<'a> SceneContentBuilder<'a> {
         &mut self,
         scene_filter: Option<SceneFilter>,
         active_color: impl Into<SceneColor>,
-        content_fn: impl FnOnce(Point2S) -> SubsceneKind,
+        content_fn: impl FnOnce(Point2S, Rotation) -> SubsceneKind,
     ) {
-        match self.try_subscene(scene_filter, active_color, |translation| {
-            Ok::<_, Infallible>(content_fn(translation))
+        match self.try_subscene(scene_filter, active_color, |translation, rotation| {
+            Ok::<_, Infallible>(content_fn(translation, rotation))
         }) {
             Ok(()) => (),
         }
@@ -335,6 +455,7 @@ pub(crate) struct Bitmap {
     pub(crate) scaled_size: Vec2<u32>,
     pub(crate) texture: Texture,
     pub(crate) filter: Option<BitmapFilter>,
+    pub(crate) rotation: Rotation,
     pub(crate) color: SceneColor,
 }
 
@@ -343,6 +464,8 @@ pub enum BitmapFilter {
     ExtractAlpha,
 }
 
+// TODO: Get rid of this
+//       It doesn't respect rotation transform and is only used for debug stuff.
 #[derive(Debug, Clone)]
 pub(crate) struct StrokedPolyline {
     pub(crate) pos: Point2S,

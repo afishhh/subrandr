@@ -1,6 +1,6 @@
 use rasterize::{
     color::BGRA8,
-    scene::{SceneContentBuilder, SceneFilter},
+    scene::{Rotation, SceneContentBuilder, SceneFilter},
     Rasterizer,
 };
 use util::math::{I26Dot6, Rect2};
@@ -9,10 +9,10 @@ use crate::{
     layout::{
         block::{BlockContainerFragment, BlockContainerFragmentContent},
         inline::{Baseline, InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
-        FixedL, FragmentBox, Point2L, Vec2L, Vec2LW, Vec2WritingModeExt as _,
+        Axis, FixedL, FragmentBox, Point2L, Vec2L, Vec2LW, Vec2WritingModeExt as _,
     },
     style::{
-        computed::{ToPhysicalPixels, WritingMode},
+        computed::{ToPhysicalPixels, Transform, WritingMode},
         ComputedStyle,
     },
     text::{self, FontMetrics, GlyphCache},
@@ -32,16 +32,55 @@ pub struct DisplayPass<'r> {
 pub type DisplayError = text::GlyphDisplayError;
 
 struct DisplayContext<'c> {
-    output: SceneContentBuilder<'c>,
     dpi: u32,
     glyph_cache: &'c GlyphCache,
     rasterizer: &'c mut dyn Rasterizer,
     decoration_ctx: DecorationContext<'c>,
 }
 
-fn round_block(mut p: Point2L, writing_mode: WritingMode) -> Point2L {
-    *p.block_mut(writing_mode) = p.block_mut(writing_mode).round();
-    p
+// This is a bit funny but seems like the best way to round with transforms.
+// It can be adapted to matrix math easily and makes sense as long a transform
+// doesn't mix axes. In the case that a transform does mix axes then rounding
+// makes little sense and we should just skip it.
+fn round_offset_in_with(
+    output: &SceneContentBuilder,
+    value: FixedL,
+    axis: Axis,
+    round: impl Fn(FixedL) -> FixedL,
+) -> FixedL {
+    let point = match axis {
+        Axis::X => Vec2L::new(value, FixedL::ZERO),
+        Axis::Y => Vec2L::new(FixedL::ZERO, value),
+    };
+    let transform = output.current_transform();
+    let translation = output.current_translation();
+    let transformed_point = transform * point + translation;
+    let rounded_transformed_point =
+        Vec2L::new(round(transformed_point.x), round(transformed_point.y));
+
+    let rounded_point = transform.inverse() * (rounded_transformed_point - translation);
+    match axis {
+        Axis::X => rounded_point.x,
+        Axis::Y => rounded_point.y,
+    }
+}
+
+fn round_offset_in(output: &SceneContentBuilder, value: FixedL, axis: Axis) -> FixedL {
+    round_offset_in_with(output, value, axis, FixedL::round)
+}
+
+fn floor_offset_in(output: &SceneContentBuilder, value: FixedL, axis: Axis) -> FixedL {
+    round_offset_in_with(output, value, axis, FixedL::floor)
+}
+
+fn round_block_in(
+    output: &SceneContentBuilder,
+    mut value: Point2L,
+    writing_mode: WritingMode,
+) -> Point2L {
+    let block_offset = value.block_mut(writing_mode);
+    *block_offset = round_offset_in(output, *block_offset, Axis::block(writing_mode));
+    value
 }
 
 impl<'r> DisplayPass<'r> {
@@ -60,14 +99,16 @@ impl<'r> DisplayPass<'r> {
         }
     }
 
-    fn root_ctx(&mut self) -> DisplayContext<'_> {
-        DisplayContext {
-            output: self.output.child(),
-            dpi: self.dpi,
-            glyph_cache: self.glyph_cache,
-            rasterizer: self.rasterizer,
-            decoration_ctx: self.decoration_tracker.root(),
-        }
+    fn root_ctx(&mut self, pos: Point2L) -> (SceneContentBuilder<'_>, DisplayContext<'_>) {
+        (
+            self.output.with_translation(pos.to_vec()),
+            DisplayContext {
+                dpi: self.dpi,
+                glyph_cache: self.glyph_cache,
+                rasterizer: self.rasterizer,
+                decoration_ctx: self.decoration_tracker.root(),
+            },
+        )
     }
 
     pub fn display_inline_content_fragment(
@@ -75,8 +116,8 @@ impl<'r> DisplayPass<'r> {
         pos: Point2L,
         fragment: &InlineContentFragment,
     ) -> Result<(), DisplayError> {
-        self.root_ctx()
-            .display_inline_content_fragment(pos, fragment)
+        let (output, mut ctx) = self.root_ctx(pos);
+        ctx.display_inline_content_fragment(output, fragment)
     }
 
     pub fn display_block_container_fragment(
@@ -84,20 +125,68 @@ impl<'r> DisplayPass<'r> {
         pos: Point2L,
         fragment: &BlockContainerFragment,
     ) -> Result<(), DisplayError> {
-        self.root_ctx()
-            .display_block_container_fragment(pos, fragment)
+        let (output, mut ctx) = self.root_ctx(pos);
+        ctx.display_block_container_fragment(output, fragment)
+    }
+}
+
+impl DisplayContext<'_> {
+    fn enter_box(
+        &mut self,
+        style: &ComputedStyle,
+        font_metrics_if_inline: Option<(&FontMetrics, WritingMode)>,
+    ) -> DisplayContext<'_> {
+        DisplayContext {
+            dpi: self.dpi,
+            glyph_cache: self.glyph_cache,
+            rasterizer: self.rasterizer,
+            decoration_ctx: self
+                .decoration_ctx
+                .push_decorations(style, font_metrics_if_inline),
+        }
+    }
+
+    fn suspend_decorations(&mut self) -> DisplayContext<'_> {
+        DisplayContext {
+            dpi: self.dpi,
+            glyph_cache: self.glyph_cache,
+            rasterizer: self.rasterizer,
+            decoration_ctx: self.decoration_ctx.suspend_active(),
+        }
+    }
+
+    /// Should only be called on [transformable elements].
+    ///
+    /// [transformable elements]: (https://drafts.csswg.org/css-transforms-1/#transformable-element)
+    fn enter_transformable_box(
+        output: &mut SceneContentBuilder,
+        fbox: &FragmentBox,
+        style: &ComputedStyle,
+    ) {
+        output.apply_translation(fbox.border_box().min.to_vec());
+
+        if let Some(Transform(rotation)) = style.transform() {
+            if rotation != Rotation::None {
+                output.apply_rotation(rotation, fbox.border_box().size() / FixedL::new(2));
+            }
+        }
+
+        output.apply_translation(-fbox.border_box().min.to_vec());
+
+        Self::display_background(output, style, fbox);
+
+        output.apply_translation(fbox.content_offset());
     }
 }
 
 impl DisplayContext<'_> {
     fn push_text(
         &mut self,
-        pos: Point2L,
+        mut output: SceneContentBuilder,
         fragment: &TextFragment,
         shadow: Option<I26Dot6>,
         color: BGRA8,
     ) -> Result<(), DisplayError> {
-        let mut output = self.output.with_translation(pos.to_vec());
         let scene_filter = shadow.map(|blur_radius| SceneFilter::ExtractAlpha {
             blur_stddev: blur_radius,
         });
@@ -133,19 +222,24 @@ impl DisplayContext<'_> {
             output.with_translation(offset).try_subscene(
                 scene_filter,
                 color,
-                |subpixel_pos, _| {
-                    let (offset_value, offset_axis_is_y) = if fragment.is_vertical() {
-                        (subpixel_pos.y, true)
-                    } else {
-                        (subpixel_pos.x, false)
+                |subpixel_pos, rotation| {
+                    let rotation_swaps_axes = match rotation {
+                        Rotation::None | Rotation::FlipXY => false,
+                        Rotation::Clockwise90 | Rotation::CounterClockwise90 => true,
                     };
+                    let (offset_value, offset_axis_is_y) =
+                        if fragment.is_vertical() ^ rotation_swaps_axes {
+                            (subpixel_pos.y, true)
+                        } else {
+                            (subpixel_pos.x, false)
+                        };
 
                     font.glyph_subscene(
                         self.glyph_cache,
                         glyph.index,
                         offset_value,
                         offset_axis_is_y,
-                        glyph_transform,
+                        rotation * glyph_transform,
                         self.rasterizer,
                     )
                     .map(|x| x.0.clone())
@@ -179,6 +273,7 @@ impl DisplayContext<'_> {
 
     fn display_text(
         &mut self,
+        output: &mut SceneContentBuilder,
         pos: Point2L,
         baseline_off: FixedL,
         fragment: &TextFragment,
@@ -199,11 +294,14 @@ impl DisplayContext<'_> {
                     FixedL::ZERO
                 };
 
+                let shadow_pos = round_block_in(
+                    output,
+                    pos + shadow.offset.to_physical_pixels(self.dpi),
+                    writing_mode,
+                )
+                .to_vec();
                 self.push_text(
-                    round_block(
-                        pos + shadow.offset.to_physical_pixels(self.dpi),
-                        writing_mode,
-                    ),
+                    output.with_translation(shadow_pos),
                     fragment,
                     Some(stddev),
                     color,
@@ -225,7 +323,7 @@ impl DisplayContext<'_> {
             .filter(|x| matches!(x.kind, DecorationKind::Underline))
         {
             Self::display_line_decoration(
-                &mut self.output,
+                output,
                 text_inline_start,
                 text_inline_end,
                 baseline_off,
@@ -236,7 +334,7 @@ impl DisplayContext<'_> {
 
         let color = fragment.style.color();
         if color.a > 0 {
-            self.push_text(pos, fragment, None, color)?;
+            self.push_text(output.with_translation(pos.to_vec()), fragment, None, color)?;
         }
 
         for decoration in self
@@ -246,7 +344,7 @@ impl DisplayContext<'_> {
             .filter(|x| matches!(x.kind, DecorationKind::LineThrough))
         {
             Self::display_line_decoration(
-                &mut self.output,
+                output,
                 text_inline_start,
                 text_inline_end,
                 baseline_off,
@@ -258,34 +356,8 @@ impl DisplayContext<'_> {
         Ok(())
     }
 
-    fn enter_box(
-        &mut self,
-        style: &ComputedStyle,
-        font_metrics_if_inline: Option<(&FontMetrics, WritingMode)>,
-    ) -> DisplayContext<'_> {
-        DisplayContext {
-            output: self.output.child(),
-            dpi: self.dpi,
-            glyph_cache: self.glyph_cache,
-            rasterizer: self.rasterizer,
-            decoration_ctx: self
-                .decoration_ctx
-                .push_decorations(style, font_metrics_if_inline),
-        }
-    }
-
-    fn suspend_decorations(&mut self) -> DisplayContext<'_> {
-        DisplayContext {
-            output: self.output.child(),
-            dpi: self.dpi,
-            glyph_cache: self.glyph_cache,
-            rasterizer: self.rasterizer,
-            decoration_ctx: self.decoration_ctx.suspend_active(),
-        }
-    }
-
-    fn display_background(
-        &mut self,
+    fn display_background_at(
+        output: &mut SceneContentBuilder,
         pos: Point2L,
         style: &ComputedStyle,
         fragment_box: &FragmentBox,
@@ -296,17 +368,29 @@ impl DisplayContext<'_> {
             // 1. Adjacent backgrounds will not overlap or have gaps unless they are less than 1 pixel wide.
             // 2. It rounds the background box to whole integers avoiding conflation artifacts.
             // Not sure what browsers do here though maybe that's worthwhile to investigate.
-            let mut bg = fragment_box.padding_box().translate(pos.to_vec());
-            bg.max.x = bg.max.x.floor();
-            bg.max.y = bg.max.y.round();
-            bg.min.x = bg.min.x.floor();
-            bg.min.y = bg.min.y.round();
-            self.output.filled_rect(bg, background);
+            // TODO: Now that we support writing modes the distinction for x/y no longer makes snese
+            //       in vertical ones. Maybe just round both coordinates...?
+            //       Also would make it consistent when rotated.
+            let mut rect = fragment_box.padding_box().translate(pos.to_vec());
+            rect.max.x = floor_offset_in(output, rect.max.x, Axis::X);
+            rect.max.y = round_offset_in(output, rect.max.y, Axis::Y);
+            rect.min.x = floor_offset_in(output, rect.min.x, Axis::X);
+            rect.min.y = round_offset_in(output, rect.min.y, Axis::Y);
+            output.filled_rect(rect, background);
         }
+    }
+
+    fn display_background(
+        output: &mut SceneContentBuilder,
+        style: &ComputedStyle,
+        fragment_box: &FragmentBox,
+    ) {
+        Self::display_background_at(output, Point2L::ZERO, style, fragment_box);
     }
 
     fn display_ruby_fragment(
         &mut self,
+        output: &mut SceneContentBuilder,
         pos: Point2L,
         baseline_pos: FixedL,
         fragment: &RubyFragment,
@@ -317,7 +401,7 @@ impl DisplayContext<'_> {
         for &(base_offset, ref base, annotation_offset, ref annotation) in &fragment.content {
             {
                 let base_pos = content_pos + base_offset;
-                self.display_background(base_pos, &base.style, &base.fbox);
+                Self::display_background_at(output, base_pos, &base.style, &base.fbox);
                 // Careful spec reading suggests ruby containers only *propagate* decorations:
                 // https://drafts.csswg.org/css-text-decor/#line-decoration
                 let mut ruby_scope = self.enter_box(&fragment.style, None);
@@ -334,7 +418,7 @@ impl DisplayContext<'_> {
                             .map_or(FixedL::ZERO, |x| x.0.inline(writing_mode));
                     for decoration in base_scope.decoration_ctx.active_decorations() {
                         Self::display_line_decoration(
-                            &mut base_scope.output,
+                            output,
                             last_inline,
                             initial_base_padding_end,
                             baseline_pos,
@@ -346,6 +430,7 @@ impl DisplayContext<'_> {
 
                 for &(base_item_offset, ref base_item) in &base.children {
                     base_scope.display_inline_item_fragment(
+                        output,
                         base_pos + base.fbox.content_offset() + base_item_offset,
                         baseline_pos,
                         base_item,
@@ -363,7 +448,7 @@ impl DisplayContext<'_> {
                             .map_or(FixedL::ZERO, |x| x.0.inline(writing_mode));
                     for decoration in base_scope.decoration_ctx.active_decorations() {
                         Self::display_line_decoration(
-                            &mut base_scope.output,
+                            output,
                             final_base_padding_end,
                             base_inline_end,
                             baseline_pos,
@@ -383,7 +468,8 @@ impl DisplayContext<'_> {
                     &annotation.style,
                     Some((annotation.primary_font.metrics(), writing_mode)),
                 );
-                annotation_scope.display_background(
+                Self::display_background_at(
+                    output,
                     annotation_pos,
                     &annotation.style,
                     &annotation.fbox,
@@ -391,6 +477,7 @@ impl DisplayContext<'_> {
                 let annotation_content_offset = annotation_pos + annotation.fbox.content_offset();
                 for &(annotation_item_offset, ref annotation_item) in &annotation.children {
                     annotation_scope.display_inline_item_fragment(
+                        output,
                         annotation_content_offset + annotation_item_offset,
                         annotation_content_offset.block(writing_mode)
                             + annotation.baseline_block_offset,
@@ -406,6 +493,7 @@ impl DisplayContext<'_> {
 
     fn display_inline_item_fragment(
         &mut self,
+        output: &mut SceneContentBuilder,
         pos: Point2L,
         baseline_pos: FixedL,
         fragment: &InlineItemFragment,
@@ -413,7 +501,7 @@ impl DisplayContext<'_> {
     ) -> Result<(), DisplayError> {
         match fragment {
             InlineItemFragment::Span(span) => {
-                self.display_background(pos, &span.style, &span.fbox);
+                Self::display_background_at(output, pos, &span.style, &span.fbox);
 
                 let mut scope = self.enter_box(
                     &span.style,
@@ -422,6 +510,7 @@ impl DisplayContext<'_> {
                 for &(offset, ref child) in &span.content {
                     let child_pos = pos + span.fbox.content_offset() + offset;
                     scope.display_inline_item_fragment(
+                        output,
                         child_pos,
                         baseline_pos,
                         child,
@@ -432,7 +521,8 @@ impl DisplayContext<'_> {
             InlineItemFragment::Text(text) => {
                 if text.style.visibility().is_visible() {
                     self.display_text(
-                        round_block(pos, writing_mode),
+                        output,
+                        round_block_in(output, pos, writing_mode),
                         baseline_pos,
                         text,
                         writing_mode,
@@ -440,10 +530,10 @@ impl DisplayContext<'_> {
                 }
             }
             InlineItemFragment::Ruby(ruby) => {
-                self.display_ruby_fragment(pos, baseline_pos, ruby, writing_mode)?
+                self.display_ruby_fragment(output, pos, baseline_pos, ruby, writing_mode)?
             }
             InlineItemFragment::Block(block) => {
-                self.display_block_container_fragment(pos, block)?
+                self.display_block_container_fragment(output.with_translation(pos.to_vec()), block)?
             }
         }
 
@@ -452,7 +542,7 @@ impl DisplayContext<'_> {
 
     fn display_inline_content_fragment(
         &mut self,
-        pos: Point2L,
+        mut output: SceneContentBuilder,
         fragment: &InlineContentFragment,
     ) -> Result<(), DisplayError> {
         let writing_mode = fragment.style.writing_mode();
@@ -462,14 +552,23 @@ impl DisplayContext<'_> {
         );
 
         for &(offset, ref line) in &fragment.lines {
-            let current = pos + offset;
-            let baseline_pos =
-                (current.block(writing_mode) + line.dominant_baseline_offset).round();
+            let current = offset.to_point();
+            let baseline_pos = round_offset_in(
+                &output,
+                current.block(writing_mode) + line.dominant_baseline_offset,
+                Axis::block(writing_mode),
+            );
 
             for &(offset, ref item) in &line.children {
                 let current = current + offset;
 
-                scope.display_inline_item_fragment(current, baseline_pos, item, writing_mode)?
+                scope.display_inline_item_fragment(
+                    &mut output,
+                    current,
+                    baseline_pos,
+                    item,
+                    writing_mode,
+                )?
             }
         }
 
@@ -478,20 +577,22 @@ impl DisplayContext<'_> {
 
     fn display_block_container_fragment(
         &mut self,
-        pos: Point2L,
+        mut output: SceneContentBuilder<'_>,
         fragment: &BlockContainerFragment,
     ) -> Result<(), DisplayError> {
-        self.display_background(pos, &fragment.style, &fragment.fbox);
+        Self::enter_transformable_box(&mut output, &fragment.fbox, &fragment.style);
 
-        let content_pos = pos + fragment.fbox.content_offset();
         let mut scope = self.enter_box(&fragment.style, None);
         match &fragment.content {
             &BlockContainerFragmentContent::Inline(offset, ref inline) => {
-                scope.display_inline_content_fragment(content_pos + offset, inline)?;
+                scope.display_inline_content_fragment(output.with_translation(offset), inline)?;
             }
             BlockContainerFragmentContent::Block(children) => {
                 for &(child_off, ref child) in children {
-                    scope.display_block_container_fragment(content_pos + child_off, child)?;
+                    scope.display_block_container_fragment(
+                        output.with_translation(child_off),
+                        child,
+                    )?;
                 }
             }
         }

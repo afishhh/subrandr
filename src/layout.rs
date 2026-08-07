@@ -214,6 +214,10 @@ impl FragmentBox {
         )
     }
 
+    pub fn border_box(&self) -> Rect2L {
+        self.padding_box()
+    }
+
     pub fn margin_box(&self) -> Rect2L {
         let mut result = self.padding_box();
         result.min.x -= self.margin.left;
@@ -432,6 +436,17 @@ impl Axis {
             Self::Y
         } else {
             Self::X
+        }
+    }
+
+    pub(crate) fn block(writing_mode: WritingMode) -> Self {
+        Self::inline(writing_mode).perpendicular()
+    }
+
+    pub(crate) fn perpendicular(self) -> Self {
+        match self {
+            Axis::X => Axis::Y,
+            Axis::Y => Axis::X,
         }
     }
 }

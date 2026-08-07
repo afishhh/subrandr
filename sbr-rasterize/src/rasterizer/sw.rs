@@ -17,7 +17,7 @@ use crate::{
     color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
     scene::{
-        Bitmap, BitmapFilter, ExternalSubscene, FilledRect, FixedS, Rect2S, Scene, SceneFilter,
+        BitmapFilter, ExternalSubscene, FilledRect, FixedS, Rect2S, Rotation, Scene, SceneFilter,
         SceneNode, SubsceneKind,
     },
     PixelFormat, SceneRenderError,
@@ -586,6 +586,10 @@ enum RasterCacheKey {
         src_off: Vec2<u32>,
         src_size: Vec2<u32>,
     },
+    TransformTexture {
+        texture: Texture<'static>,
+        rotation: Rotation,
+    },
 }
 
 enum SubsceneCacheKey {
@@ -851,6 +855,85 @@ impl Rasterizer {
             .get_or_scale_texture(texture, dst_size, src_off, src_size, self)
             .clone()
     }
+
+    fn transform_texture_uncached(
+        &self,
+        texture: &Texture,
+        rotation: Rotation,
+    ) -> Texture<'static> {
+        fn rotate<P: Copy>(
+            mut target: RenderTargetView<MaybeUninit<P>>,
+            src: &[P],
+            src_stride: usize,
+            rotation: Rotation,
+        ) {
+            let w1 = target.width - 1;
+            let h1 = target.height - 1;
+            match rotation {
+                Rotation::None => (),
+                Rotation::Clockwise90 => {
+                    for x in 0..target.width {
+                        for y in 0..target.height {
+                            let src_pixel = src[(w1 - x) as usize * src_stride + (h1 - y) as usize];
+                            let dst_pixel = target.pixel_at(x as i32, y as i32).unwrap();
+                            dst_pixel.write(src_pixel);
+                        }
+                    }
+                }
+                Rotation::FlipXY => {
+                    for x in 0..target.width {
+                        for y in 0..target.height {
+                            let src_pixel = src[(h1 - y) as usize * src_stride + (w1 - x) as usize];
+                            let dst_pixel = target.pixel_at(x as i32, y as i32).unwrap();
+                            dst_pixel.write(src_pixel);
+                        }
+                    }
+                }
+                Rotation::CounterClockwise90 => {
+                    for x in 0..target.width {
+                        for y in 0..target.height {
+                            let src_pixel = src[x as usize * src_stride + y as usize];
+                            let dst_pixel = target.pixel_at(x as i32, y as i32).unwrap();
+                            dst_pixel.write(src_pixel);
+                        }
+                    }
+                }
+            }
+        }
+
+        let new_size = match rotation {
+            Rotation::None => {
+                unreachable!("`transform_texture_uncached` called with `Rotation::None`")
+            }
+            Rotation::Clockwise90 => Vec2::new(texture.height(), texture.width()),
+            Rotation::FlipXY => texture.size(),
+            Rotation::CounterClockwise90 => Vec2::new(texture.height(), texture.width()),
+        };
+
+        match texture.data.as_ref() {
+            TextureDataRef::Mono(mono) => unsafe {
+                Texture::new_with_uninit(new_size, |target| {
+                    rotate(target, mono, texture.width as usize, rotation)
+                })
+            },
+            TextureDataRef::Bgra(bgra) => unsafe {
+                Texture::new_with_uninit(new_size, |target| {
+                    rotate(target, bgra, texture.width as usize, rotation)
+                })
+            },
+        }
+    }
+
+    fn transform_texture(
+        &self,
+        log: &LogContext,
+        texture: &Texture<'static>,
+        rotation: Rotation,
+    ) -> Texture<'static> {
+        self.cache
+            .get_or_transform_texture(log, texture, rotation, self)
+            .clone()
+    }
 }
 
 struct BlurOutput {
@@ -1042,23 +1125,6 @@ pub struct OutputPiece {
     pub content: OutputPieceContent,
 }
 
-impl OutputPiece {
-    fn from_bitmap(bitmap: Bitmap, active_color: BGRA8) -> Self {
-        let texture = unwrap_sw_texture(&bitmap.texture);
-        Self {
-            pos: bitmap.pos,
-            size: bitmap.scaled_size,
-            content: {
-                OutputPieceContent::Texture(OutputBitmap {
-                    texture: texture.clone(),
-                    filter: bitmap.filter,
-                    color: bitmap.color.compute(active_color),
-                })
-            },
-        }
-    }
-}
-
 impl Rasterizer {
     fn render_scene_pieces_impl(
         &mut self,
@@ -1075,7 +1141,27 @@ impl Rasterizer {
 
             match node {
                 SceneNode::Bitmap(bitmap) => {
-                    on_piece(self, OutputPiece::from_bitmap(bitmap.clone(), active_color));
+                    let texture = unwrap_sw_texture(&bitmap.texture);
+                    let texture = if bitmap.rotation == Rotation::None {
+                        texture.clone()
+                    } else {
+                        self.transform_texture(log, texture, bitmap.rotation)
+                    };
+
+                    on_piece(
+                        self,
+                        OutputPiece {
+                            pos: bitmap.pos,
+                            size: bitmap.scaled_size,
+                            content: {
+                                OutputPieceContent::Texture(OutputBitmap {
+                                    texture,
+                                    filter: bitmap.filter,
+                                    color: bitmap.color.compute(active_color),
+                                })
+                            },
+                        },
+                    );
                 }
                 &SceneNode::FilledRect(FilledRect { rect, color }) => {
                     let floored_pos =
@@ -1400,6 +1486,29 @@ impl RasterCache {
             || {
                 Ok::<_, std::convert::Infallible>(CachedTexture(
                     rasterizer.scale_texture_uncached(texture, dst_size, src_off, src_size),
+                ))
+            },
+        );
+
+        result
+    }
+
+    pub fn get_or_transform_texture(
+        &self,
+        log: &LogContext,
+        texture: &Texture<'static>,
+        rotation: Rotation,
+        rasterizer: &Rasterizer,
+    ) -> &Texture<'static> {
+        let Ok(CachedTexture(result)) = self.0.get_or_try_insert_with(
+            RasterCacheKey::TransformTexture {
+                texture: texture.clone(),
+                rotation,
+            },
+            || {
+                trace!(log, "Transforming {texture:?} with rotation={rotation:?}");
+                Ok::<_, std::convert::Infallible>(CachedTexture(
+                    rasterizer.transform_texture_uncached(texture, rotation),
                 ))
             },
         );

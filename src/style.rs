@@ -45,7 +45,7 @@ macros::implement_style_module! {
         #[copy(no)] text_shadows: Rc<[TextShadow]> = rc_static!([]),
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
-        text_align: HorizontalAlignment = HorizontalAlignment::Left,
+        text_align: TextAlign = TextAlign::Left,
         inline_sizing: InlineSizing = InlineSizing::Normal,
         direction: Direction = Direction::Ltr,
         writing_mode: WritingMode = WritingMode::HorizontalTtb,

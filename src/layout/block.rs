@@ -7,7 +7,7 @@ use super::{
     LayoutContext, Vec2L, Vec2LW, Vec2W, Vec2WritingModeExt,
 };
 use crate::style::{
-    computed::{BaselineSource, Direction, HorizontalAlignment, ToPhysicalPixels, WritingMode},
+    computed::{BaselineSource, Direction, TextAlign, ToPhysicalPixels, WritingMode},
     ComputedStyle,
 };
 
@@ -597,9 +597,9 @@ impl PartialBlockContainer<'_> {
                 auto_block_size = fragment.fbox.block_size(writing_mode);
 
                 let inline_offset = match self.style.text_align() {
-                    HorizontalAlignment::Left => FixedL::ZERO,
-                    HorizontalAlignment::Center => (inner_inline_size - content_inline_size) / 2,
-                    HorizontalAlignment::Right => inner_inline_size - content_inline_size,
+                    TextAlign::Left => FixedL::ZERO,
+                    TextAlign::Center => (inner_inline_size - content_inline_size) / 2,
+                    TextAlign::Right => inner_inline_size - content_inline_size,
                 };
                 BlockContainerFragmentContent::Inline(
                     Vec2LW::new(FixedL::ZERO, inline_offset).to_physical(writing_mode),

@@ -26,7 +26,10 @@ use crate::{
         FixedL, LayoutContext, Point2L, Vec2L,
     },
     srv3,
-    style::{computed::HorizontalAlignment, ComputedStyle},
+    style::{
+        computed::{TextAlign, WritingMode},
+        ComputedStyle,
+    },
     text::{self, platform_font_provider},
     vtt, DebugFlags,
 };
@@ -63,6 +66,14 @@ impl SubtitleContext {
 
     pub fn player_height(&self) -> I26Dot6 {
         self.video_height + self.padding_height()
+    }
+
+    pub fn player_inline_size(&self, writing_mode: WritingMode) -> I26Dot6 {
+        if writing_mode.is_horizontal() {
+            self.player_width()
+        } else {
+            self.player_height()
+        }
     }
 }
 
@@ -505,7 +516,7 @@ impl Renderer {
         if debug_flags.draw_perf_info {
             let mut builder = InlineContentBuilder::new({
                 let mut style = base_style.clone();
-                *style.make_text_align_mut() = HorizontalAlignment::Right;
+                *style.make_text_align_mut() = TextAlign::Right;
                 style
             });
             let mut root = builder.root();

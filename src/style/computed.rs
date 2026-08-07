@@ -138,17 +138,7 @@ impl Color {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Alignment(pub HorizontalAlignment, pub VerticalAlignment);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VerticalAlignment {
-    Top,
-    Center,
-    Bottom,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HorizontalAlignment {
+pub enum TextAlign {
     Left,
     Center,
     Right,

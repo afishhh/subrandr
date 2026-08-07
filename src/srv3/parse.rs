@@ -110,34 +110,45 @@ impl Default for WindowPos {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct WindowStyle {
-    pub mode_hint: ModeHint,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModeHint {
     // NOTE: ModeHint=0 is *not* the same as ModeHint=1 as some sources say.
-    //       For example while experimenting with the `t` attribute on ruby I
-    //       accidentally left `mh=0` and got different results.
+    //       While experimenting with the `t` attribute on ruby I accidentally
+    //       left in `mh="0"` and got different results.
     Default = 1,
     Scroll = 2,
 }
 
-impl FromStr for ModeHint {
-    type Err = AnyError;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintDir {
+    Horizontal = 0,
+    // TODO: `2` would be `VerticalUpright` which sets `text-orientation: upright`
+    VerticalMixed = 3,
+}
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.trim() {
-            "1" => Self::Default,
-            "2" => Self::Scroll,
-            _ => return Err("Unknown mode hint".into()),
-        })
+impl PrintDir {
+    pub(crate) fn is_vertical(self) -> bool {
+        matches!(self, Self::VerticalMixed)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollDir {
+    RightToLeft = 0,
+    LeftToRight = 1,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WindowStyle {
+    pub mode_hint: ModeHint,
+    pub print_dir: PrintDir,
+    pub scroll_dir: ScrollDir,
 }
 
 const DEFAULT_WINDOW_STYLE: WindowStyle = WindowStyle {
     mode_hint: ModeHint::Default,
+    print_dir: PrintDir::Horizontal,
+    scroll_dir: ScrollDir::RightToLeft,
 };
 
 impl Default for WindowStyle {
@@ -157,8 +168,8 @@ pub struct Segment<'h> {
 pub struct Event<'h> {
     pub time: u32,
     pub duration: u32,
-    pub position: &'h WindowPos,
-    pub style: &'h WindowStyle,
+    pub window_position: &'h WindowPos,
+    pub window_style: &'h WindowStyle,
     pub window_id: Option<Box<str>>,
     pub segments: Vec<Segment<'h>>,
 }
@@ -308,6 +319,42 @@ impl FromStr for Point {
     }
 }
 
+impl FromStr for ModeHint {
+    type Err = AnyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "1" => Self::Default,
+            "2" => Self::Scroll,
+            _ => return Err("Unknown mode hint".into()),
+        })
+    }
+}
+
+impl FromStr for PrintDir {
+    type Err = AnyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "0" => Self::Horizontal,
+            "3" => Self::VerticalMixed,
+            _ => return Err("Unknown print dir".into()),
+        })
+    }
+}
+
+impl FromStr for ScrollDir {
+    type Err = AnyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "0" => Self::RightToLeft,
+            "1" => Self::LeftToRight,
+            _ => return Err("Unknown scroll dir".into()),
+        })
+    }
+}
+
 fn parse_pen(
     log: &LogContext,
     attributes: Attributes,
@@ -433,6 +480,12 @@ fn parse_ws(
         },
         "mh"(mh: ModeHint) => {
             result.mode_hint = mh;
+        },
+        "pd"(pd: PrintDir) => {
+            result.print_dir = pd;
+        },
+        "sd"(sd: ScrollDir) => {
+            result.scroll_dir = sd;
         },
         else other => {
             warn!(
@@ -621,8 +674,8 @@ impl<'rs> BodyParser<'rs> {
                             let mut result = Event {
                                 time: 0,
                                 duration: 0,
-                                position: &DEFAULT_WINDOW_POS,
-                                style: &DEFAULT_WINDOW_STYLE,
+                                window_position: &DEFAULT_WINDOW_POS,
+                                window_style: &DEFAULT_WINDOW_STYLE,
                                 window_id: None,
                                 segments: vec![],
                             };
@@ -641,10 +694,10 @@ impl<'rs> BodyParser<'rs> {
                                     set_or_log!(current_event_pen, self.head.pens, id, non_existant_pen, "Pen");
                                 },
                                 "wp"(id: &str) => {
-                                    set_or_log!(result.position, self.head.wps, id, non_existant_wp, "Window position");
+                                    set_or_log!(result.window_position, self.head.wps, id, non_existant_wp, "Window position");
                                 },
                                 "ws"(id: &str) => {
-                                    set_or_log!(result.style, self.head.wss, id, non_existant_ws, "Window style");
+                                    set_or_log!(result.window_style, self.head.wss, id, non_existant_ws, "Window style");
                                 },
                                 "w"(id: &str) => {
                                     result.window_id = Some(id.into());

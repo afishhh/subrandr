@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
 use log::{log_once_state, warn, LogContext, LogOnceSet};
-use rasterize::color::BGRA8;
+use rasterize::{color::BGRA8, scene::Rotation};
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
     rc::Rc,
@@ -17,11 +17,11 @@ use crate::{
         Vec2WritingModeExt,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
-    srv3::{BodyParser, Event, ModeHint, RubyPosition},
+    srv3::{BodyParser, Event, ModeHint, RubyPosition, WindowStyle},
     style::{
         computed::{
-            Alignment, Color, Direction, FontSlant, HorizontalAlignment, InlineSizing, Length,
-            TextShadow, VerticalAlignment, Visibility,
+            Color, Direction, FontSlant, InlineSizing, Length, TextAlign, TextShadow, Transform,
+            Visibility, WritingMode,
         },
         ComputedStyle,
     },
@@ -29,7 +29,7 @@ use crate::{
     SubtitleContext,
 };
 
-use super::{EdgeType, Pen, RubyPart};
+use super::{EdgeType, Pen, Point, PrintDir, RubyPart};
 
 macro_rules! static_rc_of_static_strings {
     [$($values: literal),* $(,)?] => {
@@ -136,39 +136,31 @@ fn font_scale_from_ctx(ctx: &SubtitleContext) -> f32 {
 #[allow(clippy::let_and_return)] // shut up
 fn font_size_to_pixels(size: u16) -> f32 {
     let c = 1.0 + 0.25 * (size as f32 / 100.0 - 1.0);
-    // NOTE: This appears to be further modified based on an "of" attribute which we
-    //       currently don't support.
-    //       If we start doing so the correct transformation seems to be
+    // NOTE: This appears to be further modified based on the "of" (subscript/superscript)
+    //       attribute which we currently don't support.
     //       `if of == 0 || of == 2 { c *= 0.8 }`.
     c
 }
 
-impl super::Point {
-    pub fn to_alignment(self) -> Alignment {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Align {
+    Min,
+    Center,
+    Max,
+}
+
+impl Point {
+    fn split(self) -> Vec2<Align> {
         match self {
-            super::Point::TopLeft => Alignment(HorizontalAlignment::Left, VerticalAlignment::Top),
-            super::Point::TopCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Top)
-            }
-            super::Point::TopRight => Alignment(HorizontalAlignment::Right, VerticalAlignment::Top),
-            super::Point::MiddleLeft => {
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Center)
-            }
-            super::Point::MiddleCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Center)
-            }
-            super::Point::MiddleRight => {
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Center)
-            }
-            super::Point::BottomLeft => {
-                Alignment(HorizontalAlignment::Left, VerticalAlignment::Bottom)
-            }
-            super::Point::BottomCenter => {
-                Alignment(HorizontalAlignment::Center, VerticalAlignment::Bottom)
-            }
-            super::Point::BottomRight => {
-                Alignment(HorizontalAlignment::Right, VerticalAlignment::Bottom)
-            }
+            Point::TopLeft => Vec2::new(Align::Min, Align::Min),
+            Point::TopCenter => Vec2::new(Align::Center, Align::Min),
+            Point::TopRight => Vec2::new(Align::Max, Align::Min),
+            Point::MiddleLeft => Vec2::new(Align::Min, Align::Center),
+            Point::MiddleCenter => Vec2::new(Align::Center, Align::Center),
+            Point::MiddleRight => Vec2::new(Align::Max, Align::Center),
+            Point::BottomLeft => Vec2::new(Align::Min, Align::Max),
+            Point::BottomCenter => Vec2::new(Align::Center, Align::Max),
+            Point::BottomRight => Vec2::new(Align::Max, Align::Max),
         }
     }
 }
@@ -187,9 +179,9 @@ struct Window {
     //       Currently this is just ignored until I figure out what to do with it.
     range: Range<u32>,
     segment_style: ComputedStyle,
-    vertical_align: VerticalAlignment,
+    block_align: Align,
     lines: Vec<VisualLine>,
-    mode_hint: ModeHint,
+    window_style: WindowStyle,
 }
 
 #[derive(Debug)]
@@ -291,12 +283,12 @@ impl VisualLine {
         &self,
         pass: &mut FrameLayoutPass,
         segment: &Segment,
-        mh: ModeHint,
+        ws: &WindowStyle,
     ) -> Option<ComputedStyle> {
         let mut result = segment.base_style.clone();
         pass.add_animation_point(self.range.start + segment.time_offset);
         if segment.time_offset > pass.t - self.range.start {
-            match mh {
+            match ws.mode_hint {
                 ModeHint::Default => {
                     *result.make_visibility_mut() = Visibility::Hidden;
                 }
@@ -326,14 +318,14 @@ impl VisualLine {
         &self,
         pass: &mut FrameLayoutPass,
         root_inline_style: ComputedStyle,
-        mh: ModeHint,
+        ws: &WindowStyle,
     ) -> InlineContent {
         let mut builder = InlineContentBuilder::new(root_inline_style);
         let mut root = builder.root();
         let mut it = self.segments.iter();
         let mut take_next = move |pass: &mut FrameLayoutPass| loop {
             let segment = it.next()?;
-            if let Some(style) = self.compute_segment_style(pass, &segment.inner, mh) {
+            if let Some(style) = self.compute_segment_style(pass, &segment.inner, ws) {
                 break Some((segment, style));
             }
         };
@@ -353,6 +345,16 @@ impl VisualLine {
             }
         }
 
+        let apply_padding_max = |style: &mut ComputedStyle, value: Option<Length>| {
+            if let Some(value) = value {
+                let padding_max = if ws.print_dir.is_vertical() {
+                    style.make_padding_bottom_mut()
+                } else {
+                    style.make_padding_right_mut()
+                };
+                *padding_max = value;
+            }
+        };
         // Only used if inline-block layout is enabled to coalesce structurally-same-pen
         // segments into a single inline-block.
         // This is what YouTube appears to do from my testing.
@@ -367,7 +369,13 @@ impl VisualLine {
             next = take_next(pass);
 
             if first {
-                *style.make_padding_left_mut() = Length::from_points(style.font_size() / 4);
+                let padding_value = Length::from_points(style.font_size() / 4);
+                let padding_min = if ws.print_dir.is_vertical() {
+                    style.make_padding_top_mut()
+                } else {
+                    style.make_padding_left_mut()
+                };
+                *padding_min = padding_value;
                 first = false;
             }
             let right_padding = if next.is_none() {
@@ -389,7 +397,7 @@ impl VisualLine {
                             .push_text(&segment.inner.text);
 
                         if let Some(annotation_style) = self
-                            .compute_segment_style(pass, annotation_segment, mh)
+                            .compute_segment_style(pass, annotation_segment, ws)
                             .map(|mut style| {
                                 // If inline-block layout is enabled then background is handled by the
                                 // containing block.
@@ -410,10 +418,7 @@ impl VisualLine {
                 };
 
             if pass.srv3_use_inlines {
-                if let Some(right_padding) = right_padding {
-                    *style.make_padding_right_mut() = right_padding;
-                }
-
+                apply_padding_max(&mut style, right_padding);
                 layout_to_builder(pass, &mut root, style);
             } else {
                 let inner_style = style.create_derived();
@@ -431,10 +436,7 @@ impl VisualLine {
                     current_block.style = style;
                 };
 
-                if let Some(right_padding) = right_padding {
-                    *current_block.style.make_padding_right_mut() = right_padding;
-                }
-
+                apply_padding_max(&mut current_block.style, right_padding);
                 layout_to_builder(pass, &mut current_block.builder.root(), inner_style);
 
                 if right_padding.is_some() {
@@ -471,7 +473,7 @@ impl Window {
                     content: BlockContainerContent::Inline(line.to_inline_content(
                         pass,
                         self.segment_style.clone(),
-                        self.mode_hint,
+                        &self.window_style,
                     )),
                 });
             }
@@ -481,8 +483,18 @@ impl Window {
             return Ok(None);
         }
 
+        let window_style = {
+            let mut result = inner_style.clone();
+            match self.window_style.print_dir {
+                PrintDir::Horizontal => (),
+                PrintDir::VerticalMixed => {
+                    *result.make_transform_mut() = Some(Transform(Rotation::FlipXY))
+                }
+            };
+            result
+        };
         let window = BlockContainer {
-            style: inner_style,
+            style: window_style,
             content: BlockContainerContent::Block(lines),
         };
         let partial_window = layout::block::layout_initial(pass.lctx, &window)?;
@@ -493,7 +505,8 @@ impl Window {
             pass.sctx.player_height() * 96 / 100,
         );
         let writing_mode = window.style.writing_mode();
-        let width = partial_window
+        let max_size = Vec2W::from_physical(pass.lctx.initial_containing_block_size, writing_mode);
+        let inline_size = partial_window
             .measure(
                 pass.lctx,
                 Vec2W::new(
@@ -506,12 +519,11 @@ impl Window {
                 Axes::from(Axis::inline(writing_mode)),
             )?
             .inline(writing_mode)
-            .min(pass.sctx.player_width() * 96 / 100);
-        let height = pass.sctx.player_height();
+            .min(max_size.inline);
 
         let fragment = partial_window.layout_in(
             pass.lctx,
-            Vec2W::from_physical(Vec2::new(width, height), writing_mode),
+            Vec2W::new(max_size.block, inline_size),
             writing_mode,
             Direction::Ltr,
         )?;
@@ -523,15 +535,17 @@ impl Window {
 
         let fragment_size = fragment.fbox.size_for_layout();
         match self.segment_style.text_align() {
-            HorizontalAlignment::Left => (),
-            HorizontalAlignment::Center => pos.x -= fragment_size.x / 2,
-            HorizontalAlignment::Right => pos.x -= fragment_size.x,
+            TextAlign::Left => (),
+            TextAlign::Center => {
+                *pos.inline_mut(writing_mode) -= fragment_size.inline(writing_mode) / 2
+            }
+            TextAlign::Right => *pos.inline_mut(writing_mode) -= fragment_size.inline(writing_mode),
         }
 
-        match self.vertical_align {
-            VerticalAlignment::Top => (),
-            VerticalAlignment::Center => pos.y -= fragment_size.y / 2,
-            VerticalAlignment::Bottom => pos.y -= fragment_size.y,
+        match self.block_align {
+            Align::Min => (),
+            Align::Center => *pos.block_mut(writing_mode) -= fragment_size.block(writing_mode) / 2,
+            Align::Max => *pos.block_mut(writing_mode) -= fragment_size.block(writing_mode),
         }
 
         Ok(Some((pos, fragment)))
@@ -598,21 +612,46 @@ impl WindowBuilder<'_> {
         y: f32,
         time: u32,
         duration: u32,
-        align: Alignment,
-        mode_hint: ModeHint,
+        point: Point,
+        window_style: WindowStyle,
     ) -> Window {
+        let (inline_align, block_align) = {
+            let align = point.split();
+            if window_style.print_dir.is_vertical() {
+                (align.y, align.x)
+            } else {
+                (align.x, align.y)
+            }
+        };
+
         Window {
             x,
             y,
             range: time..time + duration,
             segment_style: {
                 let mut style = self.base_style.clone();
-                *style.make_text_align_mut() = align.0;
+                *style.make_text_align_mut() = match inline_align {
+                    Align::Min => TextAlign::Left,
+                    Align::Center => TextAlign::Center,
+                    Align::Max => TextAlign::Right,
+                };
+
+                match window_style.print_dir {
+                    PrintDir::Horizontal => (),
+                    PrintDir::VerticalMixed => {
+                        *style.make_writing_mode_mut() = match window_style.scroll_dir {
+                            super::ScrollDir::LeftToRight => WritingMode::VerticalLtr,
+                            super::ScrollDir::RightToLeft => WritingMode::VerticalRtl,
+                        };
+                        // Transform for `VerticalMixed` applied later
+                    }
+                }
+
                 style
             },
-            vertical_align: align.1,
+            block_align,
             lines: Vec::new(),
-            mode_hint,
+            window_style,
         }
     }
 
@@ -736,8 +775,8 @@ pub fn convert(
                     convert_coordinate(window.position.y as f32),
                     window.time,
                     window.duration,
-                    window.position.point.to_alignment(),
-                    window.style.mode_hint,
+                    window.position.point,
+                    *window.style,
                 ));
             }
             crate::srv3::BodyElement::Event(event) => {
@@ -760,12 +799,12 @@ pub fn convert(
                     window_builder.extend_lines(&mut result.windows[widx], &event);
                 } else {
                     let mut window = window_builder.create_window(
-                        convert_coordinate(event.position.x as f32),
-                        convert_coordinate(event.position.y as f32),
+                        convert_coordinate(event.window_position.x as f32),
+                        convert_coordinate(event.window_position.y as f32),
                         event.time,
                         event.duration,
-                        event.position.point.to_alignment(),
-                        event.style.mode_hint,
+                        event.window_position.point,
+                        *event.window_style,
                     );
                     window_builder.extend_lines(&mut window, &event);
                     result.windows.push(window);

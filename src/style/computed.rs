@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rasterize::color::BGRA8;
+use rasterize::{color::BGRA8, scene::Rotation};
 use util::math::{Number, Signed, Vec2};
 
 use crate::{layout::FixedL, text::OpenTypeTag};
@@ -263,3 +263,7 @@ impl Visibility {
         matches!(self, Self::Visible)
     }
 }
+
+// https://drafts.csswg.org/css-transforms-1/#transform-property
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Transform(pub Rotation);

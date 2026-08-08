@@ -1467,6 +1467,7 @@ impl OutputImage<'_> {
                 );
             }
             &OutputImage::Rect(OutputRect { rect, color }) => {
+                assert!(!rect.is_empty());
                 fill_rect::<BlendSet, _>(
                     target.reborrow(),
                     rect.translate(offset.to_vec()),
@@ -1687,6 +1688,14 @@ pub fn pieces_to_instanced_images<'a, B: InstancedOutputBuilder<'a>>(
                 }
             }
             &OutputPieceContent::Rect(OutputRect { mut rect, color }) => {
+                // The AA rectangle path will not rasterize anything for empty rectangles
+                // with non-integer coordinates even though they are given a non-zero clip
+                // intersection due to rounding.
+                // Skip such rectangles to prevent showing old data as their image.
+                if rect.is_empty() {
+                    continue;
+                }
+
                 rect.max.x -= (piece.size.x - clip_intersection.size.x) as i32;
                 rect.max.y -= (piece.size.y - clip_intersection.size.y) as i32;
 

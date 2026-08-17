@@ -300,7 +300,11 @@ pub fn implement_style_module_impl(ts: proc_macro::TokenStream) -> proc_macro::T
 
             let name_str = syn::LitStr::new(&name.to_string(), name.span());
             debug_fields_impl.extend(quote! {
-                .field(#name_str, &self.#name())
+                .field(#name_str,
+                    // Make property values use compact `Debug` formatting to avoid wasting
+                    // tons of space on delimiters.
+                    &util::fmt_from_fn(|f| write!(f, "{:?}", &self.#name()))
+                )
             });
         }
 

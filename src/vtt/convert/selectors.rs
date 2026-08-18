@@ -13,35 +13,35 @@ use crate::{
     vtt::convert::{Element, ElementKind, SpanKind},
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct ComplexSelectorUnit {
     selector: Option<CompoundSelector>,
     pseudo: Option<PseudoCompoundSelector>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct CompoundSelector {
     type_: Option<TypeSelector>,
     subclasses: Vec<SubclassSelector>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct PseudoCompoundSelector {
     element: PseudoElementSelector,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum PseudoElementSelector {
     Cue(Option<Box<ComplexSelectorUnit>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum TypeSelector {
     Ident(Box<str>),
     Universal,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum SubclassSelector {
     Id(Box<str>),
     Class(Box<str>),
@@ -303,5 +303,141 @@ impl ComplexSelectorUnit {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::csssyn::TokenBuffer;
+
+    #[track_caller]
+    fn test_parse(text: &str, expected: ComplexSelectorUnit, expected_specificity: Specificity) {
+        let buffer = TokenBuffer::from_source(text).unwrap();
+        let result = parse_complex_selector_unit(buffer.start()).unwrap();
+
+        assert_eq!(result, expected);
+        assert_eq!(result.specificity(), expected_specificity);
+    }
+
+    #[test]
+    fn parse_compound() {
+        test_parse(
+            ".abc",
+            ComplexSelectorUnit {
+                selector: Some(CompoundSelector {
+                    type_: None,
+                    subclasses: vec![SubclassSelector::Class("abc".into())],
+                }),
+                pseudo: None,
+            },
+            Specificity { a: 0, b: 1, c: 0 },
+        );
+
+        test_parse(
+            "type#id.cl1.cl2",
+            ComplexSelectorUnit {
+                selector: Some(CompoundSelector {
+                    type_: Some(TypeSelector::Ident("type".into())),
+                    subclasses: vec![
+                        SubclassSelector::Id("id".into()),
+                        SubclassSelector::Class("cl1".into()),
+                        SubclassSelector::Class("cl2".into()),
+                    ],
+                }),
+                pseudo: None,
+            },
+            Specificity { a: 1, b: 2, c: 1 },
+        );
+
+        test_parse(
+            "*.cl1#id",
+            ComplexSelectorUnit {
+                selector: Some(CompoundSelector {
+                    type_: Some(TypeSelector::Universal),
+                    subclasses: vec![
+                        SubclassSelector::Class("cl1".into()),
+                        SubclassSelector::Id("id".into()),
+                    ],
+                }),
+                pseudo: None,
+            },
+            Specificity { a: 1, b: 1, c: 0 },
+        );
+    }
+
+    #[test]
+    fn parse_cue_pseudo_element() {
+        test_parse(
+            "::cue",
+            ComplexSelectorUnit {
+                selector: None,
+                pseudo: Some(PseudoCompoundSelector {
+                    element: PseudoElementSelector::Cue(None),
+                }),
+            },
+            Specificity { a: 0, b: 0, c: 1 },
+        );
+
+        test_parse(
+            "type#id.abc::cue",
+            ComplexSelectorUnit {
+                selector: Some(CompoundSelector {
+                    type_: Some(TypeSelector::Ident("type".into())),
+                    subclasses: vec![
+                        SubclassSelector::Id("id".into()),
+                        SubclassSelector::Class("abc".into()),
+                    ],
+                }),
+                pseudo: Some(PseudoCompoundSelector {
+                    element: PseudoElementSelector::Cue(None),
+                }),
+            },
+            Specificity { a: 1, b: 1, c: 2 },
+        );
+
+        test_parse(
+            "::cue(.abc)",
+            ComplexSelectorUnit {
+                selector: None,
+                pseudo: Some(PseudoCompoundSelector {
+                    element: PseudoElementSelector::Cue(Some(Box::new(ComplexSelectorUnit {
+                        selector: Some(CompoundSelector {
+                            type_: None,
+                            subclasses: vec![SubclassSelector::Class("abc".into())],
+                        }),
+                        pseudo: None,
+                    }))),
+                }),
+            },
+            Specificity { a: 0, b: 1, c: 1 },
+        );
+
+        test_parse(
+            "::cue(.abc::cue(def))",
+            ComplexSelectorUnit {
+                selector: None,
+                pseudo: Some(PseudoCompoundSelector {
+                    element: PseudoElementSelector::Cue(Some(Box::new(ComplexSelectorUnit {
+                        selector: Some(CompoundSelector {
+                            type_: None,
+                            subclasses: vec![SubclassSelector::Class("abc".into())],
+                        }),
+                        pseudo: Some(PseudoCompoundSelector {
+                            element: PseudoElementSelector::Cue(Some(Box::new(
+                                ComplexSelectorUnit {
+                                    selector: Some(CompoundSelector {
+                                        type_: Some(TypeSelector::Ident("def".into())),
+                                        subclasses: Vec::new(),
+                                    }),
+                                    pseudo: None,
+                                },
+                            ))),
+                        }),
+                    }))),
+                }),
+            },
+            Specificity { a: 0, b: 1, c: 3 },
+        );
     }
 }

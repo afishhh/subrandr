@@ -135,7 +135,7 @@ impl<R: Refcount, T: ?Sized> UniqueRcBase<R, T> {
         T: Sized,
     {
         let raw_box = unsafe {
-            NonNull::new_unchecked(Box::into_raw(Box::new(RcBox {
+            NonNull::from(Box::leak(Box::new(RcBox {
                 refs: std::mem::transmute_copy(&1usize),
                 value,
             })))

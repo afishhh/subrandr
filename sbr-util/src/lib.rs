@@ -70,7 +70,7 @@ impl<T: ?Sized> ReadonlyAliasableBox<T> {
     where
         T: Sized,
     {
-        Self(unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(value))) })
+        Self(NonNull::from(Box::leak(Box::new(value))))
     }
 
     pub fn as_nonnull(this: &Self) -> NonNull<T> {
@@ -114,7 +114,7 @@ impl<T: ?Sized> AsRef<T> for ReadonlyAliasableBox<T> {
 
 impl<T: ?Sized> From<Box<T>> for ReadonlyAliasableBox<T> {
     fn from(value: Box<T>) -> Self {
-        unsafe { Self(NonNull::new_unchecked(Box::into_raw(value))) }
+        Self(NonNull::from(Box::leak(value)))
     }
 }
 

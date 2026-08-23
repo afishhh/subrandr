@@ -58,11 +58,11 @@ macro_rules! make_tree {
         make_tree!(@build_all ruby [$style; inline=builder]; $($content)*);
     }};
     (@build block [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
-        $builder.push_inline_block(
+        $builder.push_atomic(
             crate::layout::block::BlockContainer {
                 style: $style.clone(),
                 content: make_tree!(@build_block_content [$style;] $content_block)
-            }
+            }.into()
         );
     }};
     (@map_child ruby->base $value: expr) => {
@@ -104,9 +104,9 @@ macro_rules! make_tree {
         )
     };
     (@map_child block->block $value: expr) => {
-        $value
+        crate::layout::IndependentBox::from($value)
     };
-    (@build_all_result_ty block) => { crate::layout::block::BlockContainer };
+    (@build_all_result_ty block) => { crate::layout::IndependentBox };
 
     (@build $what: ident [$parent_style: expr; $($context_rest: tt)*]; [$($class: ident)*] { $($block_content: tt)* }) => {{
         let style = make_tree!(@apply_style $parent_style; $($class)*);
@@ -321,11 +321,12 @@ pub fn check_block(
     block: BlockContainer,
 ) {
     check_fn(name, viewport_size, dpi, |lctx, output, rasterizer| {
-        let fragment = layout::block::layout(lctx, &block, lctx.initial_containing_block_size)
+        let fragment = crate::layout::IndependentBox::Block(block)
+            .layout(lctx, lctx.initial_containing_block_size)
             .expect("Layout failed");
 
         DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)
-            .display_block_container_fragment(pos, &fragment)
+            .display_independent_box_fragment(pos, &fragment)
             .expect("Display failed");
     })
 }

@@ -11,9 +11,9 @@ use thiserror::Error;
 use util::math::{I26Dot6, Vec2};
 
 use super::{
-    block::{BlockContainer, BlockContainerFragment, PartialBlockContainer},
-    Axes, BoxFragmentationPart, EdgeExtents, FixedL, FragmentBox, LayoutConstraint, LayoutContext,
-    Vec2L, Vec2LW, Vec2W, Vec2WritingModeExt,
+    Axes, BoxFragmentationPart, EdgeExtents, FixedL, FragmentBox, IndependentBox,
+    IndependentBoxFragment, LayoutConstraint, LayoutContext, PartialIndependentBox, Vec2L, Vec2LW,
+    Vec2W, Vec2WritingModeExt,
 };
 use crate::{
     style::{
@@ -48,7 +48,7 @@ const VERTICAL_ORIENTATION_MAP: CodePointMapDataBorrowed<VerticalOrientation> =
 /// alongside an additional [`Vec`] of [`Rc<str>`]s that stores the
 /// final text runs on which line breaking and bidi reordering will be
 /// performed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InlineContent {
     text_runs: Box<[Rc<str>]>,
     items: Box<[InlineItem]>,
@@ -65,21 +65,21 @@ impl Default for InlineContent {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum InlineItem {
     Span(InlineSpan),
     Text(InlineText),
-    Block(InlineBlock),
+    Block(AtomicInline),
     SpanEnd,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct InlineSpan {
     style: ComputedStyle,
     kind: InlineSpanKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum InlineSpanKind {
     Span,
     // Contents are interleaved base-annotation pairs of kind `RubyInternal`.
@@ -92,15 +92,15 @@ enum InlineSpanKind {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct InlineText {
     content_range: Range<usize>,
 }
 
-#[derive(Debug, Clone)]
-struct InlineBlock {
+#[derive(Debug)]
+struct AtomicInline {
     content_index: usize,
-    block: Box<BlockContainer>,
+    inner: Box<IndependentBox>,
 }
 
 mod builder;
@@ -277,7 +277,7 @@ pub enum InlineItemFragment {
     Span(SpanFragment),
     Text(TextFragment),
     Ruby(RubyFragment),
-    Block(BlockContainerFragment),
+    Atomic(IndependentBoxFragment),
 }
 
 type OffsetInlineItemFragmentVec = Vec<(Vec2L, util::rc::Rc<InlineItemFragment>)>;
@@ -424,7 +424,7 @@ trait LayoutStage<'content> {
 struct PartialStage;
 
 impl<'content> LayoutStage<'content> for PartialStage {
-    type Block = PartialBlockContainer<'content>;
+    type Block = PartialIndependentBox<'content>;
     type RubyInner = InitialShapingResult<'content>;
 }
 
@@ -558,7 +558,7 @@ impl<'c, S: LayoutStage<'c>> std::fmt::Debug for BlockItem<'c, S> {
 struct BlockItemFragment {
     dominant_baseline_block_offset: FixedL,
     inline_size: FixedL,
-    fragment: BlockContainerFragment,
+    fragment: IndependentBoxFragment,
 }
 
 impl BlockItemFragment {
@@ -578,7 +578,7 @@ impl FragmentShapingResult<'_, '_> {
 impl BlockItemFragment {
     fn layout_partial(
         lctx: &mut LayoutContext,
-        partial: &PartialBlockContainer,
+        partial: &PartialIndependentBox,
         constraints: Vec2<LayoutConstraint>,
         writing_mode: WritingMode,
         dominant_baseline: Baseline,
@@ -597,10 +597,10 @@ impl BlockItemFragment {
         )?;
 
         Ok(Self {
-            inline_size: fragment.fbox.inline_size(writing_mode),
+            inline_size: fragment.fbox().inline_size(writing_mode),
             dominant_baseline_block_offset: fragment.baselines(writing_mode).map_or_else(
                 || {
-                    let block_size = fragment.fbox.block_size(writing_mode);
+                    let block_size = fragment.fbox().block_size(writing_mode);
 
                     // https://www.w3.org/TR/css-inline-3/#baseline-synthesis-box
                     match dominant_baseline {
@@ -1557,9 +1557,9 @@ fn shape_run_initial<'a>(
                             );
                         }
                     }
-                    &InlineItem::Block(InlineBlock {
+                    &InlineItem::Block(AtomicInline {
                         content_index,
-                        ref block,
+                        ref inner,
                     }) => {
                         self.flush_queued_text()?;
 
@@ -1568,7 +1568,7 @@ fn shape_run_initial<'a>(
                             range: content_index..content_end,
                             kind: ShapedItemKind::Block(BlockItem {
                                 span_id: self.current_span_id,
-                                inner: super::block::layout_initial(self.lctx, block)?,
+                                inner: inner.layout_initial(self.lctx)?,
                             }),
                             spacing: ShapedItemSpacing {
                                 current_spacing_left: self.queued_spacing,
@@ -2161,7 +2161,7 @@ fn layout_run_full<'a>(
                 }
                 ShapedItemKind::Block(BlockItem { inner: block, .. }) => {
                     let ascender = block.dominant_baseline_block_offset;
-                    let descender = ascender - block.fragment.fbox.block_size(writing_mode);
+                    let descender = ascender - block.fragment.fbox().block_size(writing_mode);
                     self.expand_to(ascender, descender);
                 }
             }
@@ -2506,14 +2506,14 @@ fn layout_run_full<'a>(
                     span_id,
                     inner: ref mut block,
                 }) => {
-                    let inner_inline_size = block.fragment.fbox.inline_size(self.writing_mode);
+                    let inner_inline_size = block.fragment.fbox().inline_size(self.writing_mode);
                     self.rebuild_leaf_branch(
                         span_id,
                         inner_inline_size,
                         self.line_baseline_block_offset - block.dominant_baseline_block_offset,
-                        InlineItemFragment::Block(std::mem::replace(
+                        InlineItemFragment::Atomic(std::mem::replace(
                             &mut block.fragment,
-                            BlockContainerFragment::EMPTY,
+                            IndependentBoxFragment::EMPTY,
                         ))
                         .into(),
                         OBJECT_REPLACEMENT_LENGTH,

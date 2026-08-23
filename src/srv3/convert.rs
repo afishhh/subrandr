@@ -13,7 +13,7 @@ use crate::{
         self,
         block::{BlockContainer, BlockContainerContent},
         inline::{InlineContent, InlineContentBuilder, InlineSpanBuilder},
-        Axes, Axis, FixedL, InlineLayoutError, LayoutConstraint, Point2L, Vec2W,
+        Axes, Axis, FixedL, IndependentBox, InlineLayoutError, LayoutConstraint, Point2L, Vec2W,
         Vec2WritingModeExt,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
@@ -338,10 +338,13 @@ impl VisualLine {
 
         impl CurrentBlock {
             fn flush(&mut self, to: &mut InlineSpanBuilder<'_>) {
-                to.push_inline_block(BlockContainer {
-                    style: std::mem::replace(&mut self.style, ComputedStyle::DEFAULT),
-                    content: BlockContainerContent::Inline(self.builder.finish()),
-                });
+                to.push_atomic(
+                    BlockContainer {
+                        style: std::mem::replace(&mut self.style, ComputedStyle::DEFAULT),
+                        content: BlockContainerContent::Inline(self.builder.finish()),
+                    }
+                    .into(),
+                );
             }
         }
 
@@ -458,8 +461,7 @@ impl Window {
     pub fn layout(
         &self,
         pass: &mut FrameLayoutPass,
-    ) -> Result<Option<(Point2L, layout::block::BlockContainerFragment)>, layout::InlineLayoutError>
-    {
+    ) -> Result<Option<(Point2L, layout::IndependentBoxFragment)>, layout::InlineLayoutError> {
         let inner_style = {
             let mut result = self.segment_style.clone();
             *result.make_background_color_mut() = Color::TRANSPARENT;
@@ -468,14 +470,17 @@ impl Window {
         let mut lines = Vec::new();
         for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
-                lines.push(BlockContainer {
-                    style: inner_style.clone(),
-                    content: BlockContainerContent::Inline(line.to_inline_content(
-                        pass,
-                        self.segment_style.clone(),
-                        &self.window_style,
-                    )),
-                });
+                lines.push(
+                    BlockContainer {
+                        style: inner_style.clone(),
+                        content: BlockContainerContent::Inline(line.to_inline_content(
+                            pass,
+                            self.segment_style.clone(),
+                            &self.window_style,
+                        )),
+                    }
+                    .into(),
+                );
             }
         }
 
@@ -493,18 +498,18 @@ impl Window {
             };
             result
         };
-        let window = BlockContainer {
+        let window = IndependentBox::from(BlockContainer {
             style: window_style,
             content: BlockContainerContent::Block(lines),
-        };
-        let partial_window = layout::block::layout_initial(pass.lctx, &window)?;
+        });
+        let partial_window = window.layout_initial(pass.lctx)?;
 
         // TODO: This will not be necessary once we have `max-{width,height}`
         pass.lctx.initial_containing_block_size = Vec2::new(
             pass.sctx.player_width() * 96 / 100,
             pass.sctx.player_height() * 96 / 100,
         );
-        let writing_mode = window.style.writing_mode();
+        let writing_mode = partial_window.style().writing_mode();
         let max_size = Vec2W::from_physical(pass.lctx.initial_containing_block_size, writing_mode);
         let inline_size = partial_window
             .measure(
@@ -533,7 +538,7 @@ impl Window {
             (self.y * pass.sctx.player_height().into_f32()).into(),
         );
 
-        let fragment_size = fragment.fbox.size_for_layout();
+        let fragment_size = fragment.fbox().size_for_layout();
         match self.segment_style.text_align() {
             TextAlign::Left => (),
             TextAlign::Center => {

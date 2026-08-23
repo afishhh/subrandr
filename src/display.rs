@@ -9,7 +9,8 @@ use crate::{
     layout::{
         block::{BlockContainerFragment, BlockContainerFragmentContent},
         inline::{Baseline, InlineContentFragment, InlineItemFragment, RubyFragment, TextFragment},
-        Axis, FixedL, FragmentBox, Point2L, Vec2L, Vec2LW, Vec2WritingModeExt as _,
+        Axis, FixedL, FragmentBox, IndependentBoxFragment, Point2L, Vec2L, Vec2LW,
+        Vec2WritingModeExt as _,
     },
     style::{
         computed::{ToPhysicalPixels, Transform, WritingMode},
@@ -120,13 +121,13 @@ impl<'r> DisplayPass<'r> {
         ctx.display_inline_content_fragment(output, fragment)
     }
 
-    pub fn display_block_container_fragment(
+    pub fn display_independent_box_fragment(
         &mut self,
         pos: Point2L,
-        fragment: &BlockContainerFragment,
+        fragment: &IndependentBoxFragment,
     ) -> Result<(), DisplayError> {
         let (output, mut ctx) = self.root_ctx(pos);
-        ctx.display_block_container_fragment(output, fragment)
+        ctx.display_independent_box_fragment(output, fragment)
     }
 }
 
@@ -532,8 +533,8 @@ impl DisplayContext<'_> {
             InlineItemFragment::Ruby(ruby) => {
                 self.display_ruby_fragment(output, pos, baseline_pos, ruby, writing_mode)?
             }
-            InlineItemFragment::Block(block) => {
-                self.display_block_container_fragment(output.with_translation(pos.to_vec()), block)?
+            InlineItemFragment::Atomic(block) => {
+                self.display_independent_box_fragment(output.with_translation(pos.to_vec()), block)?
             }
         }
 
@@ -589,7 +590,7 @@ impl DisplayContext<'_> {
             }
             BlockContainerFragmentContent::Block(children) => {
                 for &(child_off, ref child) in children {
-                    scope.display_block_container_fragment(
+                    scope.display_independent_box_fragment(
                         output.with_translation(child_off),
                         child,
                     )?;
@@ -598,5 +599,17 @@ impl DisplayContext<'_> {
         }
 
         Ok(())
+    }
+
+    fn display_independent_box_fragment(
+        &mut self,
+        output: SceneContentBuilder<'_>,
+        fragment: &IndependentBoxFragment,
+    ) -> Result<(), DisplayError> {
+        match fragment {
+            IndependentBoxFragment::Block(block) => {
+                self.display_block_container_fragment(output, block)
+            }
+        }
     }
 }

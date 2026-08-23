@@ -5,7 +5,7 @@ use util::math::{BoolExt, I26Dot6, Number, Point2, Rect2, Vec2};
 
 use crate::{
     style::{
-        computed::{Length, ToPhysicalPixels, WritingMode},
+        computed::{Direction, Length, ToPhysicalPixels, WritingMode},
         ComputedStyle,
     },
     text::FontDb,
@@ -515,3 +515,142 @@ impl AsLogger for LayoutContext<'_> {
 pub mod inline;
 pub use inline::InlineLayoutError;
 pub mod block;
+
+#[derive(Debug)]
+pub enum IndependentBox {
+    Block(block::BlockContainer),
+}
+
+impl From<block::BlockContainer> for IndependentBox {
+    fn from(value: block::BlockContainer) -> Self {
+        Self::Block(value)
+    }
+}
+
+impl IndependentBox {
+    pub fn layout_initial(
+        &self,
+        lctx: &mut LayoutContext,
+    ) -> Result<PartialIndependentBox<'_>, InlineLayoutError> {
+        match self {
+            IndependentBox::Block(block) => {
+                block.layout_initial(lctx).map(PartialIndependentBox::Block)
+            }
+        }
+    }
+}
+
+pub enum PartialIndependentBox<'a> {
+    Block(block::PartialBlockContainer<'a>),
+}
+
+impl<'a> PartialIndependentBox<'a> {
+    pub fn style(&self) -> &ComputedStyle {
+        match self {
+            PartialIndependentBox::Block(block) => block.style(),
+        }
+    }
+
+    pub fn measure(
+        &self,
+        lctx: &mut LayoutContext,
+        constraints: Vec2<LayoutConstraint>,
+        axes: Axes,
+    ) -> Result<Vec2L, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block.measure(lctx, constraints, axes),
+        }
+    }
+
+    fn measure_inner(
+        &self,
+        lctx: &mut LayoutContext,
+        constraints: Vec2<LayoutConstraint>,
+        axes: Axes,
+    ) -> Result<Vec2L, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block.measure_inner(lctx, constraints, axes),
+        }
+    }
+
+    fn layout(
+        &self,
+        lctx: &mut LayoutContext,
+        outer_inner_inline_size: FixedL,
+        margins: EdgeExtents,
+        available_block_space: Option<FixedL>,
+        outer_writing_mode: WritingMode,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block
+                .layout(
+                    lctx,
+                    outer_inner_inline_size,
+                    margins,
+                    available_block_space,
+                    outer_writing_mode,
+                )
+                .map(IndependentBoxFragment::Block),
+        }
+    }
+
+    pub fn layout_in(
+        self,
+        lctx: &mut LayoutContext,
+        size: Vec2LW,
+        writing_mode: WritingMode,
+        direction: Direction,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        let inline_sizes =
+            self.block_level_inline_sizes(lctx, size.inline, writing_mode, direction)?;
+        self.layout(
+            lctx,
+            inline_sizes.size,
+            inline_sizes.margins(writing_mode),
+            Some(size.block),
+            writing_mode,
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum IndependentBoxFragment {
+    Block(block::BlockContainerFragment),
+}
+
+impl IndependentBoxFragment {
+    const EMPTY: Self = Self::Block(block::BlockContainerFragment::EMPTY);
+
+    pub fn fbox(&self) -> &FragmentBox {
+        match self {
+            IndependentBoxFragment::Block(block) => &block.fbox,
+        }
+    }
+
+    fn baselines(&self, outer_writing_mode: WritingMode) -> Option<inline::BoxBaselineSet> {
+        match self {
+            IndependentBoxFragment::Block(block) => block.baselines(outer_writing_mode),
+        }
+    }
+}
+
+impl IndependentBox {
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+    pub fn layout(
+        &self,
+        lctx: &mut LayoutContext,
+        initial_containing_block_size: Vec2L,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        let partial = self.layout_initial(lctx)?;
+        let writing_mode = partial.style().writing_mode();
+        let direction = partial.style().direction();
+        lctx.initial_containing_block_size = initial_containing_block_size;
+
+        partial.layout_in(
+            lctx,
+            Vec2W::from_physical(initial_containing_block_size, writing_mode),
+            writing_mode,
+            direction,
+        )
+    }
+}

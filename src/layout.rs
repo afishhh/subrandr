@@ -518,3 +518,154 @@ impl AsLogger for LayoutContext<'_> {
 pub mod inline;
 pub use inline::InlineLayoutError;
 pub mod block;
+
+#[derive(Debug)]
+pub enum IndependentBox {
+    Block(block::BlockContainer),
+}
+
+impl From<block::BlockContainer> for IndependentBox {
+    fn from(value: block::BlockContainer) -> Self {
+        Self::Block(value)
+    }
+}
+
+impl IndependentBox {
+    pub fn layout_initial(
+        &self,
+        lctx: &mut LayoutContext,
+    ) -> Result<PartialIndependentBox<'_>, InlineLayoutError> {
+        match self {
+            IndependentBox::Block(block) => {
+                block.layout_initial(lctx).map(PartialIndependentBox::Block)
+            }
+        }
+    }
+}
+
+pub enum PartialIndependentBox<'a> {
+    Block(block::PartialBlockContainer<'a>),
+}
+
+impl<'a> PartialIndependentBox<'a> {
+    pub fn style(&self) -> &ComputedStyle {
+        match self {
+            PartialIndependentBox::Block(block) => block.style(),
+        }
+    }
+
+    pub fn measure(
+        &self,
+        lctx: &mut LayoutContext,
+        constraints: Vec2<LayoutConstraint>,
+        axes: Axes,
+    ) -> Result<Vec2L, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block.measure(lctx, constraints, axes),
+        }
+    }
+
+    fn measure_inner(
+        &self,
+        lctx: &mut LayoutContext,
+        constraints: Vec2<LayoutConstraint>,
+        axes: Axes,
+    ) -> Result<Vec2L, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block.measure_inner(lctx, constraints, axes),
+        }
+    }
+
+    fn layout_in_flow(
+        &self,
+        lctx: &mut LayoutContext,
+        outer_inner_inline_size: FixedL,
+        margins: EdgeExtents,
+        available_block_space: LayoutConstraint,
+        outer_writing_mode: WritingMode,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        match self {
+            PartialIndependentBox::Block(block) => block
+                .layout_in_flow(
+                    lctx,
+                    outer_inner_inline_size,
+                    margins,
+                    available_block_space,
+                    outer_writing_mode,
+                )
+                .map(IndependentBoxFragment::Block),
+        }
+    }
+
+    pub fn layout_fixed(
+        self,
+        lctx: &mut LayoutContext,
+        size: Vec2L,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        let writing_mode = self.style().writing_mode();
+        let margin_part = if writing_mode.is_horizontal() {
+            BoxFragmentationPart::HORIZONTAL_FULL
+        } else {
+            BoxFragmentationPart::VERTICAL_FULL
+        };
+        let margins =
+            EdgeExtents::margins_auto_to_zero_fragmented(margin_part, self.style(), lctx.dpi);
+        let padding = EdgeExtents::padding(self.style(), lctx.dpi);
+
+        let inner_size = Vec2::new(
+            size.x - margins.left - margins.right - padding.left - padding.right,
+            size.y - margins.top - margins.bottom - padding.top - padding.bottom,
+        );
+        match self {
+            PartialIndependentBox::Block(block) => block
+                .layout(
+                    lctx,
+                    Vec2W::from_physical(inner_size, writing_mode),
+                    Vec2W::from_physical(
+                        Vec2::new(
+                            LayoutConstraint::Exact(inner_size.x),
+                            LayoutConstraint::Exact(inner_size.y),
+                        ),
+                        writing_mode,
+                    ),
+                    margins,
+                )
+                .map(IndependentBoxFragment::Block),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum IndependentBoxFragment {
+    Block(block::BlockContainerFragment),
+}
+
+impl IndependentBoxFragment {
+    const EMPTY: Self = Self::Block(block::BlockContainerFragment::EMPTY);
+
+    pub fn fbox(&self) -> &FragmentBox {
+        match self {
+            IndependentBoxFragment::Block(block) => &block.fbox,
+        }
+    }
+
+    fn baselines(&self, outer_writing_mode: WritingMode) -> Option<inline::BoxBaselineSet> {
+        match self {
+            IndependentBoxFragment::Block(block) => block.baselines(outer_writing_mode),
+        }
+    }
+}
+
+impl IndependentBox {
+    #[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
+    pub fn layout(
+        &self,
+        lctx: &mut LayoutContext,
+        initial_containing_block_size: Vec2L,
+    ) -> Result<IndependentBoxFragment, InlineLayoutError> {
+        let partial = self.layout_initial(lctx)?;
+        lctx.initial_containing_block_size = initial_containing_block_size;
+
+        partial.layout_fixed(lctx, initial_containing_block_size)
+    }
+}

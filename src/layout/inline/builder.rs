@@ -1,13 +1,12 @@
 use std::ops::Range;
 
-use crate::{
-    layout::block::BlockContainer,
-    style::{computed::WhiteSpaceCollapse, ComputedStyle},
-};
-
 use super::{
-    InlineBlock, InlineContent, InlineItem, InlineSpan, InlineSpanKind, InlineText,
+    AtomicInline, InlineContent, InlineItem, InlineSpan, InlineSpanKind, InlineText,
     OBJECT_REPLACEMENT_CHARACTER,
+};
+use crate::{
+    layout::IndependentBox,
+    style::{computed::WhiteSpaceCollapse, ComputedStyle},
 };
 
 pub struct InlineContentBuilder {
@@ -312,11 +311,11 @@ impl<'a> InlineSpanBuilder<'a> {
         }
     }
 
-    pub fn push_inline_block(&mut self, block: BlockContainer) {
+    pub fn push_atomic(&mut self, block: IndependentBox) {
         let content_index = self.push_object_replacement();
-        self.push_child(InlineItem::Block(InlineBlock {
+        self.push_child(InlineItem::Block(AtomicInline {
             content_index,
-            block: Box::new(block),
+            inner: Box::new(block),
         }));
     }
 }

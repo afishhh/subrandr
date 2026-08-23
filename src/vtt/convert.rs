@@ -894,7 +894,10 @@ impl Layouter {
                     logset: &self.styling_log_set,
                 },
             )?;
-            pass.emit_fragment(pos, BlockContainerFragment::from_inline(inline));
+            pass.emit_fragment(
+                pos,
+                layout::IndependentBoxFragment::Block(BlockContainerFragment::from_inline(inline)),
+            );
         }
 
         Ok(())

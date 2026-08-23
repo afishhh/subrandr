@@ -3,24 +3,25 @@ use util::math::Vec2;
 
 use super::{
     inline::{BoxBaselineSet, InlineContent, InlineContentFragment, PartialInline},
-    Axes, Axis, EdgeExtents, FixedL, FragmentBox, InlineLayoutError, LayoutConstraint,
-    LayoutContext, Vec2L, Vec2LW, Vec2W, Vec2WritingModeExt,
+    Axes, Axis, EdgeExtents, FixedL, FragmentBox, IndependentBox, IndependentBoxFragment,
+    InlineLayoutError, LayoutConstraint, LayoutContext, PartialIndependentBox, Vec2L, Vec2LW,
+    Vec2W, Vec2WritingModeExt,
 };
 use crate::style::{
     computed::{BaselineSource, Direction, TextAlign, ToPhysicalPixels, WritingMode},
     ComputedStyle,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockContainer {
     pub style: ComputedStyle,
     pub content: BlockContainerContent,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BlockContainerContent {
     Inline(InlineContent),
-    Block(Vec<BlockContainer>),
+    Block(Vec<IndependentBox>),
 }
 
 #[derive(Debug)]
@@ -89,7 +90,33 @@ impl BlockContainerFragment {
 #[derive(Debug)]
 pub enum BlockContainerFragmentContent {
     Inline(Vec2L, InlineContentFragment),
-    Block(Vec<(Vec2L, BlockContainerFragment)>),
+    Block(Vec<(Vec2L, IndependentBoxFragment)>),
+}
+
+impl BlockContainer {
+    pub(super) fn layout_initial<'a>(
+        &'a self,
+        lctx: &mut LayoutContext,
+    ) -> Result<PartialBlockContainer<'a>, InlineLayoutError> {
+        let content = match &self.content {
+            BlockContainerContent::Inline(inline) => {
+                PartialBlockContainerContent::Inline(super::inline::shape(lctx, inline)?)
+            }
+            BlockContainerContent::Block(children) => {
+                let mut partials = Vec::new();
+                for child in children {
+                    partials.push(child.layout_initial(lctx)?);
+                }
+
+                PartialBlockContainerContent::Block(partials)
+            }
+        };
+
+        Ok(PartialBlockContainer {
+            style: self.style.clone(),
+            content,
+        })
+    }
 }
 
 pub struct PartialBlockContainer<'a> {
@@ -100,7 +127,7 @@ pub struct PartialBlockContainer<'a> {
 #[allow(clippy::large_enum_variant)] // shouldn't be moved around much anyway
 enum PartialBlockContainerContent<'a> {
     Inline(PartialInline<'a>),
-    Block(Vec<PartialBlockContainer<'a>>),
+    Block(Vec<PartialIndependentBox<'a>>),
 }
 
 #[derive(Debug)]
@@ -232,7 +259,7 @@ impl BlockInlineSizes {
     // https://www.w3.org/TR/CSS2/visudet.html#shrink-to-fit-float
     fn floating_shrink_to_fit_width(
         lctx: &mut LayoutContext,
-        container: &PartialBlockContainer,
+        container: &PartialIndependentBox,
         margin_left: FixedL,
         padding_left: FixedL,
         padding_right: FixedL,
@@ -242,7 +269,7 @@ impl BlockInlineSizes {
     ) -> Result<FixedL, InlineLayoutError> {
         // calculate the preferred width by formatting the content without breaking lines other than where explicit line breaks occur
         let mut preferred_measurement_constraints = constraints;
-        if outer_writing_mode.perpendicular(container.style.writing_mode()) {
+        if outer_writing_mode.perpendicular(container.style().writing_mode()) {
             // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
             // ^ absolutely brilliant sentence btw
             preferred_measurement_constraints = container
@@ -272,7 +299,7 @@ impl BlockInlineSizes {
     // https://www.w3.org/TR/CSS2/visudet.html#inlineblock-width
     fn compute_for_nonreplaced_inline(
         lctx: &mut LayoutContext,
-        container: &PartialBlockContainer,
+        container: &PartialIndependentBox,
         BlockComputedInlineSizes {
             margin_min: margin_left,
             padding_min: padding_left,
@@ -328,8 +355,32 @@ impl BlockInlineSizes {
     }
 }
 
-impl PartialBlockContainer<'_> {
-    fn block_level_inline_sizes(
+impl PartialIndependentBox<'_> {
+    // TODO: do we even need this
+    fn child_measure_constraints(
+        &self,
+        constraints: Vec2<LayoutConstraint>,
+        outer_writing_mode: WritingMode,
+    ) -> Vec2<LayoutConstraint> {
+        let child_writing_mode = self.style().writing_mode();
+        if outer_writing_mode.parallel(child_writing_mode) {
+            // parallel flows don't require special handling
+            return constraints;
+        }
+
+        // orthogonal flows may need to use a fallback size
+        let available_inline_space = match constraints.inline(child_writing_mode) {
+            LayoutConstraint::Exact(fixed) => fixed,
+            LayoutConstraint::Scroll { fallback_size } => fallback_size,
+        };
+        Vec2W::new(
+            constraints.block(child_writing_mode),
+            LayoutConstraint::Exact(available_inline_space),
+        )
+        .to_physical(child_writing_mode)
+    }
+
+    pub(super) fn block_level_inline_sizes(
         &self,
         lctx: &mut LayoutContext,
         containing_block_width: FixedL,
@@ -337,7 +388,7 @@ impl PartialBlockContainer<'_> {
         containing_block_direction: Direction,
     ) -> Result<BlockInlineSizes, InlineLayoutError> {
         let computed =
-            BlockComputedInlineSizes::new(&self.style, containing_block_writing_mode, lctx.dpi);
+            BlockComputedInlineSizes::new(self.style(), containing_block_writing_mode, lctx.dpi);
         Ok(BlockInlineSizes::compute_for_nonreplaced_block(
             computed,
             containing_block_width,
@@ -351,7 +402,7 @@ impl PartialBlockContainer<'_> {
         constraints: Vec2<LayoutConstraint>,
         outer_writing_mode: WritingMode,
     ) -> Result<BlockInlineSizes, InlineLayoutError> {
-        let computed = BlockComputedInlineSizes::new(&self.style, outer_writing_mode, lctx.dpi);
+        let computed = BlockComputedInlineSizes::new(self.style(), outer_writing_mode, lctx.dpi);
         let width = BlockInlineSizes::compute_for_nonreplaced_inline(
             lctx,
             self,
@@ -361,6 +412,12 @@ impl PartialBlockContainer<'_> {
         )?;
 
         Ok(width)
+    }
+}
+
+impl PartialBlockContainer<'_> {
+    pub(super) fn style(&self) -> &ComputedStyle {
+        &self.style
     }
 
     pub fn measure(
@@ -419,31 +476,7 @@ impl PartialBlockContainer<'_> {
         Ok(result)
     }
 
-    // TODO: do we even need this
-    fn child_measure_constraints(
-        &self,
-        constraints: Vec2<LayoutConstraint>,
-        outer_writing_mode: WritingMode,
-    ) -> Vec2<LayoutConstraint> {
-        let child_writing_mode = self.style.writing_mode();
-        if outer_writing_mode.parallel(child_writing_mode) {
-            // parallel flows don't require special handling
-            return constraints;
-        }
-
-        // orthogonal flows may need to use a fallback size
-        let available_inline_space = match constraints.inline(child_writing_mode) {
-            LayoutConstraint::Exact(fixed) => fixed,
-            LayoutConstraint::Scroll { fallback_size } => fallback_size,
-        };
-        Vec2W::new(
-            constraints.block(child_writing_mode),
-            LayoutConstraint::Exact(available_inline_space),
-        )
-        .to_physical(child_writing_mode)
-    }
-
-    fn measure_inner(
+    pub(super) fn measure_inner(
         &self,
         lctx: &mut LayoutContext,
         constraints: Vec2<LayoutConstraint>,
@@ -507,14 +540,12 @@ impl PartialBlockContainer<'_> {
         Ok(result)
     }
 
-    pub(super) fn layout(
+    fn layout_inner(
         &self,
         lctx: &mut LayoutContext,
-        // Refers to the inner inline size in the parent's (outer) writing mode.
-        outer_inner_inline_size: FixedL,
+        forced_inner_size: Vec2W<Option<FixedL>>,
+        inherited_inner_constraints: Vec2W<LayoutConstraint>,
         margins: EdgeExtents,
-        outer_available_block_space: LayoutConstraint,
-        outer_writing_mode: WritingMode,
     ) -> Result<BlockContainerFragment, InlineLayoutError> {
         let writing_mode = self.style.writing_mode();
         let mut base_inner_size = Vec2W::new(None, None);
@@ -526,37 +557,19 @@ impl PartialBlockContainer<'_> {
             base_inner_size.block = Some(explicit_block_size.to_physical_pixels(lctx.dpi));
         }
 
-        if outer_writing_mode.perpendicular(writing_mode) {
-            base_inner_size.block = Some(outer_inner_inline_size);
-        } else {
-            base_inner_size.inline = Some(outer_inner_inline_size);
-        }
-
-        let available_inline_space = base_inner_size.inline.map_or_else(
-            || {
-                assert!(outer_writing_mode.perpendicular(writing_mode));
-                outer_available_block_space
-            },
-            LayoutConstraint::Exact,
-        );
-        let mut available_block_space = base_inner_size.block.map_or_else(
-            || {
-                if outer_writing_mode.perpendicular(writing_mode) {
-                    LayoutConstraint::Exact(outer_inner_inline_size)
-                } else {
-                    outer_available_block_space
-                }
-            },
-            LayoutConstraint::Exact,
+        // TODO: I think this inherited constraints stuff doesn't propagate correctly during layout
+        //       (but measurement is fine, outer edges I mean)
+        let mut inner_constraints = Vec2W::new(
+            base_inner_size
+                .block
+                .map_or(inherited_inner_constraints.block, LayoutConstraint::Exact),
+            base_inner_size
+                .inline
+                .map_or(inherited_inner_constraints.inline, LayoutConstraint::Exact),
         );
 
-        // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
-        // If this block contains only inline children then this will be used for laying
-        // them out and the inner inline size will be calculated from the resulting fragment.
-        // Otherwise it will be passed to `self.measure_inner` to calculate the inner inline
-        // size before laying out children.
-        let inner_measure_constraints =
-            Vec2W::new(available_block_space, available_inline_space).to_physical(writing_mode);
+        base_inner_size.block = forced_inner_size.block.or(base_inner_size.block);
+        base_inner_size.inline = forced_inner_size.inline.or(base_inner_size.inline);
 
         let inner_inline_size;
         let inner_block_size;
@@ -567,7 +580,7 @@ impl PartialBlockContainer<'_> {
                     error!(lctx, "Block has different writing mode ({writing_mode:?}) from anonymous root inline child ({inner_writing_mode:?}). This is wrong!");
                 }
 
-                let fragment = inline.layout(lctx, inner_measure_constraints)?;
+                let fragment = inline.layout(lctx, inner_constraints.to_physical(writing_mode))?;
 
                 let content_inline_size = fragment.fbox.inline_size(writing_mode);
                 inner_inline_size = base_inner_size
@@ -591,7 +604,7 @@ impl PartialBlockContainer<'_> {
                 inner_inline_size = base_inner_size.inline.unwrap_or(
                     self.measure_inner(
                         lctx,
-                        inner_measure_constraints,
+                        inner_constraints.to_physical(writing_mode),
                         Axes::from(Axis::inline(writing_mode)),
                     )?
                     .inline(writing_mode),
@@ -608,24 +621,25 @@ impl PartialBlockContainer<'_> {
                         self.style.direction(),
                     )?;
                     let child_margins = child_inline_sizes.margins(writing_mode);
-                    let fragment = child.layout(
+                    let fragment = child.layout_in_flow(
                         lctx,
                         child_inline_sizes.size,
                         child_margins,
-                        available_block_space,
+                        inner_constraints.block,
                         writing_mode,
                     )?;
 
                     let mut off = Vec2LW::new(auto_block_size, FixedL::ZERO);
-                    auto_block_size += fragment.fbox.block_size(writing_mode);
+                    auto_block_size += fragment.fbox().block_size(writing_mode);
+
                     if writing_mode.is_block_reversed() {
                         off.block = -auto_block_size;
                     }
 
-                    match &mut available_block_space {
+                    match &mut inner_constraints.block {
                         LayoutConstraint::Exact(space) => {
-                            *space =
-                                (*space - fragment.fbox.block_size(writing_mode)).max(FixedL::ZERO);
+                            *space = (*space - fragment.fbox().block_size(writing_mode))
+                                .max(FixedL::ZERO);
                         }
                         LayoutConstraint::Scroll { fallback_size: _ } => {}
                     }
@@ -657,62 +671,62 @@ impl PartialBlockContainer<'_> {
         })
     }
 
-    pub fn layout_in(
-        self,
+    pub(super) fn layout_in_flow(
+        &self,
         lctx: &mut LayoutContext,
-        size: Vec2LW,
-        writing_mode: WritingMode,
-        direction: Direction,
+        // Refers to the inner inline size in the parent's (outer) writing mode.
+        outer_inner_inline_size: FixedL,
+        margins: EdgeExtents,
+        outer_available_block_space: LayoutConstraint,
+        outer_writing_mode: WritingMode,
     ) -> Result<BlockContainerFragment, InlineLayoutError> {
-        let inline_sizes =
-            self.block_level_inline_sizes(lctx, size.inline, writing_mode, direction)?;
-        self.layout(
+        let writing_mode = self.style.writing_mode();
+        let mut forced_inner_size = Vec2W::new(None, None);
+
+        if outer_writing_mode.perpendicular(writing_mode) {
+            forced_inner_size.block = Some(outer_inner_inline_size);
+        } else {
+            forced_inner_size.inline = Some(outer_inner_inline_size);
+        }
+
+        let mut inherited_constraints = Vec2W::new(
+            outer_available_block_space,
+            LayoutConstraint::Exact(outer_inner_inline_size),
+        );
+        if outer_writing_mode.perpendicular(writing_mode) {
+            std::mem::swap(
+                &mut inherited_constraints.block,
+                &mut inherited_constraints.inline,
+            )
+        }
+
+        // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
+        // If this block contains only inline children then this will be used for laying
+        // them out and the inner inline size will be calculated from the resulting fragment.
+        // Otherwise it will be passed to `self.measure_inner` to calculate the inner inline
+        // size before laying out children.
+
+        self.layout_inner(lctx, forced_inner_size, inherited_constraints, margins)
+    }
+
+    pub(super) fn layout(
+        &self,
+        lctx: &mut LayoutContext,
+        inner_size: Vec2LW,
+        inner_constraints: Vec2W<LayoutConstraint>,
+        margins: EdgeExtents,
+    ) -> Result<BlockContainerFragment, InlineLayoutError> {
+        // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
+        // If this block contains only inline children then this will be used for laying
+        // them out and the inner inline size will be calculated from the resulting fragment.
+        // Otherwise it will be passed to `self.measure_inner` to calculate the inner inline
+        // size before laying out children.
+
+        self.layout_inner(
             lctx,
-            inline_sizes.size,
-            inline_sizes.margins(writing_mode),
-            LayoutConstraint::Exact(size.block),
-            writing_mode,
+            Vec2W::new(Some(inner_size.block), Some(inner_size.inline)),
+            inner_constraints,
+            margins,
         )
     }
-}
-
-pub fn layout_initial<'a>(
-    lctx: &mut LayoutContext,
-    container: &'a BlockContainer,
-) -> Result<PartialBlockContainer<'a>, InlineLayoutError> {
-    let content = match &container.content {
-        BlockContainerContent::Inline(inline) => {
-            PartialBlockContainerContent::Inline(super::inline::shape(lctx, inline)?)
-        }
-        BlockContainerContent::Block(children) => {
-            let mut partials = Vec::new();
-            for child in children {
-                partials.push(layout_initial(lctx, child)?);
-            }
-
-            PartialBlockContainerContent::Block(partials)
-        }
-    };
-
-    Ok(PartialBlockContainer {
-        style: container.style.clone(),
-        content,
-    })
-}
-
-#[cfg_attr(not(all(test, feature = "_layout_tests")), expect(dead_code))]
-pub fn layout(
-    lctx: &mut LayoutContext,
-    container: &BlockContainer,
-    initial_containing_block_size: Vec2L,
-) -> Result<BlockContainerFragment, InlineLayoutError> {
-    let writing_mode = container.style.writing_mode();
-    lctx.initial_containing_block_size = initial_containing_block_size;
-
-    layout_initial(lctx, container)?.layout_in(
-        lctx,
-        Vec2W::from_physical(initial_containing_block_size, writing_mode),
-        writing_mode,
-        container.style.direction(),
-    )
 }

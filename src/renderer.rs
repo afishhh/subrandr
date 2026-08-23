@@ -21,9 +21,8 @@ use crate::{
     display::{DisplayError, DisplayPass},
     layout::{
         self,
-        block::BlockContainerFragment,
         inline::{InlineContentBuilder, InlineContentFragment},
-        FixedL, LayoutContext, Point2L, Vec2L,
+        FixedL, IndependentBoxFragment, LayoutContext, Point2L, Vec2L,
     },
     srv3,
     style::{
@@ -108,7 +107,7 @@ pub(crate) struct FrameLayoutPass<'frame> {
     pub lctx: &'frame mut LayoutContext<'frame>,
     pub t: u32,
     unchanged_range: Range<u32>,
-    fragments: Vec<(Point2L, BlockContainerFragment)>,
+    fragments: Vec<(Point2L, IndependentBoxFragment)>,
     // TODO: proper configuration system
     // TODO: fully inline mode could probably keep using blocks for ruby which would clean
     //       up a sizing hack in inline layout
@@ -148,8 +147,8 @@ impl FrameLayoutPass<'_> {
         }
     }
 
-    pub fn emit_fragment(&mut self, pos: Point2L, block: BlockContainerFragment) {
-        self.fragments.push((pos, block));
+    pub fn emit_fragment(&mut self, pos: Point2L, fragment: IndependentBoxFragment) {
+        self.fragments.push((pos, fragment));
     }
 }
 
@@ -685,7 +684,7 @@ impl Renderer {
             );
 
             for &(pos, ref fragment) in &fragments {
-                pass.display_block_container_fragment(pos, fragment)?;
+                pass.display_independent_box_fragment(pos, fragment)?;
             }
 
             for (pos, fragment) in debug_overlay_fragments {

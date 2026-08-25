@@ -46,6 +46,7 @@ macros::implement_style_module! {
         line_break: LineBreakStrictness = LineBreakStrictness::Normal,
         word_break: LineBreakWordOption = LineBreakWordOption::Normal,
         text_align: TextAlign = TextAlign::Left,
+        line_height: LineHeight = LineHeight::Normal,
         inline_sizing: InlineSizing = InlineSizing::Normal,
         direction: Direction = Direction::Ltr,
         writing_mode: WritingMode = WritingMode::HorizontalTtb,

@@ -151,7 +151,7 @@ static WEBVTT_DECLARATION_FILTER: LazyLock<DeclarationFilter> = LazyLock::new(||
             "font-weight",
             // "font-width",
             "font-size",
-            // "line-height",
+            "line-height",
             "font-family",
             // "font",
             // "white-space",

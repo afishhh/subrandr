@@ -151,6 +151,7 @@ pub(super) static DECLARATION_HANDLERS: &[DeclarationHandler] = &[
         "font-feature-settings",
         font::take_font_feature_settings
     ),
+    longhand!(ComputedLineHeight, "line-height", inline::take_line_height),
     // This is a draft property and the CSSWG seems to want to change its name
     // so expose it as a vendor-specific property for now.
     longhand!(

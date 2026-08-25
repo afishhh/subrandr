@@ -52,25 +52,31 @@ impl<'a> Tokenizer<'a> {
         self.index += count_bytes;
     }
 
-    fn peek_codepoint(&mut self) -> Option<char> {
-        let mut chrs = self.source[self.index..].chars();
-        match chrs.next()? {
-            '\0' => Some(char::REPLACEMENT_CHARACTER),
-            '\x0C' => Some('\n'),
+    fn peek_codepoint_inner(&mut self) -> Option<(char, usize)> {
+        let mut chrs = self.source[self.index..].char_indices();
+        let (_, raw) = chrs.next()?;
+        let processed = match raw {
+            '\0' => char::REPLACEMENT_CHARACTER,
+            '\x0C' => '\n',
             '\r' => {
-                if chrs.next() == Some('\n') {
-                    self.index += 1;
+                let mut tmp = chrs.clone();
+                if matches!(tmp.next(), Some((_, '\n'))) {
+                    chrs = tmp;
                 }
-                Some('\n')
+                '\n'
             }
-            '\n' => Some('\n'),
-            c => Some(c),
-        }
+            c => c,
+        };
+        Some((processed, chrs.offset()))
+    }
+
+    fn peek_codepoint(&mut self) -> Option<char> {
+        self.peek_codepoint_inner().map(|(c, _)| c)
     }
 
     fn consume_codepoint(&mut self) -> Option<char> {
-        if let Some(chr) = self.peek_codepoint() {
-            self.index += chr.len_utf8();
+        if let Some((chr, len)) = self.peek_codepoint_inner() {
+            self.index += len;
             Some(chr)
         } else {
             None
@@ -78,9 +84,13 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn reconsume(&mut self, codepoint: char) {
-        self.index -= codepoint.len_utf8();
-        if codepoint == '\n' && self.source.as_bytes()[self.index] == b'\r' {
+        let bytes = &self.source.as_bytes()[..self.index];
+        if bytes.ends_with(b"\0") {
             self.index -= 1;
+        } else if bytes.ends_with(b"\r\n") {
+            self.index -= 2;
+        } else {
+            self.index -= codepoint.len_utf8();
         }
     }
 
@@ -745,6 +755,12 @@ mod test {
             " u\\72l(   data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==\t\t)  ",
             &[TokenKind::Whitespace, TokenKind::Url { value_offset: 9, trailing_len: 3 }, TokenKind::Whitespace]
         );
+    }
+
+    #[test]
+    fn null() {
+        assert_tokens("\0llo", &[TokenKind::Ident]);
+        assert_tokens("\0", &[TokenKind::Ident]);
     }
 
     #[test]

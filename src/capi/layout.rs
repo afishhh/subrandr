@@ -7,7 +7,7 @@ use std::{
 
 use once_cell::unsync::OnceCell;
 use rasterize::{
-    color::BGRA8,
+    color::{Premultiplied, BGRA8},
     scene::{Scene, SceneBuilder},
     sw,
 };
@@ -609,6 +609,25 @@ unsafe extern "C" fn sbr_sw_rasterizer_create(lib: *const CLibrary) -> *mut CSwR
         inner: sw::Rasterizer::new(),
         instanced_raster_pass: CInstancedRasterPass::new(),
     }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_sw_rasterizer_bad_render_dont_commit(
+    rasterizer: *mut CSwRasterizer,
+    scene: *const CScene,
+    buffer: *mut Premultiplied<BGRA8>,
+    width: u32,
+    height: u32,
+    stride: u32,
+) -> c_int {
+    let buffer = std::slice::from_raw_parts_mut(buffer, stride as usize * height as usize);
+    ctry!((*rasterizer).inner.render_scene(
+        &(*(*rasterizer).lib).root_logger.new_ctx(),
+        &mut rasterize::sw::RenderTarget::new(buffer, width, height, stride),
+        &(*scene).inner,
+    ));
+
+    0
 }
 
 #[unsafe(no_mangle)]

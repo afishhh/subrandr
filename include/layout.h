@@ -242,6 +242,9 @@ sbr_scene *sbr_display_pass_finish(sbr_display_pass *);
 typedef struct sbr_sw_rasterizer sbr_sw_rasterizer;
 
 sbr_sw_rasterizer *sbr_sw_rasterizer_create(sbr_library *);
+int sbr_sw_rasterizer_bad_render_dont_commit(sbr_sw_rasterizer *, sbr_scene *,
+                                             sbr_bgra8 *buffer, uint32_t width,
+                                             uint32_t height, uint32_t stride);
 sbr_instanced_raster_pass *
 sbr_sw_rasterizer_render_instanced(sbr_sw_rasterizer *, sbr_scene *,
                                    sbr_rect2i clip_rect, uint64_t flags);

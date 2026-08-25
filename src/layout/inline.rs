@@ -18,8 +18,8 @@ use super::{
 use crate::{
     style::{
         computed::{
-            self, FontSlant, InlineSizing, TextAlign, ToPhysicalPixels, WhiteSpaceCollapse,
-            WritingMode,
+            self, FontSlant, InlineSizing, LineHeight, TextAlign, ToPhysicalPixels,
+            WhiteSpaceCollapse, WritingMode,
         },
         ComputedStyle,
     },
@@ -2071,12 +2071,7 @@ fn layout_run_full<'a>(
         min_descender: FixedL,
     }
 
-    #[derive(Debug, Clone, Copy)]
-    enum LineHeight {
-        Normal,
-        Value(FixedL),
-    }
-
+    #[allow(non_local_definitions)]
     impl LineHeight {
         const ONE: Self = Self::Value(FixedL::ONE);
         const RUBY_ANNOTATION: Self = Self::ONE;
@@ -2608,12 +2603,13 @@ fn layout_run_full<'a>(
             shaped: &mut [ShapedItem<'c, FragmentStage<'p>>],
         ) -> Result<(), InlineLayoutError> {
             let writing_mode = self.content.root_style.writing_mode();
+            let line_height = self.content.root_style.line_height();
             let line_baseline = writing_mode.auto_dominant_baseline();
             let mut line_inline_size = FixedL::ZERO;
             let mut line_metrics = LineHeightMetrics::ZERO;
             for item in &*shaped {
                 item.accumulate_width(&mut line_inline_size);
-                line_metrics.process_item(item, LineHeight::Normal, line_baseline, writing_mode);
+                line_metrics.process_item(item, line_height, line_baseline, writing_mode);
                 self.update_line_fragmentation_state_pre(item, self.text_leaf_items);
             }
             let line_block_size = line_metrics.height();

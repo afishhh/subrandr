@@ -199,6 +199,12 @@ impl FontFeatureSettings {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum LineHeight {
+    Normal,
+    Value(FixedL),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum InlineSizing {
     Normal,
     Stretch,

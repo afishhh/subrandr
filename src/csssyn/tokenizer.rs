@@ -500,11 +500,11 @@ impl<'a> Tokenizer<'a> {
 
     // https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
     fn skip_escaped_codepoint(&mut self) {
-        let hex_len = self
-            .peek_bytes(6)
+        let bytes = self.peek_bytes(6);
+        let hex_len = bytes
             .iter()
             .position(|&c| !c.is_ascii_hexdigit())
-            .unwrap_or(6);
+            .unwrap_or(bytes.len());
 
         if hex_len == 0 {
             self.consume_codepoint();
@@ -761,6 +761,7 @@ mod test {
     fn null() {
         assert_tokens("\0llo", &[TokenKind::Ident]);
         assert_tokens("\0", &[TokenKind::Ident]);
+        assert_tokens(r"\0", &[TokenKind::Ident]);
     }
 
     #[test]

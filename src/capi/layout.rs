@@ -1,6 +1,6 @@
 use std::{
     cell::UnsafeCell,
-    ffi::{c_char, c_int},
+    ffi::{c_char, c_int, c_void},
     mem::ManuallyDrop,
     rc::Rc,
 };
@@ -8,10 +8,10 @@ use std::{
 use once_cell::unsync::OnceCell;
 use rasterize::{
     color::{Premultiplied, BGRA8},
-    scene::{Scene, SceneBuilder},
+    scene::{Scene, SceneBuilder, SceneContentBuilder},
     sw,
 };
-use util::math::{Rect2, Vec2};
+use util::math::{OutlineEvent, Point2, Rect2, Vec2};
 
 use crate::{
     capi::{instanced_raster::CInstancedRasterPass, library::CLibrary, CError, ErrorKind},
@@ -74,9 +74,16 @@ unsafe extern "C" fn sbr_computed_style_compute_from_str(
     ))
 }
 
+type CImagePaintFn = unsafe extern "C" fn(user_data: *mut c_void, *mut SceneContentBuilder, Vec2L);
+
 #[derive(Debug)]
-struct CImage {
-    texture: sw::Texture<'static>,
+enum CImage {
+    Texture(sw::Texture<'static>),
+    Callback {
+        natural_size: Vec2L,
+        callback: CImagePaintFn,
+        user_data: *mut c_void,
+    },
 }
 
 #[unsafe(no_mangle)]
@@ -99,8 +106,22 @@ unsafe extern "C" fn sbr_image_from_bgra(
     }
 
     let pixels = std::slice::from_raw_parts(data.cast(), stride as usize * height as usize);
-    Rc::into_raw(Rc::new(CImage {
-        texture: sw::Texture::from_strided_bgra(pixels, width, height, stride),
+    Rc::into_raw(Rc::new(CImage::Texture(sw::Texture::from_strided_bgra(
+        pixels, width, height, stride,
+    ))))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_image_from_callback(
+    _lib: *const CLibrary,
+    natural_size: Vec2L,
+    callback: CImagePaintFn,
+    user_data: *mut c_void,
+) -> *const CImage {
+    Rc::into_raw(Rc::new(CImage::Callback {
+        natural_size,
+        callback,
+        user_data,
     }))
 }
 
@@ -116,16 +137,52 @@ unsafe extern "C" fn sbr_image_unref(texture: *const CImage) {
 
 impl layout::image::ImageInner for CImage {
     fn display(&self, builder: &mut rasterize::scene::SceneContentBuilder, size: Vec2L) {
-        builder.bitmap(
-            self.texture.clone().into(),
-            util::math::Vec2::new(
-                size.x.round_to_inner() as u32,
-                size.y.round_to_inner() as u32,
-            ),
-            None,
-            BGRA8::WHITE,
-        );
+        match self {
+            CImage::Texture(texture) => {
+                builder.bitmap(
+                    texture.clone().into(),
+                    util::math::Vec2::new(
+                        size.x.round_to_inner() as u32,
+                        size.y.round_to_inner() as u32,
+                    ),
+                    None,
+                    BGRA8::WHITE,
+                );
+            }
+            &CImage::Callback {
+                natural_size: _,
+                callback,
+                user_data,
+            } => unsafe { callback(user_data, builder, size) },
+        }
     }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_painter_fill_polyline(
+    builder: &mut rasterize::scene::SceneContentBuilder,
+    color: u32,
+    points: *const Point2L,
+    n_points: usize,
+) {
+    let points = std::slice::from_raw_parts(points, n_points);
+
+    let mut i = 0;
+    builder.filled_outline(
+        std::iter::from_fn(|| {
+            let &point = points.get(i)?;
+
+            let pointf = Point2::new(point.x.into_f32(), point.y.into_f32());
+            i += 1;
+            if i == 1 {
+                Some(OutlineEvent::MoveTo(pointf))
+            } else {
+                Some(OutlineEvent::LineTo(pointf))
+            }
+        }),
+        // TODO: use argb32?
+        BGRA8::from_rgba32(color),
+    );
 }
 
 struct CLayoutContext {
@@ -188,10 +245,20 @@ unsafe extern "C" fn sbr_box_from_image(
     Box::into_raw(Box::new(CBox {
         inner: IndependentBox::Image(Image {
             style: (*ManuallyDrop::new(ComputedStyle::from_raw(style))).clone(),
-            natural_dimensions: layout::image::NaturalDimensions {
-                // TODO: handle overflow
-                width: FixedL::new((*image).texture.width() as i32),
-                height: FixedL::new((*image).texture.height() as i32),
+            natural_dimensions: {
+                match &(*image) {
+                    CImage::Texture(texture) => {
+                        layout::image::NaturalDimensions {
+                            // TODO: handle overflow
+                            width: FixedL::new(texture.width() as i32),
+                            height: FixedL::new(texture.height() as i32),
+                        }
+                    }
+                    &CImage::Callback { natural_size, .. } => layout::image::NaturalDimensions {
+                        width: natural_size.x,
+                        height: natural_size.y,
+                    },
+                }
             },
             inner: Rc::from_raw(image),
         }),

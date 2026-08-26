@@ -30,18 +30,35 @@ void sbr_computed_style_unref(sbr_computed_style *);
 
 typedef struct sbr_image sbr_image;
 
+typedef uint32_t sbr_rgba32;
+
+typedef struct sbr_vec2l {
+  sbr_26dot6 x, y;
+} sbr_vec2l;
+
+// artist in a 1v3? what is he gonna do, start painting?? HAHAHAHA
+// HACK: (this is not final API, needs to have stuff to allow for failures n
+//       shit)
+//       this is just so I can implement my test software
+//       (quickshell? I write shell in C with libwayland-client and subrandr)
+typedef struct sbr_painter sbr_painter;
+
+void sbr_painter_fill_polyline(struct sbr_painter *, sbr_rgba32 fill,
+                               sbr_vec2l const *points, size_t n_points);
+
+typedef void (*sbr_image_paint_fn)(void *user_data, sbr_painter *,
+                                   sbr_vec2l size);
+
 sbr_image *sbr_image_from_bgra(sbr_library *, void *data, uint32_t width,
                                uint32_t height, uint32_t stride);
+sbr_image *sbr_image_from_callback(sbr_library *, sbr_vec2l natural_size,
+                                   sbr_image_paint_fn, void *user_data);
 // TODO: image from outline
 //       or image from callback (callback would receive an `sbr_scene_builder`
 //       and would be able to insert scene nodes like outlines or rectanges n
 //       stuff)
 void sbr_image_ref(sbr_image *);
 void sbr_image_unref(sbr_image *);
-
-typedef struct sbr_vec2l {
-  sbr_26dot6 x, y;
-} sbr_vec2l;
 
 typedef struct sbr_inline_builder sbr_inline_builder;
 typedef struct sbr_span_builder sbr_span_builder;

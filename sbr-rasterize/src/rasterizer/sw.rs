@@ -331,6 +331,13 @@ impl<'a, P> RenderTargetView<'a, P> {
                 .split_at_mut_unchecked(self.width as usize)
         })
     }
+
+    pub fn fill(&mut self, pixel: P)
+    where
+        P: Clone,
+    {
+        self.buffer.fill(pixel);
+    }
 }
 
 impl<P> RenderTargetView<'_, MaybeUninit<P>> {
@@ -1348,8 +1355,6 @@ impl Rasterizer {
         target: &mut RenderTarget,
         scene: &Scene,
     ) -> Result<(), super::SceneRenderError> {
-        target.buffer.fill(Premultiplied(BGRA8::ZERO));
-
         let cull_rect = Rect2S::new(
             Point2::ZERO,
             Point2::new(

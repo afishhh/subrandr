@@ -6,7 +6,7 @@ use std::{
 
 use log::{trace, AsLogger, LogContext};
 use rasterize::{
-    color::BGRA8,
+    color::{Premultiplied, BGRA8},
     scene::{Scene, SceneBuilder, SceneContentBuilder},
     Rasterizer,
 };
@@ -443,6 +443,7 @@ impl Renderer {
         rasterizer: &mut rasterize::sw::Rasterizer,
     ) -> Result<(), RenderError> {
         self.render_to_scene(log, ctx, t, rasterizer)?;
+        target.fill(Premultiplied(BGRA8::ZERO));
         rasterizer.render_scene(log, &mut target, &self.scene)?;
 
         self.end_raster(log);

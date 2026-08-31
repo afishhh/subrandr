@@ -18,7 +18,7 @@ use super::{
 use crate::{
     style::{
         computed::{
-            self, FontSlant, HorizontalAlignment, InlineSizing, ToPhysicalPixels,
+            self, FontSlant, HorizontalAlignment, InlineSizing, TextOrientation, ToPhysicalPixels,
             WhiteSpaceCollapse, WritingMode,
         },
         ComputedStyle,
@@ -737,7 +737,6 @@ fn primary_font_from_style(
 }
 
 #[derive(Debug)]
-
 struct FontFeatureEvent {
     utf8_index: usize,
     kind: FontFeatureEventKind,
@@ -910,6 +909,175 @@ impl WritingMode {
     }
 }
 
+struct TextSegmenter {
+    vertical_typesetting: Option<VerticalTypesetting>,
+    range: Range<usize>,
+    current_bidi_paragraph: usize,
+    next_grapheme_end_idx: usize,
+    was_newline: bool,
+}
+
+struct TextSegment {
+    bidi_level: unicode_bidi::Level,
+    vertical_typesetting: Option<VerticalTypesetting>,
+    range: Range<usize>,
+    followed_by_newline: bool,
+}
+
+impl TextSegmenter {
+    fn new() -> Self {
+        Self {
+            vertical_typesetting: None,
+            range: 0..0,
+            current_bidi_paragraph: 0,
+            next_grapheme_end_idx: 0,
+            was_newline: false,
+        }
+    }
+
+    fn skip_to(&mut self, bidi: &unicode_bidi::BidiInfo, index: usize) {
+        self.range.start = index;
+        self.range.end = index;
+        match bidi
+            .paragraphs
+            .binary_search_by_key(&self.range.start, |p| p.range.start)
+        {
+            Ok(i) => i,
+            Err(i) => i - 1,
+        };
+    }
+
+    fn take(&mut self, bidi: &unicode_bidi::BidiInfo) -> TextSegment {
+        debug_assert!(!self.range.is_empty());
+
+        let segment = TextSegment {
+            bidi_level: bidi.levels[self.range.start],
+            vertical_typesetting: self.vertical_typesetting,
+            range: self.range.start..self.range.end - usize::from(self.was_newline),
+            followed_by_newline: self.was_newline,
+        };
+        self.range.start = self.range.end;
+        if bidi.paragraphs[self.current_bidi_paragraph].range.end == self.range.end {
+            self.current_bidi_paragraph += 1;
+        }
+        segment
+    }
+
+    fn segment_bidi(
+        &mut self,
+        bidi: &unicode_bidi::BidiInfo,
+        run_text: &str,
+        until: usize,
+    ) -> Option<TextSegment> {
+        assert!(until <= bidi.levels.len() && until <= run_text.len());
+
+        let mut current_level = bidi.levels[self.range.start];
+        while self.range.end < until {
+            let level = bidi.levels[self.range.end];
+            let paragraph_ended =
+                bidi.paragraphs[self.current_bidi_paragraph].range.end == self.range.end;
+            let level_changed_or_break = current_level != level || self.was_newline;
+            if !self.range.is_empty() && (paragraph_ended || level_changed_or_break) {
+                return Some(self.take(bidi));
+            }
+            current_level = level;
+            self.was_newline = run_text.as_bytes()[self.range.end] == b'\n';
+            self.range.end += 1;
+        }
+
+        None
+    }
+
+    fn segment_full(
+        &mut self,
+        bidi: &unicode_bidi::BidiInfo,
+        run_text: &str,
+        until: usize,
+        grapheme_cluster_boundaries: &[usize],
+        writing_mode: WritingMode,
+        text_orientation: TextOrientation,
+    ) -> Option<TextSegment> {
+        // https://drafts.csswg.org/css-writing-modes-3/#text-orientation
+        // This property specifies the orientation of text within a line.
+        // Current values only have an effect in vertical typographic modes: the property has no effect in horizontal typographic modes.
+        if writing_mode.is_horizontal() {
+            self.segment_bidi(bidi, run_text, until)
+        } else if writing_mode.is_typographic_mode_horizontal() {
+            let vertical_typesetting = match writing_mode {
+                WritingMode::HorizontalTtb
+                | WritingMode::VerticalRtl
+                | WritingMode::VerticalLtr => unreachable!(),
+                WritingMode::SidewaysRtl => VerticalTypesetting::Sideways { clockwise: true },
+            };
+
+            if !self.range.is_empty() && self.vertical_typesetting != Some(vertical_typesetting) {
+                return Some(self.take(bidi));
+            }
+            self.vertical_typesetting = Some(vertical_typesetting);
+
+            self.segment_bidi(bidi, run_text, until)
+        } else {
+            match text_orientation {
+                computed::TextOrientation::Mixed => (),
+            }
+
+            if grapheme_cluster_boundaries
+                .get(self.next_grapheme_end_idx)
+                .is_some_and(|&x| x <= self.range.end)
+            {
+                self.next_grapheme_end_idx =
+                    match grapheme_cluster_boundaries.binary_search(&self.range.end) {
+                        Ok(i) => i + 1,
+                        Err(i) => i,
+                    };
+            }
+
+            while self.range.end != until {
+                let end = grapheme_cluster_boundaries
+                    .get(self.next_grapheme_end_idx)
+                    .copied()
+                    .map_or(until, |end| end.min(until));
+                let grapheme = &run_text[self.range.end..end];
+
+                // https://www.unicode.org/reports/tr50/#grapheme_clusters
+                // If the cluster contains an enclosing combining mark (general category Me), then the whole cluster has the Vertical_Orientation property value U.
+                let unicode_orientation = if grapheme
+                    .chars()
+                    .any(|c| GENERAL_CATEGORY_MAP.get(c) == GeneralCategory::EnclosingMark)
+                {
+                    VerticalOrientation::Upright
+                } else {
+                    VERTICAL_ORIENTATION_MAP.get(grapheme.chars().next().unwrap())
+                };
+
+                // (back to CSS spec)
+                // typesetting it upright if its orientation property is U, Tu, or Tr; or typesetting it sideways (90° clockwise from horizontal) if its orientation property is R.
+                let vertical_typesetting = if unicode_orientation == VerticalOrientation::Upright
+                    || unicode_orientation == VerticalOrientation::TransformedUpright
+                    || unicode_orientation == VerticalOrientation::TransformedRotated
+                {
+                    VerticalTypesetting::Upright
+                } else {
+                    VerticalTypesetting::Sideways { clockwise: true }
+                };
+
+                if !self.range.is_empty() && self.vertical_typesetting != Some(vertical_typesetting)
+                {
+                    return Some(self.take(bidi));
+                }
+                self.vertical_typesetting = Some(vertical_typesetting);
+
+                self.next_grapheme_end_idx += 1;
+                if let Some(segment) = self.segment_bidi(bidi, run_text, end) {
+                    return Some(segment);
+                }
+            }
+
+            None
+        }
+    }
+}
+
 fn shape_run_initial<'a>(
     content: &'a InlineContent,
     run_index: usize,
@@ -920,101 +1088,6 @@ fn shape_run_initial<'a>(
     span_state: &mut Vec<SpanState<'a>>,
     inner_style: &'a ComputedStyle,
 ) -> Result<InitialShapingResult<'a>, InlineLayoutError> {
-    struct QueuedText {
-        matcher: FontMatcher,
-        vertical_typesetting: Option<VerticalTypesetting>,
-        range: Range<usize>,
-    }
-
-    impl QueuedText {
-        fn flush(
-            self,
-            text: Rc<str>,
-            bidi: &unicode_bidi::BidiInfo,
-            lctx: &mut LayoutContext,
-            result: &mut Vec<ShapedItem<'_, PartialStage>>,
-            left_spacing: &mut FixedL,
-            shaper: &mut RunShaper,
-        ) -> Result<(), InlineLayoutError> {
-            let mut current_paragraph = match bidi
-                .paragraphs
-                .binary_search_by_key(&self.range.start, |p| p.range.start)
-            {
-                Ok(i) => i,
-                Err(i) => i - 1,
-            };
-
-            let mut push = |level: unicode_bidi::Level,
-                            range: Range<usize>,
-                            break_after: bool|
-             -> Result<(), InlineLayoutError> {
-                let direction = match (self.vertical_typesetting, level.is_ltr()) {
-                    (Some(VerticalTypesetting::Sideways { .. }) | None, true) => Direction::Ltr,
-                    (Some(VerticalTypesetting::Sideways { .. }) | None, false) => Direction::Rtl,
-                    (Some(VerticalTypesetting::Upright), true) => Direction::Ttb,
-                    (Some(VerticalTypesetting::Upright), false) => Direction::Btt,
-                };
-
-                let glyphs = {
-                    shaper.buffer.guess_properties();
-                    shaper.set_buffer_content(
-                        &text,
-                        range.clone(),
-                        direction,
-                        self.vertical_typesetting,
-                    );
-                    let mut output = GlyphString::new(text.clone(), direction);
-                    shaper.shape(&mut output, self.matcher.iterator(), lctx)?;
-                    output
-                };
-                shaper.buffer.clear();
-
-                result.push(ShapedItem {
-                    range: range.clone(),
-                    kind: ShapedItemKind::Text(TextItem {
-                        font_matcher: self.matcher.clone(),
-                        primary_font: self.matcher.primary(lctx.log, lctx.fonts)?,
-                        glyphs,
-                        break_after,
-                        vertical_typesetting: self.vertical_typesetting,
-                    }),
-                    spacing: ShapedItemSpacing {
-                        current_spacing_left: *left_spacing,
-                        current_spacing_right: FixedL::ZERO,
-                    },
-                });
-                *left_spacing = FixedL::ZERO;
-
-                Ok(())
-            };
-
-            let mut current_level = bidi.levels[self.range.start];
-            let mut last = self.range.start;
-            let mut was_newline = false;
-            for (i, &level) in self.range.clone().zip(&bidi.levels[self.range.clone()]) {
-                let paragraph_ended = bidi.paragraphs[current_paragraph].range.end == i;
-                let level_changed_or_break = current_level != level || was_newline;
-                if paragraph_ended || level_changed_or_break {
-                    push(
-                        current_level,
-                        last..i - usize::from(was_newline),
-                        was_newline,
-                    )?;
-                    last = i;
-                    current_paragraph += usize::from(paragraph_ended);
-                }
-                current_level = level;
-                was_newline = text.as_bytes()[i] == b'\n';
-            }
-
-            push(
-                current_level,
-                last..self.range.end - usize::from(was_newline),
-                was_newline,
-            )
-        }
-    }
-
     struct ShapedItemBuilder<'c, 's, 'l, 'll> {
         content: &'c InlineContent,
         run_text: &'c Rc<str>,
@@ -1027,7 +1100,8 @@ fn shape_run_initial<'a>(
         shaped: Vec<ShapedItem<'c, PartialStage>>,
         span_state: &'s mut Vec<SpanState<'c>>,
         shaping_buffer: ShapingBuffer,
-        queued_text: Option<QueuedText>,
+        queued_text_matcher: FontMatcher,
+        queued_text_segmenter: TextSegmenter,
         font_feature_events: Vec<FontFeatureEvent>,
         queued_spacing: FixedL,
         current_span_id: usize,
@@ -1149,20 +1223,60 @@ fn shape_run_initial<'a>(
             }
         }
 
+        fn push_text_segment(
+            &mut self,
+            font_matcher: FontMatcher,
+            segment: TextSegment,
+        ) -> Result<(), InlineLayoutError> {
+            let direction = match (segment.vertical_typesetting, segment.bidi_level.is_ltr()) {
+                (Some(VerticalTypesetting::Sideways { .. }) | None, true) => Direction::Ltr,
+                (Some(VerticalTypesetting::Sideways { .. }) | None, false) => Direction::Rtl,
+                (Some(VerticalTypesetting::Upright), true) => Direction::Ttb,
+                (Some(VerticalTypesetting::Upright), false) => Direction::Btt,
+            };
+
+            let shaper = &mut RunShaper {
+                buffer: &mut self.shaping_buffer,
+                font_feature_events: &self.font_feature_events,
+                grapheme_cluster_boundaries: &self.grapheme_cluster_boundaries,
+            };
+            let glyphs = {
+                shaper.buffer.guess_properties();
+                shaper.set_buffer_content(
+                    self.run_text,
+                    segment.range.clone(),
+                    direction,
+                    segment.vertical_typesetting,
+                );
+                let mut output = GlyphString::new(self.run_text.clone(), direction);
+                shaper.shape(&mut output, font_matcher.iterator(), self.lctx)?;
+                output
+            };
+            shaper.buffer.clear();
+
+            self.shaped.push(ShapedItem {
+                range: segment.range,
+                kind: ShapedItemKind::Text(TextItem {
+                    primary_font: font_matcher.primary(self.lctx.log, self.lctx.fonts)?,
+                    font_matcher,
+                    glyphs,
+                    break_after: segment.followed_by_newline,
+                    vertical_typesetting: segment.vertical_typesetting,
+                }),
+                spacing: ShapedItemSpacing {
+                    current_spacing_left: self.queued_spacing,
+                    current_spacing_right: FixedL::ZERO,
+                },
+            });
+            self.queued_spacing = FixedL::ZERO;
+
+            Ok(())
+        }
+
         fn flush_queued_text(&mut self) -> Result<(), InlineLayoutError> {
-            if let Some(queued) = self.queued_text.take() {
-                queued.flush(
-                    self.run_text.clone(),
-                    &self.bidi,
-                    self.lctx,
-                    &mut self.shaped,
-                    &mut self.queued_spacing,
-                    &mut RunShaper {
-                        buffer: &mut self.shaping_buffer,
-                        font_feature_events: &self.font_feature_events,
-                        grapheme_cluster_boundaries: &self.grapheme_cluster_boundaries,
-                    },
-                )?;
+            if !self.queued_text_segmenter.range.is_empty() {
+                let segment = self.queued_text_segmenter.take(&self.bidi);
+                self.push_text_segment(self.queued_text_matcher.clone(), segment)?;
             }
 
             Ok(())
@@ -1182,7 +1296,7 @@ fn shape_run_initial<'a>(
                 //       "what if some segment of text needs to have different (cloned) padding but we
                 //        want to shape it along with some preceeding one" or similar.
                 //       This cannot happen precisely because any change in padding parameters will also
-                //       trigger a `QueuedText::flush` and shaping break.
+                //       trigger a shaping break.
                 //       The only exception is right-side cloned padding which needs to be communicated
                 //       via a side-channel because it may differ inside a single `ShapedItem`.
                 self.flush_queued_text()?;
@@ -1402,125 +1516,27 @@ fn shape_run_initial<'a>(
                     InlineItem::Text(text) => {
                         let font_matcher = font_matcher_from_style(current_style, self.lctx);
 
-                        match self.queued_text {
-                            Some(ref mut queued)
-                                if queued.matcher != font_matcher
-                                    || queued.range.end != text.content_range.start =>
-                            {
-                                self.flush_queued_text()?;
-                            }
-                            _ => {}
+                        if self.queued_text_segmenter.range.end != text.content_range.start {
+                            // Whatever non-text content we're jumping over should've flushed the
+                            // queued text and the segmenter should now be empty.
+                            debug_assert!(self.queued_text_segmenter.range.is_empty());
+                            self.queued_text_segmenter
+                                .skip_to(&self.bidi, text.content_range.start);
+                        }
+                        if self.queued_text_matcher != font_matcher {
+                            self.flush_queued_text()?;
+                            self.queued_text_matcher = font_matcher;
                         }
 
-                        // https://drafts.csswg.org/css-writing-modes-3/#text-orientation
-                        // This property specifies the orientation of text within a line.
-                        // Current values only have an effect in vertical typographic modes: the property has no effect in horizontal typographic modes.
-                        if writing_mode.is_horizontal() {
-                            match self.queued_text {
-                                Some(ref mut queued) => queued.range.end = text.content_range.end,
-                                None => {
-                                    self.queued_text = Some(QueuedText {
-                                        matcher: font_matcher,
-                                        range: text.content_range.clone(),
-                                        vertical_typesetting: None,
-                                    })
-                                }
-                            }
-                        } else if writing_mode.is_typographic_mode_horizontal() {
-                            let vertical_typesetting = match writing_mode {
-                                WritingMode::HorizontalTtb
-                                | WritingMode::VerticalRtl
-                                | WritingMode::VerticalLtr => unreachable!(),
-                                WritingMode::SidewaysRtl => {
-                                    VerticalTypesetting::Sideways { clockwise: true }
-                                }
-                            };
-
-                            match self.queued_text {
-                                Some(ref mut queued)
-                                    if queued.vertical_typesetting
-                                        == Some(vertical_typesetting) =>
-                                {
-                                    queued.range.end = text.content_range.end
-                                }
-                                Some(_) | None => {
-                                    self.flush_queued_text()?;
-                                    self.queued_text = Some(QueuedText {
-                                        matcher: font_matcher.clone(),
-                                        range: text.content_range.clone(),
-                                        vertical_typesetting: Some(vertical_typesetting),
-                                    })
-                                }
-                            }
-                        } else {
-                            match current_style.text_orientation() {
-                                computed::TextOrientation::Mixed => (),
-                            }
-
-                            let mut next_grapheme_end_idx = match self
-                                .grapheme_cluster_boundaries
-                                .binary_search(&text.content_range.start)
-                            {
-                                Ok(i) => i + 1,
-                                Err(i) => i,
-                            };
-
-                            let mut current = text.content_range.start;
-                            while current != text.content_range.end {
-                                let end = self
-                                    .grapheme_cluster_boundaries
-                                    .get(next_grapheme_end_idx)
-                                    .copied()
-                                    .map_or(text.content_range.end, |end| {
-                                        end.min(text.content_range.end)
-                                    });
-
-                                let grapheme = &self.run_text[current..end];
-
-                                // https://www.unicode.org/reports/tr50/#grapheme_clusters
-                                // If the cluster contains an enclosing combining mark (general category Me), then the whole cluster has the Vertical_Orientation property value U.
-                                let unicode_orientation = if grapheme.chars().any(|c| {
-                                    GENERAL_CATEGORY_MAP.get(c) == GeneralCategory::EnclosingMark
-                                }) {
-                                    VerticalOrientation::Upright
-                                } else {
-                                    VERTICAL_ORIENTATION_MAP.get(grapheme.chars().next().unwrap())
-                                };
-
-                                // (back to CSS spec)
-                                // typesetting it upright if its orientation property is U, Tu, or Tr; or typesetting it sideways (90° clockwise from horizontal) if its orientation property is R.
-                                let vertical_typesetting = if unicode_orientation
-                                    == VerticalOrientation::Upright
-                                    || unicode_orientation
-                                        == VerticalOrientation::TransformedUpright
-                                    || unicode_orientation
-                                        == VerticalOrientation::TransformedRotated
-                                {
-                                    VerticalTypesetting::Upright
-                                } else {
-                                    VerticalTypesetting::Sideways { clockwise: true }
-                                };
-
-                                match self.queued_text {
-                                    Some(ref mut queued)
-                                        if queued.vertical_typesetting
-                                            == Some(vertical_typesetting) =>
-                                    {
-                                        queued.range.end = end
-                                    }
-                                    Some(_) | None => {
-                                        self.flush_queued_text()?;
-                                        self.queued_text = Some(QueuedText {
-                                            matcher: font_matcher.clone(),
-                                            range: current..end,
-                                            vertical_typesetting: Some(vertical_typesetting),
-                                        })
-                                    }
-                                }
-
-                                next_grapheme_end_idx += 1;
-                                current = end;
-                            }
+                        while let Some(segment) = self.queued_text_segmenter.segment_full(
+                            &self.bidi,
+                            self.run_text,
+                            text.content_range.end,
+                            &self.grapheme_cluster_boundaries,
+                            writing_mode,
+                            current_style.text_orientation(),
+                        ) {
+                            self.push_text_segment(self.queued_text_matcher.clone(), segment)?;
                         }
 
                         let font_feature_settings = current_style.font_feature_settings();
@@ -1637,7 +1653,13 @@ fn shape_run_initial<'a>(
         shaped: Vec::new(),
         span_state,
         shaping_buffer: ShapingBuffer::new(),
-        queued_text: None,
+        queued_text_matcher: FontMatcher::new(
+            util::rc_static!([]),
+            text::FontStyle::default(),
+            I26Dot6::ZERO,
+            0,
+        ),
+        queued_text_segmenter: TextSegmenter::new(),
         font_feature_events: Vec::new(),
         queued_spacing: FixedL::ZERO,
         current_span_id: usize::MAX,
@@ -2699,8 +2721,6 @@ fn layout_run_full<'a>(
         fn finish(self) -> InlineContentFragment {
             let mut fragment = self.result;
 
-            // TODO: Investigate whether `self.total_content_bytes_added` hack counts
-            //       the same as `QueuedText::flush` in the presence of consecutive newlines.
             #[cfg(debug_assertions)]
             for span_state in self.span_state {
                 assert_eq!(

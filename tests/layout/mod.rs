@@ -12,5 +12,6 @@ mod ruby;
 mod shaping;
 mod text_decoration;
 mod text_shadow;
+mod transform;
 mod whitespace;
 mod writing_modes;

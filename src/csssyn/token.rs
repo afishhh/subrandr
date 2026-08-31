@@ -136,6 +136,10 @@ pub struct NumericTokenValue<'a> {
 }
 
 impl<'a> NumericTokenValue<'a> {
+    pub fn as_str(self) -> &'a str {
+        self.value
+    }
+
     pub fn to_f32(self) -> f32 {
         self.value.parse().unwrap()
     }

@@ -114,8 +114,10 @@ mod display;
 mod font;
 mod inline;
 mod length;
+mod quantities;
 mod text;
 mod text_decor;
+mod transforms;
 mod writing_modes;
 
 macro_rules! longhand {
@@ -222,4 +224,5 @@ pub(super) static DECLARATION_HANDLERS: &[DeclarationHandler] = &[
         "writing-mode",
         writing_modes::take_writing_mode
     ),
+    longhand!(ComputedTransform, "transform", transforms::take_transform),
 ];

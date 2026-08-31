@@ -2,7 +2,7 @@
 use icu_segmenter::options::{LineBreakStrictness, LineBreakWordOption};
 
 use super::*;
-use crate::style::computed::{HorizontalAlignment, WhiteSpaceCollapse};
+use crate::style::computed::{TextAlign, WhiteSpaceCollapse};
 
 // https://drafts.csswg.org/css-text-4/#line-break-property
 // auto not supported
@@ -50,13 +50,13 @@ pub(super) fn take_white_space_collapse(
 
 // https://drafts.csswg.org/css-text-4/#propdef-text-align
 // TODO: consider supporting start and end values since those seem useful
-pub(super) fn take_text_align(stream: &mut ParseStream) -> Result<HorizontalAlignment, ParseError> {
+pub(super) fn take_text_align(stream: &mut ParseStream) -> Result<TextAlign, ParseError> {
     Ok(if stream.peek_skip("left") {
-        HorizontalAlignment::Left
+        TextAlign::Left
     } else if stream.peek_skip("right") {
-        HorizontalAlignment::Right
+        TextAlign::Right
     } else if stream.peek_skip("center") {
-        HorizontalAlignment::Center
+        TextAlign::Center
     } else {
         return Err(stream.lookahead_error());
     })

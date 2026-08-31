@@ -1023,14 +1023,12 @@ impl super::Rasterizer for Rasterizer {
 
     fn write_debug_info(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
         let stats = self.cache.0.stats();
-        let (footprint_divisor, footprint_suffix) =
-            util::human_size_suffix(stats.total_memory_footprint);
 
         writeln!(writer, "== raster cache stats ==")?;
         writeln!(
             writer,
-            "approximate memory footprint: {:.3}{footprint_suffix}B",
-            stats.total_memory_footprint as f32 / footprint_divisor as f32
+            "approximate memory footprint: {}B",
+            util::HumanSize(stats.total_memory_footprint)
         )?;
         writeln!(writer, "total entries: {}", stats.total_entries)?;
         writeln!(writer, "current generation: {}", stats.generation)?;

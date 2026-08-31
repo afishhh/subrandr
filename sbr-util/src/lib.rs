@@ -124,27 +124,33 @@ impl<T: ?Sized> Drop for ReadonlyAliasableBox<T> {
     }
 }
 
-pub fn human_size_suffix(size: usize) -> (usize, &'static str) {
+fn binary_unit_prefix(quantity: usize) -> (usize, &'static str) {
     const TABLE: &[&str] = &["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei"];
 
-    let mut current_pow = 1;
-    let mut next_pow = 1024;
-    let mut current_idx = 0;
-    while next_pow <= size && current_idx < TABLE.len() - 1 {
-        current_pow = next_pow;
-        current_idx += 1;
-        next_pow = match next_pow.checked_mul(1024) {
-            Some(next_pow) => next_pow,
-            None => break,
-        };
-    }
+    let k = (usize::BITS - quantity.leading_zeros()).saturating_sub(1) / 10;
+    (1 << (k * 10), TABLE[k as usize])
+}
 
-    (current_pow, TABLE[current_idx])
+pub struct HumanSize(pub usize);
+
+impl std::fmt::Display for HumanSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (divisor, prefix) = binary_unit_prefix(self.0);
+        write!(
+            f,
+            "{:.3}{prefix}B",
+            if divisor > 1 {
+                (self.0 / (divisor >> 10)) as f32 / 1024.0
+            } else {
+                self.0 as f32
+            }
+        )
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{human_size_suffix, ReadonlyAliasableBox};
+    use super::{binary_unit_prefix, HumanSize, ReadonlyAliasableBox};
 
     #[test]
     fn readonly_aliasable_box() {
@@ -155,13 +161,13 @@ mod test {
         _ = aliasing;
     }
 
-    fn human_size_one(size: usize, exp_div: usize, exp_suffix: &str) {
-        assert_eq!(human_size_suffix(size), (exp_div, exp_suffix));
+    fn check_binary_unit(size: usize, exp_div: usize, exp_suffix: &str) {
+        assert_eq!(binary_unit_prefix(size), (exp_div, exp_suffix));
     }
 
     // Make sure not to break this on 32-bit by running it on a 32-bit miri target.
     #[test]
-    fn human_size() {
+    fn binary_unit() {
         const KB: usize = 1024;
         const MB: usize = KB * 1024;
         const GB: usize = MB * 1024;
@@ -172,14 +178,27 @@ mod test {
         #[cfg(target_pointer_width = "64")]
         const EB: usize = PB * 1024;
 
-        human_size_one(0, 1, "");
-        human_size_one(1023, 1, "");
-        human_size_one(KB + 1, KB, "Ki");
-        human_size_one(MB, MB, "Mi");
-        human_size_one(1749685123, GB, "Gi");
+        binary_unit_prefix(usize::MAX);
+
+        check_binary_unit(0, 1, "");
+        check_binary_unit(1023, 1, "");
+        check_binary_unit(KB + 1, KB, "Ki");
+        check_binary_unit(MB, MB, "Mi");
+        check_binary_unit(1749685123, GB, "Gi");
         #[cfg(target_pointer_width = "64")]
-        human_size_one(1000 * PB, PB, "Pi");
+        check_binary_unit(1000 * PB, PB, "Pi");
         #[cfg(target_pointer_width = "64")]
-        human_size_one(5 * EB, EB, "Ei");
+        check_binary_unit(usize::MAX, EB, "Ei");
+    }
+
+    #[test]
+    fn human_size() {
+        assert_eq!(format!("{}", HumanSize(0)), "0.000B");
+        assert_eq!(format!("{}", HumanSize(42)), "42.000B");
+        assert_eq!(format!("{}", HumanSize(1040)), "1.016KiB");
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(format!("{}", HumanSize(534900675635793436)), "475.087PiB");
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(format!("{}", HumanSize(usize::MAX)), "15.999EiB");
     }
 }

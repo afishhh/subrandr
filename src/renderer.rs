@@ -478,14 +478,12 @@ impl Renderer {
 
             {
                 let stats = glyph_cache.stats();
-                let (footprint_divisor, footprint_suffix) =
-                    util::human_size_suffix(stats.total_memory_footprint);
 
                 _ = writeln!(root, "=== glyph cache stats ===");
                 _ = writeln!(
                     root,
-                    "approximate memory footprint: {:.3}{footprint_suffix}B",
-                    stats.total_memory_footprint as f32 / footprint_divisor as f32
+                    "approximate memory footprint: {}B",
+                    util::HumanSize(stats.total_memory_footprint)
                 );
                 _ = writeln!(root, "total entries: {}", stats.total_entries);
                 _ = writeln!(root, "current generation: {}", stats.generation);

@@ -323,6 +323,8 @@ macro_rules! define_fixed_for_type {
             const ONE: Self = Self::ONE;
             const MAX: Self = Self::MAX;
         }
+
+        impl<const P: u32> super::Signed for Fixed<P, $type> {}
     };
     (@unsigned $type: ty, $wide: ty) => {
         impl<const P: u32> Fixed<P, $type> {
@@ -363,12 +365,12 @@ type FT_Fixed = std::ffi::c_long;
 
 impl<const P: u32> Fixed<P, i32> {
     #[allow(clippy::unnecessary_cast)]
-    pub fn into_ft(self) -> FT_Fixed {
+    pub const fn into_ft(self) -> FT_Fixed {
         Self::into_raw(self) as _
     }
 
     #[allow(clippy::unnecessary_cast)]
-    pub fn from_ft(value: FT_Fixed) -> Self {
+    pub const fn from_ft(value: FT_Fixed) -> Self {
         Self::from_raw(value as i32)
     }
 }

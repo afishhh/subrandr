@@ -9,7 +9,9 @@ use std::{
 
 use rasterize::{
     color::BGRA8,
-    scene::{ExternalSubscene, FixedS, Rect2S, SceneBuilder, SceneColor, SubsceneKind, Vec2S},
+    scene::{
+        ExternalSubscene, FixedS, Rect2S, Rotation, SceneBuilder, SceneColor, SubsceneKind, Vec2S,
+    },
     PixelFormat, Rasterizer, Texture,
 };
 use text_sys::*;
@@ -20,7 +22,7 @@ use util::{
 };
 
 use super::{Axis, FontMetrics, OpenTypeTag};
-use crate::text::{ft_utils::*, FontSizeKey, GlyphCache, GlyphKey, GlyphSubscene};
+use crate::text::{ft_utils::*, BaselineMetrics, FontSizeKey, GlyphCache, GlyphKey, GlyphSubscene};
 
 // Light hinting is used to ensure horizontal metrics remain unchanged by hinting.
 // This is required because we currently rely on subpixel positioning while rendering
@@ -446,11 +448,31 @@ unsafe fn build_font_metrics(
         underline_thickness = dpi_scale;
     };
 
+    let central_baseline;
+    {
+        if let Some(vhea) =
+            unsafe { get_table::<TT_VertHeader>(face, FT_SFNT_VHEA).filter(|_| scalable) }
+        {
+            central_baseline = BaselineMetrics {
+                ascender: scale_font_units!(vhea.Ascender),
+                descender: scale_font_units!(vhea.Descender),
+            };
+        } else {
+            let mid = max_advance / 2;
+            central_baseline = BaselineMetrics {
+                ascender: mid,
+                descender: mid,
+            };
+        }
+    }
+
     FontMetrics {
-        ascender,
-        descender,
-        height,
-        max_advance,
+        alphabetic_baseline: BaselineMetrics {
+            ascender,
+            descender,
+        },
+        horiz_height: height,
+        central_baseline,
         underline_top_offset,
         underline_thickness,
         strikeout_top_offset,
@@ -702,6 +724,7 @@ impl Font {
             texture,
             unscaled_offset,
         }: &CachedBitmapTexture,
+        rotation: Rotation,
     ) -> GlyphSubscene {
         if texture.width() == 0 || texture.height() == 0 {
             return GlyphSubscene::empty();
@@ -716,12 +739,10 @@ impl Font {
 
         GlyphSubscene(SubsceneKind::Scene({
             let mut b = SceneBuilder::new();
-            b.root().with_translation(scaled_offset).bitmap(
-                texture.clone(),
-                scaled_size,
-                None,
-                BGRA8::WHITE,
-            );
+            let mut r = b.root();
+            r.apply_rotation(rotation, Vec2::ZERO);
+            r.apply_translation(scaled_offset);
+            r.bitmap(texture.clone(), scaled_size, None, BGRA8::WHITE);
             b.finish()
         }))
     }
@@ -730,17 +751,18 @@ impl Font {
         &self,
         index: u32,
         subpixel_offset: Vec2S,
+        rotation: Rotation,
         rasterizer: &mut dyn Rasterizer,
         glyph_cache: &GlyphCache,
         glyph_key: GlyphKey,
     ) -> Result<GlyphSubscene, GlyphDisplayError> {
         let bitmap_key = glyph_key.for_bitmap_strike(self.size.bitmap_strike_index);
         if let Some(cached) = glyph_cache.get::<CachedBitmapTexture>(bitmap_key.clone()) {
-            return Ok(self.subscene_for_cached_bitmap(cached));
+            return Ok(self.subscene_for_cached_bitmap(cached, rotation));
         }
 
         let face = self.with_applied_size()?;
-        let _guard = unsafe { TransformGuard::new(face, subpixel_offset) };
+        let _guard = unsafe { TransformGuard::new(face, subpixel_offset, rotation) };
 
         unsafe {
             fttry!(FT_Load_Glyph(
@@ -768,8 +790,8 @@ impl Font {
                 })?
             };
 
-            return Ok(self.subscene_for_cached_bitmap(cached));
-        } else if unsafe {(*glyph).format == FT_GLYPH_FORMAT_OUTLINE}
+            return Ok(self.subscene_for_cached_bitmap(cached, rotation));
+        } else if unsafe { (*glyph).format == FT_GLYPH_FORMAT_OUTLINE }
                 // COLRv0 glyphs actually store multiple layers which we would
                 // have to take into account here so disable this path
                 // if the font contains such glyphs.
@@ -781,9 +803,14 @@ impl Font {
                 return Ok(GlyphSubscene::empty());
             }
 
+            let transform_point = |p: Point2<I26Dot6>| (rotation * Vec2::new(p.x, -p.y)).to_point();
+
             bbox = Rect2S::NOTHING;
             for p in outline.points() {
-                bbox.expand_to_point(Point2::new(FixedS::from_ft(p.x), FixedS::from_ft(-p.y)));
+                bbox.expand_to_point(transform_point(Point2::new(
+                    FixedS::from_ft(p.x),
+                    FixedS::from_ft(p.y),
+                )));
             }
 
             let bbox_size = bbox.size();
@@ -792,9 +819,12 @@ impl Font {
             if bbox_max_dim > 128 && bbox_min_dim > 64 {
                 let mut b = SceneBuilder::new();
                 b.root().filled_outline(
-                    outline
-                        .iter()
-                        .map(|x| x.map(|c| Point2::new(c.x.into_f32(), -c.y.into_f32()))),
+                    outline.iter().map(|x| {
+                        x.map(|mut p| {
+                            p = transform_point(p);
+                            Point2::new(p.x.into_f32(), p.y.into_f32())
+                        })
+                    }),
                     SceneColor::ACTIVE,
                 );
                 return Ok(GlyphSubscene(SubsceneKind::Scene(b.finish())));
@@ -807,6 +837,7 @@ impl Font {
             font: self.clone(),
             index,
             subpixel_offset,
+            rotation,
             bbox,
         });
 
@@ -865,10 +896,42 @@ unsafe fn copy_glyph_slot_bitmap_to_texture(
 struct TransformGuard(FT_Face);
 
 impl TransformGuard {
-    unsafe fn new(face: FT_Face, translation: Vec2<I26Dot6>) -> Self {
+    unsafe fn new(face: FT_Face, translation: Vec2<I26Dot6>, rotation: Rotation) -> Self {
+        const IDENTITY_MATRIX: FT_Matrix = FT_Matrix {
+            xx: I16Dot16::ONE.into_ft(),
+            xy: 0,
+            yx: 0,
+            yy: I16Dot16::ONE.into_ft(),
+        };
+        const CLOCKWISE_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
+            xx: 0,
+            xy: I16Dot16::ONE.into_ft(),
+            yx: -I16Dot16::ONE.into_ft(),
+            yy: 0,
+        };
+        const FLIP_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
+            xx: -I16Dot16::ONE.into_ft(),
+            xy: 0,
+            yx: 0,
+            yy: -I16Dot16::ONE.into_ft(),
+        };
+        const COUNTER_CLOCKWISE_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
+            xx: 0,
+            xy: -I16Dot16::ONE.into_ft(),
+            yx: I16Dot16::ONE.into_ft(),
+            yy: 0,
+        };
+
+        let mut matrix = match rotation {
+            Rotation::None => IDENTITY_MATRIX,
+            Rotation::Clockwise90 => CLOCKWISE_ROTATION_MATRIX,
+            Rotation::FlipXY => FLIP_ROTATION_MATRIX,
+            Rotation::CounterClockwise90 => COUNTER_CLOCKWISE_ROTATION_MATRIX,
+        };
+
         FT_Set_Transform(
             face,
-            std::ptr::null_mut(),
+            &mut matrix,
             &mut FT_Vector {
                 x: translation.x.into_ft(),
                 y: -translation.y.into_ft(),
@@ -888,6 +951,7 @@ struct FreeTypeSubscene {
     font: Font,
     index: u32,
     subpixel_offset: Vec2S,
+    rotation: Rotation,
     bbox: Rect2S,
 }
 
@@ -1082,7 +1146,7 @@ impl FreeTypeSubscene {
         rasterizer: &mut dyn Rasterizer,
     ) -> Result<(Vec2<i32>, Texture), GlyphRenderError> {
         let face = self.font.with_applied_size()?;
-        let _guard = unsafe { TransformGuard::new(face, self.subpixel_offset) };
+        let _guard = unsafe { TransformGuard::new(face, self.subpixel_offset, self.rotation) };
 
         unsafe {
             fttry!(FT_Load_Glyph(

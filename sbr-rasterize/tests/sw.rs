@@ -338,7 +338,7 @@ fn translated_subscene_with_polyline() {
             BGRA8::BLUE,
         );
         root.with_translation(Vec2::new(FixedS::new(25), FixedS::new(25)))
-            .subscene(None, BGRA8::MAGENTA, |_| SubsceneKind::Scene(subscene));
+            .subscene(None, BGRA8::MAGENTA, |_, _| SubsceneKind::Scene(subscene));
         builder.finish()
     };
 
@@ -399,21 +399,21 @@ fn blurred_triangle() {
                 blur_stddev: I26Dot6::from_quotient(5, 2),
             }),
             BGRA8::MAGENTA,
-            |_| SubsceneKind::Scene(triangle.clone()),
+            |_, _| SubsceneKind::Scene(triangle.clone()),
         );
         root.subscene(
             Some(SceneFilter::ExtractAlpha {
                 blur_stddev: I26Dot6::from_quotient(9, 10),
             }),
             BGRA8::YELLOW,
-            |_| SubsceneKind::Scene(triangle.clone()),
+            |_, _| SubsceneKind::Scene(triangle.clone()),
         );
         root.subscene(
             Some(SceneFilter::ExtractAlpha {
                 blur_stddev: I26Dot6::ZERO,
             }),
             BGRA8::BLACK,
-            |_| SubsceneKind::Scene(triangle),
+            |_, _| SubsceneKind::Scene(triangle),
         );
         builder.finish()
     };
@@ -493,11 +493,11 @@ fn placeholder_subscene_with_filled_outline() {
     };
     let scene = {
         let mut root = builder.root();
-        root.subscene(None, BGRA8::MAGENTA, |_| {
+        root.subscene(None, BGRA8::MAGENTA, |_, _| {
             SubsceneKind::Scene(subscene.clone())
         });
         root.with_translation(Vec2::new(FixedS::ZERO, FixedS::new(60)))
-            .subscene(None, BGRA8::ORANGERED, |_| SubsceneKind::Scene(subscene));
+            .subscene(None, BGRA8::ORANGERED, |_, _| SubsceneKind::Scene(subscene));
         builder.finish()
     };
 

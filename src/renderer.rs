@@ -21,9 +21,9 @@ use crate::{
     display::{DisplayError, DisplayPass},
     layout::{
         self,
-        block::{BlockContainerFragment, ContainingBlock},
+        block::BlockContainerFragment,
         inline::{InlineContentBuilder, InlineContentFragment},
-        FixedL, LayoutContext, Point2L,
+        FixedL, LayoutContext, Point2L, Vec2L,
     },
     srv3,
     style::{computed::HorizontalAlignment, ComputedStyle},
@@ -497,7 +497,7 @@ impl Renderer {
                 DebugContentFragment::Inline(layout::inline::layout(
                     lctx,
                     &builder.finish(),
-                    &ContainingBlock::infinite_initial(),
+                    Vec2L::new(FixedL::MAX, FixedL::MAX),
                 )?),
             ));
         }
@@ -556,7 +556,7 @@ impl Renderer {
                 let perf_text_fragment = layout::inline::layout(
                     lctx,
                     &builder.finish(),
-                    &ContainingBlock::infinite_initial(),
+                    Vec2L::new(FixedL::MAX, FixedL::MAX),
                 )?;
                 let graph_y = perf_text_fragment.fbox.size_for_layout().y;
                 fragments.push((
@@ -628,6 +628,10 @@ impl Renderer {
                     log,
                     dpi: ctx.dpi,
                     fonts: &mut self.fonts,
+                    initial_containing_block_size: Vec2::new(
+                        ctx.player_width(),
+                        ctx.player_height(),
+                    ),
                 },
                 t,
                 unchanged_range: 0..u32::MAX,

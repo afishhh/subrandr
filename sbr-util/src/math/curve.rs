@@ -14,7 +14,7 @@ const MAX_BEZIER_CONTROL_POINTS: usize = 4;
 
 mod flatten;
 
-pub fn evaluate_bezier<N: Number>(points: &[Point2<N>], t: N) -> Point2<N> {
+fn evaluate_bezier<N: Number>(points: &[Point2<N>], t: N) -> Point2<N> {
     assert!(points.len() <= MAX_BEZIER_CONTROL_POINTS);
 
     let mut midpoints_buffer = [MaybeUninit::<Vec2<N>>::uninit(); MAX_BEZIER_CONTROL_POINTS];
@@ -38,18 +38,6 @@ pub fn evaluate_bezier<N: Number>(points: &[Point2<N>], t: N) -> Point2<N> {
     }
 
     midpoints[0].to_point()
-}
-
-pub trait Bezier<N: Number> {
-    fn points(&self) -> &[Point2<N>];
-    fn points_mut(&mut self) -> &mut [Point2<N>];
-    fn sample(&self, t: N) -> Point2<N> {
-        evaluate_bezier(self.points(), t)
-    }
-
-    fn subcurve(&self, t0: N, t1: N) -> Self
-    where
-        Self: Sized;
 }
 
 macro_rules! define_curve {
@@ -87,31 +75,9 @@ macro_rules! define_curve {
 define_curve!(QuadraticBezier, 3);
 define_curve!(CubicBezier, 4);
 
-impl<N: Number> Bezier<N> for QuadraticBezier<N> {
-    fn points(&self) -> &[Point2<N>] {
-        &self.0
-    }
-
-    fn points_mut(&mut self) -> &mut [Point2<N>] {
-        &mut self.0
-    }
-
-    fn subcurve(&self, t0: N, t1: N) -> Self
-    where
-        Self: Sized,
-    {
-        let from = self.sample(t0);
-        let to = self.sample(t1);
-
-        let d = [
-            (self[1] - self[0]).to_point(),
-            (self[2] - self[1]).to_point(),
-        ];
-
-        let dt = t1 - t0;
-        let p1 = from + super::evaluate_bezier(&d, t0).to_vec() * dt;
-
-        Self([from, p1, to])
+impl<N: Number> QuadraticBezier<N> {
+    fn sample(&self, t: N) -> Point2<N> {
+        evaluate_bezier(&self.0, t)
     }
 }
 
@@ -143,13 +109,9 @@ impl<N: Number> QuadraticBezier<N> {
     }
 }
 
-impl<N: Number> Bezier<N> for CubicBezier<N> {
-    fn points(&self) -> &[Point2<N>] {
-        &self.0
-    }
-
-    fn points_mut(&mut self) -> &mut [Point2<N>] {
-        &mut self.0
+impl<N: Number> CubicBezier<N> {
+    fn sample(&self, t: N) -> Point2<N> {
+        evaluate_bezier(&self.0, t)
     }
 
     fn subcurve(&self, t0: N, t1: N) -> Self
@@ -166,8 +128,8 @@ impl<N: Number> Bezier<N> for CubicBezier<N> {
         ];
 
         let dt = t1 - t0;
-        let p1 = from + super::evaluate_bezier(&d, t0).to_vec() * dt;
-        let p2 = to - super::evaluate_bezier(&d, t1).to_vec() * dt;
+        let p1 = from + evaluate_bezier(&d, t0).to_vec() * dt;
+        let p2 = to - evaluate_bezier(&d, t1).to_vec() * dt;
 
         Self([from, p1, p2, to])
     }
@@ -179,14 +141,5 @@ impl CubicBezier<f32> {
         tolerance: f32,
     ) -> impl Iterator<Item = QuadraticBezier<f32>> + use<'_> {
         flatten::cubic_to_quadratics(self, tolerance)
-    }
-
-    pub fn from_b_spline(b0: Point2f, b1: Point2f, b2: Point2f, b3: Point2f) -> Self {
-        Self([
-            ((b0.to_vec() + b1.to_vec() * 4.0 + b2.to_vec()) / 6.0).to_point(),
-            ((b1.to_vec() * 2.0 + b2.to_vec()) / 3.0).to_point(),
-            ((b1.to_vec() + b2.to_vec() * 2.0) / 3.0).to_point(),
-            ((b1.to_vec() + b2.to_vec() * 4.0 + b3.to_vec()) / 6.0).to_point(),
-        ])
     }
 }

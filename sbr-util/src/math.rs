@@ -1,6 +1,5 @@
 use std::{
     fmt::Debug,
-    iter::Sum,
     ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
@@ -88,6 +87,8 @@ impl<N: Number + Signed> Vec2<N> {
 }
 
 impl<N: Number> Vec2<N> {
+    pub const ZERO: Self = Self::splat(N::ZERO);
+
     #[track_caller]
     pub fn length(self) -> N
     where
@@ -101,47 +102,12 @@ impl<N: Number> Vec2<N> {
         self.x * self.x + self.y * self.y
     }
 
-    /// Calculates the dot product of two vectors.
-    ///
-    /// The dot product of two (2d) vectors is defined for vector u and v as:
-    /// u⋅v = u.x * v.x + u.y * v.y
-    ///
-    /// However there is also a useful geometric definition:
-    /// u⋅v = ||u|| * ||v|| * cos(θ)
-    /// where θ is the angle between u and v.
-    #[track_caller]
-    pub fn dot(self, other: Self) -> N {
-        self.x * other.x + self.y * other.y
-    }
-
-    /// Calculates the cross product of two vectors.
-    ///
-    /// # Note
-    ///
-    /// The cross product of two (2d) vectors is defined for vector u and v as:
-    /// u⨯v = u.x * v.y - u.y * v.x
-    ///
-    /// However there is also a useful geometric definition:
-    /// u⨯v = ||u|| * ||v|| * sin(θ)
-    ///
-    /// If this value is negative that means that the second vector is
-    /// in the "clockwise direction" while if it positive then
-    /// it is in the "counter-clockwise direction".
-    ///
-    /// another NOTE: This terminology is made up and probably not very formal.
-    #[track_caller]
-    pub fn cross(self, other: Self) -> N {
-        self.x * other.y - self.y * other.x
-    }
-
     pub fn normalize(self) -> Self
     where
         N: Sqrt,
     {
         N::fast_normalize(self)
     }
-
-    pub const ZERO: Self = Self::new(N::ZERO, N::ZERO);
 }
 
 impl<N: Debug> Debug for Vec2<N> {
@@ -236,22 +202,6 @@ impl<N: Number + Signed> Neg for Vec2<N> {
     }
 }
 
-impl<N: Number> Sum for Vec2<N> {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.reduce(Self::add).unwrap_or(Self::ZERO)
-    }
-}
-
-impl<N: Number> Sum<Vec2<N>> for Point2<N> {
-    fn sum<I: Iterator<Item = Vec2<N>>>(iter: I) -> Self {
-        let mut result = Self::ZERO;
-        for value in iter {
-            result += value;
-        }
-        result
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(C)]
 pub struct Rect2<N> {
@@ -265,11 +215,6 @@ impl<N: Number> Rect2<N> {
     pub const NOTHING: Self = Self {
         min: Point2::new(N::MAX, N::MAX),
         max: Point2::new(N::MIN, N::MIN),
-    };
-
-    pub const ZERO: Self = Self {
-        min: Point2::ZERO,
-        max: Point2::ZERO,
     };
 
     pub const MAX: Self = Self {
@@ -307,13 +252,6 @@ impl<N: Number> Rect2<N> {
             && self.max.y >= other.min.y
     }
 
-    pub fn intersection(&self, other: &Self) -> Self {
-        Self {
-            min: Point2::new(self.min.x.max(other.min.x), self.min.y.max(other.min.y)),
-            max: Point2::new(self.max.x.min(other.max.x), self.max.y.min(other.max.y)),
-        }
-    }
-
     pub fn includes(&self, other: Rect2<N>) -> bool {
         self.min.x <= other.min.x
             && self.max.x >= other.max.x
@@ -329,29 +267,12 @@ impl<N: Number> Rect2<N> {
         self.max - self.min
     }
 
-    pub fn signed_area(&self) -> N {
-        let size = self.size();
-        size.x * size.y
-    }
-
-    pub fn x(&self) -> N {
-        self.min.x
-    }
-
-    pub fn y(&self) -> N {
-        self.min.y
-    }
-
     pub fn width(&self) -> N {
         self.size().x
     }
 
     pub fn height(&self) -> N {
         self.size().y
-    }
-
-    pub fn center(&self) -> Point2<N> {
-        self.min + (self.max - self.min) / (N::ONE + N::ONE)
     }
 
     pub fn expand_to_point(&mut self, point: Point2<N>) {
@@ -420,21 +341,7 @@ impl<N: Copy + Into<f32>> Rect2<N> {
     }
 }
 
-pub trait BoolExt {
-    fn then_or_zero<N: Number>(self, fun: impl FnOnce() -> N) -> N;
-}
-
-impl BoolExt for bool {
-    fn then_or_zero<N: Number>(self, fun: impl FnOnce() -> N) -> N {
-        if self {
-            fun()
-        } else {
-            N::ZERO
-        }
-    }
-}
-
-pub fn fast_divide_by_sqrt<O, T>(numerator: T, squared_denominator: f32) -> O
+fn fast_divide_by_sqrt<O, T>(numerator: T, squared_denominator: f32) -> O
 where
     T: Div<f32, Output = O> + Mul<f32, Output = O>,
 {

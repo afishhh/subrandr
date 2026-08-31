@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use log::{AsLogger, LogContext};
-use util::math::{BoolExt, I26Dot6, Number, Point2, Rect2, Vec2};
+use util::math::{I26Dot6, Number, Point2, Rect2, Vec2};
 
 use crate::{
     style::{
@@ -40,10 +40,10 @@ impl EdgeExtents {
         right: impl FnOnce() -> FixedL,
     ) -> Self {
         Self {
-            top: part.is_top().then_or_zero(top),
-            bottom: part.is_bottom().then_or_zero(bottom),
-            left: part.is_leftmost().then_or_zero(left),
-            right: part.is_rightmost().then_or_zero(right),
+            top: part.is_top().then(top).unwrap_or(FixedL::ZERO),
+            bottom: part.is_bottom().then(bottom).unwrap_or(FixedL::ZERO),
+            left: part.is_leftmost().then(left).unwrap_or(FixedL::ZERO),
+            right: part.is_rightmost().then(right).unwrap_or(FixedL::ZERO),
         }
     }
 

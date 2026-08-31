@@ -1,6 +1,6 @@
 //! An implementation of [this algorithm](https://raphlinus.github.io/graphics/curves/2019/12/23/flatten-quadbez.html).
 //! Cubic curves are converted into quadratics using [this algorithm](https://web.archive.org/web/20150403003715/http://www.caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html).
-use super::{Bezier as _, CubicBezier, Point2f, QuadraticBezier};
+use super::{CubicBezier, Point2f, QuadraticBezier};
 
 struct Basic {
     x0: f32,
@@ -8,9 +8,7 @@ struct Basic {
     scale: f32,
 }
 
-/// Map a quadratic bezier to a scaled, translated and rotated segment of y=x^2
 fn map_to_basic(a: Point2f, b: Point2f, c: Point2f) -> Basic {
-    // (b - a) + (b - c)
     let dd = b.to_vec() * 2.0 - a.to_vec() - c.to_vec();
     let u0 = (b.x - a.x) * dd.x + (b.y - a.y) * dd.y;
     let u2 = (c.x - b.x) * dd.x + (c.y - b.y) * dd.y;
@@ -21,7 +19,6 @@ fn map_to_basic(a: Point2f, b: Point2f, c: Point2f) -> Basic {
     Basic { x0, x2, scale }
 }
 
-// integral((1 + 4x²)**-0.25)
 fn approximate_segments_integral(x: f32) -> f32 {
     let d: f32 = 0.67;
     x / (1.0 - d + (d.powi(4) + 0.25 * x * x).powf(0.25))

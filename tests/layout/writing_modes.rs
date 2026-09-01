@@ -200,3 +200,36 @@ check_test! {
         block.cyan_bg.height100.tmarginauto.right { inline { text "123" } }
     }
 }
+
+test_define_style! {
+    .la "line-break: anywhere"
+    .bpadding20 "padding-bottom: 20px"
+}
+
+check_test! {
+    name = tmp,
+    size = (750, 450),
+    block.height400.noto_sans_jp {
+        block.fs24.bpadding20 { inline { text "this is in an another block" } }
+        block.la { inline.fs64 {
+            block.green_bg.vertical_rl {
+                inline {
+                    span.blue_bg {
+                        span.gunderline { text "ハロー" }
+                        span.red_bg { text "ABC\n" }
+                        span.ystrike { text "defバイバイ" }
+                        ruby {
+                            base { text "縦書き" }
+                            annotation.fs32.annotation { text "たてがき" }
+                        }
+                        span { text "aaaaaa" }
+                        text "\nあ"
+                        block.vmargin30.hpadding20.red_bg.horizontal_tb { inline { text "abcd" } }
+                        text "あ"
+                    }
+                }
+            }
+            text "more stuff"
+        } }
+    }
+}

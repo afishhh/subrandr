@@ -510,10 +510,12 @@ impl Window {
             .measure(
                 pass.lctx,
                 Vec2W::new(
-                    LayoutConstraint::Fixed(
+                    LayoutConstraint::Exact(
                         pass.lctx.initial_containing_block_size.block(writing_mode),
                     ),
-                    LayoutConstraint::MaxContent,
+                    LayoutConstraint::Scroll {
+                        fallback_size: pass.lctx.initial_containing_block_size.inline(writing_mode),
+                    },
                 )
                 .to_physical(writing_mode),
                 Axes::from(Axis::inline(writing_mode)),

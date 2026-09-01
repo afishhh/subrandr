@@ -494,8 +494,11 @@ impl std::ops::BitOr for Axes {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutConstraint {
-    Fixed(FixedL),
-    MaxContent,
+    // Used for layout in known-size block flow.
+    Exact(FixedL),
+    // Used for max-content sizing, sizing under scroll containers, etc.
+    // TODO: better name?
+    Scroll { fallback_size: FixedL },
 }
 
 #[derive(Debug)]

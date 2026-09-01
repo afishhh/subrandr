@@ -584,15 +584,11 @@ impl BlockItemFragment {
         dominant_baseline: Baseline,
     ) -> Result<Self, InlineLayoutError> {
         let sizes = partial.inline_level_block_sizes(lctx, constraints, writing_mode)?;
-        let available_block_space = match constraints.block(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => Some(fixed),
-            LayoutConstraint::MaxContent => None,
-        };
         let fragment = partial.layout(
             lctx,
             sizes.size,
             sizes.margins(writing_mode),
-            available_block_space,
+            constraints.block(writing_mode),
             writing_mode,
         )?;
 
@@ -2793,8 +2789,8 @@ fn layout_run_full<'a>(
 
     let mut items = &mut items[..];
     let available_space = match constraints.inline(writing_mode) {
-        LayoutConstraint::Fixed(fixed) => fixed,
-        LayoutConstraint::MaxContent => FixedL::MAX,
+        LayoutConstraint::Exact(fixed) => fixed,
+        LayoutConstraint::Scroll { fallback_size: _ } => FixedL::MAX,
     };
     if available_space != FixedL::MAX && !break_opportunities.is_empty() {
         let mut breaking_context = BreakingContext {
@@ -2905,6 +2901,7 @@ impl PartialInline<'_> {
         &self,
         lctx: &mut LayoutContext,
         block_constraint: LayoutConstraint,
+        inline_fallback_size: FixedL,
     ) -> Result<FixedL, InlineLayoutError> {
         // TODO: This could actually be avoided (and it was avoided before but removed for simplicity)
         //       by just measuring the partial items directly.
@@ -2913,8 +2910,13 @@ impl PartialInline<'_> {
             .initial_shaping_result
             .to_fragment_result(
                 lctx,
-                Vec2W::new(block_constraint, LayoutConstraint::MaxContent)
-                    .to_physical(writing_mode),
+                Vec2W::new(
+                    block_constraint,
+                    LayoutConstraint::Scroll {
+                        fallback_size: inline_fallback_size,
+                    },
+                )
+                .to_physical(writing_mode),
                 writing_mode,
                 writing_mode.auto_dominant_baseline(),
             )?
@@ -2939,14 +2941,21 @@ impl PartialInline<'_> {
         axes: Axes,
     ) -> Result<Vec2L, InlineLayoutError> {
         let writing_mode = self.content.root_style.writing_mode();
-        if constraints.inline(writing_mode) == LayoutConstraint::MaxContent
-            && !axes.block(writing_mode)
-        {
-            return Ok(Vec2LW::new(
-                FixedL::ZERO,
-                self.max_inline_size(lctx, constraints.block(writing_mode))?,
-            )
-            .to_physical(writing_mode));
+        if !axes.block(writing_mode) {
+            if let LayoutConstraint::Scroll {
+                fallback_size: inline_fallback_size,
+            } = constraints.inline(writing_mode)
+            {
+                return Ok(Vec2LW::new(
+                    FixedL::ZERO,
+                    self.max_inline_size(
+                        lctx,
+                        constraints.block(writing_mode),
+                        inline_fallback_size,
+                    )?,
+                )
+                .to_physical(writing_mode));
+            }
         }
 
         layout_run_full(
@@ -2982,8 +2991,8 @@ pub fn layout<'l, 'b, 'c>(
     lctx.initial_containing_block_size = initial_containing_block_size;
 
     let constraints = Vec2::new(
-        LayoutConstraint::Fixed(initial_containing_block_size.x),
-        LayoutConstraint::Fixed(initial_containing_block_size.y),
+        LayoutConstraint::Exact(initial_containing_block_size.x),
+        LayoutConstraint::Exact(initial_containing_block_size.y),
     );
     shape(lctx, content).and_then(|s| s.layout(lctx, constraints))
 }

@@ -241,19 +241,12 @@ impl BlockInlineSizes {
         outer_writing_mode: WritingMode,
     ) -> Result<FixedL, InlineLayoutError> {
         // calculate the preferred width by formatting the content without breaking lines other than where explicit line breaks occur
-        let mut preferred_measurement_constraints = Vec2W::new(
-            constraints.block(outer_writing_mode),
-            LayoutConstraint::MaxContent,
-        )
-        .to_physical(outer_writing_mode);
+        let mut preferred_measurement_constraints = constraints;
         if outer_writing_mode.perpendicular(container.style.writing_mode()) {
             // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
             // ^ absolutely brilliant sentence btw
-            preferred_measurement_constraints = container.child_measure_constraints(
-                lctx,
-                preferred_measurement_constraints,
-                outer_writing_mode,
-            )
+            preferred_measurement_constraints = container
+                .child_measure_constraints(preferred_measurement_constraints, outer_writing_mode)
         };
         let preferred_width = container
             .measure_inner(
@@ -266,10 +259,10 @@ impl BlockInlineSizes {
         // TODO: minimum width
         // Thirdly, find the available width: in this case, this is the width of the containing block minus the used values of 'margin-left', 'border-left-width', 'padding-left', 'padding-right', 'border-right-width', 'margin-right', and the widths of any relevant scroll bars.
         let available_width = match constraints.inline(outer_writing_mode) {
-            LayoutConstraint::Fixed(available_inline_space) => {
+            LayoutConstraint::Exact(available_inline_space) => {
                 available_inline_space - margin_left - padding_left - padding_right - margin_right
             }
-            LayoutConstraint::MaxContent => FixedL::MAX,
+            LayoutConstraint::Scroll { fallback_size: _ } => FixedL::MAX,
         };
 
         // Then the shrink-to-fit width is: min(max(preferred minimum width, available width), preferred width).
@@ -333,21 +326,6 @@ impl BlockInlineSizes {
             }
         }
     }
-}
-
-// https://drafts.csswg.org/css-writing-modes-3/#orthogonal-auto
-pub(super) fn fallback_inline_space_in_orthogonal_flow(
-    lctx: &mut LayoutContext,
-    orthogonal_writing_mode: WritingMode,
-) -> FixedL {
-    // In these cases, an additional fallback size is used in place of the available inline space for calculations that require a definite available inline space: this size is the smallest of
-    // - the size represented by the containing block’s inner max size (if that is fixed) floored by its inner min size (if that is fixed)
-    // TODO: support max-{width,height}
-    // - the nearest ancestor scrollport’s inner size if that is fixed, else / capped by its inner max size if that is fixed, floored by its inner min size if that is fixed
-    // NOTE: scrollports do not exist in our layout engine right now
-    // - the initial containing block’s size
-    lctx.initial_containing_block_size
-        .inline(orthogonal_writing_mode)
 }
 
 impl PartialBlockContainer<'_> {
@@ -422,12 +400,12 @@ impl PartialBlockContainer<'_> {
 
         let mut inner_constraints = constraints;
         match &mut inner_constraints.inline_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.inline,
-            LayoutConstraint::MaxContent => (),
+            LayoutConstraint::Exact(fixed) => *fixed -= outer_edges.inline,
+            LayoutConstraint::Scroll { fallback_size: _ } => (),
         }
         match &mut inner_constraints.block_mut(writing_mode) {
-            LayoutConstraint::Fixed(fixed) => *fixed -= outer_edges.block,
-            LayoutConstraint::MaxContent => (),
+            LayoutConstraint::Exact(fixed) => *fixed -= outer_edges.block,
+            LayoutConstraint::Scroll { fallback_size: _ } => (),
         }
         let mut result = self.measure_inner(lctx, inner_constraints, axes)?;
 
@@ -441,9 +419,9 @@ impl PartialBlockContainer<'_> {
         Ok(result)
     }
 
+    // TODO: do we even need this
     fn child_measure_constraints(
         &self,
-        lctx: &mut LayoutContext,
         constraints: Vec2<LayoutConstraint>,
         outer_writing_mode: WritingMode,
     ) -> Vec2<LayoutConstraint> {
@@ -455,14 +433,12 @@ impl PartialBlockContainer<'_> {
 
         // orthogonal flows may need to use a fallback size
         let available_inline_space = match constraints.inline(child_writing_mode) {
-            LayoutConstraint::Fixed(fixed) => fixed,
-            LayoutConstraint::MaxContent => {
-                fallback_inline_space_in_orthogonal_flow(lctx, child_writing_mode)
-            }
+            LayoutConstraint::Exact(fixed) => fixed,
+            LayoutConstraint::Scroll { fallback_size } => fallback_size,
         };
         Vec2W::new(
             constraints.block(child_writing_mode),
-            LayoutConstraint::Fixed(available_inline_space),
+            LayoutConstraint::Exact(available_inline_space),
         )
         .to_physical(child_writing_mode)
     }
@@ -491,7 +467,7 @@ impl PartialBlockContainer<'_> {
         let auto_axes = axes;
         // If we have a fixed available block size then we need to track child block sizes
         // to update it.
-        if matches!(constraints.block(writing_mode), LayoutConstraint::Fixed(_)) {
+        if matches!(constraints.block(writing_mode), LayoutConstraint::Exact(_)) {
             *axes.block_mut(writing_mode) = true;
         }
 
@@ -504,15 +480,16 @@ impl PartialBlockContainer<'_> {
                 let mut result = Vec2LW::ZERO;
 
                 for child in children {
+                    // TODO: this transformation should probably only be applied in shrink-to-fit sizing
                     let child_constraints =
-                        child.child_measure_constraints(lctx, current_constraints, writing_mode);
+                        child.child_measure_constraints(current_constraints, writing_mode);
                     let child_size = child.measure(lctx, child_constraints, axes)?;
 
                     result.inline = result.inline.max(child_size.inline(writing_mode));
                     result.block += child_size.block(writing_mode);
                     match current_constraints.block_mut(writing_mode) {
-                        LayoutConstraint::Fixed(fixed) => *fixed -= child_size.block(writing_mode),
-                        LayoutConstraint::MaxContent => (),
+                        LayoutConstraint::Exact(fixed) => *fixed -= child_size.block(writing_mode),
+                        LayoutConstraint::Scroll { fallback_size: _ } => (),
                     }
                 }
 
@@ -536,7 +513,7 @@ impl PartialBlockContainer<'_> {
         // Refers to the inner inline size in the parent's (outer) writing mode.
         outer_inner_inline_size: FixedL,
         margins: EdgeExtents,
-        outer_available_block_space: Option<FixedL>,
+        outer_available_block_space: LayoutConstraint,
         outer_writing_mode: WritingMode,
     ) -> Result<BlockContainerFragment, InlineLayoutError> {
         let writing_mode = self.style.writing_mode();
@@ -555,29 +532,31 @@ impl PartialBlockContainer<'_> {
             base_inner_size.inline = Some(outer_inner_inline_size);
         }
 
-        let available_inline_space = base_inner_size.inline.unwrap_or_else(|| {
-            assert!(outer_writing_mode.perpendicular(writing_mode));
-            outer_available_block_space
-                .unwrap_or_else(|| fallback_inline_space_in_orthogonal_flow(lctx, writing_mode))
-        });
-        let mut available_block_space = base_inner_size.block.or_else(|| {
-            if outer_writing_mode.perpendicular(writing_mode) {
-                Some(outer_inner_inline_size)
-            } else {
+        let available_inline_space = base_inner_size.inline.map_or_else(
+            || {
+                assert!(outer_writing_mode.perpendicular(writing_mode));
                 outer_available_block_space
-            }
-        });
+            },
+            LayoutConstraint::Exact,
+        );
+        let mut available_block_space = base_inner_size.block.map_or_else(
+            || {
+                if outer_writing_mode.perpendicular(writing_mode) {
+                    LayoutConstraint::Exact(outer_inner_inline_size)
+                } else {
+                    outer_available_block_space
+                }
+            },
+            LayoutConstraint::Exact,
+        );
 
         // https://drafts.csswg.org/css-writing-modes-3/#orthogonal-layout
         // If this block contains only inline children then this will be used for laying
         // them out and the inner inline size will be calculated from the resulting fragment.
         // Otherwise it will be passed to `self.measure_inner` to calculate the inner inline
         // size before laying out children.
-        let inner_measure_constraints = Vec2W::new(
-            available_block_space.map_or(LayoutConstraint::MaxContent, LayoutConstraint::Fixed),
-            LayoutConstraint::Fixed(available_inline_space),
-        )
-        .to_physical(writing_mode);
+        let inner_measure_constraints =
+            Vec2W::new(available_block_space, available_inline_space).to_physical(writing_mode);
 
         let inner_inline_size;
         let inner_block_size;
@@ -618,6 +597,7 @@ impl PartialBlockContainer<'_> {
                     .inline(writing_mode),
                 );
 
+                // TODO: layout in reverse order for reverse block direction
                 let mut auto_block_size = FixedL::ZERO;
                 let mut fragments = Vec::new();
                 for child in children {
@@ -642,9 +622,12 @@ impl PartialBlockContainer<'_> {
                         off.block = -auto_block_size;
                     }
 
-                    if let Some(space) = available_block_space.as_mut() {
-                        *space =
-                            (*space - fragment.fbox.block_size(writing_mode)).max(FixedL::ZERO);
+                    match &mut available_block_space {
+                        LayoutConstraint::Exact(space) => {
+                            *space =
+                                (*space - fragment.fbox.block_size(writing_mode)).max(FixedL::ZERO);
+                        }
+                        LayoutConstraint::Scroll { fallback_size: _ } => {}
                     }
 
                     fragments.push((off.to_physical(writing_mode), fragment));
@@ -687,7 +670,7 @@ impl PartialBlockContainer<'_> {
             lctx,
             inline_sizes.size,
             inline_sizes.margins(writing_mode),
-            Some(size.block),
+            LayoutConstraint::Exact(size.block),
             writing_mode,
         )
     }

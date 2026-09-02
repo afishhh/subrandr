@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
 
 use super::{
     AtomicInline, InlineContent, InlineItem, InlineSpan, InlineSpanKind, InlineText,
@@ -311,11 +311,11 @@ impl<'a> InlineSpanBuilder<'a> {
         }
     }
 
-    pub fn push_atomic(&mut self, block: IndependentBox) {
+    pub fn push_atomic(&mut self, block: Rc<IndependentBox>) {
         let content_index = self.push_object_replacement();
         self.push_child(InlineItem::Block(AtomicInline {
             content_index,
-            inner: Box::new(block),
+            inner: block,
         }));
     }
 

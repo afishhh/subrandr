@@ -100,7 +100,7 @@ struct InlineText {
 #[derive(Debug)]
 struct AtomicInline {
     content_index: usize,
-    inner: Box<IndependentBox>,
+    inner: Rc<IndependentBox>,
 }
 
 mod builder;

@@ -338,13 +338,10 @@ impl VisualLine {
 
         impl CurrentBlock {
             fn flush(&mut self, to: &mut InlineSpanBuilder<'_>) {
-                to.push_atomic(
-                    BlockContainer {
-                        style: std::mem::replace(&mut self.style, ComputedStyle::DEFAULT),
-                        content: BlockContainerContent::Inline(self.builder.finish()),
-                    }
-                    .into(),
-                );
+                to.push_atomic(std::rc::Rc::new(IndependentBox::Block(BlockContainer {
+                    style: std::mem::replace(&mut self.style, ComputedStyle::DEFAULT),
+                    content: BlockContainerContent::Inline(self.builder.finish()),
+                })));
             }
         }
 
@@ -467,20 +464,17 @@ impl Window {
             *result.make_background_color_mut() = Color::TRANSPARENT;
             result
         };
-        let mut lines = Vec::new();
+        let mut lines = Vec::with_capacity(self.lines.len());
         for line in &self.lines {
             if pass.add_event_range(line.range.clone()) {
-                lines.push(
-                    BlockContainer {
-                        style: inner_style.clone(),
-                        content: BlockContainerContent::Inline(line.to_inline_content(
-                            pass,
-                            self.segment_style.clone(),
-                            &self.window_style,
-                        )),
-                    }
-                    .into(),
-                );
+                lines.push(std::rc::Rc::new(IndependentBox::Block(BlockContainer {
+                    style: inner_style.clone(),
+                    content: BlockContainerContent::Inline(line.to_inline_content(
+                        pass,
+                        self.segment_style.clone(),
+                        &self.window_style,
+                    )),
+                })));
             }
         }
 
@@ -500,7 +494,7 @@ impl Window {
         };
         let window = IndependentBox::from(BlockContainer {
             style: window_style,
-            content: BlockContainerContent::Block(lines),
+            content: BlockContainerContent::Block(lines.into_boxed_slice()),
         });
         let partial_window = window.layout_initial(pass.lctx)?;
 

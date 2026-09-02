@@ -562,6 +562,7 @@ impl IndependentBox {
     }
 }
 
+#[allow(clippy::large_enum_variant)] // could perhaps be a trait instead
 pub enum PartialIndependentBox<'a> {
     Block(block::PartialBlockContainer<'a>),
     Image(image::Image),

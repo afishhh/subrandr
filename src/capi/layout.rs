@@ -176,7 +176,7 @@ unsafe extern "C" fn sbr_layout_context_destroy(lctx: *mut CLayoutContext) {
 }
 
 struct CBox {
-    inner: IndependentBox,
+    inner: Rc<IndependentBox>,
 }
 
 #[unsafe(no_mangle)]
@@ -186,7 +186,7 @@ unsafe extern "C" fn sbr_box_from_image(
     style: *const ComputedStyleInner,
 ) -> *mut CBox {
     Box::into_raw(Box::new(CBox {
-        inner: IndependentBox::Image(Image {
+        inner: Rc::new(IndependentBox::Image(Image {
             style: (*ManuallyDrop::new(ComputedStyle::from_raw(style))).clone(),
             natural_dimensions: layout::image::NaturalDimensions {
                 // TODO: handle overflow
@@ -194,7 +194,7 @@ unsafe extern "C" fn sbr_box_from_image(
                 height: FixedL::new((*image).texture.height() as i32),
             },
             inner: Rc::from_raw(image),
-        }),
+        })),
     }))
 }
 
@@ -205,7 +205,7 @@ unsafe extern "C" fn sbr_box_destroy(block: *mut CBox) {
 
 struct CBlockBuilder {
     style: ComputedStyle,
-    contents: Vec<IndependentBox>,
+    contents: Vec<Rc<IndependentBox>>,
 }
 
 #[unsafe(no_mangle)]
@@ -246,10 +246,10 @@ unsafe extern "C" fn sbr_block_builder_set_style(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sbr_block_builder_finish(builder: *mut CBlockBuilder) -> *mut CBox {
     Box::into_raw(Box::new(CBox {
-        inner: IndependentBox::Block(BlockContainer {
+        inner: Rc::new(IndependentBox::Block(BlockContainer {
             style: (*builder).style.clone(),
-            content: BlockContainerContent::Block(std::mem::take(&mut (*builder).contents)),
-        }),
+            content: BlockContainerContent::Block((*builder).contents.drain(..).collect()),
+        })),
     }))
 }
 
@@ -306,10 +306,10 @@ unsafe extern "C" fn sbr_inline_builder_finish_block(builder: *mut CInlineBuilde
     drop((*builder).root.take());
 
     let result = Box::into_raw(Box::new(CBox {
-        inner: IndependentBox::Block(BlockContainer {
+        inner: Rc::new(IndependentBox::Block(BlockContainer {
             style: (*builder).style.clone(),
             content: BlockContainerContent::Inline((*builder).inner.finish()),
-        }),
+        })),
     }));
     (*builder).inner.set_root_style((*builder).style.clone());
     result
@@ -682,6 +682,6 @@ unsafe extern "C" fn sbr_custom_container_builder_finish(
     size: Vec2L,
 ) -> *mut CBox {
     Box::into_raw(Box::new(CBox {
-        inner: IndependentBox::User((*builder).inner.finish(size)),
+        inner: Rc::new(IndependentBox::User((*builder).inner.finish(size))),
     }))
 }

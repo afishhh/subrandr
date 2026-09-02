@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use log::error;
 use util::math::Vec2;
 
@@ -24,7 +26,7 @@ pub struct BlockContainer {
 #[derive(Debug)]
 pub enum BlockContainerContent {
     Inline(InlineContent),
-    Block(Vec<IndependentBox>),
+    Block(Box<[Rc<IndependentBox>]>),
 }
 
 #[derive(Debug, Clone)]

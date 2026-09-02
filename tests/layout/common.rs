@@ -61,10 +61,10 @@ macro_rules! make_tree {
         make_tree!(@build_all ruby [$style; inline=builder]; $($content)*);
     }};
     (@build block [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
-        $builder.push_atomic(make_tree!(@build block [$style;]; $content_block).into());
+        $builder.push_atomic(std::rc::Rc::new(make_tree!(@build block [$style;]; $content_block).into()));
     }};
     (@build image [$style: expr; inline=$builder: ident]; $content_block: tt) => {{
-        $builder.push_atomic(make_tree!(@build image [$style;]; $content_block).into());
+        $builder.push_atomic(std::rc::Rc::new(make_tree!(@build image [$style;]; $content_block).into()));
     }};
     (@map_child ruby->base $value: expr) => {
         $value
@@ -105,12 +105,12 @@ macro_rules! make_tree {
         )
     };
     (@map_child block->block $value: expr) => {
-        crate::layout::IndependentBox::from($value)
+        std::rc::Rc::new(crate::layout::IndependentBox::from($value))
     };
     (@map_child block->image $value: expr) => {
-        crate::layout::IndependentBox::from($value)
+        std::rc::Rc::new(crate::layout::IndependentBox::from($value))
     };
-    (@build_all_result_ty block) => { crate::layout::IndependentBox };
+    (@build_all_result_ty block) => { std::rc::Rc<crate::layout::IndependentBox> };
 
     (@build image [$style: expr;]; {
         natural_size = $natural_size: expr,
@@ -357,12 +357,13 @@ pub fn check_block(
     check_fn(name, viewport_size, dpi, |lctx, output, rasterizer| {
         let root = crate::layout::IndependentBox::Block(BlockContainer {
             style: crate::style::ComputedStyle::DEFAULT,
-            content: layout::block::BlockContainerContent::Block(vec![
+            content: layout::block::BlockContainerContent::Block(Box::new([std::rc::Rc::new(
                 crate::layout::IndependentBox::Block(block),
-            ]),
+            )])),
         });
         let fragment = root
-            .layout(lctx, lctx.initial_containing_block_size)
+            .layout_initial(lctx)
+            .and_then(|partial| partial.layout_fixed(lctx, lctx.initial_containing_block_size))
             .expect("Layout failed");
 
         DisplayPass::new(output.root(), dpi, &GlyphCache::new(), rasterizer)

@@ -351,16 +351,16 @@ impl ShapingPass<'_> {
             )
         };
 
-        let (infos, positions) = self.buffer.items();
-        if infos.is_empty() {
-            return Ok(());
-        }
-
         let is_reverse = Direction::try_from_hb(self.properties.direction)
             .unwrap()
             .is_reverse();
         if is_reverse {
             unsafe { hb_buffer_reverse(self.buffer.0) };
+        }
+
+        let (infos, positions) = self.buffer.items();
+        if infos.is_empty() {
+            return Ok(());
         }
 
         let make_glyph = |info: &hb_glyph_info_t, position: &hb_glyph_position_t| {

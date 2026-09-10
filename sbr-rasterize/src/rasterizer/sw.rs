@@ -1027,7 +1027,7 @@ impl super::Rasterizer for Rasterizer {
         writeln!(writer, "== raster cache stats ==")?;
         writeln!(
             writer,
-            "approximate memory footprint: {}B",
+            "approximate memory footprint: {}",
             util::HumanSize(stats.total_memory_footprint)
         )?;
         writeln!(writer, "total entries: {}", stats.total_entries)?;

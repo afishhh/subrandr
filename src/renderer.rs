@@ -482,7 +482,7 @@ impl Renderer {
                 _ = writeln!(root, "=== glyph cache stats ===");
                 _ = writeln!(
                     root,
-                    "approximate memory footprint: {}B",
+                    "approximate memory footprint: {}",
                     util::HumanSize(stats.total_memory_footprint)
                 );
                 _ = writeln!(root, "total entries: {}", stats.total_entries);

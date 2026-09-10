@@ -874,7 +874,7 @@ impl Rasterizer {
                 Rotation::Clockwise90 => {
                     for x in 0..target.width {
                         for y in 0..target.height {
-                            let src_pixel = src[(w1 - x) as usize * src_stride + (h1 - y) as usize];
+                            let src_pixel = src[(w1 - x) as usize * src_stride + y as usize];
                             let dst_pixel = target.pixel_at(x as i32, y as i32).unwrap();
                             dst_pixel.write(src_pixel);
                         }
@@ -892,7 +892,7 @@ impl Rasterizer {
                 Rotation::CounterClockwise90 => {
                     for x in 0..target.width {
                         for y in 0..target.height {
-                            let src_pixel = src[x as usize * src_stride + y as usize];
+                            let src_pixel = src[x as usize * src_stride + (h1 - y) as usize];
                             let dst_pixel = target.pixel_at(x as i32, y as i32).unwrap();
                             dst_pixel.write(src_pixel);
                         }

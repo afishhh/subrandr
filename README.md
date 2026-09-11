@@ -132,17 +132,6 @@ There's a WebAssembly library being worked on in the `wasi32` directory and a we
 
 Currently it is still a work-in-progress and there's a few difficult problems that still have to be solved. Although it does work, keep in mind that performance is not that great (especially on HiDPI displays) and no API stability is guaranteed.
 
-#### `sbr-overlay`
-
-The `sbr-overlay` directory contains a test program that can be used to test the library in software rasterization mode on X11. It renders subtitles onto a transparent window and also provides some additional functionality to synchronize with and overlay on top of existing video players. 
-
-Subtitles can be synchronized with video playback in [mpv](https://github.com/mpv-player/mpv/) by specifying `--connect mpv:<PATH_TO_MPV_SOCKET>` (with a path to a socket created using the `--input-ipc-server` mpv option).
-
-~~It is also possible to overlay over a YouTube tab using `--connect youtube-cdp:<CDP_URL>` which lets you specify the URL to a Chrome DevTools Protocol WebSocket, it will automatically attach to the first YouTube tab it finds and collect information from it to (mostly) correctly overlay and synchronize the subtitles.~~
-[This is currently broken](https://github.com/afishhh/subrandr/issues/47) and likely to be removed soon&trade;.
-
-The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target (also only supported on X11).
-
 ### License
 
 subrandr is available under the Mozilla Public License 2.0, see [LICENSE](https://github.com/afishhh/subrandr/blob/master/LICENSE) for details. Unless stated otherwise all files in this repository are covered by this license.

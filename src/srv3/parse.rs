@@ -194,8 +194,6 @@ pub enum Error {
     InvalidStructure(&'static str),
     #[error("'{0}' element is missing an '{1}' attribute")]
     MissingAttribute(&'static str, &'static str),
-    #[error("Attribute {0} has an invalid value {1:?}: {2}")]
-    InvalidAttributeValue(&'static str, String, AnyError),
     #[error(transparent)]
     InvalidXML(#[from] XmlError),
     #[error("Unexpected end-of-file")]
@@ -203,31 +201,37 @@ pub enum Error {
 }
 
 macro_rules! match_attribute {
-    ($attr: expr, $($key: literal($var: ident: $($type: tt)*) => $expr: expr,)+ else $other: pat => $else: expr $(,)?) => {
+    ($log: expr, $attr: expr, $($key: literal($var: ident: $($type: tt)*) => $expr: expr,)+ else $other: pat => $else: expr $(,)?) => {
         match unsafe { std::str::from_utf8_unchecked($attr.key.0) } {
             $(
             $key => {
                 let value = unsafe { std::str::from_utf8_unchecked(&$attr.value) };
-                let $var: $($type)* = match_attribute!(@parse value, $($type)*, $key);
+                let $var: $($type)* = match_attribute!(@parse value, $($type)*, $key, $log);
                 $expr
             },
             )*
             $other => $else
         }
     };
-    (@parse $value: ident, &str, $key: literal) => {
+    (@parse $value: ident, &str, $key: literal, $log: expr) => {
         $value
     };
-    (@parse $value: ident, $type: ty, $key: literal) => {
-        $value.parse().map_err(|e| Error::InvalidAttributeValue($key, $value.to_string(), Box::from(e)))?
+    (@parse $value: ident, $type: ty, $key: literal, $log: expr) => {
+        match $value.parse() {
+            Ok(value) => value,
+            Err(error) => {
+                warn!($log, concat!("Failed to parse attribute ", $key, " value {:?}: {}"), $value, error);
+                continue;
+            }
+        }
     };
 }
 
 macro_rules! match_attributes {
-    ($attrs: expr, $($tt: tt)*) => {
+    ($log: expr, $attrs: expr, $($tt: tt)*) => {
         let mut it = $attrs;
         while let Some(attr) = it.next().transpose().map_err(XmlError::from)? {
-            match_attribute!(attr, $($tt)*)
+            match_attribute!($log, attr, $($tt)*)
         }
     };
 }
@@ -368,7 +372,7 @@ fn parse_pen(
     log_once_state!(in logset; unknown_pen_attribute);
 
     match_attributes! {
-        attributes,
+        log, attributes,
         "id"(id: &str) => {
             result_id = Some(id.into());
         },
@@ -438,7 +442,7 @@ fn parse_wp(
     log_once_state!(in logset; unknown_wp_attribute);
 
     match_attributes! {
-        attributes,
+        log, attributes,
         "id"(id: &str) => {
             result_id = Some(id.into());
         },
@@ -476,7 +480,7 @@ fn parse_ws(
     log_once_state!(in logset; unknown_ws_attribute);
 
     match_attributes! {
-        attributes,
+        log, attributes,
         "id"(id: &str) => {
             result_id = Some(id.into());
         },
@@ -639,7 +643,7 @@ impl<'rs> BodyParser<'rs> {
                             };
 
                             match_attributes! {
-                                element.attributes(),
+                                log, element.attributes(),
                                 "id"(id: &str) => {
                                     result_id = Some(id.into());
                                 },
@@ -685,7 +689,7 @@ impl<'rs> BodyParser<'rs> {
                             current_event_pen = &Pen::DEFAULT;
 
                             match_attributes! {
-                                element.attributes(),
+                                log, element.attributes(),
                                 "t"(time: u32) => {
                                     result.time = time;
                                 },
@@ -747,7 +751,7 @@ impl<'rs> BodyParser<'rs> {
                             current_segment_time_offset = 0;
 
                             match_attributes! {
-                                element.attributes(),
+                                log, element.attributes(),
                                 "p"(id: &str) => {
                                     set_or_log!(current_segment_pen, self.head.pens, id, non_existant_pen, "Pen");
                                 },

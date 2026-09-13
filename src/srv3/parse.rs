@@ -6,7 +6,7 @@ use quick_xml::{
     Error as XmlError,
 };
 use thiserror::Error;
-use util::StringExt;
+use util::{AnyError, StringExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontStyle {
@@ -195,20 +195,15 @@ pub struct Window<'h> {
     pub style: &'h WindowStyle,
 }
 
-type AnyError = Box<dyn std::error::Error + Send + Sync>;
-
-// TODO: Subrandr parsing errors are currently not very useful,
-//       they could be improved significantly.
-
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]
     InvalidStructure(&'static str),
-    #[error("'{0}' element is missing an '{1}' attribute")]
-    MissingAttribute(&'static str, &'static str),
+    #[error("{0} element is missing an id attribute")]
+    MissingIdAttribute(&'static str),
     #[error(transparent)]
     InvalidXML(#[from] XmlError),
-    #[error("Unexpected end-of-file")]
+    #[error("Unexpected end of file")]
     UnexpectedEof,
 }
 
@@ -271,19 +266,19 @@ impl FromStr for HexRGBColor {
 struct Bool01(bool);
 
 impl FromStr for Bool01 {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
             "0" => Self(false),
             "1" => Self(true),
-            _ => return Err("Boolean values must be either '0' or '1'".into()),
+            _ => return Err("Boolean values must be either '0' or '1'"),
         })
     }
 }
 
 impl FromStr for FontStyle {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
@@ -294,13 +289,13 @@ impl FromStr for FontStyle {
             "5" => Self::Fantasy,
             "6" => Self::Cursive,
             "7" => Self::SmallCaps,
-            _ => return Err("Unknown font style".into()),
+            _ => return Err("Unknown font style"),
         })
     }
 }
 
 impl FromStr for EdgeType {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
@@ -309,13 +304,13 @@ impl FromStr for EdgeType {
             "2" => Self::Bevel,
             "3" => Self::Glow,
             "4" => Self::SoftShadow,
-            _ => return Err("Unknown edge type".into()),
+            _ => return Err("Unknown edge type"),
         })
     }
 }
 
 impl FromStr for RubyPart {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
@@ -329,13 +324,13 @@ impl FromStr for RubyPart {
             "5" => Self::Ruby(RubyTextPart {
                 position: RubyPosition::Under,
             }),
-            _ => return Err("Unknown ruby part".into()),
+            _ => return Err("Unknown ruby part"),
         })
     }
 }
 
 impl FromStr for Point {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
@@ -348,44 +343,44 @@ impl FromStr for Point {
             "6" => Self::BottomLeft,
             "7" => Self::BottomCenter,
             "8" => Self::BottomRight,
-            _ => return Err("Point number out of range".into()),
+            _ => return Err("Point number out of range"),
         })
     }
 }
 
 impl FromStr for ModeHint {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
             "1" => Self::Default,
             "2" => Self::Scroll,
-            _ => return Err("Unknown mode hint".into()),
+            _ => return Err("Unknown mode hint"),
         })
     }
 }
 
 impl FromStr for PrintDir {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
             "0" => Self::HorizontalLangDir,
             "1" => Self::HorizontalRtl,
             "3" => Self::VerticalMixed,
-            _ => return Err("Unknown print dir".into()),
+            _ => return Err("Unknown print dir"),
         })
     }
 }
 
 impl FromStr for ScrollDir {
-    type Err = AnyError;
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.trim() {
             "0" => Self::RightToLeft,
             "1" => Self::LeftToRight,
-            _ => return Err("Unknown scroll dir".into()),
+            _ => return Err("Unknown scroll dir"),
         })
     }
 }
@@ -455,7 +450,7 @@ fn parse_pen(
 
     match result_id {
         // TODO: This should be a warning only
-        None => Err(Error::MissingAttribute("pen", "id")),
+        None => Err(Error::MissingIdAttribute("pen")),
         Some(id) => Ok((id, result)),
     }
 }
@@ -493,7 +488,7 @@ fn parse_wp(
     }
 
     match result_id {
-        None => Err(Error::MissingAttribute("wp", "id")),
+        None => Err(Error::MissingIdAttribute("wp")),
         Some(id) => Ok((id, result)),
     }
 }
@@ -531,7 +526,7 @@ fn parse_ws(
     }
 
     match result_id {
-        None => Err(Error::MissingAttribute("ws", "id")),
+        None => Err(Error::MissingIdAttribute("ws")),
         Some(id) => Ok((id, result)),
     }
 }

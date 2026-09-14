@@ -84,7 +84,6 @@ members = [
   "sbr-log",
   "sbr-util",
   "sbr-rasterize",
-  "sbr-overlay",
   "sbr-macros",
   "xtask",
 ]

@@ -208,7 +208,9 @@ struct LineSegment {
 
 impl Segment {
     fn compute_shadows(&self, ctx: &SubtitleContext, out: &mut Vec<TextShadow>) {
-        let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0);
+        // Clamp to epsilon to make sure the SoftShadow loop terminates even
+        // when the scale rounds to zero.
+        let scale = FixedL::from_f32(font_scale_from_ctx(ctx) / 32.0).max(FixedL::EPS);
         let l1 = Length::from_pixels((scale).max(FixedL::ONE));
         let l2 = Length::from_pixels((scale * 2).max(FixedL::ONE));
         let l3 = Length::from_pixels((scale * 3).max(FixedL::ONE));

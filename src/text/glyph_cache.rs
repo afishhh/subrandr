@@ -1,6 +1,6 @@
 use std::{fmt::Debug, hash::Hash};
 
-use rasterize::scene::Rotation;
+use rasterize::scene::LinearTransform;
 use util::{
     cache::{Cache, CacheConfiguration, CacheStats, CacheValue},
     math::{I16Dot16, I26Dot6, Vec2},
@@ -44,7 +44,7 @@ pub(super) struct Key {
     dpi: u32,
     coords: [I16Dot16; text_sys::T1_MAX_MM_AXIS as usize],
     glyph: u32,
-    rotation: Rotation,
+    transform: LinearTransform,
     subpixel_bucket: u8,
 }
 
@@ -103,7 +103,7 @@ impl FontSizeKey {
             dpi: self.dpi,
             coords: self.coords,
             glyph,
-            rotation: Rotation::None,
+            transform: LinearTransform::IDENTITY,
             subpixel_bucket: 0,
         })
     }
@@ -134,10 +134,10 @@ impl GlyphKey {
         }
     }
 
-    pub(super) fn for_outline(self, subpixel_bucket: u8, rotation: Rotation) -> Key {
+    pub(super) fn for_outline(self, subpixel_bucket: u8, transform: LinearTransform) -> Key {
         Key {
             subpixel_bucket,
-            rotation,
+            transform,
             ..self.0
         }
     }

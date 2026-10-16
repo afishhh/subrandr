@@ -4,12 +4,17 @@ test_define_style! {
     .rotate_90deg "transform: rotate(90deg)"
     .rotate_180deg "transform: rotate(180deg)"
     .rotate_270deg "transform: rotate(270deg)"
+    .scale_3_2_translate_0_10 "transform: scale(3, 2) translate(0, 10px)"
+    .width50 "width: 50px"
     .size100x50 "width: 100px; height: 50px"
     .size50x100 "width: 50px; height: 100px"
     .padding10 "padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px"
     .vpadding10 "padding-top: 10px; padding-bottom: 10px"
     .hpadding30 "padding-left: 30px; padding-right: 30px"
     .tpadding10 "padding-top: 10px"
+    .hmargin_auto "margin-left: auto; margin-right: auto"
+
+    .noto_sans_jp_noto_color_emoji "font-family: Noto Sans JP, Noto Color Emoji"
 }
 
 check_test! {
@@ -83,5 +88,19 @@ check_test! {
     size = (340, 1550),
     inline.noto_sans_jp.vertical_lr.fs256 {
         text "Hello, world!"
+    }
+}
+
+check_test! {
+    name = scale_translate,
+    size = (180, 105),
+    block.noto_sans_jp_noto_color_emoji.fs20.yellow_bg.padding10 {
+        block.width50.blue_bg {
+            inline { text "Hi!😀" }
+        }
+
+        block.width50.hmargin_auto.scale_3_2_translate_0_10.blue_bg {
+            inline { text "Hi!😀" }
+        }
     }
 }

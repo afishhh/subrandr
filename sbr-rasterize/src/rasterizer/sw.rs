@@ -8,7 +8,7 @@ use std::{
 use log::{trace, LogContext};
 use util::{
     cache::{Cache, CacheConfiguration, CacheValue},
-    math::{I26Dot6, Point2, Rect2, Vec2},
+    math::{I16Dot16, I26Dot6, Point2, Rect2, Vec2},
     rc::{Arc, UniqueArc},
     slice_assume_init_mut,
 };
@@ -17,8 +17,8 @@ use crate::{
     color::{Premultiplied, Premultiply, BGRA8},
     rasterizer::SceneRenderErrorInner,
     scene::{
-        BitmapFilter, ExternalSubscene, FilledRect, FixedS, Rect2S, Rotation, Scene, SceneFilter,
-        SceneNode, SubsceneKind,
+        BitmapFilter, ExternalSubscene, FilledRect, FixedS, LinearTransform, Rect2S, Rotation,
+        Scene, SceneFilter, SceneNode, SubsceneKind,
     },
     PixelFormat, SceneRenderError,
 };
@@ -1223,6 +1223,8 @@ impl Rasterizer {
                             Some(SceneFilter::ExtractAlpha { blur_stddev }) if blur_stddev == FixedS::ZERO
                         ) && scene.is_mono();
 
+                        can_skip_texture &= subscene.transform == LinearTransform::IDENTITY;
+
                         if can_skip_texture {
                             let (pieces, _) = cache.get_or_render_scene_pieces(
                                 log,
@@ -1244,14 +1246,14 @@ impl Rasterizer {
                         }
                     }
 
-                    let (off, mut texture) = cache.get_or_render_subscene_texture(
+                    let (mut unscaled_offset, mut texture) = cache.get_or_render_subscene_texture(
                         log,
                         &subscene.kind,
                         new_active_color,
                         self,
                     )?;
 
-                    let mut pos = subscene.pos + off;
+                    let mut pos = subscene.pos;
                     let mut output_filter = None;
                     match subscene.scene_filter {
                         Some(SceneFilter::ExtractAlpha { blur_stddev }) => {
@@ -1260,18 +1262,47 @@ impl Rasterizer {
                             } else {
                                 let output =
                                     cache.get_or_blur_texture(log, &texture, blur_stddev, self);
-                                pos -= Vec2::new(output.padding.x as i32, output.padding.y as i32);
+                                unscaled_offset -=
+                                    Vec2::new(output.padding.x as i32, output.padding.y as i32);
                                 texture = output.texture.clone();
                             }
                         }
                         None => {}
                     }
 
+                    if subscene.transform.rotation != Rotation::None {
+                        texture = cache
+                            .get_or_transform_texture(
+                                log,
+                                &texture,
+                                subscene.transform.rotation,
+                                self,
+                            )
+                            .clone();
+                    }
+
+                    let dst_size = if subscene.transform.scale != Vec2::splat(I16Dot16::ONE) {
+                        debug_assert!(subscene.transform.scale.x >= 0);
+                        debug_assert!(subscene.transform.scale.y >= 0);
+
+                        pos += Vec2::new(
+                            (subscene.transform.scale.x * unscaled_offset.x).round_to_inner(),
+                            (subscene.transform.scale.y * unscaled_offset.y).round_to_inner(),
+                        );
+                        Vec2::new(
+                            (texture.width() * subscene.transform.scale.x.into_raw() as u32) >> 16,
+                            (texture.height() * subscene.transform.scale.y.into_raw() as u32) >> 16,
+                        )
+                    } else {
+                        pos += unscaled_offset;
+                        texture.size()
+                    };
+
                     on_piece(
                         self,
                         OutputPiece {
                             pos,
-                            size: texture.size(),
+                            size: dst_size,
                             content: OutputPieceContent::Texture(OutputBitmap {
                                 texture,
                                 filter: output_filter,

@@ -803,14 +803,9 @@ impl Font {
                 return Ok(GlyphSubscene::empty());
             }
 
-            let transform_point = |p: Point2<I26Dot6>| (rotation * Vec2::new(p.x, -p.y)).to_point();
-
             bbox = Rect2S::NOTHING;
             for p in outline.points() {
-                bbox.expand_to_point(transform_point(Point2::new(
-                    FixedS::from_ft(p.x),
-                    FixedS::from_ft(p.y),
-                )));
+                bbox.expand_to_point(Point2::new(FixedS::from_ft(p.x), FixedS::from_ft(-p.y)));
             }
 
             let bbox_size = bbox.size();
@@ -819,12 +814,9 @@ impl Font {
             if bbox_max_dim > 128 && bbox_min_dim > 64 {
                 let mut b = SceneBuilder::new();
                 b.root().filled_outline(
-                    outline.iter().map(|x| {
-                        x.map(|mut p| {
-                            p = transform_point(p);
-                            Point2::new(p.x.into_f32(), p.y.into_f32())
-                        })
-                    }),
+                    outline
+                        .iter()
+                        .map(|x| x.map(|p| Point2::new(p.x.into_f32(), -p.y.into_f32()))),
                     SceneColor::ACTIVE,
                 );
                 return Ok(GlyphSubscene(SubsceneKind::Scene(b.finish())));

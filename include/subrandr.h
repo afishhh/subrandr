@@ -30,6 +30,9 @@ typedef struct sbr_subtitle_context {
 typedef struct sbr_rect2i {
   int32_t min_x, min_y, max_x, max_y;
 } sbr_rect2i;
+typedef struct sbr_vec2d {
+  double x, y;
+} sbr_vec2d;
 
 // Construct a new `sbr_library *` that is required to use most subrandr APIs.
 //
@@ -137,6 +140,11 @@ sbr_renderer *sbr_renderer_create(sbr_library *);
 void sbr_renderer_set_subtitles(sbr_renderer *, sbr_subtitles *);
 bool sbr_renderer_did_change(sbr_renderer *, sbr_subtitle_context const *,
                              uint32_t t);
+
+// TODO: document
+void sbr_renderer_reset_transform(sbr_renderer *);
+void sbr_renderer_apply_scale(sbr_renderer *, sbr_vec2d);
+void sbr_renderer_apply_translation(sbr_renderer *, sbr_vec2d);
 
 // Fully render a single subtitle frame into the provided pixel buffer.
 //

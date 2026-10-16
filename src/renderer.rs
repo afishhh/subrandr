@@ -7,7 +7,7 @@ use std::{
 use log::{trace, AsLogger, LogContext};
 use rasterize::{
     color::BGRA8,
-    scene::{Scene, SceneBuilder, SceneContentBuilder},
+    scene::{Scene, SceneBuilder, SceneContentBuilder, Transform},
     Rasterizer,
 };
 use thiserror::Error;
@@ -326,6 +326,8 @@ pub struct Renderer {
     pub(crate) glyph_cache: text::GlyphCache,
     perf: PerfStats,
 
+    transform: Transform,
+
     scene_builder: SceneBuilder,
     scene: Scene,
 
@@ -355,6 +357,7 @@ impl Renderer {
                 padding_top: I26Dot6::ZERO,
                 padding_bottom: I26Dot6::ZERO,
             },
+            transform: Transform::IDENTITY,
             scene_builder: SceneBuilder::new(),
             scene: Scene::empty(),
             layouter: None,
@@ -395,6 +398,14 @@ impl Renderer {
             }
             None => None,
         };
+    }
+
+    pub fn reset_transform(&mut self) {
+        self.transform = Transform::IDENTITY;
+    }
+
+    pub fn apply_transform(&mut self, transform: Transform) {
+        self.transform = self.transform * transform;
     }
 }
 
@@ -613,7 +624,8 @@ impl Renderer {
 
         trace!(
             log,
-            "rendering frame (class={subtitle_class_name} ctx={ctx:?} t={t}ms)",
+            "rendering frame (class={subtitle_class_name} ctx={ctx:?} t={t}ms transform={:?})",
+            self.transform,
         );
 
         self.perf.start_layout();
@@ -665,7 +677,11 @@ impl Renderer {
         {
             self.scene_builder.reset();
             let mut pass = DisplayPass::new(
-                self.scene_builder.root(),
+                {
+                    let mut builder = self.scene_builder.root();
+                    builder.apply_transform(self.transform);
+                    builder
+                },
                 ctx.dpi,
                 &self.glyph_cache,
                 rasterizer,

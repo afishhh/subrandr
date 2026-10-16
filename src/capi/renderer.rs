@@ -3,8 +3,10 @@ use std::ffi::c_int;
 use log::info;
 use rasterize::{
     color::{Premultiplied, BGRA8},
+    scene::Transform,
     sw::OutputPiece,
 };
+use util::math::{I16Dot16, I26Dot6, Vec2};
 
 use crate::{capi::library::CLibrary, Renderer, SubtitleContext, Subtitles};
 
@@ -45,6 +47,29 @@ unsafe extern "C" fn sbr_renderer_create(lib: &CLibrary) -> *mut CRenderer<'_> {
         output_images: Vec::new(),
         output_instances: Vec::new(),
     }))
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_reset_transform(renderer: *mut CRenderer) {
+    (*renderer).inner.reset_transform();
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_apply_scale(renderer: *mut CRenderer, scale: Vec2<f64>) {
+    let tf = Transform::scale(Vec2::new(
+        I16Dot16::from_f64(scale.x),
+        I16Dot16::from_f64(scale.y),
+    ));
+    (*renderer).inner.apply_transform(tf);
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sbr_renderer_apply_translation(renderer: *mut CRenderer, scale: Vec2<f64>) {
+    let tf = Transform::translate(Vec2::new(
+        I26Dot6::from_f64(scale.x),
+        I26Dot6::from_f64(scale.y),
+    ));
+    (*renderer).inner.apply_transform(tf);
 }
 
 #[unsafe(no_mangle)]

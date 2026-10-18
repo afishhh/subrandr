@@ -57,6 +57,8 @@ test_define_style! {
     .vertical_lr "writing-mode: vertical-lr"
     .underline "text-decoration-line: underline; text-decoration-color: red"
     .strike "text-decoration-line: line-through; text-decoration-color: black"
+
+    .fs256 "font-size: 256px"
 }
 
 check_test! {
@@ -71,5 +73,15 @@ check_test! {
                 inline { span.underline { text "I'm upside down!" } }
             }
         }
+    }
+}
+
+// This triggers the sparse glyph rasterization path and makes sure it works with
+// the rotation transform applied by vertical-lr to sideways glyphs.
+check_test! {
+    name = big_vertical_lr,
+    size = (340, 1550),
+    inline.noto_sans_jp.vertical_lr.fs256 {
+        text "Hello, world!"
     }
 }

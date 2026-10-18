@@ -13,12 +13,12 @@
           udev
           vulkan-loader
           gcc-unwrapped
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXrandr
-          xorg.libXpresent
-          xorg.libXi
-          xorg.libxcb
+          libX11
+          libXcursor
+          libXrandr
+          libXpresent
+          libXi
+          libxcb
           libGL
           libxkbcommon
           freetype

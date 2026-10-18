@@ -1,10 +1,14 @@
 { rustPlatform
 , stdenv
+, nix-gitignore
+
 , pkg-config
 , harfbuzz
 , freetype
 , fontconfig
+
 , buildRevision ? null
+
 , ...
 }:
 
@@ -18,7 +22,10 @@ rustPlatform.buildRustPackage {
   SUBRANDR_BUILD_REV = buildRevision;
 
   cargoLock.lockFile = ../Cargo.lock;
-  src = ../.;
+  src = nix-gitignore.gitignoreSource ''
+    /nix
+    /flake.nix
+  '' ../.;
 
   nativeBuildInputs = [
     pkg-config

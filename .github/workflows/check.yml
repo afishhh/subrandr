@@ -19,14 +19,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The layout test suite and xxtask does not follow crate msrv.
-      - run: rustup default nightly
+      # The layout test suite is ran in a pinned nix devshell to make it reproducible
+      # Prevents things like FreeType changes from breaking CI
+      - uses: cachix/install-nix-action@v31
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-run-tests-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-run-tests-
+          purge: true
+          purge-prefixes: nix-run-tests-
       - uses: Swatinem/rust-cache@v2
+      - run: nix develop .#devShells.$(nix eval --impure --raw --expr 'builtins.currentSystem').ci -c true
       - run: cargo xxtask ptr pull tests/assets/*.ptr
-      - run: sudo apt update && sudo apt install -y build-essential libfontconfig-dev libfreetype-dev libharfbuzz-dev
-      - name: Install nextest
-        uses: taiki-e/install-action@nextest
+        shell: 'nix develop .#ci -c bash -e {0}'
       - run: cargo nextest r -F _layout_tests --workspace --exclude sbr-overlay --no-fail-fast
+        shell: 'nix develop .#ci -c bash -e {0}'
 
   nix-build:
     name: Build nix flake

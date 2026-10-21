@@ -125,7 +125,14 @@ impl GenericTileRasterizer {
         let (lx, rx) = if bx < tx { (bx, tx) } else { (tx, bx) };
         let mut current_xi = lx.floor_to_inner() as usize;
         let mut current_x = lx.floor();
-        let end_x = rx.ceil() - 1;
+        let end_x = (rx - 1).ceil();
+
+        if lx < 0 || (current_x < end_x && end_x.floor_to_inner() as usize >= width) {
+            // Something went wrong (probably a calculation wrapped).
+            // We can't do anything about that here but we should return early
+            // to avoid out-of-bounds indexing below.
+            return;
+        }
 
         unsafe { std::hint::assert_unchecked(current_xi < width) };
 

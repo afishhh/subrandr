@@ -30,196 +30,51 @@ mod scale;
 mod strip;
 pub use strip::*;
 
-trait DrawPixel: Copy + Sized {
-    fn scale_alpha(self, scale: u8) -> Self;
-}
-
-impl DrawPixel for Premultiplied<BGRA8> {
-    fn scale_alpha(self, scale: u8) -> Self {
-        self.mul_alpha(scale)
-    }
-}
-
-trait BlendMode<P: DrawPixel> {
-    fn blend(dst: &mut P, src: P);
-}
-
-struct BlendOver;
-impl BlendMode<Premultiplied<BGRA8>> for BlendOver {
-    fn blend(dst: &mut Premultiplied<BGRA8>, src: Premultiplied<BGRA8>) {
-        *dst = src.blend_over(*dst)
-    }
-}
-
-struct BlendSet;
-impl BlendMode<Premultiplied<BGRA8>> for BlendSet {
-    fn blend(dst: &mut Premultiplied<BGRA8>, src: Premultiplied<BGRA8>) {
-        *dst = src;
-    }
-}
-
-unsafe fn horizontal_line_unchecked<B: BlendMode<P>, P: DrawPixel>(
-    x0: i32,
-    x1: i32,
-    offset_buffer: &mut [P],
-    width: i32,
-    color: P,
-) {
-    for x in x0.clamp(0, width)..x1.clamp(0, width) {
-        B::blend(offset_buffer.get_unchecked_mut(x as usize), color);
-    }
-}
-
-unsafe fn vertical_line_unchecked<B: BlendMode<P>, P: DrawPixel>(
-    y0: i32,
-    y1: i32,
-    offset_buffer: &mut [P],
-    height: i32,
-    stride: i32,
-    color: P,
-) {
-    for y in y0.clamp(0, height)..y1.clamp(0, height) {
-        B::blend(
-            offset_buffer.get_unchecked_mut((y * stride) as usize),
-            color,
-        );
-    }
-}
-
-// Scuffed Anti-Aliasing™ (SAA)
-fn fill_rect<B: BlendMode<P>, P: DrawPixel>(
+fn blend_rect_to<P>(
     mut target: RenderTargetView<P>,
-    rect: Rect2S,
-    color: P,
+    mut rect: Rect2S,
+    mut blend: impl FnMut(&mut P, u8),
 ) {
+    rect.min.x = rect.min.x.max(I26Dot6::ZERO);
+    rect.min.y = rect.min.y.max(I26Dot6::ZERO);
+    if rect.max.x > target.width as i32 {
+        rect.max.x = I26Dot6::new(target.width as i32);
+    }
+    if rect.max.y > target.height as i32 {
+        rect.max.y = I26Dot6::new(target.height as i32);
+    }
+
     if rect.is_empty() {
         return;
     }
 
-    const AA_THRESHOLD: FixedS = FixedS::from_quotient(1, 64);
+    for y in rect.min.y.floor_to_inner()..rect.max.y.ceil_to_inner() {
+        let height = I26Dot6::ONE
+            - (rect.min.y - I26Dot6::new(y)).max(I26Dot6::ZERO)
+            - (I26Dot6::new(y + 1) - rect.max.y).max(I26Dot6::ZERO);
 
-    let (left_aa, full_left) = if (rect.min.x - rect.min.x.round()).abs() > AA_THRESHOLD {
-        (true, rect.min.x.ceil_to_inner())
-    } else {
-        (false, rect.min.x.round_to_inner())
-    };
-
-    let (right_aa, full_right) = if (rect.max.x - rect.max.x.round()).abs() > AA_THRESHOLD {
-        (true, rect.max.x.floor_to_inner())
-    } else {
-        (false, rect.max.x.round_to_inner())
-    };
-
-    let (top_aa_width, full_top) = if (rect.min.y - rect.min.y.round()).abs() > AA_THRESHOLD {
-        let top_width = FixedS::ONE - rect.min.y.fract();
-        let top_fill = (top_width * 255).round_to_inner() as u8;
-        let top_y = rect.min.y.floor_to_inner();
-        if top_y >= 0 && top_y < target.height as i32 {
-            unsafe {
-                horizontal_line_unchecked::<B, _>(
-                    full_left,
-                    full_right,
-                    &mut target.buffer[top_y as usize * target.stride as usize..],
-                    target.width as i32,
-                    color.scale_alpha(top_fill),
-                );
+        if !rect.min.x.is_integer() {
+            let left_x = rect.min.x.floor_to_inner();
+            if let Some(pixel) = target.pixel_at(left_x, y) {
+                let width = I26Dot6::ONE - (rect.min.x - left_x);
+                blend(pixel, (height * width * 255).round_to_inner() as u8);
             }
         }
-        (top_width, top_y + 1)
-    } else {
-        (FixedS::ONE, rect.min.y.round_to_inner())
-    };
 
-    let (bottom_aa_width, full_bottom) = if (rect.max.y - rect.max.y.round()).abs() > AA_THRESHOLD {
-        let bottom_width = rect.max.y.fract();
-        let bottom_fill = (bottom_width * 255).round_to_inner() as u8;
-        let bottom_y = rect.max.y.floor_to_inner();
-        if bottom_y >= 0 && bottom_y < target.height as i32 {
-            unsafe {
-                horizontal_line_unchecked::<B, _>(
-                    full_left,
-                    full_right,
-                    &mut target.buffer[bottom_y as usize * target.stride as usize..],
-                    target.width as i32,
-                    color.scale_alpha(bottom_fill),
-                );
+        if !rect.max.x.is_integer() {
+            let right_x = rect.max.x.floor_to_inner();
+            if let Some(pixel) = target.pixel_at(right_x, y) {
+                let width = rect.max.x - right_x;
+                blend(pixel, (height * width * 255).round_to_inner() as u8);
             }
         }
-        (bottom_width, bottom_y)
-    } else {
-        (FixedS::ONE, rect.max.y.round_to_inner())
-    };
 
-    if left_aa {
-        let left_fill = (FixedS::ONE - rect.min.x.fract()) * 255;
-        let left_x = full_left - 1;
-        if left_x >= 0 && left_x < target.width as i32 {
-            if let Some(pixel) = target.pixel_at(left_x, full_top - 1) {
-                B::blend(
-                    pixel,
-                    color.scale_alpha((left_fill * top_aa_width).round_to_inner() as u8),
-                )
-            }
-
-            unsafe {
-                vertical_line_unchecked::<B, _>(
-                    full_top,
-                    full_bottom,
-                    &mut target.buffer[left_x as usize..],
-                    target.height as i32,
-                    target.stride as i32,
-                    color.scale_alpha(left_fill.round_to_inner() as u8),
-                );
-            }
-
-            if let Some(pixel) = target.pixel_at(left_x, full_bottom) {
-                B::blend(
-                    pixel,
-                    color.scale_alpha((left_fill * bottom_aa_width).round_to_inner() as u8),
-                );
-            }
-        }
-    }
-
-    if right_aa {
-        let right_fill = rect.max.x.fract() * 255;
-        let right_x = full_right;
-        if right_x >= 0 && right_x < target.width as i32 {
-            if let Some(pixel) = target.pixel_at(right_x, full_top - 1) {
-                B::blend(
-                    pixel,
-                    color.scale_alpha((right_fill * top_aa_width).round_to_inner() as u8),
-                )
-            }
-
-            unsafe {
-                vertical_line_unchecked::<B, _>(
-                    full_top,
-                    full_bottom,
-                    &mut target.buffer[right_x as usize..],
-                    target.height as i32,
-                    target.stride as i32,
-                    color.scale_alpha(right_fill.round_to_inner() as u8),
-                );
-            }
-
-            if let Some(pixel) = target.pixel_at(right_x, full_bottom) {
-                B::blend(
-                    pixel,
-                    color.scale_alpha((right_fill * bottom_aa_width).round_to_inner() as u8),
-                );
-            }
-        }
-    }
-
-    for y in full_top.clamp(0, target.height as i32)..full_bottom.clamp(0, target.height as i32) {
-        unsafe {
-            horizontal_line_unchecked::<B, _>(
-                full_left,
-                full_right,
-                &mut target.buffer[y as usize * target.stride as usize..],
-                target.width as i32,
-                color,
+        let full_left = rect.min.x.ceil_to_inner();
+        let full_right = rect.max.x.floor_to_inner();
+        for x in full_left..full_right {
+            blend(
+                unsafe { target.pixel_at(x, y).unwrap_unchecked() },
+                (height * 255).round_to_inner() as u8,
             );
         }
     }
@@ -1541,10 +1396,10 @@ impl OutputPiece {
                 );
             }
             &OutputPieceContent::Rect(OutputRect { rect, color }) => {
-                fill_rect::<BlendOver, _>(
+                blend_rect_to(
                     target.reborrow(),
                     rect.translate(Vec2::new(pos.x, pos.y)),
-                    color.premultiply(),
+                    |dst, src| *dst = color.mul_alpha(src).premultiply().blend_over(*dst),
                 );
             }
         }
@@ -1575,10 +1430,10 @@ impl OutputImage<'_> {
             }
             &OutputImage::Rect(OutputRect { rect, color }) => {
                 assert!(!rect.is_empty());
-                fill_rect::<BlendSet, _>(
+                blend_rect_to(
                     target.reborrow(),
                     rect.translate(offset.to_vec()),
-                    color.premultiply(),
+                    |dst, src| *dst = color.mul_alpha(src).premultiply(),
                 );
             }
         }

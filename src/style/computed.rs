@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use rasterize::{color::BGRA8, scene::Rotation};
-use util::math::{Number, Signed, Vec2};
+use rasterize::{color::BGRA8, scene::Transform};
+use util::math::{I16Dot16, Number, Signed, Vec2};
 
 use crate::{layout::FixedL, text::OpenTypeTag};
 
@@ -255,5 +255,13 @@ impl Visibility {
 }
 
 // https://drafts.csswg.org/css-transforms-1/#transform-property
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Transform(pub Rotation);
+#[derive(Debug, Clone, Copy)]
+pub struct UnscaledTransform(pub Transform);
+
+impl ToPhysicalPixels for UnscaledTransform {
+    type Output = Transform;
+
+    fn to_physical_pixels(self, dpi: u32) -> Self::Output {
+        Transform::scale(Vec2::splat(I16Dot16::from_quotient(dpi as i32, 72))) * self.0
+    }
+}

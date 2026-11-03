@@ -2,7 +2,10 @@ use std::{collections::HashMap, ops::Range};
 
 use icu_locale::{LanguageIdentifier, LocaleDirectionality};
 use log::{log_once_state, warn, LogContext, LogOnceSet};
-use rasterize::{color::BGRA8, scene::Rotation};
+use rasterize::{
+    color::BGRA8,
+    scene::{Rotation, Transform},
+};
 use util::{
     math::{I16Dot16, I26Dot6, Vec2},
     rc::Rc,
@@ -20,8 +23,8 @@ use crate::{
     srv3::{BodyParser, Event, ModeHint, RubyPosition, WindowStyle},
     style::{
         computed::{
-            Color, Direction, FontSlant, InlineSizing, Length, TextAlign, TextShadow, Transform,
-            Visibility, WritingMode,
+            Color, Direction, FontSlant, InlineSizing, Length, TextAlign, TextShadow,
+            UnscaledTransform, Visibility, WritingMode,
         },
         ComputedStyle,
     },
@@ -490,7 +493,8 @@ impl Window {
             match self.window_style.print_dir {
                 PrintDir::HorizontalLangDir | PrintDir::HorizontalRtl => (),
                 PrintDir::VerticalMixed => {
-                    *result.make_transform_mut() = Some(Transform(Rotation::FlipXY))
+                    *result.make_transform_mut() =
+                        Some(UnscaledTransform(Transform::rotate(Rotation::FlipXY)))
                 }
             };
             result

@@ -55,6 +55,7 @@ macros::implement_style_module! {
 
     rc uninherited {
         #[inherit(no)] background_color: Color = Color::TRANSPARENT,
+        #[copy(no)]
         #[inherit(no)] text_decoration_line: TextDecorationLines = TextDecorationLines::NONE,
         #[inherit(no)] text_decoration_color: Color = Color::CurrentColor,
         #[inherit(no)] baseline_source: BaselineSource = BaselineSource::Last,

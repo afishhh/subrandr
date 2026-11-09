@@ -580,7 +580,7 @@ impl Element {
                 *style.make_font_weight_mut() = I16Dot16::new(700);
             }
             ElementKind::Span(SpanKind::Underline) => {
-                style.text_decoration_line().underline = true;
+                style.make_text_decoration_line_mut().underline = true;
             }
             ElementKind::RubyText => {
                 *style.make_font_size_mut() = style.font_size() / 2;

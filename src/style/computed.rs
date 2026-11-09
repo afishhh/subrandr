@@ -158,7 +158,7 @@ pub struct TextShadow {
     pub color: Color,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TextDecorationLines {
     pub underline: bool,
     pub line_through: bool,

@@ -573,7 +573,7 @@ fn pen_to_size_independent_style(
 
     let bgra_foreground_color = BGRA8::from_rgba32(pen.foreground_color);
     if pen.underline {
-        base.text_decoration_line().underline = true;
+        base.make_text_decoration_line_mut().underline = true;
     }
 
     if set_default || pen.foreground_color != Pen::DEFAULT.foreground_color {

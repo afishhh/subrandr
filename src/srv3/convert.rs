@@ -8,6 +8,7 @@ use util::{
     rc::Rc,
 };
 
+use super::{parse, EdgeType, Pen, Point, PrintDir, RubyPart};
 use crate::{
     layout::{
         self,
@@ -17,7 +18,10 @@ use crate::{
         Vec2WritingModeExt,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
-    srv3::{BodyParser, Event, ModeHint, RubyPosition, WindowStyle},
+    srv3::{
+        parse_segment_interior_xml, BodyParser, Event, ModeHint, RubyPosition, SegmentSpanKind,
+        WindowStyle,
+    },
     style::{
         computed::{
             Color, Direction, FontSlant, InlineSizing, Length, TextAlign, TextShadow, Transform,
@@ -28,8 +32,6 @@ use crate::{
     text::OpenTypeTag,
     SubtitleContext,
 };
-
-use super::{EdgeType, Pen, Point, PrintDir, RubyPart};
 
 macro_rules! static_rc_of_static_strings {
     [$($values: literal),* $(,)?] => {
@@ -590,14 +592,23 @@ fn pen_to_size_independent_style(
 fn convert_segment(
     segment: &super::Segment,
     pen: &super::Pen,
-    text: &str,
+    text: std::rc::Rc<str>,
     base_style: &ComputedStyle,
+    span_kind: SegmentSpanKind,
 ) -> Segment {
+    let mut pen = *pen;
+    match span_kind {
+        SegmentSpanKind::Normal => (),
+        SegmentSpanKind::Bold => pen.bold = true,
+        SegmentSpanKind::Italic => pen.italic = true,
+        SegmentSpanKind::Underline => pen.underline = true,
+    }
+
     Segment {
-        pen: *pen,
-        base_style: pen_to_size_independent_style(pen, false, base_style.clone()),
+        pen,
+        base_style: pen_to_size_independent_style(&pen, false, base_style.clone()),
         time_offset: segment.time_offset,
-        text: text.into(),
+        text,
     }
 }
 
@@ -660,6 +671,59 @@ impl WindowBuilder<'_> {
         }
     }
 
+    fn try_take_ruby(
+        &self,
+        base: &parse::Segment,
+        it: &mut std::slice::Iter<'_, parse::Segment>,
+        window: &Window,
+    ) -> Option<LineSegment> {
+        let ruby_block = it.as_slice().first_chunk::<3>()?;
+        let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
+            ruby_block.each_ref().map(|s| s.pen.ruby_part)
+        else {
+            return None;
+        };
+
+        log_once_state!(in &self.logset; ruby_under_unsupported);
+
+        match part.position {
+            RubyPosition::Alternate | RubyPosition::Over => (),
+            RubyPosition::Under => {
+                warn!(
+                    self.log,
+                    once(ruby_under_unsupported),
+                    "`ruby-position: under`-style ruby text is not supported yet"
+                );
+                return None;
+            }
+        };
+
+        _ = it.next().unwrap();
+        let annotation = it.next().unwrap();
+        let result = LineSegment {
+            inner: convert_segment(
+                base,
+                base.pen,
+                base.text.clone(),
+                &window.segment_style,
+                SegmentSpanKind::Normal,
+            ),
+            annotation: Some(convert_segment(
+                annotation,
+                // SRV3 ruby don't have their internal elements styled and both
+                // the base and annotation just derive their style from the ruby's
+                // parent inline-block which itself is styled from the base's pen
+                base.pen,
+                annotation.text.clone(),
+                &window.segment_style,
+                SegmentSpanKind::Normal,
+            )),
+        };
+        _ = it.next().unwrap();
+
+        Some(result)
+    }
+
     fn extend_lines(&mut self, window: &mut Window, event: &Event) {
         let event_range = event.time..event.time + event.duration;
         let mut current_line = VisualLine {
@@ -667,50 +731,58 @@ impl WindowBuilder<'_> {
             segments: Vec::new(),
         };
 
-        log_once_state!(in &self.logset; ruby_under_unsupported);
-
         let mut it = event.segments.iter();
-        'segment_loop: while let Some(segment) = it.next() {
-            'ruby_failed: {
-                if segment.pen.ruby_part == RubyPart::Base && it.as_slice().len() > 3 {
-                    let ruby_block = <&[_; 3]>::try_from(&it.as_slice()[..3]).unwrap();
+        while let Some(segment) = it.next() {
+            if segment.pen.ruby_part == RubyPart::Base {
+                if let Some(result) = self.try_take_ruby(segment, &mut it, window) {
+                    current_line.segments.push(result);
+                    continue;
+                }
+            }
 
-                    let [RubyPart::Parenthesis, RubyPart::Ruby(part), RubyPart::Parenthesis] =
-                        ruby_block.each_ref().map(|s| s.pen.ruby_part)
-                    else {
-                        break 'ruby_failed;
-                    };
+            let push_segment_span = |current_line: &mut VisualLine,
+                                     text: std::rc::Rc<str>,
+                                     kind: SegmentSpanKind| {
+                current_line.segments.push(LineSegment {
+                    inner: convert_segment(segment, segment.pen, text, &window.segment_style, kind),
+                    annotation: None,
+                });
+            };
 
-                    match part.position {
-                        RubyPosition::Alternate | RubyPosition::Over => (),
-                        RubyPosition::Under => {
-                            warn!(
-                                self.log,
-                                once(ruby_under_unsupported),
-                                "`ruby-position: under`-style ruby text is not supported yet"
-                            );
-                            break 'ruby_failed;
+            // TODO: let chains make this a bit cleaner (MSRV 1.87)
+            if segment.text.contains('<') && segment.text.contains('>') {
+                if let Ok(interior_spans) = parse_segment_interior_xml(&segment.text) {
+                    let mut prev_kind = SegmentSpanKind::Normal;
+                    for (text, kind) in interior_spans.into_iter() {
+                        let is_first_segment = std::ptr::eq(event.segments.as_ptr(), segment);
+
+                        // Yeah, this happens for some reason.
+                        // It appears to happen only to the first segment of a <p>.
+                        // Doesn't matter whether the target window has pre-existing content.
+                        // TODO: In Firefox, empty lines created here have a non-zero
+                        //       height while in subrandr they are invisible.
+                        if !current_line.segments.is_empty() && is_first_segment {
+                            if prev_kind != kind {
+                                // TODO: This trailing empty segment makes right padding
+                                //       not show up in Firefox while in subrandr it's
+                                //       inconsistent.
+                                push_segment_span(
+                                    &mut current_line,
+                                    "".into(),
+                                    SegmentSpanKind::Normal,
+                                );
+                            }
+                            window.lines.push(current_line);
+                            current_line = VisualLine {
+                                range: event_range.clone(),
+                                segments: Vec::new(),
+                            };
                         }
-                    };
+                        push_segment_span(&mut current_line, text, kind);
+                        prev_kind = kind;
+                    }
 
-                    _ = it.next().unwrap();
-                    let base = segment;
-                    let annotation = it.next().unwrap();
-                    current_line.segments.push(LineSegment {
-                        inner: convert_segment(base, base.pen, &base.text, &window.segment_style),
-                        annotation: Some(convert_segment(
-                            annotation,
-                            // SRV3 ruby don't have their internal elements styled and both
-                            // the base and annotation just derive their style from the ruby's
-                            // parent inline-block which itself is styled from the base's pen
-                            base.pen,
-                            &annotation.text,
-                            &window.segment_style,
-                        )),
-                    });
-                    _ = it.next().unwrap();
-
-                    continue 'segment_loop;
+                    continue;
                 }
             }
 
@@ -720,15 +792,8 @@ impl WindowBuilder<'_> {
                     .find('\n')
                     .map_or(segment.text.len(), |i| last + i);
 
-                current_line.segments.push(LineSegment {
-                    inner: convert_segment(
-                        segment,
-                        segment.pen,
-                        &segment.text[last..end],
-                        &window.segment_style,
-                    ),
-                    annotation: None,
-                });
+                let text = &segment.text[last..end];
+                push_segment_span(&mut current_line, text.into(), SegmentSpanKind::Normal);
 
                 if end == segment.text.len() {
                     break;
@@ -751,7 +816,7 @@ pub fn convert(
     log: &LogContext,
     mut parser: BodyParser,
     lang: Option<&LanguageIdentifier>,
-) -> Result<Subtitles, super::parse::Error> {
+) -> Result<Subtitles, parse::Error> {
     let mut result = Subtitles {
         windows: Vec::new(),
     };

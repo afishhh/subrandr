@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, rc::Rc, str::FromStr};
 
 use log::{log_once_state, warn, LogContext, LogOnceSet};
 use quick_xml::{
@@ -6,6 +6,7 @@ use quick_xml::{
     Error as XmlError,
 };
 use thiserror::Error;
+use util::StringExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
@@ -162,7 +163,7 @@ impl Default for WindowStyle {
 pub struct Segment<'h> {
     pub pen: &'h Pen,
     pub time_offset: u32,
-    pub text: String,
+    pub text: Rc<str>,
 }
 
 #[derive(Debug)]
@@ -738,7 +739,7 @@ impl<'rs> BodyParser<'rs> {
                                         event.segments.push(Segment {
                                             pen: current_event_pen,
                                             time_offset: current_segment_time_offset,
-                                            text: std::mem::take(&mut current_text),
+                                            text: current_text.take_into(),
                                         });
                                     }
                                     _ => {
@@ -794,17 +795,17 @@ impl<'rs> BodyParser<'rs> {
                     depth += 1;
                 }
                 XmlEvent::End(_) if current.is_some() && depth == 2 => {
-                    if !current_text.is_empty() {
-                        match &mut current {
-                            Some(BodyElement::Event(event)) => {
-                                event.segments.push(Segment {
-                                    pen: current_segment_pen,
-                                    time_offset: current_segment_time_offset,
-                                    text: std::mem::take(&mut current_text),
-                                });
-                            }
-                            _ => unreachable!("non-empty text with empty or Window current"),
-                        }
+                    if let Some(BodyElement::Event(event)) = &mut current {
+                        event.segments.push(Segment {
+                            pen: current_segment_pen,
+                            time_offset: current_segment_time_offset,
+                            text: current_text.take_into(),
+                        });
+                    } else {
+                        assert!(
+                            current_text.is_empty(),
+                            "non-empty `current_text` outside event"
+                        );
                     }
                     depth = 1;
                 }
@@ -815,10 +816,10 @@ impl<'rs> BodyParser<'rs> {
                                 event.segments.push(Segment {
                                     pen: current_event_pen,
                                     time_offset: current_segment_time_offset,
-                                    text: std::mem::take(&mut current_text),
+                                    text: current_text.take_into(),
                                 });
                             }
-                            _ => unreachable!("non-empty text with empty or Window current"),
+                            _ => unreachable!("non-empty `current_text` outside event"),
                         }
                     }
 
@@ -1010,4 +1011,189 @@ pub fn parse<'s>(log: &LogContext, text: &'s str) -> Result<BodyParser<'s>, Erro
         head,
         reader,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SegmentSpanKind {
+    /// Segments created implicitly.
+    Normal,
+    /// Segments created by interior <b> tags.
+    Bold,
+    /// Segments created by interior <i> tags.
+    Italic,
+    /// Segments created by interior <u> tags.
+    Underline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct InvalidSegmentXML;
+
+pub(super) fn parse_segment_interior_xml(
+    text: &str,
+) -> Result<Vec<(Rc<str>, SegmentSpanKind)>, InvalidSegmentXML> {
+    let mut reader = quick_xml::Reader::from_str(text);
+    reader.config_mut().expand_empty_elements = true;
+    reader.config_mut().check_end_names = true;
+
+    let mut ignored_tag_depth = 0;
+    let mut current_kind = SegmentSpanKind::Normal;
+    let mut current_text = String::new();
+
+    let mut result = Vec::new();
+    loop {
+        match reader.read_event() {
+            // XML declarations are treated as an error.
+            Ok(XmlEvent::Decl(_)) => return Err(InvalidSegmentXML),
+            // Processing instructions are just ignored.
+            Ok(XmlEvent::PI(_)) => continue,
+            // <!DOCTYPE> is treated as an error.
+            Ok(XmlEvent::DocType(_)) => return Err(InvalidSegmentXML),
+
+            // Yep, we just ignore whitespace-only text nodes. Cool.
+            // Does not apply to comments or cdata.
+            Ok(XmlEvent::Text(text))
+                // these seem like the only whitespace characters considered here
+                if text.iter().all(|&b| matches!(b, b' ' | b'\r' | b'\n')) =>
+            {
+                continue
+            }
+
+            // Top-level comment text is appended straight into the result.
+            // What even is a comment?
+            Ok(XmlEvent::Comment(text)) if current_kind == SegmentSpanKind::Normal => {
+                if !current_text.is_empty() {
+                    result.push((current_text.take_into(), SegmentSpanKind::Normal));
+                }
+
+                let content = unsafe { std::str::from_utf8_unchecked(&text) };
+                current_text.extend(content.chars().filter(|&x| x != '\n'));
+                result.push((current_text.take_into(), SegmentSpanKind::Normal));
+            }
+
+            // Non-top-level comments are ignored.
+            Ok(XmlEvent::Comment(_)) => {}
+
+            // Tags inside other tags are ignored (but their content is not).
+            Ok(XmlEvent::Start(_)) if current_kind != SegmentSpanKind::Normal => {
+                ignored_tag_depth += 1;
+            }
+            Ok(XmlEvent::End(_)) if ignored_tag_depth > 0 => {
+                ignored_tag_depth -= 1;
+            }
+
+            Ok(XmlEvent::Text(text)) => {
+                let content = unsafe { std::str::from_utf8_unchecked(&text) };
+                current_text.extend(content.chars().filter(|&x| x != '\n'));
+            }
+
+            Ok(XmlEvent::CData(cdata)) => {
+                let content = unsafe { std::str::from_utf8_unchecked(&cdata) };
+                current_text.extend(content.chars().filter(|&x| x != '\n'));
+            }
+
+            Ok(XmlEvent::Start(start)) => {
+                current_kind = match start.name().into_inner() {
+                    b"b" => SegmentSpanKind::Bold,
+                    b"i" => SegmentSpanKind::Italic,
+                    b"u" => SegmentSpanKind::Underline,
+                    _ => return Err(InvalidSegmentXML),
+                };
+
+                if !current_text.is_empty() {
+                    result.push((current_text.take_into(), SegmentSpanKind::Normal));
+                };
+            }
+            Ok(XmlEvent::End(_)) => {
+                // Note that even empty tags emit segments here, hence no `is_empty` check.
+                result.push((
+                    current_text.take_into(),
+                    std::mem::replace(&mut current_kind, SegmentSpanKind::Normal),
+                ));
+            }
+
+            Ok(XmlEvent::Empty(_)) => unreachable!(), // expand_empty_elements = true
+
+            // Unclosed tags are an error.
+            Ok(XmlEvent::Eof) if current_kind != SegmentSpanKind::Normal => return Err(InvalidSegmentXML),
+
+            Ok(XmlEvent::Eof) => {
+                assert_eq!(ignored_tag_depth, 0);
+                assert_eq!(current_kind, SegmentSpanKind::Normal);
+
+                if !current_text.is_empty() {
+                    result.push((current_text.take_into(), SegmentSpanKind::Normal));
+                } else {
+                    return Ok(result);
+                }
+            }
+
+            Err(_) => return Err(InvalidSegmentXML),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn interior_xml() {
+        assert_eq!(
+            parse_segment_interior_xml("<b>bold</b>"),
+            Ok(vec![(Rc::from("bold"), SegmentSpanKind::Bold)])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml("normal <b>bold</b> normal"),
+            Ok(vec![
+                (Rc::from("normal "), SegmentSpanKind::Normal),
+                (Rc::from("bold"), SegmentSpanKind::Bold),
+                (Rc::from(" normal"), SegmentSpanKind::Normal),
+            ])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml("normal <u>under<abc>line</abc></u> normal"),
+            Ok(vec![
+                (Rc::from("normal "), SegmentSpanKind::Normal),
+                (Rc::from("underline"), SegmentSpanKind::Underline),
+                (Rc::from(" normal"), SegmentSpanKind::Normal),
+            ])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml("hi <!--what even is a comment--> you"),
+            Ok(vec![
+                (Rc::from("hi "), SegmentSpanKind::Normal),
+                (Rc::from("what even is a comment"), SegmentSpanKind::Normal),
+                (Rc::from(" you"), SegmentSpanKind::Normal),
+            ])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml("<b><!--comment in tag--></b>"),
+            Ok(vec![(Rc::from(""), SegmentSpanKind::Bold)])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml("<i/>"),
+            Ok(vec![(Rc::from(""), SegmentSpanKind::Italic)])
+        );
+
+        assert_eq!(
+            parse_segment_interior_xml(" \r\n<!--\r \n--><![CDATA[\n \r]]>"),
+            Ok(vec![
+                (Rc::from("\r "), SegmentSpanKind::Normal),
+                (Rc::from(" \r"), SegmentSpanKind::Normal),
+            ])
+        );
+
+        assert!(parse_segment_interior_xml("<b>unclosed").is_err());
+        assert!(parse_segment_interior_xml("unclosed</b>").is_err());
+        assert!(parse_segment_interior_xml("<f>bad name</f>").is_err());
+        assert!(parse_segment_interior_xml("<u>mismatched end</i>").is_err());
+        assert!(parse_segment_interior_xml("<!DOCTYPE abcd>").is_err());
+        assert!(parse_segment_interior_xml("<?xml?>").is_err());
+        assert_eq!(parse_segment_interior_xml("<?notxml?>"), Ok(vec![]));
+    }
 }

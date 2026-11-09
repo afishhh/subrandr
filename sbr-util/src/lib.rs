@@ -30,6 +30,18 @@ pub fn vec_into_parts<T>(mut v: Vec<T>) -> (*mut T, usize, usize) {
     parts
 }
 
+pub trait StringExt: Sized {
+    fn take_into<T: for<'a> From<&'a str>>(&mut self) -> T;
+}
+
+impl StringExt for String {
+    fn take_into<T: for<'a> From<&'a str>>(&mut self) -> T {
+        let result = T::from(self.as_str());
+        self.clear();
+        result
+    }
+}
+
 // Formatting helpers
 // Remove once [debug_closure_helpers](https://github.com/rust-lang/rust/issues/117729) is stabilized.
 

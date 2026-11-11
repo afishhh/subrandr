@@ -9,6 +9,17 @@ use thiserror::Error;
 use util::StringExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontStyle {
+    MonospaceSerif = 1,
+    Serif,
+    MonospaceSansSerif,
+    SansSerif,
+    Fantasy,
+    Cursive,
+    SmallCaps,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeType {
     None = 0,
     HardShadow = 1,
@@ -41,7 +52,7 @@ pub enum RubyPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pen {
     pub font_size: u16,
-    pub font_style: u32,
+    pub font_style: FontStyle,
 
     pub bold: bool,
     pub italic: bool,
@@ -59,7 +70,7 @@ pub struct Pen {
 impl Pen {
     pub const DEFAULT: Self = Self {
         font_size: 100,
-        font_style: 0,
+        font_style: FontStyle::SansSerif,
         bold: false,
         italic: false,
         underline: false,
@@ -271,6 +282,23 @@ impl FromStr for Bool01 {
     }
 }
 
+impl FromStr for FontStyle {
+    type Err = AnyError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "1" => Self::MonospaceSerif,
+            "2" => Self::Serif,
+            "3" => Self::MonospaceSansSerif,
+            "0" | "4" => Self::SansSerif,
+            "5" => Self::Fantasy,
+            "6" => Self::Cursive,
+            "7" => Self::SmallCaps,
+            _ => return Err("Unknown font style".into()),
+        })
+    }
+}
+
 impl FromStr for EdgeType {
     type Err = AnyError;
 
@@ -399,7 +427,7 @@ fn parse_pen(
         "sz"(size: u16) => {
             result.font_size = size;
         },
-        "fs"(style: u32) => {
+        "fs"(style: FontStyle) => {
             result.font_style = style;
         },
         "et"(et: EdgeType) => {

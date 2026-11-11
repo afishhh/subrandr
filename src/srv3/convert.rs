@@ -19,8 +19,8 @@ use crate::{
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
     srv3::{
-        parse_segment_interior_xml, BodyParser, Event, ModeHint, RubyPosition, SegmentSpanKind,
-        WindowStyle,
+        parse_segment_interior_xml, BodyParser, Event, FontStyle, ModeHint, RubyPosition,
+        SegmentSpanKind, WindowStyle,
     },
     style::{
         computed::{
@@ -41,68 +41,60 @@ macro_rules! static_rc_of_static_strings {
     };
 }
 
-const SRV3_FONTS: &[Rc<[Rc<str>]>] = &[
-    static_rc_of_static_strings![
-        b"Courier New",
-        b"Courier",
-        b"Nimbus Mono L",
-        b"Cutive Mono",
-        b"monospace",
-    ],
-    static_rc_of_static_strings![
-        b"Times New Roman",
-        b"Times",
-        b"Georgia",
-        b"Cambria",
-        b"PT Serif Caption",
-        b"serif",
-    ],
-    static_rc_of_static_strings![
-        b"Deja Vu Sans Mono", // not a real font :(
-        b"Lucida Console",
-        b"Monaco",
-        b"Consolas",
-        b"PT Mono",
-        b"monospace",
-    ],
-    static_rc_of_static_strings![
-        b"YouTube Noto",
-        b"Roboto",
-        b"Arial",
-        b"Helvetica",
-        b"Verdana",
-        b"PT Sans Caption",
-        b"sans-serif",
-    ],
-    static_rc_of_static_strings![b"Comic Sans Ms", b"Impact", b"Handlee", b"fantasy"],
-    static_rc_of_static_strings![
-        b"Monotype Corsiva",
-        b"URW Chancery L",
-        b"Apple Chancery",
-        b"Dancing Script",
-        b"cursive",
-    ],
-    // YouTube appears to conditionally set this to either:
-    // "Carrois Gothic SC", sans-serif-smallcaps
-    // or sometimes:
-    // Arial, Helvetica, Verdana, "Marcellus SC", sans-serif
-    // the first one seems to be used when ran under Cobalt
-    // https://developers.google.com/youtube/cobalt
-    // i.e. in YouTube TV
-    static_rc_of_static_strings![
-        b"Arial",
-        b"Helvetica",
-        b"Verdana",
-        b"Marcellus SC",
-        b"sans-serif",
-    ],
-];
-
-fn font_style_to_families(style: u32) -> &'static Rc<[Rc<str>]> {
-    style
-        .checked_sub(1)
-        .and_then(|i| SRV3_FONTS.get(i as usize))
-        .map_or(&SRV3_FONTS[3], |v| v)
+impl FontStyle {
+    const fn to_families(self) -> Rc<[Rc<str>]> {
+        match self {
+            FontStyle::MonospaceSerif => static_rc_of_static_strings![
+                b"Courier New",
+                b"Courier",
+                b"Nimbus Mono L",
+                b"Cutive Mono",
+                b"monospace",
+            ],
+            FontStyle::Serif => static_rc_of_static_strings![
+                b"Times New Roman",
+                b"Times",
+                b"Georgia",
+                b"Cambria",
+                b"PT Serif Caption",
+                b"serif",
+            ],
+            FontStyle::MonospaceSansSerif => static_rc_of_static_strings![
+                b"Deja Vu Sans Mono", // not a real font :(
+                b"Lucida Console",
+                b"Monaco",
+                b"Consolas",
+                b"PT Mono",
+                b"monospace",
+            ],
+            FontStyle::SansSerif => static_rc_of_static_strings![
+                b"YouTube Noto",
+                b"Roboto",
+                b"Arial",
+                b"Helvetica",
+                b"Verdana",
+                b"PT Sans Caption",
+                b"sans-serif",
+            ],
+            FontStyle::Fantasy => {
+                static_rc_of_static_strings![b"Comic Sans Ms", b"Impact", b"Handlee", b"fantasy"]
+            }
+            FontStyle::Cursive => static_rc_of_static_strings![
+                b"Monotype Corsiva",
+                b"URW Chancery L",
+                b"Apple Chancery",
+                b"Dancing Script",
+                b"cursive",
+            ],
+            FontStyle::SmallCaps => static_rc_of_static_strings![
+                b"Arial",
+                b"Helvetica",
+                b"Verdana",
+                b"Marcellus SC",
+                b"sans-serif",
+            ],
+        }
+    }
 }
 
 fn convert_coordinate(coord: f32) -> f32 {
@@ -562,7 +554,7 @@ fn pen_to_size_independent_style(
     mut base: ComputedStyle,
 ) -> ComputedStyle {
     if set_default || pen.font_style != Pen::DEFAULT.font_style {
-        *base.make_font_family_mut() = font_style_to_families(pen.font_style).clone();
+        *base.make_font_family_mut() = pen.font_style.to_families();
     }
 
     if pen.bold {

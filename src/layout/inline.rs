@@ -762,7 +762,6 @@ impl RunShaper<'_> {
     ) {
         self.buffer.clear();
         self.buffer.set_direction(direction);
-        self.buffer.set_pre_context(&self.text[..range.start]);
 
         // https://drafts.csswg.org/css-writing-modes-4/#vertical-font-features
         let set_default_font_features = |buffer: &mut ShapingBuffer| match vertical_typesetting {
@@ -836,8 +835,6 @@ impl RunShaper<'_> {
             self.buffer.add_grapheme(&self.text[current..end], current);
             current = end;
         }
-
-        self.buffer.set_post_context(&self.text[range.end..]);
     }
 
     pub fn shape(
@@ -847,7 +844,7 @@ impl RunShaper<'_> {
         lctx: &mut LayoutContext,
     ) -> Result<(), text::ShapingError> {
         self.buffer
-            .shape(lctx.log, output, font_iterator, lctx.fonts)
+            .shape(lctx.log, self.text, output, font_iterator, lctx.fonts)
     }
 }
 
@@ -1241,7 +1238,6 @@ fn shape_run_initial<'a>(
                 grapheme_cluster_boundaries: &self.grapheme_cluster_boundaries,
             };
             let glyphs = {
-                shaper.buffer.guess_properties();
                 shaper.set_buffer_content(
                     segment.range.clone(),
                     direction,

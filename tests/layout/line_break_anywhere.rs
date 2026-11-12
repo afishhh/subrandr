@@ -3,6 +3,7 @@ use super::common::*;
 test_define_style! {
     .break_anywhere "line-break: anywhere"
     .noto_arabic_and_emoji "font-family: Noto Sans Arabic, Noto Color Emoji"
+    .noto_serif_noto_arabic "font-family: Noto Serif, Noto Sans Arabic"
 }
 
 check_test! {
@@ -201,6 +202,14 @@ check_test! {
         span.g2 {
             text "ع"
         }
+    }
+}
+
+check_test! {
+    name = arabic_rtl_non_primary_font_reshaping,
+    size = (120, 130),
+    inline.noto_serif_noto_arabic.align_right.fs32.break_anywhere  {
+        text "لمّا كان الاعترا"
     }
 }
 

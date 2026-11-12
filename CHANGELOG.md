@@ -1,8 +1,17 @@
 ## [Unreleased]
 
-- Fixed SRV3 ruby annotations being styled by the annotation segment's pen instead of the base's pen.
+- Fixed SRV3 ruby annotations being styled by the annotation segment's pen instead of the base's pen (https://github.com/afishhh/subrandr/issues/184).
 - Added basic support for WebVTT STYLE blocks.
 - Fixed handling of grapheme boundaries in RTL reshaping.
+- Fixed SRV3 default background alpha (`0xBF` -> `0xC0`).
+- Fixed rasterization of non-pixel-aligned rectangles. Previously the images they generate could be larger than the area they overwrite, causing stale pixel data to show up.
+- Added support for `pd="3"` SRV3 vertical text.
+- Fixed infinite loop in SRV3 shadow computation at tiny viewport sizes.
+- Fixed out-of-bounds writes caused by overflow when rasterizing tiles in strip outline rasterizer.
+- Added support for SRT-style styling tags in SRV3 (https://github.com/afishhh/subrandr/issues/84). SRV3 segments can now use escaped (as `&lt;<name>&gt;`) `<b>`/`<i>`/`<u>` tags for styling.
+- Fixed shaping context not being provided to HarfBuzz in all but the first shaping attempt (shaping the whole string with the primary font).
+- Removed complex shaping of tofu glyphs. They are now always simply laid out sequentially along the baseline.
+- Improved tofu glyph rendering.
 
 ## [v1.4.0]
 

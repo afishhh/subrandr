@@ -148,7 +148,6 @@ impl GlyphStringSegment {
 
     fn break_until(
         &self,
-        text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
         shaper: &mut RunShaper,
@@ -172,12 +171,7 @@ impl GlyphStringSegment {
                     let reshape_cluster = self[i + 1].cluster;
                     let reshape_range = reshape_cluster..break_index;
 
-                    shaper.set_buffer_content(
-                        &text,
-                        reshape_range,
-                        direction,
-                        vertical_typesetting,
-                    );
+                    shaper.set_buffer_content(reshape_range, direction, vertical_typesetting);
                     if let Some(result) =
                         self.try_concat_with_reshaped_end(i, shaper, font_iterator.clone(), lctx)?
                     {
@@ -189,12 +183,7 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = self.text_range.start..break_index;
-        shaper.set_buffer_content(
-            text.as_ref(),
-            reshape_range,
-            direction,
-            vertical_typesetting,
-        );
+        shaper.set_buffer_content(reshape_range, direction, vertical_typesetting);
         let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
@@ -225,7 +214,6 @@ impl GlyphStringSegment {
     // Analogous to `break_until` but returns the part logically after `break_index` (inclusive).
     fn break_after(
         &self,
-        text: Rc<str>,
         glyph_index: usize,
         break_index: usize,
         shaper: &mut RunShaper,
@@ -243,12 +231,7 @@ impl GlyphStringSegment {
                     let reshape_cluster = self[i].cluster;
                     let reshape_range = break_index..reshape_cluster;
 
-                    shaper.set_buffer_content(
-                        text.as_ref(),
-                        reshape_range,
-                        direction,
-                        vertical_typesetting,
-                    );
+                    shaper.set_buffer_content(reshape_range, direction, vertical_typesetting);
                     if let Some(result) =
                         self.try_concat_with_reshaped_start(i, shaper, font_iterator.clone(), lctx)?
                     {
@@ -260,12 +243,7 @@ impl GlyphStringSegment {
 
         // We have to reshape the whole segment, there's no place where we can safely concat.
         let reshape_range = break_index..self.text_range.end;
-        shaper.set_buffer_content(
-            text.as_ref(),
-            reshape_range,
-            direction,
-            vertical_typesetting,
-        );
+        shaper.set_buffer_content(reshape_range, direction, vertical_typesetting);
         let mut result = GlyphStringSegmentSink(Vec::new());
         shaper.shape(&mut result, font_iterator, lctx)?;
         Ok(result.0)
@@ -428,6 +406,7 @@ impl GlyphString {
         lctx: &mut LayoutContext,
     ) -> Result<Option<(Self, Self)>, ShapingError> {
         assert!(!self.is_empty());
+        assert!(std::ptr::eq(&*self.text, shaper.text));
 
         let left_segments;
         let mut current_x = I26Dot6::ZERO;
@@ -441,7 +420,6 @@ impl GlyphString {
 
             if let Some(left_candidate_glyph) = segment.glyph_at_utf8_index(break_range.start) {
                 let mut left_candidate = segment.break_until(
-                    self.text.clone(),
                     left_candidate_glyph,
                     break_range.start,
                     shaper,
@@ -482,7 +460,6 @@ impl GlyphString {
         while let Some((i, segment)) = next {
             if let Some(right_candidate_glyph) = segment.glyph_at_utf8_index(break_range.end) {
                 let mut right_segments = segment.break_after(
-                    self.text.clone(),
                     right_candidate_glyph,
                     break_range.end,
                     shaper,

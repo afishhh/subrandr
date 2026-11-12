@@ -747,6 +747,7 @@ enum FontFeatureEventKind {
 }
 
 struct RunShaper<'a> {
+    text: &'a str,
     buffer: &'a mut ShapingBuffer,
     font_feature_events: &'a [FontFeatureEvent],
     grapheme_cluster_boundaries: &'a [usize],
@@ -755,14 +756,13 @@ struct RunShaper<'a> {
 impl RunShaper<'_> {
     fn set_buffer_content(
         &mut self,
-        text: &str,
         range: Range<usize>,
         direction: Direction,
         vertical_typesetting: Option<VerticalTypesetting>,
     ) {
         self.buffer.clear();
         self.buffer.set_direction(direction);
-        self.buffer.set_pre_context(&text[..range.start]);
+        self.buffer.set_pre_context(&self.text[..range.start]);
 
         // https://drafts.csswg.org/css-writing-modes-4/#vertical-font-features
         let set_default_font_features = |buffer: &mut ShapingBuffer| match vertical_typesetting {
@@ -833,11 +833,11 @@ impl RunShaper<'_> {
             let end = next_grapheme_boundary_it
                 .next()
                 .map_or(range.end, |end| end.min(range.end));
-            self.buffer.add_grapheme(&text[current..end], current);
+            self.buffer.add_grapheme(&self.text[current..end], current);
             current = end;
         }
 
-        self.buffer.set_post_context(&text[range.end..]);
+        self.buffer.set_post_context(&self.text[range.end..]);
     }
 
     pub fn shape(
@@ -1235,6 +1235,7 @@ fn shape_run_initial<'a>(
             };
 
             let shaper = &mut RunShaper {
+                text: self.run_text,
                 buffer: &mut self.shaping_buffer,
                 font_feature_events: &self.font_feature_events,
                 grapheme_cluster_boundaries: &self.grapheme_cluster_boundaries,
@@ -1242,7 +1243,6 @@ fn shape_run_initial<'a>(
             let glyphs = {
                 shaper.buffer.guess_properties();
                 shaper.set_buffer_content(
-                    self.run_text,
                     segment.range.clone(),
                     direction,
                     segment.vertical_typesetting,
@@ -2801,6 +2801,7 @@ fn layout_run_full<'a>(
             available_space,
             break_opportunities,
             shaper: RunShaper {
+                text: &content.text_runs[0],
                 buffer: &mut text::ShapingBuffer::new(),
                 font_feature_events,
                 grapheme_cluster_boundaries,

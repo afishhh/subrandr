@@ -1,55 +1,58 @@
 ## subrandr
 
-subrandr is a subtitle rendering library that aims to fill a gap in open-source rendering of non-ASS subtitles accurately.
+subrandr is a subtitle renderer for the SRV3 and WebVTT subtitle formats.
 
-Currently most subtitle rendering happens in renderers specialized for a particular format into which other subtitles have to be converted. subrandr's goal is to support multiple formats in one library instead, this allows it to conform to format idiosyncrasies while still sharing a lot of code which would otherwise be repeated in specialized renderers[^1].
+## Supported subtitle formats
 
-Note that the library is still under heavy development so beware of bugs and the many unimplemented features.
-
-[^1]: This is particularly useful for SRV3 and WebVTT which effectively require supporting non-trivial CSS inline layout.
-
-### Supported subtitle formats
-
-#### SRV3
+### SRV3
 
 YouTube's subtitle format in its XML form.
 
 Most features used by [YTSubConverter](https://github.com/arcusmaximus/YTSubConverter) are supported. Some additional features found in auto-generated subtitles are also supported.
 
 > [!WARNING]
-> Since the SRV3 format is entirely undocumented, the format is implemented on a best-effort basis and many features are known to be handled incorrectly/unimplemented.
+> Since the SRV3 format is entirely undocumented, it's implemented on a best-effort basis and many features are known to be handled incorrectly/unimplemented.
 >
-> However subrandr is generally more accurate (for the features it supports) than all implementations I know of that are not browser-based.
+> However, subrandr is generally more accurate than all other open implementations I know of.
 
 The most notable limitations for this format currently are:
 - Partial vertical text support
 - No justification support
 
-#### WebVTT
+### WebVTT
 
 [WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt1/), supported natively by browsers.
 
-Currently subrandr is in the [User agents that do not support CSS](https://www.w3.org/TR/webvtt1/#user-agents-that-do-not-support-css) conformance class of the specification. However note that subrandr does actually implement inline layout as specified by CSS and supports complex layout elements like ruby annotations.
+Currently subrandr is in the [User agents that do not support CSS](https://www.w3.org/TR/webvtt1/#user-agents-that-do-not-support-css) conformance class of the specification. This is because it does not implement the full feature set technically required by the [User agents that do not support a full HTML CSS engine](https://www.w3.org/TR/webvtt1/#user-agents-that-do-not-support-a-full-html-css-engine) conformance class but it does implement a sizable chunk like parsing of CSS stylesheets and proper CSS inline layout.
 
 The most notable limitations for this format currently are:
 - No vertical text support
 - Incomplete CSS selector/property support
 - No region support
 
-### Usage
+## Requirements
+
+subrandr unconditionally depends on the following non-Rust libraries:
+- FreeType2
+- HarfBuzz
+
+The following libraries/APIs are used for system font providers:
+- (*on Unix platforms except Android*) Fontconfig
+- (*on Android*) Android NDK (API level >=29)
+- (*on Windows*) DirectWrite
+
+Font providers can be enabled/disabled via cargo feature flags of the main crate. If the (enabled by default) `platform-defaults` feature is enabled, font providers are automatically enabled based on the condition preceding it in parenthesis in the above list. To manually decide which font providers to build, disable default features and enable specific `font-provider-<name>` features.
+
+## Usage
 
 > [!WARNING]
-> Currently the only stable API provided is the C API, **do not** use this library from Rust. Absolutely no API stability is guaranteed on the Rust side.
+> Currently the only stable API provided is the C API. The Rust API of the core and internal crates is permanently unstable and breaking changes happen often.
 
-#### C
+### C
 
-The C library can be built and installed with `cargo xtask install` (see `--help` for options). Optionally the build step can also be run separately with `cargo xtask build`.
+The C library can be built and installed with `cargo xtask install` (see `--help` for options). Optionally, the build step can also be run separately with `cargo xtask build`.
 
-Definitions and documentation is provided in the `subrandr/*` headers (`include/*` in this repository). Items marked there as unstable require the `SBR_ALLOW_UNSTABLE` macro to be defined. 
-
-> [!WARNING]
-> No stability guarantees, neither ABI nor API, are provided for items marked unstable.
-> `SBR_ALLOW_UNSTABLE` should only be used when loading at runtime after checking the version or in statically linked builds.
+Definitions are provided in the `<subrandr/*>` headers (`include/*` in this repository) along with documentation in the form of doc comments.
 
 ```c
 #include <stdio.h>
@@ -60,10 +63,11 @@ Definitions and documentation is provided in the `subrandr/*` headers (`include/
 
 int main() {
   sbr_library *sbr = sbr_library_init();
-  if (!sbr)
-    // use sbr_get_last_error_string to get a string representation
-    // of the last error that occurred in a subrandr function
+  if (!sbr) {
+    // Use `sbr_get_last_error_string` to get a string representation of the
+    // last error that occurred in a subrandr function on this thread.
     exit(1);
+  }
 
   char *content = "<timedtext format=\"3\"><head></head>"
                   "<body><p t=\"0\" d=\"5000\">Hello, world!</p></body>"
@@ -77,49 +81,43 @@ int main() {
   if (!renderer)
     exit(1);
 
+  uint32_t width = 1920;
+  uint32_t height = 1080;
+  uint32_t *pixel_buffer = calloc(height * width * 4);
+  if (!pixel_buffer) {
+    printf("malloc failed\n");
+    exit(1);
+  }
+
+  uint32_t t = 2424 /* milliseconds */;
   sbr_subtitle_context ctx = {
-      // dots per inch
       .dpi = 144,
-      // video dimensions and padding are in 26.6 fixed point format
+      // Video dimensions and padding are in 26.6 fixed point format.
       .video_width = 1920 << 6,
       .video_height = 1080 << 6,
-      // if your player has additional padding around the video (for example
-      // black bars)
-      // you should provide it here, srv3 subtitles are laid out differently
-      // depending
-      // on this padding
+      // If your player has additional padding around the video (black bars),
+      // you can provide it here.
       .padding_left = 0,
       .padding_right = 0,
       .padding_top = 0,
       .padding_bottom = 0,
   };
 
-  uint32_t t = 2424 /* milliseconds */;
-
-  uint32_t width = 1920;
-  uint32_t height = 1080;
-  uint32_t *pixel_buffer = malloc(height * width * 4);
-  if (!pixel_buffer) {
-    printf("malloc failed\n");
-    exit(1);
-  }
-
   sbr_renderer_set_subtitles(renderer, subs);
-  if (sbr_renderer_render(renderer, &ctx, t, pixel_buffer, width, height,
-                          width) < 0)
+  // Alternatively: consider `sbr_renderer_render_instanced` for better performance.
+  if (sbr_renderer_render(renderer, &ctx, t, pixel_buffer, width, height, width) < 0)
     exit(1);
 
-  // blit bitmap to the screen OVER the viewport
-  // note: bitmap is already premultiplied, use premultiplied blending function
+  // `bitmap` now contains premultiplied sRGB in BGRA format that can be blended
+  // over the viewport.
+  // Due to legacy web reasons, this is expected to be done in gamma-encoded sRGB
+  // and *not* linear light.
 
-  // some time later
-
-  // you own the bitmap at all times and can free it whenever you want
   free(pixel_buffer);
   sbr_renderer_destroy(renderer);
   sbr_subtitles_destroy(subs);
-  // the library must be destroyed only after all associated renderers and
-  // subtitles have also been destroyed
+  // The library must be destroyed only after all associated objects have
+  // been destroyed.
   sbr_library_fini(sbr);
 }
 ```
@@ -130,7 +128,7 @@ The example code above is licensed under [CC0 1.0](https://creativecommons.org/p
 
 There's a WebAssembly library being worked on in the `wasi32` directory and a webextension that is able to successfully render subtitles over YouTube videos on youtube.com in the `webextension` directory.
 
-Currently it is still a work-in-progress and there's a few difficult problems that still have to be solved. Although it does work, keep in mind that performance is not that great (especially on HiDPI displays) and no API stability is guaranteed.
+Currently it is still a work-in-progress and there's a few difficult problems that still have to be solved. Although it does work, keep in mind that performance is not great (especially on HiDPI displays) and no API stability is guaranteed.
 
 #### `sbr-overlay`
 
@@ -143,6 +141,6 @@ Subtitles can be synchronized with video playback in [mpv](https://github.com/mp
 
 The mpv IPC implementation is able to automatically acquire the X11 window id of the mpv window, in other cases you need to specify the window id via the `--overlay` option to have the window overlaid on the target (also only supported on X11).
 
-### License
+## License
 
 subrandr is available under the Mozilla Public License 2.0, see [LICENSE](https://github.com/afishhh/subrandr/blob/master/LICENSE) for details. Unless stated otherwise all files in this repository are covered by this license.

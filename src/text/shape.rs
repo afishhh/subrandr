@@ -144,6 +144,7 @@ pub struct ShapingBuffer {
     raw: RawShapingBuffer,
     features: Vec<hb_feature_t>,
     cluster_map: Vec<ClusterEntry>,
+    direction: Direction,
     glyph_scratch_buffer_parts: (*mut Glyph, usize),
 }
 
@@ -162,6 +163,7 @@ impl ShapingBuffer {
             raw: RawShapingBuffer::new(),
             features: Vec::new(),
             cluster_map: Vec::new(),
+            direction: Direction::Ltr,
             glyph_scratch_buffer_parts: {
                 let (ptr, _, cap) = vec_into_parts(Vec::new());
                 (ptr, cap)
@@ -170,8 +172,6 @@ impl ShapingBuffer {
     }
 
     fn add_codepoint(&mut self, codepoint: char, utf8_index: usize, is_grapheme_start: bool) {
-        self.raw
-            .add_codepoint(codepoint, self.cluster_map.len() as u32);
         self.cluster_map.push(ClusterEntry {
             codepoint,
             utf8_index,
@@ -218,9 +218,7 @@ impl ShapingBuffer {
     }
 
     pub fn set_direction(&mut self, direction: Direction) {
-        unsafe {
-            hb_buffer_set_direction(self.raw.0, direction as hb_direction_t);
-        }
+        self.direction = direction;
     }
 
     pub fn clear(&mut self) {
@@ -228,6 +226,7 @@ impl ShapingBuffer {
         self.raw.clear();
         self.features.clear();
         self.cluster_map.clear();
+        self.direction = Direction::Ltr;
     }
 }
 
@@ -251,7 +250,6 @@ impl ShapingBuffer {
 
         ShapingPass {
             log,
-            properties: self.raw.guess_properties(),
             buffer: RawShapingBuffer(self.raw.0),
             glyph_buffer: unsafe {
                 ManuallyDrop::new(Vec::from_raw_parts(
@@ -265,9 +263,16 @@ impl ShapingBuffer {
             cluster_map: &self.cluster_map,
             text,
             fonts,
+            properties: hb_segment_properties_t {
+                direction: self.direction as u32,
+                script: HB_SCRIPT_INVALID,
+                language: std::ptr::null(), // HB_LANGUAGE_INVALID
+                reserved1: std::ptr::null_mut(),
+                reserved2: std::ptr::null_mut(),
+            },
             features: &self.features,
         }
-        .shape_range(0..self.cluster_map.len(), font_iterator, false)?;
+        .shape_range(0..self.cluster_map.len(), font_iterator, false, true)?;
 
         self.clear();
 
@@ -307,6 +312,7 @@ impl ShapingPass<'_> {
         cluster_range: Range<usize>,
         mut font_iterator: FontMatchIterator<'_>,
         force_tofu: bool,
+        toplevel: bool,
     ) -> Result<(), ShapingError> {
         let cluster_map_slice = &self.cluster_map[cluster_range.clone()];
         let (Some(first_cluster), Some(last_cluster)) =
@@ -320,7 +326,6 @@ impl ShapingPass<'_> {
         );
 
         self.buffer.clear();
-        self.buffer.set_segment_properties(&self.properties);
 
         self.buffer
             .set_pre_context(&self.text[..first_cluster.utf8_index]);
@@ -329,6 +334,11 @@ impl ShapingPass<'_> {
         }
         self.buffer
             .set_post_context(&self.text[last_cluster.end_utf8_index()..]);
+
+        self.buffer.set_segment_properties(&self.properties);
+        if toplevel {
+            self.properties = self.buffer.guess_properties();
+        }
 
         let font = if force_tofu {
             font_iterator.matcher().tofu()
@@ -455,6 +465,7 @@ impl ShapingPass<'_> {
                         broken_subrange_start..cluster_subrange_start,
                         font_iterator.clone(),
                         force_tofu,
+                        false,
                     )?;
                 }
                 broken_subrange_start = cluster_subrange_end;
@@ -481,7 +492,7 @@ impl ShapingPass<'_> {
                 broken_subrange_start == cluster_range.start && font_iterator.did_system_fallback();
 
             let range = broken_subrange_start..cluster_range.end;
-            self.shape_range(range, font_iterator.clone(), next_force_tofu)?
+            self.shape_range(range, font_iterator.clone(), next_force_tofu, false)?
         }
 
         Ok(())

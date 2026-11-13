@@ -8,7 +8,6 @@ use util::{
     rc::Rc,
 };
 
-use super::{parse, EdgeType, Pen, Point, PrintDir, RubyPart};
 use crate::{
     layout::{
         self,
@@ -18,10 +17,6 @@ use crate::{
         Vec2WritingModeExt,
     },
     renderer::{FrameLayoutPass, SubtitleEvent},
-    srv3::{
-        parse_segment_interior_xml, BodyParser, Event, FontStyle, ModeHint, RubyPosition,
-        SegmentSpanKind, WindowStyle,
-    },
     style::{
         computed::{
             Color, Direction, FontSlant, InlineSizing, Length, TextAlign, TextShadow, Transform,
@@ -32,6 +27,14 @@ use crate::{
     text::OpenTypeTag,
     SubtitleContext,
 };
+
+mod parse;
+use parse::{
+    parse_segment_interior_xml, EdgeType, Event, FontStyle, ModeHint, Pen, Point, PrintDir,
+    RubyPart, RubyPosition, SegmentSpanKind, WindowStyle,
+};
+
+pub use parse::{parse, probe, BodyParser};
 
 macro_rules! static_rc_of_static_strings {
     [$($values: literal),* $(,)?] => {
@@ -582,8 +585,8 @@ fn pen_to_size_independent_style(
 }
 
 fn convert_segment(
-    segment: &super::Segment,
-    pen: &super::Pen,
+    segment: &parse::Segment,
+    pen: &parse::Pen,
     text: std::rc::Rc<str>,
     base_style: &ComputedStyle,
     span_kind: SegmentSpanKind,
@@ -648,8 +651,8 @@ impl WindowBuilder<'_> {
                     }
                     PrintDir::VerticalMixed => {
                         *style.make_writing_mode_mut() = match window_style.scroll_dir {
-                            super::ScrollDir::LeftToRight => WritingMode::VerticalLtr,
-                            super::ScrollDir::RightToLeft => WritingMode::VerticalRtl,
+                            parse::ScrollDir::LeftToRight => WritingMode::VerticalLtr,
+                            parse::ScrollDir::RightToLeft => WritingMode::VerticalRtl,
                         };
                         // Transform for `VerticalMixed` applied later
                     }
@@ -830,7 +833,7 @@ pub fn convert(
     let mut wname_to_index = HashMap::new();
     while let Some(element) = parser.read_next(log)? {
         match element {
-            crate::srv3::BodyElement::Window(id, window) => {
+            parse::BodyElement::Window(id, window) => {
                 wname_to_index.insert(id, result.windows.len());
                 result.windows.push(window_builder.create_window(
                     convert_coordinate(window.position.x as f32),
@@ -841,7 +844,7 @@ pub fn convert(
                     *window.style,
                 ));
             }
-            crate::srv3::BodyElement::Event(event) => {
+            parse::BodyElement::Event(event) => {
                 // YouTube's player seems to skip these segments (which appear in auto-generated subs sometimes).
                 // Don't know what the exact rule is but this at least fixes auto-generated subs.
                 if event.segments.iter().all(|segment| {

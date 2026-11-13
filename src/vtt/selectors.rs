@@ -4,13 +4,11 @@
 //! but is reasonably simple.
 //!
 //! [Selectors]: https://drafts.csswg.org/selectors/
-use crate::{
-    csssyn::{
-        buffer::{Cursor, HashTypeFlag},
-        token::{FunctionalNotation, Hash, Ident, Token, Whitespace},
-        ParseError,
-    },
-    vtt::convert::{Element, ElementKind, SpanKind},
+use super::{Element, ElementKind, SpanKind};
+use crate::csssyn::{
+    buffer::{Cursor, HashTypeFlag},
+    token::{FunctionalNotation, Hash, Ident, Token, Whitespace},
+    ParseError,
 };
 
 #[derive(Debug, PartialEq, Eq)]

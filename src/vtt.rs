@@ -23,12 +23,16 @@ use crate::{
         ComputedStyle, DeclarationFilter,
     },
     text::OpenTypeTag,
-    vtt::{self, convert::stylesheet::Stylesheet},
     SubtitleContext,
 };
 
+mod parse;
 mod selectors;
 mod stylesheet;
+use parse::{Line, Position, PositionAlignment, TextAlignment, WritingDirection};
+use stylesheet::Stylesheet;
+
+pub use parse::{parse, probe};
 
 #[derive(Debug)]
 enum ComputedLine {
@@ -43,13 +47,13 @@ enum ComputedPositionAlignment {
     LineRight,
 }
 
-impl vtt::Line {
+impl Line {
     // https://www.w3.org/TR/webvtt1/#cue-computed-line
     fn computed(self, showing_track_index: u32) -> ComputedLine {
         match self {
-            vtt::Line::Percentage(value) => ComputedLine::Percentage(value),
-            vtt::Line::Lines(value) => ComputedLine::Lines(value),
-            vtt::Line::Auto => {
+            Line::Percentage(value) => ComputedLine::Percentage(value),
+            Line::Lines(value) => ComputedLine::Lines(value),
+            Line::Auto => {
                 // I believe step 3 can also only happen via DOM manipulation?
                 ComputedLine::Lines(-((showing_track_index + 1) as f64))
             }
@@ -57,18 +61,18 @@ impl vtt::Line {
     }
 }
 
-impl vtt::Cue<'_> {
+impl parse::Cue<'_> {
     // https://www.w3.org/TR/webvtt1/#cue-computed-position
     fn computed_position(&self) -> f64 {
         match self.position {
-            vtt::Position::Percentage(value) => value,
-            vtt::Position::Auto => match self.text_alignment {
+            Position::Percentage(value) => value,
+            Position::Auto => match self.text_alignment {
                 // NOTE: Browsers implement an older version of the spec where
                 //       this said that Start and End should act like Left and
                 //       Right respectively.
                 //       See https://github.com/w3c/webvtt/pull/273
-                vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Right => 100.,
+                TextAlignment::Left => 0.,
+                TextAlignment::Right => 100.,
                 _ => 50.,
             },
         }
@@ -77,27 +81,27 @@ impl vtt::Cue<'_> {
     // https://www.w3.org/TR/webvtt1/#cue-computed-position-alignment
     fn computed_position_alignment(&self, text_is_ltr: bool) -> ComputedPositionAlignment {
         match self.position_alignment {
-            vtt::PositionAlignment::LineLeft => ComputedPositionAlignment::LineLeft,
-            vtt::PositionAlignment::Center => ComputedPositionAlignment::Center,
-            vtt::PositionAlignment::LineRight => ComputedPositionAlignment::LineRight,
-            vtt::PositionAlignment::Auto => match self.text_alignment {
-                vtt::TextAlignment::Left => ComputedPositionAlignment::LineLeft,
-                vtt::TextAlignment::Right => ComputedPositionAlignment::LineRight,
-                vtt::TextAlignment::Start => {
+            PositionAlignment::LineLeft => ComputedPositionAlignment::LineLeft,
+            PositionAlignment::Center => ComputedPositionAlignment::Center,
+            PositionAlignment::LineRight => ComputedPositionAlignment::LineRight,
+            PositionAlignment::Auto => match self.text_alignment {
+                TextAlignment::Left => ComputedPositionAlignment::LineLeft,
+                TextAlignment::Right => ComputedPositionAlignment::LineRight,
+                TextAlignment::Start => {
                     if text_is_ltr {
                         ComputedPositionAlignment::LineLeft
                     } else {
                         ComputedPositionAlignment::LineRight
                     }
                 }
-                vtt::TextAlignment::End => {
+                TextAlignment::End => {
                     if text_is_ltr {
                         ComputedPositionAlignment::LineRight
                     } else {
                         ComputedPositionAlignment::LineLeft
                     }
                 }
-                vtt::TextAlignment::Center => ComputedPositionAlignment::Center,
+                TextAlignment::Center => ComputedPositionAlignment::Center,
             },
         }
     }
@@ -108,9 +112,9 @@ impl vtt::Cue<'_> {
 #[doc(hidden)]
 pub struct Event {
     range: Range<u32>,
-    writing_direction: vtt::WritingDirection,
-    text_alignment: vtt::TextAlignment,
-    line: vtt::Line,
+    writing_direction: WritingDirection,
+    text_alignment: TextAlignment,
+    line: Line,
     size: f64,
     root: Element,
     x: f64,
@@ -173,9 +177,9 @@ impl Event {
     ) -> Result<(Point2L, layout::inline::InlineContentFragment), layout::InlineLayoutError> {
         let text_align = match self.text_alignment {
             // TODO: Start and End alignment is not supported yet
-            vtt::TextAlignment::Start | vtt::TextAlignment::Left => TextAlign::Left,
-            vtt::TextAlignment::End | vtt::TextAlignment::Right => TextAlign::Right,
-            vtt::TextAlignment::Center => TextAlign::Center,
+            TextAlignment::Start | TextAlignment::Left => TextAlign::Left,
+            TextAlignment::End | TextAlignment::Right => TextAlign::Right,
+            TextAlignment::Center => TextAlign::Center,
         };
         let mut fragment = layout::inline::layout(
             lctx,
@@ -220,20 +224,18 @@ impl Event {
         if self.writing_direction.is_horizontal() {
             // emulate width = size vw
             result.x += match self.text_alignment {
-                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => sctx.video_width.into_f32() * self.size as f32 / 200.,
-                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
+                TextAlignment::Start | TextAlignment::Left => 0.,
+                TextAlignment::Center => sctx.video_width.into_f32() * self.size as f32 / 200.,
+                TextAlignment::End | TextAlignment::Right => {
                     sctx.video_width.into_f32() * self.size as f32 / 100.
                 }
             };
         } else {
             // emulate height = size vh
             result.y += match self.text_alignment {
-                vtt::TextAlignment::Start | vtt::TextAlignment::Left => 0.,
-                vtt::TextAlignment::Center => {
-                    sctx.video_height.into_f32() * self.size as f32 / 200.
-                }
-                vtt::TextAlignment::End | vtt::TextAlignment::Right => {
+                TextAlignment::Start | TextAlignment::Left => 0.,
+                TextAlignment::Center => sctx.video_height.into_f32() * self.size as f32 / 200.,
+                TextAlignment::End | TextAlignment::Right => {
                     sctx.video_height.into_f32() * self.size as f32 / 100.
                 }
             };
@@ -463,24 +465,24 @@ struct Element {
     children: Vec<Node>,
 }
 
-fn convert_node(output: &mut Vec<Node>, node: &vtt::Node, mut in_ruby: bool) {
+fn convert_node(output: &mut Vec<Node>, node: &parse::Node, mut in_ruby: bool) {
     match node {
-        vtt::Node::Internal(internal) => {
+        parse::Node::Internal(internal) => {
             let mut result = Element {
                 kind: match internal.kind {
                     // TODO: Nested ruby is not currently supported by our layout engine.
-                    vtt::InternalNodeKind::Ruby if !in_ruby => {
+                    parse::InternalNodeKind::Ruby if !in_ruby => {
                         in_ruby = true;
                         ElementKind::Ruby
                     }
-                    vtt::InternalNodeKind::RubyText => ElementKind::RubyText,
-                    vtt::InternalNodeKind::Class => ElementKind::Span(SpanKind::Class),
-                    vtt::InternalNodeKind::Italic => ElementKind::Span(SpanKind::Italic),
-                    vtt::InternalNodeKind::Bold => ElementKind::Span(SpanKind::Bold),
-                    vtt::InternalNodeKind::Underline => ElementKind::Span(SpanKind::Underline),
-                    vtt::InternalNodeKind::Voice { .. } => ElementKind::Span(SpanKind::Voice),
-                    vtt::InternalNodeKind::Language => ElementKind::Span(SpanKind::Language),
-                    vtt::InternalNodeKind::Ruby => ElementKind::Span(SpanKind::Ruby),
+                    parse::InternalNodeKind::RubyText => ElementKind::RubyText,
+                    parse::InternalNodeKind::Class => ElementKind::Span(SpanKind::Class),
+                    parse::InternalNodeKind::Italic => ElementKind::Span(SpanKind::Italic),
+                    parse::InternalNodeKind::Bold => ElementKind::Span(SpanKind::Bold),
+                    parse::InternalNodeKind::Underline => ElementKind::Span(SpanKind::Underline),
+                    parse::InternalNodeKind::Voice { .. } => ElementKind::Span(SpanKind::Voice),
+                    parse::InternalNodeKind::Language => ElementKind::Span(SpanKind::Language),
+                    parse::InternalNodeKind::Ruby => ElementKind::Span(SpanKind::Ruby),
                 },
                 id: None,
                 classlist: internal.classes.to_string().into_boxed_str(),
@@ -493,15 +495,15 @@ fn convert_node(output: &mut Vec<Node>, node: &vtt::Node, mut in_ruby: bool) {
 
             output.push(Node::Element(result));
         }
-        vtt::Node::Text(text) => output.push(Node::Text(text.content().into())),
-        vtt::Node::Timestamp(_) => (),
+        parse::Node::Text(text) => output.push(Node::Text(text.content().into())),
+        parse::Node::Timestamp(_) => (),
     }
 }
 
-fn build_tree(cue: vtt::Cue) -> Element {
+fn build_tree(cue: parse::Cue) -> Element {
     let mut result = Vec::new();
 
-    for node in vtt::parse_cue_text(cue.text) {
+    for node in parse::parse_cue_text(cue.text) {
         convert_node(&mut result, &node, false);
     }
 
@@ -690,7 +692,7 @@ pub struct Subtitles {
     stylesheets: Vec<Stylesheet>,
 }
 
-pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
+pub fn convert(log: &LogContext, captions: parse::Captions) -> Subtitles {
     let mut subtitles = Subtitles {
         events: Vec::new(),
         stylesheets: Vec::new(),
@@ -728,29 +730,32 @@ pub fn convert(log: &LogContext, captions: vtt::Captions) -> Subtitles {
         let mut y_position = 0.0;
 
         match cue.writing_direction {
-            vtt::WritingDirection::Horizontal => match computed_position_alignment {
+            WritingDirection::Horizontal => match computed_position_alignment {
                 ComputedPositionAlignment::LineLeft => x_position = computed_position,
                 ComputedPositionAlignment::Center => x_position = computed_position - size / 2.,
                 ComputedPositionAlignment::LineRight => x_position = computed_position - size,
             },
-            vtt::WritingDirection::VerticalGrowingLeft
-            | vtt::WritingDirection::VerticalGrowingRight => match computed_position_alignment {
-                ComputedPositionAlignment::LineLeft => y_position = computed_position,
-                ComputedPositionAlignment::Center => y_position = computed_position - size / 2.,
-                ComputedPositionAlignment::LineRight => y_position = computed_position - size,
-            },
+            WritingDirection::VerticalGrowingLeft | WritingDirection::VerticalGrowingRight => {
+                match computed_position_alignment {
+                    ComputedPositionAlignment::LineLeft => y_position = computed_position,
+                    ComputedPositionAlignment::Center => y_position = computed_position - size / 2.,
+                    ComputedPositionAlignment::LineRight => y_position = computed_position - size,
+                }
+            }
         }
 
         match cue.line {
-            vtt::Line::Percentage(percentage) => match cue.writing_direction {
-                vtt::WritingDirection::Horizontal => y_position = percentage,
-                vtt::WritingDirection::VerticalGrowingLeft
-                | vtt::WritingDirection::VerticalGrowingRight => x_position = percentage,
+            Line::Percentage(percentage) => match cue.writing_direction {
+                WritingDirection::Horizontal => y_position = percentage,
+                WritingDirection::VerticalGrowingLeft | WritingDirection::VerticalGrowingRight => {
+                    x_position = percentage
+                }
             },
-            vtt::Line::Lines(_) | vtt::Line::Auto => match cue.writing_direction {
-                vtt::WritingDirection::Horizontal => y_position = 0.,
-                vtt::WritingDirection::VerticalGrowingLeft
-                | vtt::WritingDirection::VerticalGrowingRight => x_position = 0.,
+            Line::Lines(_) | Line::Auto => match cue.writing_direction {
+                WritingDirection::Horizontal => y_position = 0.,
+                WritingDirection::VerticalGrowingLeft | WritingDirection::VerticalGrowingRight => {
+                    x_position = 0.
+                }
             },
         }
 

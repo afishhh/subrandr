@@ -1,4 +1,9 @@
-use std::{convert::Infallible, fmt::Debug, ops::Mul, rc::Rc};
+use std::{
+    convert::Infallible,
+    fmt::Debug,
+    ops::{Mul, MulAssign},
+    rc::Rc,
+};
 
 use util::{
     math::{
@@ -172,8 +177,7 @@ impl SceneBuilder {
     pub fn root(&mut self) -> SceneContentBuilder<'_> {
         SceneContentBuilder {
             parent: self,
-            current_translation: Vec2S::ZERO,
-            current_rotation: Rotation::None,
+            transform: Transform::IDENTITY,
         }
     }
 
@@ -255,11 +259,144 @@ impl<N: Number + Signed> Mul<Rect2<N>> for Rotation {
     }
 }
 
+// Not a fully general linear transform because the rasterizer cannot handle general
+// linear transforms on bitmaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LinearTransform {
+    pub rotation: Rotation,
+    pub scale: Vec2<I16Dot16>,
+}
+
+impl LinearTransform {
+    pub const IDENTITY: Self = Self {
+        rotation: Rotation::None,
+        scale: Vec2::splat(I16Dot16::ONE),
+    };
+
+    pub fn apply_inverse(self, mut point: Vec2S) -> Vec2S {
+        point.x /= self.scale.x;
+        point.y /= self.scale.y;
+        self.rotation.inverse() * point
+    }
+}
+
+impl Mul<Vec2S> for LinearTransform {
+    type Output = Vec2S;
+
+    fn mul(self, rhs: Vec2S) -> Self::Output {
+        let mut result = self.rotation * rhs;
+        result.x *= self.scale.x;
+        result.y *= self.scale.y;
+        result
+    }
+}
+
+impl Mul<Vec2<f32>> for LinearTransform {
+    type Output = Vec2<f32>;
+
+    fn mul(self, rhs: Vec2<f32>) -> Self::Output {
+        let mut result = self.rotation * rhs;
+        result.x *= self.scale.x.into_f32();
+        result.y *= self.scale.y.into_f32();
+        result
+    }
+}
+
+impl<N: Number + Signed + MulAssign<I16Dot16>> Mul<Rect2<N>> for LinearTransform {
+    type Output = Rect2<N>;
+
+    fn mul(self, rhs: Rect2<N>) -> Self::Output {
+        let mut result = self.rotation * rhs;
+        result.min.x *= self.scale.x;
+        result.max.x *= self.scale.x;
+        result.min.y *= self.scale.y;
+        result.max.y *= self.scale.y;
+        result
+    }
+}
+
+impl Mul for LinearTransform {
+    type Output = Self;
+
+    fn mul(mut self, rhs: Self) -> Self::Output {
+        match self.rotation {
+            Rotation::None | Rotation::FlipXY => {
+                self.scale.x *= rhs.scale.x;
+                self.scale.y *= rhs.scale.y;
+            }
+            Rotation::Clockwise90 | Rotation::CounterClockwise90 => {
+                self.scale.y *= rhs.scale.x;
+                self.scale.x *= rhs.scale.y;
+            }
+        }
+        self.rotation = self.rotation * rhs.rotation;
+
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Transform {
+    pub linear: LinearTransform,
+    pub translation: Vec2S,
+}
+
+impl Transform {
+    pub const IDENTITY: Self = Self {
+        linear: LinearTransform::IDENTITY,
+        translation: Vec2::ZERO,
+    };
+
+    pub fn rotate(rotation: Rotation) -> Self {
+        Self {
+            linear: LinearTransform {
+                rotation,
+                ..LinearTransform::IDENTITY
+            },
+            ..Self::IDENTITY
+        }
+    }
+
+    pub fn scale(scale: Vec2<I16Dot16>) -> Self {
+        Self {
+            linear: LinearTransform {
+                scale,
+                ..LinearTransform::IDENTITY
+            },
+            ..Self::IDENTITY
+        }
+    }
+
+    pub fn translate(translation: Vec2<I26Dot6>) -> Self {
+        Self {
+            translation,
+            ..Self::IDENTITY
+        }
+    }
+}
+
+impl From<LinearTransform> for Transform {
+    fn from(linear: LinearTransform) -> Self {
+        Self {
+            linear,
+            ..Self::IDENTITY
+        }
+    }
+}
+
+impl Mul for Transform {
+    type Output = Self;
+
+    fn mul(mut self, rhs: Self) -> Self::Output {
+        self.translation += self.linear * rhs.translation;
+        self.linear = self.linear * rhs.linear;
+        self
+    }
+}
+
 pub struct SceneContentBuilder<'a> {
     parent: &'a mut SceneBuilder,
-    current_translation: Vec2S,
-    // Our transformation matrix. Yes, it only has four values :)
-    current_rotation: Rotation,
+    transform: Transform,
 }
 
 impl<'a> SceneContentBuilder<'a> {
@@ -271,12 +408,14 @@ impl<'a> SceneContentBuilder<'a> {
     }
 
     pub fn apply_translation(&mut self, translation: Vec2S) -> &mut SceneContentBuilder<'a> {
-        self.current_translation += self.current_rotation * translation;
-        self
+        self.apply_transform(Transform::translate(translation))
     }
 
-    pub fn apply_rotation(&mut self, rotation: Rotation) -> &mut SceneContentBuilder<'a> {
-        self.current_rotation = rotation * self.current_rotation;
+    pub fn apply_transform(
+        &mut self,
+        transform: impl Into<Transform>,
+    ) -> &mut SceneContentBuilder<'a> {
+        self.transform = self.transform * transform.into();
         self
     }
 
@@ -286,18 +425,14 @@ impl<'a> SceneContentBuilder<'a> {
         child
     }
 
-    pub fn current_transform(&self) -> Rotation {
-        self.current_rotation
-    }
-
-    pub fn current_translation(&self) -> Vec2S {
-        self.current_translation
+    pub fn current_transform(&self) -> Transform {
+        self.transform
     }
 
     fn rounded_translation(&self) -> Vec2<i32> {
         Vec2::new(
-            self.current_translation.x.round_to_inner(),
-            self.current_translation.y.round_to_inner(),
+            self.transform.translation.x.round_to_inner(),
+            self.transform.translation.y.round_to_inner(),
         )
     }
 
@@ -310,7 +445,9 @@ impl<'a> SceneContentBuilder<'a> {
     ) {
         let mut pos = self.rounded_translation().to_point();
 
-        match self.current_rotation {
+        scaled_size.x = (scaled_size.x * self.transform.linear.scale.x.into_raw() as u32) >> 16;
+        scaled_size.y = (scaled_size.y * self.transform.linear.scale.y.into_raw() as u32) >> 16;
+        match self.transform.linear.rotation {
             Rotation::None => (),
             Rotation::Clockwise90 => {
                 pos.x -= scaled_size.y as i32;
@@ -329,7 +466,7 @@ impl<'a> SceneContentBuilder<'a> {
             scaled_size,
             texture,
             filter,
-            rotation: self.current_rotation,
+            rotation: self.transform.linear.rotation,
             color: color.into(),
         }));
     }
@@ -343,7 +480,7 @@ impl<'a> SceneContentBuilder<'a> {
         self.parent
             .nodes
             .push(SceneNode::StrokedPolyline(StrokedPolyline {
-                pos: self.current_translation.to_point(),
+                pos: self.transform.translation.to_point(),
                 polyline,
                 width,
                 color: color.into(),
@@ -356,8 +493,8 @@ impl<'a> SceneContentBuilder<'a> {
         color: impl Into<SceneColor>,
     ) {
         let transf = Vec2::new(
-            self.current_translation.x.into_f32(),
-            self.current_translation.y.into_f32(),
+            self.transform.translation.x.into_f32(),
+            self.transform.translation.y.into_f32(),
         );
 
         self.parent
@@ -366,7 +503,7 @@ impl<'a> SceneContentBuilder<'a> {
                 events: outline
                     .into_iter()
                     .map_points(|point| {
-                        (self.current_rotation * point.to_vec() + transf).to_point()
+                        (self.transform.linear * point.to_vec() + transf).to_point()
                     })
                     .collect(),
                 color: color.into(),
@@ -375,7 +512,7 @@ impl<'a> SceneContentBuilder<'a> {
 
     pub fn filled_rect(&mut self, rect: Rect2S, color: impl Into<SceneColor>) {
         self.parent.nodes.push(SceneNode::FilledRect(FilledRect {
-            rect: (self.current_rotation * rect).translate(self.current_translation),
+            rect: (self.transform.linear * rect).translate(self.transform.translation),
             color: color.into(),
         }));
     }
@@ -384,12 +521,30 @@ impl<'a> SceneContentBuilder<'a> {
         &mut self,
         scene_filter: Option<SceneFilter>,
         active_color: impl Into<SceneColor>,
-        content_fn: impl FnOnce(Point2S, Rotation) -> Result<SubsceneKind, E>,
+        content_fn: impl FnOnce(Transform) -> Result<SubsceneKind, E>,
     ) -> Result<(), E> {
         let floored_pos = Vec2::new(
-            self.current_translation.x.floor_to_inner(),
-            self.current_translation.y.floor_to_inner(),
+            self.transform.translation.x.floor_to_inner(),
+            self.transform.translation.y.floor_to_inner(),
         );
+        let fract_translation = self.transform.translation - floored_pos;
+
+        let (outer_transform, inner_transform) = match scene_filter {
+            None
+            | Some(SceneFilter::ExtractAlpha {
+                blur_stddev: I26Dot6::ZERO,
+            }) => (
+                LinearTransform::IDENTITY,
+                Transform {
+                    translation: fract_translation,
+                    ..self.transform
+                },
+            ),
+            Some(SceneFilter::ExtractAlpha { blur_stddev: _ }) => (
+                self.transform.linear,
+                Transform::translate(self.transform.linear.apply_inverse(fract_translation)),
+            ),
+        };
 
         // TODO: We should actually only pass rotation to the callback if
         //       scene_filter is None because the filter is supossed to
@@ -398,10 +553,8 @@ impl<'a> SceneContentBuilder<'a> {
         self.parent.nodes.push(SceneNode::Subscene(Subscene {
             pos: floored_pos.to_point(),
             scene_filter,
-            kind: content_fn(
-                (self.current_translation - floored_pos).to_point(),
-                self.current_rotation,
-            )?,
+            kind: content_fn(inner_transform)?,
+            transform: outer_transform,
             active_color: active_color.into(),
         }));
 
@@ -412,10 +565,10 @@ impl<'a> SceneContentBuilder<'a> {
         &mut self,
         scene_filter: Option<SceneFilter>,
         active_color: impl Into<SceneColor>,
-        content_fn: impl FnOnce(Point2S, Rotation) -> SubsceneKind,
+        content_fn: impl FnOnce(Transform) -> SubsceneKind,
     ) {
-        match self.try_subscene(scene_filter, active_color, |translation, rotation| {
-            Ok::<_, Infallible>(content_fn(translation, rotation))
+        match self.try_subscene(scene_filter, active_color, |transform| {
+            Ok::<_, Infallible>(content_fn(transform))
         }) {
             Ok(()) => (),
         }
@@ -490,6 +643,7 @@ pub(crate) struct Subscene {
     pub(crate) pos: Point2<i32>,
     pub(crate) kind: SubsceneKind,
     pub(crate) scene_filter: Option<SceneFilter>,
+    pub(crate) transform: LinearTransform,
     pub(crate) active_color: SceneColor,
 }
 
@@ -520,16 +674,16 @@ impl Subscene {
             return inner_bbox;
         }
 
+        let mut result = inner_bbox;
         match self.scene_filter {
             Some(SceneFilter::ExtractAlpha { blur_stddev }) => {
-                let mut result = inner_bbox;
                 let expansion = blur_stddev * 3;
                 result.expand(expansion, expansion);
-                result
             }
-            None => inner_bbox,
+            None => (),
         }
-        .translate(self.pos.to_vec())
+
+        (self.transform * result).translate(self.pos.to_vec())
     }
 }
 

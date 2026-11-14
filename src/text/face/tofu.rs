@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-use rasterize::scene::{Rotation, SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
+use rasterize::scene::{SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind, Transform};
 use text_sys::*;
 use util::{
     make_static_outline,
@@ -475,16 +475,14 @@ impl Font {
     pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
-        subpixel_offset: rasterize::scene::Vec2S,
-        rotation: Rotation,
+        transform: Transform,
         _rasterizer: &mut dyn rasterize::Rasterizer,
     ) -> GlyphSubscene {
         let mut builder = SceneBuilder::new();
         self.build_glyph_outline(
             {
                 let mut root = builder.root();
-                root.apply_translation(subpixel_offset);
-                root.apply_rotation(rotation);
+                root.apply_transform(transform);
                 root
             },
             index,

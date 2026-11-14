@@ -186,19 +186,19 @@ macro_rules! define_fixed_for_type {
             }
         }
 
-        impl<const P: u32> Div for Fixed<P, $type> {
+        impl<const P1: u32, const P2: u32> Div<Fixed<P2, $type>> for Fixed<P1, $type> {
             type Output = Self;
 
             #[track_caller]
-            fn div(self, rhs: Self) -> Self::Output {
-                let wide_result = ((self.0 as $wide) << P) / rhs.0 as $wide;
+            fn div(self, rhs: Fixed<P2, $type>) -> Self::Output {
+                let wide_result = ((self.0 as $wide) << P2) / rhs.0 as $wide;
                 Self(wide_result as $type)
             }
         }
 
-        impl<const P: u32> DivAssign for Fixed<P, $type> {
+        impl<const P1: u32, const P2: u32> DivAssign<Fixed<P2, $type>> for Fixed<P1, $type> {
             #[track_caller]
-            fn div_assign(&mut self, rhs: Self) {
+            fn div_assign(&mut self, rhs: Fixed<P2, $type>) {
                 *self = *self / rhs;
             }
         }

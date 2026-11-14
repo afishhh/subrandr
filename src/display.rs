@@ -12,7 +12,7 @@ use crate::{
         Axis, FixedL, FragmentBox, Point2L, Vec2L, Vec2LW, Vec2WritingModeExt as _,
     },
     style::{
-        computed::{ToPhysicalPixels, Transform, WritingMode},
+        computed::{ToPhysicalPixels, WritingMode},
         ComputedStyle,
     },
     text::{self, FontMetrics, GlyphCache},
@@ -53,12 +53,13 @@ fn round_offset_in_with(
         Axis::Y => Vec2L::new(FixedL::ZERO, value),
     };
     let transform = output.current_transform();
-    let translation = output.current_translation();
-    let transformed_point = transform * point + translation;
+    let transformed_point = transform.linear * point + transform.translation;
     let rounded_transformed_point =
         Vec2L::new(round(transformed_point.x), round(transformed_point.y));
 
-    let rounded_point = transform.inverse() * (rounded_transformed_point - translation);
+    let rounded_point = transform
+        .linear
+        .apply_inverse(rounded_transformed_point - transform.translation);
     match axis {
         Axis::X => rounded_point.x,
         Axis::Y => rounded_point.y,
@@ -162,14 +163,15 @@ impl DisplayContext<'_> {
         output: &mut SceneContentBuilder,
         fbox: &FragmentBox,
         style: &ComputedStyle,
+        dpi: u32,
     ) {
         output.apply_translation(fbox.border_box().min.to_vec());
 
-        if let Some(Transform(rotation)) = style.transform() {
-            if rotation != Rotation::None {
+        if let Some(transform) = style.transform() {
+            if transform.0 != rasterize::scene::Transform::IDENTITY {
                 let origin = fbox.border_box().size() / FixedL::new(2);
                 output.apply_translation(origin);
-                output.apply_rotation(rotation);
+                output.apply_transform(transform.to_physical_pixels(dpi));
                 output.apply_translation(-origin);
             }
         }
@@ -225,24 +227,26 @@ impl DisplayContext<'_> {
             output.with_translation(offset).try_subscene(
                 scene_filter,
                 color,
-                |subpixel_pos, rotation| {
-                    let rotation_swaps_axes = match rotation {
+                |mut transform| {
+                    let rotation_swaps_axes = match transform.linear.rotation {
                         Rotation::None | Rotation::FlipXY => false,
                         Rotation::Clockwise90 | Rotation::CounterClockwise90 => true,
                     };
                     let (offset_value, offset_axis_is_y) =
                         if fragment.is_vertical() ^ rotation_swaps_axes {
-                            (subpixel_pos.y, true)
+                            (transform.translation.y, true)
                         } else {
-                            (subpixel_pos.x, false)
+                            (transform.translation.x, false)
                         };
+
+                    transform.linear.rotation = glyph_transform * transform.linear.rotation;
 
                     font.glyph_subscene(
                         self.glyph_cache,
                         glyph.index,
                         offset_value,
                         offset_axis_is_y,
-                        rotation * glyph_transform,
+                        transform.linear,
                         self.rasterizer,
                     )
                     .map(|x| x.0.clone())
@@ -583,7 +587,7 @@ impl DisplayContext<'_> {
         mut output: SceneContentBuilder<'_>,
         fragment: &BlockContainerFragment,
     ) -> Result<(), DisplayError> {
-        Self::enter_transformable_box(&mut output, &fragment.fbox, &fragment.style);
+        Self::enter_transformable_box(&mut output, &fragment.fbox, &fragment.style, self.dpi);
 
         let mut scope = self.enter_box(&fragment.style, None);
         match &fragment.content {

@@ -1,7 +1,7 @@
 use std::{fmt::Debug, hash::Hash, ops::RangeInclusive, path::Path};
 
 use rasterize::{
-    scene::{FixedS, Rotation, Scene, SubsceneKind},
+    scene::{FixedS, LinearTransform, Scene, SubsceneKind, Transform},
     Rasterizer,
 };
 use text_sys::hb_font_t;
@@ -211,28 +211,36 @@ impl Font {
         glyph: u32,
         offset_value: FixedS,
         offset_axis_is_y: bool,
-        rotation: Rotation,
+        linear_transform: LinearTransform,
         rasterizer: &mut dyn Rasterizer,
     ) -> Result<&'c GlyphSubscene, GlyphDisplayError> {
         let (render_offset, subpixel_bucket) =
             GlyphKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
         let key = self.size_cache_key().for_glyph(self.face(), glyph);
 
-        cache.get_or_try_insert_with(key.clone().for_outline(subpixel_bucket, rotation), || {
-            match self {
+        cache.get_or_try_insert_with(
+            key.clone().for_outline(subpixel_bucket, linear_transform),
+            || match self {
                 Self::FreeType(font) => font.glyph_subscene_uncached(
                     glyph,
-                    render_offset,
-                    rotation,
+                    Transform {
+                        linear: linear_transform,
+                        translation: render_offset,
+                    },
                     rasterizer,
                     cache,
                     key,
                 ),
-                Self::Tofu(font) => {
-                    Ok(font.glyph_subscene_uncached(glyph, render_offset, rotation, rasterizer))
-                }
-            }
-        })
+                Self::Tofu(font) => Ok(font.glyph_subscene_uncached(
+                    glyph,
+                    Transform {
+                        linear: linear_transform,
+                        translation: render_offset,
+                    },
+                    rasterizer,
+                )),
+            },
+        )
     }
 }
 

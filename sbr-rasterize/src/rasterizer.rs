@@ -49,6 +49,12 @@ impl Texture {
         }
     }
 
+    pub fn size(&self) -> Vec2<u32> {
+        match &self.0 {
+            TextureInner::Software(sw) => sw.size(),
+        }
+    }
+
     pub fn width(&self) -> u32 {
         match &self.0 {
             TextureInner::Software(sw) => sw.width(),

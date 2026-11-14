@@ -10,7 +10,8 @@ use std::{
 use rasterize::{
     color::BGRA8,
     scene::{
-        ExternalSubscene, FixedS, Rect2S, Rotation, SceneBuilder, SceneColor, SubsceneKind, Vec2S,
+        ExternalSubscene, FixedS, LinearTransform, Rect2S, Rotation, SceneBuilder, SceneColor,
+        SubsceneKind, Transform,
     },
     PixelFormat, Rasterizer, Texture,
 };
@@ -724,25 +725,24 @@ impl Font {
             texture,
             unscaled_offset,
         }: &CachedBitmapTexture,
-        rotation: Rotation,
+        transform: LinearTransform,
     ) -> GlyphSubscene {
         if texture.width() == 0 || texture.height() == 0 {
             return GlyphSubscene::empty();
         };
 
-        let scale = self.size.bitmap_scale;
-        let scaled_offset = Vec2::new(scale * unscaled_offset.x, scale * unscaled_offset.y);
-        let scaled_size = Vec2::new(
-            (scale * texture.width() as i32).floor_to_inner() as u32,
-            (scale * texture.height() as i32).floor_to_inner() as u32,
-        );
+        let scale = I16Dot16::from_raw(self.size.bitmap_scale.into_raw() << 10);
 
         GlyphSubscene(SubsceneKind::Scene({
             let mut b = SceneBuilder::new();
             let mut r = b.root();
-            r.apply_rotation(rotation);
-            r.apply_translation(scaled_offset);
-            r.bitmap(texture.clone(), scaled_size, None, BGRA8::WHITE);
+            r.apply_transform(transform);
+            r.apply_transform(Transform::scale(Vec2::splat(scale)));
+            r.apply_translation(Vec2::new(
+                FixedS::new(unscaled_offset.x),
+                FixedS::new(unscaled_offset.y),
+            ));
+            r.bitmap(texture.clone(), texture.size(), None, BGRA8::WHITE);
             b.finish()
         }))
     }
@@ -750,19 +750,18 @@ impl Font {
     pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
-        subpixel_offset: Vec2S,
-        rotation: Rotation,
+        transform: Transform,
         rasterizer: &mut dyn Rasterizer,
         glyph_cache: &GlyphCache,
         glyph_key: GlyphKey,
     ) -> Result<GlyphSubscene, GlyphDisplayError> {
         let bitmap_key = glyph_key.for_bitmap_strike(self.size.bitmap_strike_index);
         if let Some(cached) = glyph_cache.get::<CachedBitmapTexture>(bitmap_key.clone()) {
-            return Ok(self.subscene_for_cached_bitmap(cached, rotation));
+            return Ok(self.subscene_for_cached_bitmap(cached, transform.linear));
         }
 
         let face = self.with_applied_size()?;
-        let _guard = unsafe { TransformGuard::new(face, subpixel_offset, rotation) };
+        let _guard = unsafe { TransformGuard::new(face, transform) };
 
         unsafe {
             fttry!(FT_Load_Glyph(
@@ -790,7 +789,7 @@ impl Font {
                 })?
             };
 
-            return Ok(self.subscene_for_cached_bitmap(cached, rotation));
+            return Ok(self.subscene_for_cached_bitmap(cached, transform.linear));
         } else if unsafe { (*glyph).format == FT_GLYPH_FORMAT_OUTLINE }
                 // COLRv0 glyphs actually store multiple layers which we would
                 // have to take into account here so disable this path
@@ -828,8 +827,7 @@ impl Font {
         let subscene = Rc::new(FreeTypeSubscene {
             font: self.clone(),
             index,
-            subpixel_offset,
-            rotation,
+            transform,
             bbox,
         });
 
@@ -888,45 +886,50 @@ unsafe fn copy_glyph_slot_bitmap_to_texture(
 struct TransformGuard(FT_Face);
 
 impl TransformGuard {
-    unsafe fn new(face: FT_Face, translation: Vec2<I26Dot6>, rotation: Rotation) -> Self {
+    unsafe fn new(face: FT_Face, transform: Transform) -> Self {
         const IDENTITY_MATRIX: FT_Matrix = FT_Matrix {
-            xx: I16Dot16::ONE.into_ft(),
+            xx: 1,
             xy: 0,
             yx: 0,
-            yy: I16Dot16::ONE.into_ft(),
+            yy: 1,
         };
         const CLOCKWISE_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
             xx: 0,
-            xy: I16Dot16::ONE.into_ft(),
-            yx: -I16Dot16::ONE.into_ft(),
+            xy: 1,
+            yx: -1,
             yy: 0,
         };
         const FLIP_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
-            xx: -I16Dot16::ONE.into_ft(),
+            xx: -1,
             xy: 0,
             yx: 0,
-            yy: -I16Dot16::ONE.into_ft(),
+            yy: -1,
         };
         const COUNTER_CLOCKWISE_ROTATION_MATRIX: FT_Matrix = FT_Matrix {
             xx: 0,
-            xy: -I16Dot16::ONE.into_ft(),
-            yx: I16Dot16::ONE.into_ft(),
+            xy: -1,
+            yx: 1,
             yy: 0,
         };
 
-        let mut matrix = match rotation {
+        let mut matrix = match transform.linear.rotation {
             Rotation::None => IDENTITY_MATRIX,
             Rotation::Clockwise90 => CLOCKWISE_ROTATION_MATRIX,
             Rotation::FlipXY => FLIP_ROTATION_MATRIX,
             Rotation::CounterClockwise90 => COUNTER_CLOCKWISE_ROTATION_MATRIX,
         };
 
+        matrix.xx *= transform.linear.scale.x.into_ft();
+        matrix.xy *= transform.linear.scale.y.into_ft();
+        matrix.yx *= transform.linear.scale.x.into_ft();
+        matrix.yy *= transform.linear.scale.y.into_ft();
+
         FT_Set_Transform(
             face,
             &mut matrix,
             &mut FT_Vector {
-                x: translation.x.into_ft(),
-                y: -translation.y.into_ft(),
+                x: transform.translation.x.into_ft(),
+                y: -transform.translation.y.into_ft(),
             },
         );
         Self(face)
@@ -942,8 +945,7 @@ impl Drop for TransformGuard {
 struct FreeTypeSubscene {
     font: Font,
     index: u32,
-    subpixel_offset: Vec2S,
-    rotation: Rotation,
+    transform: Transform,
     bbox: Rect2S,
 }
 
@@ -1138,7 +1140,7 @@ impl FreeTypeSubscene {
         rasterizer: &mut dyn Rasterizer,
     ) -> Result<(Vec2<i32>, Texture), GlyphRenderError> {
         let face = self.font.with_applied_size()?;
-        let _guard = unsafe { TransformGuard::new(face, self.subpixel_offset, self.rotation) };
+        let _guard = unsafe { TransformGuard::new(face, self.transform) };
 
         unsafe {
             fttry!(FT_Load_Glyph(
@@ -1182,8 +1184,8 @@ impl ExternalSubscene for FreeTypeSubscene {
     fn write_debug_name(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             fmt,
-            "glyph {:?} of {:?} at {:?}",
-            self.index, self.font, self.subpixel_offset
+            "glyph {:?} of {:?} * {:?}",
+            self.index, self.font, self.transform
         )
     }
 

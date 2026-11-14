@@ -8,7 +8,6 @@ use std::{
 };
 
 use rasterize::{
-    color::BGRA8,
     scene::{
         ExternalSubscene, FixedS, Rect2S, Rotation, SceneBuilder, SceneColor, SubsceneKind, Vec2S,
     },
@@ -742,7 +741,7 @@ impl Font {
             let mut r = b.root();
             r.apply_rotation(rotation);
             r.apply_translation(scaled_offset);
-            r.bitmap(texture.clone(), scaled_size, None, BGRA8::WHITE);
+            r.bitmap(texture.clone(), scaled_size, None, SceneColor::ACTIVE);
             b.finish()
         }))
     }

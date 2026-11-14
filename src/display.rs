@@ -3,6 +3,7 @@ use rasterize::{
     scene::{Rotation, SceneContentBuilder, SceneFilter},
     Rasterizer,
 };
+use thiserror::Error;
 use util::math::{I26Dot6, Rect2};
 
 use crate::{
@@ -29,7 +30,14 @@ pub struct DisplayPass<'r> {
     decoration_tracker: DecorationTracker,
 }
 
-pub type DisplayError = text::GlyphDisplayError;
+#[derive(Debug, Error)]
+pub enum DisplayError {
+    #[error("Failed to display glyph {which}")]
+    Glyph {
+        which: String,
+        source: text::GlyphDisplayError,
+    },
+}
 
 struct DisplayContext<'c> {
     dpi: u32,
@@ -246,6 +254,10 @@ impl DisplayContext<'_> {
                         self.rasterizer,
                     )
                     .map(|x| x.0.clone())
+                    .map_err(|err| DisplayError::Glyph {
+                        which: format!("{} of {font:?}", glyph.index),
+                        source: err,
+                    })
                 },
             )?;
 

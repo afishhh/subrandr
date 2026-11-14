@@ -699,7 +699,7 @@ impl Font {
 
 #[derive(Debug, Error)]
 pub enum GlyphDisplayError {
-    #[error(transparent)]
+    #[error("Failed to copy bitmap")]
     BitmapGlyphCopy(#[from] BitmapCopyError),
     #[error(transparent)]
     FreeType(#[from] FreeTypeError),

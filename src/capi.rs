@@ -50,7 +50,7 @@ enum ErrorKind {
 #[derive(Debug)]
 struct CError {
     kind: ErrorKind,
-    context: Option<Box<dyn std::error::Error + Sync + 'static>>,
+    context: Option<Box<dyn std::error::Error + 'static>>,
     message: Option<Cow<'static, str>>,
 }
 
@@ -75,7 +75,7 @@ impl CError {
         }
     }
 
-    pub fn from_error(error: impl std::error::Error + Sync + 'static) -> Self {
+    pub fn from_error(error: impl std::error::Error + 'static) -> Self {
         Self {
             kind: ErrorKind::Other,
             context: Some(Box::new(error)),
@@ -89,12 +89,18 @@ impl std::fmt::Display for CError {
         if let Some(message) = self.message.as_ref() {
             fmt.write_str(message)?;
         }
-        if let Some(context) = self.context.as_deref() {
-            if self.message.is_some() {
+
+        let mut first = self.message.is_none();
+        let mut context = self.context.as_deref();
+        while let Some(err) = context {
+            if !first {
                 fmt.write_str(": ")?;
             }
-            std::fmt::Display::fmt(context, fmt)?;
+            std::fmt::Display::fmt(err, fmt)?;
+            context = err.source();
+            first = false;
         }
+
         Ok(())
     }
 }

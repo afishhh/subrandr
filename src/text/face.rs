@@ -145,7 +145,7 @@ impl Face {
         pub fn weight[&]() -> I16Dot16;
         pub fn italic[&]() -> bool;
 
-        pub fn contains_codepoint[&](codepoint: u32) -> bool;
+        pub fn contains_codepoint[&](codepoint: char) -> bool;
     );
 
     pub fn axis(&self, tag: OpenTypeTag) -> Option<Axis> {

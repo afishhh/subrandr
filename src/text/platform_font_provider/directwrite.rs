@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::hash::Hash;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
+use icu_locale::subtags::{script, Script};
+use icu_locale::LanguageIdentifier;
 use log::{warn, LogContext};
 use util::math::I16Dot16;
 use windows::core::{implement, Interface, PCWSTR};
@@ -197,6 +200,159 @@ impl Source {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum GenericFamily {
+    SansSerif,
+    Serif,
+    Monospace,
+    Cursive,
+    Fantasy,
+    Emoji,
+}
+
+impl GenericFamily {
+    fn from_str(family: &str) -> Option<Self> {
+        Some(match family {
+            "sans-serif" => Self::SansSerif,
+            "serif" => Self::Serif,
+            "monospace" => Self::Monospace,
+            "cursive" => Self::Cursive,
+            "fantasy" => Self::Fantasy,
+            "emoji" => Self::Emoji,
+            _ => return None,
+        })
+    }
+}
+
+macro_rules! make_script_substitutes {
+    ($(($generic: ident, $first_script: literal $(| $more_scripts: literal)*) => [ $($fonts: literal),* ]),* $(,)?) => {{
+        let mut result = HashMap::new();
+
+        $({
+            let fonts: &[&'static str] = &[ $($fonts),* ];
+
+            result.insert((GenericFamily::$generic, script!($first_script)), fonts);
+            $(result.insert((GenericFamily::$generic, script!($more_scripts)), fonts);)*
+        })*
+
+        result
+    }};
+}
+
+// TODO: This can't hold `Rc<str>` because `Rc` is not Sync *even though* static
+//       `Rc`s are perfectly fine to share.
+//       Make static `Rc`s a separate type (could convert to both `Rc` and `Arc`).
+type ScriptSubstituteMap = HashMap<(GenericFamily, Script), &'static [&'static str]>;
+static SCRIPT_FONT_SUBSTITUTES: LazyLock<ScriptSubstituteMap> = LazyLock::new(|| {
+    make_script_substitutes! {
+        (Serif, "Arab") => ["Times New Roman"],
+        (SansSerif, "Arab") => ["Segoe UI", "Tahoma", "Arial"],
+        (Monospace, "Arab") => ["Consolas"],
+        (Cursive, "Arab") => ["Comic Sans MS"],
+
+        (Serif, "Grek") => ["Times New Roman"],
+        (SansSerif, "Grek") => ["Arial"],
+        (Monospace, "Grek") => ["Consolas"],
+        (Cursive, "Grek") => ["Comic Sans MS"],
+
+        (Serif, "Hebr") => ["Narkisim", "David"],
+        (SansSerif, "Hebr") => ["Arial"],
+        (Monospace, "Hebr") => ["Fixed Miriam Transparent", "Miriam Fixed", "Rod", "Consolas", "Cursor New"],
+        (Cursive, "Hebr") => ["Guttman Yad", "Ktav", "Arial"],
+
+        (Serif, "Kata" | "Hira" | "Hrkt" | "Hani" | "Jpan") => ["Yu Mincho", "MS PMincho", "MS Mincho", "Noto Serif CJK JP", "Noto Seif JP", "Meiryo", "Yu Gothic", "MS PGothic", "MS Gothic"],
+        (SansSerif, "Kata" | "Hira" | "Hrkt" | "Hani" | "Jpan") => ["Meiryo", "Yu Gothic", "MS PGothic", "MS Gothic", "Noto Sans CJK JP", "Noto Sans JP"],
+        (Monospace, "Kata" | "Hira" | "Hrkt" | "Hani" | "Jpan") => ["BIZ UDGothic", "MS Gothic", "MS Mincho", "Meiryo", "Yu Gothic", "Yu Mincho"],
+
+        (Serif, "Hang" | "Jamo" | "Kore") => ["Batang", "Noto Serif CJK KR", "Noto Serif KR", "Gulim"],
+        (SansSerif, "Hang" | "Jamo" | "Kore") => ["Malgun Gothic", "Gulim", "Noto Sans CJK KR", "Noto Sans KR"],
+        (Monospace, "Hang" | "Jamo" | "Kore") => ["GulimChe"],
+        (Cursive, "Hang" | "Jamo" | "Kore") => ["Gungsuh"],
+
+        (Serif, "Thai") => ["Tahoma"],
+        (SansSerif, "Thai") => ["Tahoma"],
+        (Monospace, "Thai") => ["Tahoma"],
+        (Cursive, "Thai") => ["Tahoma"],
+
+        (Serif, "Hans") => ["SimSun", "MS Song", "SimSum-ExtB", "Noto Serif CJK SC", "Noto Serif SC"],
+        (SansSerif, "Hans") => ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Noto Sans SC"],
+        (Monospace, "Hans") => ["NSimSun", "SimSun", "MS Song", "SimSun-ExtB"],
+        (Cursive, "Hans") => ["KaiTi", "KaiTi_GB2312"],
+
+        // TODO: Firefox has different rules for zh-CN/zh-TW/zh-HK but we don't have region here.
+        //       Either way we can't really guess region easily so just distinguish Hans/Hant for now.
+
+        (Serif, "Hant" | "Hanb") => ["Times New Roman", "PMingLiU", "MingLiU", "MingLiU-ExtB", "Noto Serif CJK TC", "Noto Serif CJK TC"],
+        (SansSerif, "Hant" | "Hanb") => ["Arial", "Microsoft JhengHei", "PMingLiU", "MingLiU", "MingLiU-ExtB", "Noto Sans CJK TC", "Noto Sans TC"],
+        (Monospace, "Hant" | "Hanb") => ["MingLiU", "MingLiU-ExtB"],
+        (Cursive, "Hant" | "Hanb") => ["DFKai-SB"],
+
+        (Serif, "Deva") => ["Kokila", "Raghindi"],
+        (SansSerif, "Deva") => ["Nirmala UI", "Mangal"],
+        (Monospace, "Deva") => ["Mangal", "Nirmala UI"],
+
+        (Serif, "Taml") => ["Latha"],
+        (Monospace, "Taml") => ["Latha"],
+
+        (Serif, "Armn") => ["Sylfaen"],
+        (SansSerif, "Armn") => ["Arial AMU"],
+        (Monospace, "Armn") => ["Arial AMU"],
+
+        (Serif, "Beng") => ["Vrinda", "Akaash", "Likhan", "Ekushey Punarbhaba"],
+        (SansSerif, "Beng") => ["Nirmala Text", "Vrinda", "Akaash", "Likhan", "Ekushey Punarbhaba"],
+        (Monospace, "Beng") => ["Mitra Mono", "Likhan", "Mukti Narrow"],
+
+        (Serif, "Cans") => ["Aboriginal Serif", "BJCree Uni"],
+        (SansSerif, "Cans") => ["Aboriginal Sans"],
+        (Monospace, "Cans") => ["Aboriginal Sans", "OskiDakelh", "Pigiarniq", "Uqammaq"],
+
+        (Serif, "Ethi") => ["Visual Geez Unicode", "Visual Geez Unicode Agazian"],
+        (SansSerif, "Ethi") => ["GF Zemen Unicode"],
+        (Monospace, "Ethi") => ["Ethiopia Jiret"],
+        (Cursive, "Ethi") => ["Visual Geez Unicode Title"],
+
+        (Serif, "Geor") => ["Sylfaen", "BPG Paata Khutsuri U", "TITUS Cyberbit Basic"],
+        (SansSerif, "Geor") => ["BPG Classic 99U"],
+        (Monospace, "Geor") => ["BPG Classic 99U"],
+
+        (Serif, "Gujr") => ["Shruti"],
+        (SansSerif, "Gujr") => ["Shruti"],
+        (Monospace, "Gujr") => ["Shruti"],
+
+        (Serif, "Guru") => ["Raavi", "Saab"],
+        (SansSerif, "Guru") => [""],
+        (Monospace, "Guru") => ["Raavi", "Saab"],
+
+        (Serif, "Khmr") => ["PhnomPenh OT", "Mondulkiri U GR 1.5", "Khmer OS"],
+        (SansSerif, "Khmr") => ["Khmer OS"],
+        (Monospace, "Khmr") => ["Khmer OS", "Khmer OS System"],
+
+        (Serif, "Mlym") => ["Rachana_w01", "AnjaliOldLipi", "Kartika", "ThoolikaUnicode"],
+        (SansSerif, "Mlym") => ["Rachana_w01", "AnjaliOldLipi", "Kartika", "ThoolikaUnicode"],
+        (Monospace, "Mlym") => ["Rachana_w01", "AnjaliOldLipi", "Kartika", "ThoolikaUnicode"],
+
+        (Serif, "Orya") => ["ori1Uni", "Kalinga"],
+        (SansSerif, "Orya") => ["ori1Uni", "Kalinga"],
+        (Monospace, "Orya") => ["ori1Uni", "Kalinga"],
+
+        (Serif, "Telu") => ["Gautami", "Akshar Unicode"],
+        (SansSerif, "Telu") => ["Gautami", "Akshar Unicode"],
+        (Monospace, "Telu") => ["Gautami", "Akshar Unicode"],
+
+        (Serif, "Knda") => ["Tunga", "AksharUnicode"],
+        (SansSerif, "Knda") => ["Tunga", "AksharUnicode"],
+        (Monospace, "Knda") => ["Tunga", "AksharUnicode"],
+
+        (Serif, "Sinh") => ["Iskoola Pota", "AksharUnicode"],
+        (SansSerif, "Sinh") => ["Iskoola Pota", "AksharUnicode"],
+        (Monospace, "Sinh") => ["Iskoola Pota", "AksharUnicode"],
+
+        (Serif, "Tibt") => ["Tibetan Machine Uni", "Jomolhari", "Microsoft Himalaya"],
+        (SansSerif, "Tibt") => ["Tibetan Machine Uni", "Jomolhari", "Microsoft Himalaya"],
+        (Monospace, "Tibt") => ["Tibetan Machine Uni", "Jomolhari", "Microsoft Himalaya"],
+    }
+});
+
 #[derive(Debug)]
 pub struct DirectWriteFontProvider {
     fallback: IDWriteFontFallback,
@@ -297,15 +453,28 @@ impl DirectWriteFontProvider {
         Ok(result)
     }
 
-    fn substitute_family(family: &str) -> &'static [&'static str] {
-        // TODO: This should be script-dependent
-        match family {
-            "sans-serif" => &["Arial"],
-            "serif" => &["Times New Roman"],
-            "monospace" => &["Consolas"],
-            "cursive" => &["Comic Sans MS"],
-            "fantasy" => &["Impact"],
-            _ => &[],
+    fn substitute_family(family: &str, language: &LanguageIdentifier) -> &'static [&'static str] {
+        let Some(generic) = GenericFamily::from_str(family) else {
+            return &[];
+        };
+
+        if let Some(script) = language.script {
+            if script == script!("Zsye") {
+                return &["Segoe UI Emoji"];
+            }
+
+            if let Some(subst) = SCRIPT_FONT_SUBSTITUTES.get(&(generic, script)) {
+                return subst;
+            }
+        }
+
+        match generic {
+            GenericFamily::Serif => &["Times New Roman"],
+            GenericFamily::SansSerif => &["Arial"],
+            GenericFamily::Monospace => &["Consolas"],
+            GenericFamily::Cursive => &["Comic Sans MS"],
+            GenericFamily::Fantasy => &["Impact"],
+            GenericFamily::Emoji => &["Segoe UI Emoji"],
         }
     }
 }
@@ -317,7 +486,7 @@ impl PlatformFontProvider for DirectWriteFontProvider {
         request: &mut crate::text::FaceRequest,
     ) -> Result<(), super::SubstituteError> {
         for family in std::mem::take(&mut request.families) {
-            let substitutes = Self::substitute_family(&family);
+            let substitutes = Self::substitute_family(&family, &request.language);
             if substitutes.is_empty() {
                 request.families.push(family);
             } else {
@@ -339,7 +508,7 @@ impl PlatformFontProvider for DirectWriteFontProvider {
         request: &crate::text::FontFallbackRequest,
     ) -> Result<Option<crate::text::FaceInfo>, super::FallbackError> {
         unsafe {
-            let (utf16, len) = codepoint_to_utf16(request.codepoint);
+            let (utf16, len) = codepoint_to_utf16(request.codepoint.into());
             let source = TextAnalysisSource { text: utf16, len };
 
             // TODO: This should probably use the "used font" from the initial query.

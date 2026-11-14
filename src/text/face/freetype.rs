@@ -263,12 +263,11 @@ impl Face {
             )
     }
 
-    pub(super) fn contains_codepoint(&self, codepoint: u32) -> bool {
+    pub(super) fn contains_codepoint(&self, codepoint: char) -> bool {
         if unsafe { FT_Select_Charmap(self.face, FT_ENCODING_UNICODE) } != 0 {
             return false;
         }
 
-        #[allow(clippy::useless_conversion)]
         let index = unsafe { FT_Get_Char_Index(self.face, codepoint as std::ffi::c_ulong) };
 
         index != 0

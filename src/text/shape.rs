@@ -1,10 +1,17 @@
+use icu_locale::{
+    subtags::{language, Language},
+    LanguageIdentifier,
+};
+use icu_properties::{
+    props::{Emoji, Script as UnicodeScript},
+    CodePointMapDataBorrowed, CodePointSetDataBorrowed,
+};
+use log::LogContext;
 use std::{
     collections::HashMap,
     mem::{ManuallyDrop, MaybeUninit},
     ops::Range,
 };
-
-use log::LogContext;
 use text_sys::*;
 use thiserror::Error;
 use util::{vec_into_parts, vec_parts};
@@ -293,6 +300,70 @@ impl Drop for ShapingBuffer {
     }
 }
 
+const CHARACTER_SCRIPT: CodePointMapDataBorrowed<UnicodeScript> = CodePointMapDataBorrowed::new();
+const EMOJI: CodePointSetDataBorrowed = CodePointSetDataBorrowed::new::<Emoji>();
+
+/// Attempts to guess language from text.
+///
+/// This guess is very bad as it only uses script information so in most cases
+/// the language subtag is [`Language::UNKNOWN`].
+fn guess_language(chars: impl Iterator<Item = char>) -> LanguageIdentifier {
+    let mut has_emoji = false;
+    let script = {
+        let mut current_script = UnicodeScript::Unknown;
+        for chr in chars {
+            let char_script = CHARACTER_SCRIPT.get(chr);
+
+            if !has_emoji && char_script == UnicodeScript::Common {
+                has_emoji = EMOJI.contains(chr);
+            }
+
+            match (current_script, char_script) {
+                (_, UnicodeScript::Common | UnicodeScript::Inherited | UnicodeScript::Unknown) => {}
+                (a, b) if a == b => {}
+                (UnicodeScript::Han, UnicodeScript::Hiragana | UnicodeScript::Katakana) => {
+                    current_script = UnicodeScript::Japanese;
+                    break;
+                }
+                (UnicodeScript::Han, UnicodeScript::Hangul) => {
+                    current_script = UnicodeScript::Korean;
+                    break;
+                }
+                (UnicodeScript::Unknown, _) => {
+                    current_script = char_script;
+                    if current_script != UnicodeScript::Han {
+                        break;
+                    }
+                }
+                // confusion
+                _ => break,
+            }
+        }
+
+        match current_script {
+            UnicodeScript::Unknown if has_emoji => current_script = UnicodeScript::SymbolsEmoji,
+            UnicodeScript::Unknown => return LanguageIdentifier::UNKNOWN,
+            _ => (),
+        }
+
+        current_script
+    };
+
+    let language = match script {
+        UnicodeScript::Hiragana | UnicodeScript::Katakana | UnicodeScript::Japanese => {
+            language!("ja")
+        }
+        UnicodeScript::Hangul | UnicodeScript::Korean => language!("ko"),
+        _ => Language::UNKNOWN,
+    };
+
+    LanguageIdentifier {
+        language,
+        script: Some(icu_locale::subtags::Script::from(script)),
+        ..LanguageIdentifier::UNKNOWN
+    }
+}
+
 struct ShapingPass<'p> {
     log: &'p LogContext<'p>,
     buffer: RawShapingBuffer,
@@ -344,7 +415,12 @@ impl ShapingPass<'_> {
             font_iterator.matcher().tofu()
         } else {
             font_iterator
-                .next_with_fallback(self.log, first_cluster.codepoint as u32, self.fonts)?
+                .next_with_fallback(
+                    self.log,
+                    first_cluster.codepoint,
+                    guess_language(cluster_map_slice.iter().map(|entry| entry.codepoint)),
+                    self.fonts,
+                )?
                 .unwrap_or_else(|| font_iterator.matcher().tofu())
         };
         let hb_font = font.as_harfbuzz_font()?;
@@ -505,5 +581,30 @@ impl Drop for ShapingPass<'_> {
             let (ptr, _, cap) = vec_parts(&mut *self.glyph_buffer);
             (ptr.cast(), cap)
         };
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use icu_locale::langid;
+
+    #[test]
+    fn guess_language() {
+        macro_rules! check {
+            ($text: literal, $expected: literal) => {
+                assert_eq!(super::guess_language($text.chars()), langid!($expected));
+            };
+        }
+
+        check!("Hello, world!", "und-Latn");
+        check!("ひらがな", "ja-Hira");
+        check!("カタカナ", "ja-Kana");
+        check!("漢字", "und-Hani");
+        check!("漢字ひらがな", "ja-Jpan");
+        check!("漢字한글", "ko-Kore");
+        check!("🌐", "und-Zsye");
+        // Other scripts take priority over emoji so that we avoid shaping
+        // normal text with an emoji font instead of the intended style.
+        check!("🌐 <- World", "und-Latn");
     }
 }

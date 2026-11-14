@@ -37,7 +37,7 @@ impl Face {
         false
     }
 
-    pub(super) fn contains_codepoint(&self, _codepoint: u32) -> bool {
+    pub(super) fn contains_codepoint(&self, _codepoint: char) -> bool {
         true
     }
 }

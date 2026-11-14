@@ -1,10 +1,13 @@
 use std::cmp::Reverse;
 
+use icu_locale::LanguageIdentifier;
 use log::LogContext;
 use util::{
     math::{I16Dot16, I26Dot6},
     rc::Rc,
 };
+
+use crate::text::FaceRequest;
 
 use super::{font_db, Face, FaceInfo, Font, FontDb, FontFallbackRequest, FontStyle};
 
@@ -178,7 +181,7 @@ impl FontMatcher {
     ) -> Result<Font, font_db::SelectError> {
         Ok(self
             .iterator()
-            .next_with_fallback(log, ' '.into(), fonts)?
+            .next_with_fallback(log, ' ', LanguageIdentifier::UNKNOWN, fonts)?
             .unwrap_or_else(|| self.tofu()))
     }
 }
@@ -198,10 +201,12 @@ impl FontMatchIterator<'_> {
         self.index > self.matcher.families.len()
     }
 
+    // TODO: language should be part of FontMatcher
     pub fn next_with_fallback(
         &mut self,
         log: &LogContext,
-        codepoint: u32,
+        codepoint: char,
+        language: LanguageIdentifier,
         fonts: &mut FontDb,
     ) -> Result<Option<Font>, font_db::SelectError> {
         loop {
@@ -209,8 +214,14 @@ impl FontMatchIterator<'_> {
                 Some(family) => {
                     self.index += 1;
 
-                    let Some(matched) =
-                        fonts.match_face_for_family(log, family.clone(), self.matcher.style)?
+                    let Some(matched) = fonts.match_face_for_family(
+                        log,
+                        &FaceRequest {
+                            families: vec![family.clone()],
+                            language: language.clone(),
+                        },
+                        self.matcher.style,
+                    )?
                     else {
                         continue;
                     };
@@ -235,6 +246,7 @@ impl FontMatchIterator<'_> {
                                 .collect(),
                             style: self.matcher.style,
                             codepoint,
+                            language,
                         },
                     ) {
                         Ok(face) => Ok(Some(face.with_size(self.matcher.size, self.matcher.dpi)?)),

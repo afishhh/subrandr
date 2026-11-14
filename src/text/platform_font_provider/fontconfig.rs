@@ -6,10 +6,11 @@ use std::{
     path::PathBuf,
 };
 
+use icu_locale::LanguageIdentifier;
 use log::{info, LogContext};
 use text_sys::fontconfig::*;
 use thiserror::Error;
-use util::math::I16Dot16;
+use util::{math::I16Dot16, rc::Rc};
 
 use super::PlatformFontProvider;
 use crate::text::{
@@ -49,10 +50,6 @@ pub enum UpdateError {
 
 #[derive(Error, Debug)]
 pub enum SubstituteError {
-    #[error("Family contained null byte")]
-    NulInFamily,
-    #[error("Language contained null byte")]
-    NulInLang,
     #[error(transparent)]
     PatternAdd(#[from] PatternAddError),
     #[error("Failed to get value from pattern: {0}")]
@@ -220,6 +217,26 @@ impl FontconfigFontProvider {
     }
 }
 
+fn set_pattern_family_and_lang(
+    pattern: &mut Pattern,
+    families: &[Rc<str>],
+    language: &LanguageIdentifier,
+) -> Result<(), PatternAddError> {
+    for family in families {
+        if let Ok(c_family) = CString::new(family.as_bytes()) {
+            pattern.add(c"family", pattern::Value::String(&c_family), true)?;
+        }
+    }
+
+    if !language.is_unknown() {
+        if let Ok(c_lang) = CString::new(language.to_string()) {
+            pattern.add(c"lang", pattern::Value::String(&c_lang), true)?;
+        }
+    }
+
+    Ok(())
+}
+
 impl PlatformFontProvider for FontconfigFontProvider {
     fn update_if_changed(&mut self, log: &LogContext) -> Result<bool, super::UpdateError> {
         if unsafe { FcInitBringUptoDate() } == FcFalse as FcBool {
@@ -247,20 +264,8 @@ impl PlatformFontProvider for FontconfigFontProvider {
     ) -> Result<(), super::SubstituteError> {
         let mut pattern = Pattern::new();
 
-        for family in &request.families {
-            let c_family =
-                CString::new(family.as_bytes()).map_err(|_| SubstituteError::NulInFamily)?;
-            pattern
-                .add(c"family", pattern::Value::String(&c_family), true)
-                .map_err(SubstituteError::from)?;
-        }
-
-        if let Some(lang) = &request.language {
-            let c_lang = CString::new(lang.as_bytes()).map_err(|_| SubstituteError::NulInLang)?;
-            pattern
-                .add(c"lang", pattern::Value::String(&c_lang), true)
-                .map_err(SubstituteError::from)?;
-        }
+        set_pattern_family_and_lang(&mut pattern, &request.families, &request.language)
+            .map_err(SubstituteError::from)?;
 
         if unsafe { FcConfigSubstitute(self.config, pattern.as_mut_ptr(), FcMatchPattern) }
             == FcFalse as FcBool
@@ -281,7 +286,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
                     }
                 }
                 Ok((_, _)) => {
-                    return Err(SubstituteError::PatternGet(PatternGetError::TypeMismatch).into())
+                    return Err(SubstituteError::PatternGet(PatternGetError::TypeMismatch).into());
                 }
                 Err(PatternGetError::NoId) => break,
                 Err(error) => return Err(SubstituteError::from(error).into()),
@@ -301,15 +306,8 @@ impl PlatformFontProvider for FontconfigFontProvider {
     ) -> Result<Option<FaceInfo>, super::FallbackError> {
         let mut pattern = Pattern::new();
 
-        for family in &request.families {
-            let Ok(c_family) = CString::new(family.clone().into_string()) else {
-                continue;
-            };
-
-            pattern
-                .add(c"family", Value::String(&c_family), true)
-                .map_err(FallbackError::from)?
-        }
+        set_pattern_family_and_lang(&mut pattern, &request.families, &request.language)
+            .map_err(FallbackError::from)?;
 
         let Some(fc_weight) = map_opentype_weight_to_fontconfig(request.style.weight) else {
             return Err(FallbackError::WeightOutOfRange.into());
@@ -369,7 +367,7 @@ impl PlatformFontProvider for FontconfigFontProvider {
                     continue;
                 };
 
-                if FcCharSetHasChar(charset, request.codepoint) == 0 {
+                if FcCharSetHasChar(charset, request.codepoint.into()) == 0 {
                     continue;
                 }
             }

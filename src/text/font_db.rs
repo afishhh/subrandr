@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf, sync::Arc};
 
+use icu_locale::LanguageIdentifier;
 use log::{trace, LogContext};
 use thiserror::Error;
 use util::{math::I16Dot16, rc::Rc};
@@ -14,16 +15,16 @@ use super::{ft_utils::FreeTypeError, Face};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontFallbackRequest {
-    pub families: Vec<Box<str>>,
+    pub families: Vec<Rc<str>>,
     pub style: FontStyle,
-    pub codepoint: u32,
+    pub codepoint: char,
+    pub language: LanguageIdentifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FaceRequest {
-    pub families: Vec<Box<str>>,
-    // TODO: script?
-    pub language: Option<Box<str>>,
+    pub families: Vec<Rc<str>>,
+    pub language: LanguageIdentifier,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -202,8 +203,8 @@ impl From<FreeTypeError> for SelectError {
 #[derive(Debug)]
 pub struct FontDb {
     source_cache: HashMap<FontSource, Face>,
-    family_cache: HashMap<Box<str>, Vec<FaceInfo>>,
-    family_match_cache: HashMap<(Rc<str>, FontStyle), Option<Face>>,
+    family_cache: HashMap<FaceRequest, Vec<FaceInfo>>,
+    family_match_cache: HashMap<(FaceRequest, FontStyle), Option<Face>>,
     request_cache: HashMap<FontFallbackRequest, Option<Face>>,
     provider: &'static LockedPlatformFontProvider,
     extra_faces: Vec<FaceInfo>,
@@ -310,31 +311,32 @@ impl FontDb {
     pub fn select_family(
         &mut self,
         log: &LogContext,
-        name: &str,
+        request: &FaceRequest,
     ) -> Result<&[FaceInfo], SelectError> {
         // NLL problem case 3 again
         let family_cache = &raw mut self.family_cache;
-        if let Some(existing) = unsafe { (*family_cache).get(name) } {
+        if let Some(existing) = unsafe { (*family_cache).get(request) } {
             return Ok(existing);
         }
 
-        trace!(log, "Substituting font family {name:?}");
+        trace!(
+            log,
+            "Substituting font families {:?} with language {:?}",
+            request.families,
+            request.language
+        );
 
-        let mut request = FaceRequest {
-            families: vec![name.into()],
-            language: None,
-        };
-
+        let mut substituted = request.clone();
         self.provider
             .read()
             .unwrap()
-            .substitute(log, &mut request)
+            .substitute(log, &mut substituted)
             .map_err(SelectError::Substitute)?;
 
-        trace!(log, "Substition resulted in {:?}", request.families);
+        trace!(log, "Substition resulted in {:?}", substituted.families);
 
         let mut result = None;
-        for candidate in &request.families {
+        for candidate in &substituted.families {
             let lowercase_name = candidate.to_lowercase();
             if let Some(faces) = self.family_lookup_cache.get(lowercase_name.as_str()) {
                 result = Some(faces);
@@ -346,21 +348,21 @@ impl FontDb {
             Some(faces) => {
                 trace!(
                     log,
-                    "Font family query {name:?} matched {} {:?} faces",
+                    "Font family query {request:?} matched {} {:?} faces",
                     faces.len(),
                     faces[0].family_names[0]
                 );
                 faces.clone()
             }
             None => {
-                trace!(log, "Font family query {name:?} matched no faces",);
+                trace!(log, "Font family query {request:?} matched no faces");
                 Vec::new()
             }
         };
 
         Ok(self
             .family_cache
-            .entry(name.into())
+            .entry(request.clone())
             .insert_entry(faces)
             .into_mut())
     }
@@ -414,16 +416,16 @@ impl FontDb {
     pub fn match_face_for_family(
         &mut self,
         log: &LogContext,
-        family: Rc<str>,
+        request: &FaceRequest,
         style: FontStyle,
     ) -> Result<Option<Face>, SelectError> {
-        match self.family_match_cache.entry((family.clone(), style)) {
+        match self.family_match_cache.entry((request.clone(), style)) {
             std::collections::hash_map::Entry::Occupied(occupied) => Ok(occupied.get().clone()),
             std::collections::hash_map::Entry::Vacant(_) => {
-                let faces = self.select_family(log, &family)?.to_vec();
+                let faces = self.select_family(log, request)?.to_vec();
                 let face = super::font_match::match_faces(&faces, &style, self)?;
                 self.family_match_cache
-                    .insert((family.clone(), style), face.clone());
+                    .insert((request.clone(), style), face.clone());
                 Ok(face)
             }
         }

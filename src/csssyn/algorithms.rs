@@ -1,4 +1,4 @@
-//! Implementation of select parser algorithms from https://drafts.csswg.org/css-syntax-3/.
+//! Implementation of select parser algorithms from <https://drafts.csswg.org/css-syntax-3/>.
 
 use crate::csssyn::{
     buffer::Cursor,

@@ -1017,11 +1017,11 @@ pub fn parse<'s>(log: &LogContext, text: &'s str) -> Result<BodyParser<'s>, Erro
 pub(super) enum SegmentSpanKind {
     /// Segments created implicitly.
     Normal,
-    /// Segments created by interior <b> tags.
+    /// Segments created by interior `<b>` tags.
     Bold,
-    /// Segments created by interior <i> tags.
+    /// Segments created by interior `<i>` tags.
     Italic,
-    /// Segments created by interior <u> tags.
+    /// Segments created by interior `<u>` tags.
     Underline,
 }
 

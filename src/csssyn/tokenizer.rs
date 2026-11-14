@@ -1,4 +1,4 @@
-//! https://www.w3.org/TR/css-syntax-3/#tokenization
+//! <https://www.w3.org/TR/css-syntax-3/#tokenization>
 
 use std::{fmt::Write, ops::Range};
 

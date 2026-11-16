@@ -7,9 +7,9 @@ use std::{
 use log::LogContext;
 use text_sys::*;
 use thiserror::Error;
-use util::{vec_into_parts, vec_parts};
+use util::{math::I26Dot6, vec_into_parts, vec_parts};
 
-use crate::text::{Font, OpenTypeTag};
+use crate::text::{face::tofu, freetype, Font, OpenTypeTag};
 
 use super::{Direction, FontDb, FontMatchIterator, Glyph};
 
@@ -314,16 +314,58 @@ impl ShapingPass<'_> {
         force_tofu: bool,
         toplevel: bool,
     ) -> Result<(), ShapingError> {
-        let cluster_map_slice = &self.cluster_map[cluster_range.clone()];
-        let (Some(first_cluster), Some(last_cluster)) =
-            (cluster_map_slice.first(), cluster_map_slice.last())
-        else {
+        let Some(first_cluster) = self.cluster_map.get(cluster_range.start) else {
             return Ok(());
         };
         assert!(
             first_cluster.is_grapheme_start,
             "Attempted to shape range that starts in the middle of a grapheme"
         );
+
+        let font = if force_tofu {
+            font_iterator.matcher().tofu()
+        } else {
+            font_iterator
+                .next_with_fallback(self.log, first_cluster.codepoint as u32, self.fonts)?
+                .unwrap_or_else(|| font_iterator.matcher().tofu())
+        };
+
+        match font {
+            Font::FreeType(font) => {
+                self.shape_freetype(cluster_range, font, font_iterator, toplevel)
+            }
+            Font::Tofu(font) => self.shape_tofu(cluster_range, font),
+        }
+    }
+
+    #[inline]
+    fn text_utf8_end(&self) -> usize {
+        self.cluster_map
+            .last()
+            .map_or(0, |entry| entry.end_utf8_index())
+    }
+
+    fn cluster_range_to_utf8(&self, range: Range<usize>) -> Range<usize> {
+        self.cluster_map[range.start].utf8_index
+            ..self
+                .cluster_map
+                .get(range.end)
+                .map_or(self.text_utf8_end(), |c| c.utf8_index)
+    }
+
+    fn shape_freetype(
+        &mut self,
+        cluster_range: Range<usize>,
+        font: freetype::Font,
+        font_iterator: FontMatchIterator<'_>,
+        toplevel: bool,
+    ) -> Result<(), ShapingError> {
+        let cluster_map_slice = &self.cluster_map[cluster_range.clone()];
+        let (Some(first_cluster), Some(last_cluster)) =
+            (cluster_map_slice.first(), cluster_map_slice.last())
+        else {
+            unreachable!();
+        };
 
         self.buffer.clear();
 
@@ -340,14 +382,7 @@ impl ShapingPass<'_> {
             self.properties = self.buffer.guess_properties();
         }
 
-        let font = if force_tofu {
-            font_iterator.matcher().tofu()
-        } else {
-            font_iterator
-                .next_with_fallback(self.log, first_cluster.codepoint as u32, self.fonts)?
-                .unwrap_or_else(|| font_iterator.matcher().tofu())
-        };
-        let hb_font = font.as_harfbuzz_font()?;
+        let hb_font = font.with_applied_size_and_hb()?.1;
 
         unsafe {
             hb_shape(
@@ -446,32 +481,22 @@ impl ShapingPass<'_> {
 
         let mut broken_subrange_start = cluster_range.start;
         {
-            let text_utf8_end = self.cluster_map.get(cluster_range.end).map_or_else(
-                || self.cluster_map.last().unwrap().end_utf8_index(),
-                |x| x.utf8_index,
-            );
-            let cluster_range_to_utf8 = |range: Range<usize>| {
-                self.cluster_map[range.start].utf8_index
-                    ..self
-                        .cluster_map
-                        .get(range.end)
-                        .map_or(text_utf8_end, |c| c.utf8_index)
-            };
             let truncate_to = glyph_buffer_last;
 
+            let font = Font::FreeType(font);
             for (cluster_subrange_start, cluster_subrange_end, len) in successful_ranges {
                 if broken_subrange_start != cluster_subrange_start {
                     self.shape_range(
                         broken_subrange_start..cluster_subrange_start,
                         font_iterator.clone(),
-                        force_tofu,
+                        false,
                         false,
                     )?;
                 }
                 broken_subrange_start = cluster_subrange_end;
 
                 let text_range =
-                    cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end);
+                    self.cluster_range_to_utf8(cluster_subrange_start..cluster_subrange_end);
                 self.output.append(
                     text_range,
                     &font,
@@ -484,16 +509,57 @@ impl ShapingPass<'_> {
         }
 
         if broken_subrange_start != cluster_range.end {
-            assert!(!force_tofu, "Tofu font failed to shape any characters");
-
             // This means the font fallback system lied to us and gave us
             // a font that does not, in fact, have the character we asked for.
-            let next_force_tofu =
+            let force_tofu =
                 broken_subrange_start == cluster_range.start && font_iterator.did_system_fallback();
 
             let range = broken_subrange_start..cluster_range.end;
-            self.shape_range(range, font_iterator.clone(), next_force_tofu, false)?
+            self.shape_range(range, font_iterator.clone(), force_tofu, false)?
         }
+
+        Ok(())
+    }
+
+    fn shape_tofu(
+        &mut self,
+        cluster_range: Range<usize>,
+        font: tofu::Font,
+    ) -> Result<(), ShapingError> {
+        let direction = Direction::try_from_hb(self.properties.direction).unwrap();
+        let glyph_buffer_start = self.glyph_buffer.len();
+        let glyph_metrics = font.glyph_metrics();
+        for entry in &self.cluster_map[cluster_range.clone()] {
+            if !direction.is_vertical() {
+                self.glyph_buffer.push(Glyph {
+                    index: u32::from(entry.codepoint),
+                    cluster: entry.utf8_index,
+                    x_advance: glyph_metrics.hori_advance,
+                    y_advance: I26Dot6::ZERO,
+                    x_offset: glyph_metrics.hori_x_offset(),
+                    y_offset: glyph_metrics.hori_y_offset,
+                    flags: 0,
+                });
+            } else {
+                self.glyph_buffer.push(Glyph {
+                    index: u32::from(entry.codepoint),
+                    cluster: entry.utf8_index,
+                    x_advance: I26Dot6::ZERO,
+                    y_advance: glyph_metrics.vert_advance,
+                    x_offset: glyph_metrics.vert_x_offset(),
+                    y_offset: glyph_metrics.vert_y_offset(),
+                    flags: 0,
+                });
+            }
+        }
+
+        let text_range = self.cluster_range_to_utf8(cluster_range);
+        self.output.append(
+            text_range,
+            &Font::Tofu(font),
+            &self.glyph_buffer[glyph_buffer_start..],
+        );
+        self.glyph_buffer.truncate(glyph_buffer_start);
 
         Ok(())
     }

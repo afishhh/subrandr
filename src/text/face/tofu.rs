@@ -1,7 +1,6 @@
-use std::ffi::c_void;
+use std::{hash::Hash, sync::Arc};
 
 use rasterize::scene::{Rotation, SceneBuilder, SceneColor, SceneContentBuilder, SubsceneKind};
-use text_sys::*;
 use util::{
     make_static_outline,
     math::{I16Dot16, I26Dot6, Outline, OutlineIterExt as _, Point2, Rect2, StaticOutline, Vec2},
@@ -42,20 +41,30 @@ impl Face {
     }
 }
 
-static TOFU_HB_FONT_USERDATA_KEY: hb_user_data_key_t = hb_user_data_key_t { unused: 104 };
-
 #[derive(Debug, Clone, Copy)]
-struct GlyphMetrics {
-    width: I26Dot6,
-    height: I26Dot6,
-    hori_bearing_x: I26Dot6,
-    hori_bearing_y: I26Dot6,
-    hori_advance: I26Dot6,
-    vert_bearing_x: I26Dot6,
-    vert_bearing_y: I26Dot6,
-    vert_advance: I26Dot6,
+pub(in crate::text) struct GlyphMetrics {
+    pub width: I26Dot6,
+    pub height: I26Dot6,
+    pub hori_y_offset: I26Dot6,
+    pub hori_advance: I26Dot6,
+    pub vert_advance: I26Dot6,
 }
 
+impl GlyphMetrics {
+    pub(in crate::text) fn hori_x_offset(&self) -> I26Dot6 {
+        I26Dot6::ZERO
+    }
+
+    pub(in crate::text) fn vert_x_offset(&self) -> I26Dot6 {
+        -(self.width / 2)
+    }
+
+    pub(in crate::text) fn vert_y_offset(&self) -> I26Dot6 {
+        -self.height
+    }
+}
+
+#[derive(Debug)]
 struct FontShared {
     point_size: I26Dot6,
     dpi: u32,
@@ -63,278 +72,67 @@ struct FontShared {
     font_metrics: FontMetrics,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct Font {
-    hb: *mut hb_font_t,
+#[derive(Debug, Clone)]
+pub struct Font(Arc<FontShared>);
+
+impl PartialEq for Font {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Font {}
+
+impl Hash for Font {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
 }
 
 impl Font {
     pub fn create(point_size: I26Dot6, dpi: u32) -> Self {
-        let shared = Box::into_raw(Box::new({
-            let dpi_scale = I16Dot16::from_quotient(dpi as i32, 72);
-            let dpi_scale6 = I26Dot6::from_raw(dpi_scale.into_raw() >> 10);
-            let decoration_thickness = point_size * dpi_scale6 / 192;
-            let point_height = point_size * dpi_scale;
-            let pixel_height = point_height + point_height / 3;
-            let pixel_width = pixel_height * 2 / 3;
-            let ascender = pixel_height * 5 / 6;
-            let descender = ascender - pixel_height;
-            FontShared {
-                point_size,
-                dpi,
-                glyph_metrics: GlyphMetrics {
-                    width: pixel_width,
-                    height: pixel_height,
-                    hori_bearing_x: pixel_height / 12,
-                    hori_bearing_y: -ascender,
-                    hori_advance: pixel_width,
-                    vert_bearing_x: pixel_width / 2,
-                    vert_bearing_y: pixel_height,
-                    vert_advance: pixel_height,
+        let dpi_scale = I16Dot16::from_quotient(dpi as i32, 72);
+        let dpi_scale6 = I26Dot6::from_raw(dpi_scale.into_raw() >> 10);
+        let decoration_thickness = point_size * dpi_scale6 / 192;
+        let point_height = point_size * dpi_scale;
+        let pixel_height = point_height + point_height / 3;
+        let pixel_width = pixel_height * 2 / 3;
+        let ascender = pixel_height * 5 / 6;
+        let descender = ascender - pixel_height;
+
+        Self(Arc::new(FontShared {
+            point_size,
+            dpi,
+            glyph_metrics: GlyphMetrics {
+                width: pixel_width,
+                height: pixel_height,
+                hori_y_offset: ascender,
+                hori_advance: pixel_width,
+                vert_advance: pixel_height,
+            },
+            font_metrics: FontMetrics {
+                alphabetic_baseline: BaselineMetrics {
+                    ascender,
+                    descender,
                 },
-                font_metrics: FontMetrics {
-                    alphabetic_baseline: BaselineMetrics {
-                        ascender,
-                        descender,
-                    },
-                    horiz_height: ascender - descender,
-                    central_baseline: BaselineMetrics {
-                        ascender: pixel_width / 2,
-                        descender: (pixel_width / 2) - pixel_width,
-                    },
-
-                    underline_top_offset: (descender - decoration_thickness) / 2,
-                    underline_thickness: decoration_thickness,
-                    strikeout_top_offset: (ascender - descender) / 2
-                        - ascender
-                        - decoration_thickness / 2,
-                    strikeout_thickness: decoration_thickness,
+                horiz_height: ascender - descender,
+                central_baseline: BaselineMetrics {
+                    ascender: pixel_width / 2,
+                    descender: (pixel_width / 2) - pixel_width,
                 },
-            }
-        }));
 
-        unsafe extern "C" fn free_userdata(userdata: *mut c_void) {
-            drop(unsafe { Box::from_raw(userdata.cast::<FontShared>()) });
-        }
-
-        let hb = unsafe {
-            let funcs = hb_font_funcs_create();
-            assert!(
-                !funcs.is_null(),
-                "hb_font_funcs_create failed to allocate font funcs"
-            );
-
-            macro_rules! set {
-                (
-                    $hb_setter: ident,
-                    $Self: ident :: $name: ident($($param: ident : $param_ty: ty),* $(,)?) -> $ret: ty
-                ) => {{
-                    unsafe extern "C" fn wrapper(font: *mut hb_font_t, fontdata: *mut c_void $(, $param: $param_ty)*, userdata: *mut c_void) -> $ret {
-                        _ = font;
-                        debug_assert!(userdata.is_null());
-                        $Self::$name(&*fontdata.cast::<FontShared>() $(, $param)*)
-                    }
-
-                    $hb_setter(
-                        funcs,
-                        Some(wrapper),
-                        std::ptr::null_mut(),
-                        None,
-                    );
-                }};
-            }
-
-            set!(
-                hb_font_funcs_set_font_h_extents_func,
-                Font::hb_font_h_extents_func(extents: *mut hb_font_extents_t) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_font_v_extents_func,
-                Font::hb_font_v_extents_func(extents: *mut hb_font_extents_t) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_nominal_glyph_func,
-                Font::hb_nominal_glyph_func(
-                    unicode: hb_codepoint_t,
-                    glyph: *mut hb_codepoint_t,
-                ) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_variation_glyph_func,
-                Font::hb_variation_glyph_func(
-                    unicode: hb_codepoint_t,
-                    variation_selector: hb_codepoint_t,
-                    glyph: *mut hb_codepoint_t,
-                ) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_glyph_h_advance_func,
-                Font::hb_glyph_h_advance_func(glyph: hb_codepoint_t) -> hb_position_t
-            );
-
-            set!(
-                hb_font_funcs_set_glyph_h_origin_func,
-                Font::hb_glyph_h_origin_func(
-                    glyph: hb_codepoint_t,
-                    x: *mut hb_position_t,
-                    y: *mut hb_position_t,
-                ) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_glyph_v_advance_func,
-                Font::hb_glyph_v_advance_func(glyph: hb_codepoint_t) -> hb_position_t
-            );
-
-            set!(
-                hb_font_funcs_set_glyph_v_origin_func,
-                Font::hb_glyph_v_origin_func(
-                    glyph: hb_codepoint_t,
-                    x: *mut hb_position_t,
-                    y: *mut hb_position_t,
-                ) -> hb_bool_t
-            );
-
-            set!(
-                hb_font_funcs_set_glyph_extents_func,
-                Font::hb_glyphs_extents_func(
-                    glyph: hb_codepoint_t,
-                    extents: *mut hb_glyph_extents_t,
-                ) -> i32
-            );
-
-            let face = hb_face_create(hb_blob_get_empty(), 0);
-            assert!(!face.is_null(), "hb_face_create failed to allocate face");
-
-            // HarfBuzz understandably assumes the font is useless if the glyph count is zero
-            hb_face_set_glyph_count(face, u32::MAX);
-
-            let font = hb_font_create(face);
-            assert!(!font.is_null(), "hb_font_create failed to allocate font");
-            hb_face_destroy(face);
-
-            let set = hb_font_set_user_data(
-                font,
-                (&raw const TOFU_HB_FONT_USERDATA_KEY).cast_mut(),
-                shared.cast::<c_void>(),
-                Some(free_userdata),
-                1,
-            );
-            assert_eq!(set, 1);
-            hb_font_set_funcs(font, funcs, shared.cast::<c_void>(), None);
-            hb_font_make_immutable(font);
-            font
-        };
-
-        Self { hb }
+                underline_top_offset: (descender - decoration_thickness) / 2,
+                underline_thickness: decoration_thickness,
+                strikeout_top_offset: (ascender - descender) / 2
+                    - ascender
+                    - decoration_thickness / 2,
+                strikeout_thickness: decoration_thickness,
+            },
+        }))
     }
 
-    unsafe fn hb_font_h_extents_func(shared: &FontShared, extents: *mut hb_font_extents_t) -> i32 {
-        let metrics = &shared.font_metrics;
-        let out = &mut *extents;
-
-        out.ascender = metrics.alphabetic_baseline.ascender.into_raw();
-        out.descender = metrics.alphabetic_baseline.descender.into_raw();
-        out.line_gap = 0;
-
-        1
-    }
-
-    unsafe fn hb_font_v_extents_func(shared: &FontShared, extents: *mut hb_font_extents_t) -> i32 {
-        let metrics = &shared.font_metrics;
-        let out = &mut *extents;
-
-        out.ascender = metrics.central_baseline.ascender.into_raw();
-        out.descender = metrics.central_baseline.descender.into_raw();
-        out.line_gap = (metrics.horiz_height - metrics.central_baseline.ascender
-            + metrics.central_baseline.descender)
-            .into_raw();
-
-        1
-    }
-
-    unsafe fn hb_nominal_glyph_func(
-        _shared: &FontShared,
-        unicode: hb_codepoint_t,
-        glyph: *mut hb_codepoint_t,
-    ) -> i32 {
-        // NOTE: A zero glyph is treated as not found so we convert NUL into u32::MAX
-        //       which should be outside the unicode range anyway.
-        glyph.write(if unicode == 0 { u32::MAX } else { unicode });
-        1
-    }
-
-    unsafe fn hb_variation_glyph_func(
-        shared: &FontShared,
-        unicode: hb_codepoint_t,
-        _variation_selector: hb_codepoint_t,
-        glyph: *mut hb_codepoint_t,
-    ) -> i32 {
-        Self::hb_nominal_glyph_func(shared, unicode, glyph)
-    }
-
-    unsafe fn hb_glyph_h_advance_func(
-        shared: &FontShared,
-        _glyph: hb_codepoint_t,
-    ) -> hb_position_t {
-        shared.glyph_metrics.hori_advance.into_raw()
-    }
-
-    unsafe fn hb_glyph_h_origin_func(
-        shared: &FontShared,
-        _glyph: hb_codepoint_t,
-        x: *mut hb_position_t,
-        y: *mut hb_position_t,
-    ) -> hb_bool_t {
-        *x = 0;
-        *y = shared.glyph_metrics.hori_bearing_y.into_raw();
-        1
-    }
-
-    unsafe fn hb_glyph_v_advance_func(
-        shared: &FontShared,
-        _glyph: hb_codepoint_t,
-    ) -> hb_position_t {
-        shared.glyph_metrics.vert_advance.into_raw()
-    }
-
-    unsafe fn hb_glyph_v_origin_func(
-        shared: &FontShared,
-        _glyph: hb_codepoint_t,
-        x: *mut hb_position_t,
-        y: *mut hb_position_t,
-    ) -> hb_bool_t {
-        *x = shared.glyph_metrics.vert_bearing_x.into_raw();
-        *y = shared.glyph_metrics.vert_bearing_y.into_raw();
-        1
-    }
-
-    unsafe fn hb_glyphs_extents_func(
-        shared: &FontShared,
-        _glyph: hb_codepoint_t,
-        extents: *mut hb_glyph_extents_t,
-    ) -> i32 {
-        let out = &mut *extents;
-        out.width = shared.glyph_metrics.width.into_raw();
-        out.height = shared.glyph_metrics.height.into_raw();
-        out.x_bearing = shared.glyph_metrics.hori_bearing_x.into_raw();
-        out.y_bearing = shared.glyph_metrics.hori_bearing_y.into_raw();
-        1
-    }
-
-    fn shared(&self) -> &FontShared {
-        unsafe {
-            &*hb_font_get_user_data(self.hb, (&raw const TOFU_HB_FONT_USERDATA_KEY).cast_mut())
-                .cast::<FontShared>()
-        }
-    }
-
-    pub fn as_harfbuzz_font(&self) -> *mut hb_font_t {
-        self.hb
+    pub(in crate::text) fn glyph_metrics(&self) -> &GlyphMetrics {
+        &self.0.glyph_metrics
     }
 }
 
@@ -342,9 +140,8 @@ impl Font {
     fn build_glyph_outline(&self, mut output: SceneContentBuilder, index: u32) {
         let mut outline = Vec::new();
 
-        let shared = self.shared();
-        let pixel_width = shared.glyph_metrics.width;
-        let pixel_height = shared.glyph_metrics.height;
+        let pixel_width = self.0.glyph_metrics.width;
+        let pixel_height = self.0.glyph_metrics.height;
         let outline_width = pixel_height / 40;
         let base_spacing = pixel_height / 12;
         let margin = base_spacing;
@@ -369,7 +166,7 @@ impl Font {
 
         let mut digits_buf = [0u8; 8];
         let num_chars = {
-            let mut value = if index == u32::MAX { 0 } else { index };
+            let mut value = index;
             let mut len = 0usize;
             while value > 0 {
                 digits_buf[len] = (value % 16) as u8;
@@ -452,22 +249,18 @@ impl Font {
         output.filled_outline(outline.iter().copied(), SceneColor::ACTIVE);
     }
 
-    pub(super) fn metrics(&self) -> &FontMetrics {
-        &self.shared().font_metrics
+    pub(in crate::text) fn metrics(&self) -> &FontMetrics {
+        &self.0.font_metrics
     }
 
     pub(super) fn point_size(&self) -> I26Dot6 {
-        self.shared().point_size
-    }
-
-    pub(super) fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
-        I26Dot6::ONE
+        self.0.point_size
     }
 
     pub(super) fn size_cache_key(&self) -> FontSizeKey {
         FontSizeKey::new(
             self.point_size(),
-            self.shared().dpi,
+            self.0.dpi,
             [I16Dot16::ZERO; text_sys::T1_MAX_MM_AXIS as usize],
         )
     }
@@ -490,20 +283,6 @@ impl Font {
             index,
         );
         GlyphSubscene(SubsceneKind::Scene(builder.finish()))
-    }
-}
-
-impl Clone for Font {
-    fn clone(&self) -> Self {
-        Self {
-            hb: unsafe { hb_font_reference(self.hb) },
-        }
-    }
-}
-
-impl Drop for Font {
-    fn drop(&mut self) {
-        unsafe { hb_font_destroy(self.hb) };
     }
 }
 

@@ -98,6 +98,11 @@ impl Direction {
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::Rtl | Self::Btt)
     }
+
+    #[must_use]
+    pub const fn is_vertical(self) -> bool {
+        matches!(self, Self::Ttb | Self::Btt)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,7 +123,7 @@ impl Glyph {
         info: &hb_glyph_info_t,
         position: &hb_glyph_position_t,
         original_cluster: usize,
-        font: &Font,
+        font: &freetype::Font,
     ) -> Self {
         // Fix up incorrect metrics for scaled bitmap glyphs which HarfBuzz sees as unscaled.
         let scale = font.harfbuzz_scale_factor_for(info.codepoint);

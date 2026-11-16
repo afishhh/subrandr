@@ -603,7 +603,7 @@ impl Font {
         Ok(self.ft_face)
     }
 
-    pub(super) fn with_applied_size_and_hb(
+    pub(in crate::text) fn with_applied_size_and_hb(
         &self,
     ) -> Result<(FT_Face, *mut hb_font_t), FreeTypeError> {
         Ok((self.with_applied_size()?, self.hb_font))
@@ -678,7 +678,7 @@ impl Font {
     // FIXME: This is not really correct since it should also scale bitmaps in scalable
     //        fonts but doing that with FreeType is a pain. Since fonts rarely mix
     //        outlines and bitmaps let's just ignore that for now.
-    pub(super) fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
+    pub(in crate::text) fn harfbuzz_scale_factor_for(&self, _glyph: u32) -> I26Dot6 {
         let is_scalable =
             unsafe { (*self.ft_face).face_flags & (FT_FACE_FLAG_SCALABLE as FT_Long) != 0 };
         if is_scalable {

@@ -4,7 +4,6 @@ use rasterize::{
     scene::{FixedS, Rotation, Scene, SubsceneKind},
     Rasterizer,
 };
-use text_sys::hb_font_t;
 use util::{
     cache::CacheValue,
     math::{I16Dot16, I26Dot6},
@@ -15,7 +14,7 @@ use crate::text::{FontSizeKey, GlyphCache, GlyphKey, OpenTypeTag};
 
 pub mod freetype;
 pub use freetype::GlyphDisplayError;
-mod tofu;
+pub mod tofu;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Axis {
@@ -184,7 +183,6 @@ impl Font {
         fn size_cache_key[&]() -> FontSizeKey;
         pub fn metrics[&]() -> &FontMetrics;
         pub fn point_size[&]() -> I26Dot6;
-        pub fn harfbuzz_scale_factor_for[&](glyph: u32) -> I26Dot6;
     );
 
     pub fn tofu(point_size: I26Dot6, dpi: u32) -> Self {
@@ -195,13 +193,6 @@ impl Font {
         match self {
             Font::FreeType(font) => Face::FreeType(font.face().clone()),
             Font::Tofu(_) => Face::Tofu(tofu::Face),
-        }
-    }
-
-    pub fn as_harfbuzz_font(&self) -> Result<*mut hb_font_t, FreeTypeError> {
-        match self {
-            Self::FreeType(font) => Ok(font.with_applied_size_and_hb()?.1),
-            Self::Tofu(font) => Ok(font.as_harfbuzz_font()),
         }
     }
 

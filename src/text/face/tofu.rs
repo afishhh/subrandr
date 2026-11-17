@@ -17,7 +17,7 @@ pub struct Face;
 
 impl Face {
     pub(super) fn family_name(&self) -> &str {
-        "Subrandr Tofu Font"
+        "Subrandr Tofu"
     }
 
     pub(super) fn axes(&self) -> &[super::Axis] {
@@ -95,9 +95,9 @@ impl Font {
         let dpi_scale6 = I26Dot6::from_raw(dpi_scale.into_raw() >> 10);
         let decoration_thickness = point_size * dpi_scale6 / 192;
         let point_height = point_size * dpi_scale;
-        let pixel_height = point_height + point_height / 3;
-        let pixel_width = pixel_height * 2 / 3;
-        let ascender = pixel_height * 5 / 6;
+        let pixel_height = (point_height + point_height * 3 / 11).ceil();
+        let pixel_width = (pixel_height * 2 / 3).ceil();
+        let ascender = pixel_height * 9 / 11;
         let descender = ascender - pixel_height;
 
         Self(Arc::new(FontShared {
@@ -142,8 +142,8 @@ impl Font {
 
         let pixel_width = self.0.glyph_metrics.width;
         let pixel_height = self.0.glyph_metrics.height;
-        let outline_width = pixel_height / 40;
-        let base_spacing = pixel_height / 12;
+        let outline_width = (pixel_height / 40).floor().max(I26Dot6::ONE);
+        let base_spacing = (pixel_height / 12).round();
         let margin = base_spacing;
         let inner_offset = Vec2::new(margin, margin);
         let outline_size = Vec2::new(pixel_width - margin * 2, pixel_height - margin * 2);
@@ -268,7 +268,6 @@ impl Font {
     pub(super) fn glyph_subscene_uncached(
         &self,
         index: u32,
-        subpixel_offset: rasterize::scene::Vec2S,
         rotation: Rotation,
         _rasterizer: &mut dyn rasterize::Rasterizer,
     ) -> GlyphSubscene {
@@ -276,7 +275,6 @@ impl Font {
         self.build_glyph_outline(
             {
                 let mut root = builder.root();
-                root.apply_translation(subpixel_offset);
                 root.apply_rotation(rotation);
                 root
             },

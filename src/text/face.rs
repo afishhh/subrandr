@@ -6,7 +6,7 @@ use rasterize::{
 };
 use util::{
     cache::CacheValue,
-    math::{I16Dot16, I26Dot6},
+    math::{I16Dot16, I26Dot6, Vec2},
 };
 
 use super::FreeTypeError;
@@ -205,8 +205,13 @@ impl Font {
         rotation: Rotation,
         rasterizer: &mut dyn Rasterizer,
     ) -> Result<&'c GlyphSubscene, GlyphDisplayError> {
-        let (render_offset, subpixel_bucket) =
-            GlyphKey::get_subpixel_bucket(offset_value, offset_axis_is_y);
+        let (render_offset, subpixel_bucket) = match self {
+            Font::FreeType(_) => GlyphKey::get_subpixel_bucket(offset_value, offset_axis_is_y),
+            // We ignore subpixel offset for tofu glyphs since this makes them
+            // aligned on a pixel boundary and we don't have to do hinting
+            // of the rectangle.
+            Font::Tofu(_) => (Vec2::ZERO, 0),
+        };
         let key = self.size_cache_key().for_glyph(self.face(), glyph);
 
         cache.get_or_try_insert_with(key.clone().for_outline(subpixel_bucket, rotation), || {
@@ -219,9 +224,7 @@ impl Font {
                     cache,
                     key,
                 ),
-                Self::Tofu(font) => {
-                    Ok(font.glyph_subscene_uncached(glyph, render_offset, rotation, rasterizer))
-                }
+                Self::Tofu(font) => Ok(font.glyph_subscene_uncached(glyph, rotation, rasterizer)),
             }
         })
     }

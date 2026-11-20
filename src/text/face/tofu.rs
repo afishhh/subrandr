@@ -298,11 +298,6 @@ static GLYPHS: [StaticOutline<f32>; 17] = [
         line_to (40, 360);
         line_to (160, 360);
         line_to (160, 40);
-
-        #move_to (80, 170);
-        line_to (80, 230);
-        line_to (120, 230);
-        line_to (120, 170);
     },
     // 1
     make_static_outline! {

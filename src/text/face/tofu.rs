@@ -164,8 +164,8 @@ impl Font {
         let min_cell_spacing_x = base_spacing / 2;
         let min_cell_spacing_y = base_spacing;
 
-        let mut digits_buf = [0u8; 8];
-        let num_chars = {
+        let mut digits_buf = [0u8; 10];
+        let n_digits = {
             let mut value = index;
             let mut len = 0usize;
             while value > 0 {
@@ -176,20 +176,19 @@ impl Font {
             if len == 0 {
                 len += 1;
             }
-            digits_buf[..len].reverse();
             len
         };
 
-        let (cells_per_row, max_cols): (&[u8], u8) = match num_chars {
-            1 => (&[1], 1),
-            2 => (&[2], 2),
-            3 => (&[2, 2], 2),
-            4 => (&[2, 2], 2),
-            5 => (&[2, 2, 2], 3),
-            6 => (&[2, 2, 2], 3),
+        let (cells_per_row, max_cols, leading_zeroes): (&[u8], u8, usize) = match n_digits {
+            1 => (&[1], 1, 0),
+            2 => (&[2], 2, 0),
+            3 => (&[2, 2], 2, 1),
+            4 => (&[2, 2], 2, 0),
+            5 => (&[2, 2, 2], 3, 1),
+            6 => (&[2, 2, 2], 3, 0),
             // These should not actually occur
-            7 => (&[3, 3, 3], 3),
-            8 => (&[3, 3, 3], 3),
+            7 => (&[3, 3, 3], 3, 2),
+            8 => (&[3, 3, 3], 3, 1),
             0 | 9.. => unreachable!(),
         };
         let rows = cells_per_row.len() as u8;
@@ -223,7 +222,7 @@ impl Font {
                 16,
             );
         } else {
-            let mut i = 0;
+            let mut i = 1;
             let justify_spacing_y =
                 (content_size.y - cell_size_y * i32::from(rows)) / i32::from(rows + 1);
             let mut y = content_offset.y + justify_spacing_y.into_f32();
@@ -236,7 +235,7 @@ impl Font {
                     draw_digit(
                         Vec2::new(x, y),
                         Vec2::new(cell_size_x, cell_size_y),
-                        digits_buf[i],
+                        digits_buf[(n_digits + leading_zeroes) - i],
                     );
                     x += cell_size_x.into_f32() + justify_spacing_x.into_f32();
                     i += 1;

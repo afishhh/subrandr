@@ -11,6 +11,7 @@
 - Added support for SRT-style styling tags in SRV3 (https://github.com/afishhh/subrandr/issues/84). SRV3 segments can now use escaped (as `&lt;<name>&gt;`) `<b>`/`<i>`/`<u>` tags for styling.
 - Fixed shaping context not being provided to HarfBuzz in all but the first shaping attempt (shaping the whole string with the primary font).
 - Removed complex shaping of tofu glyphs. They are now always simply laid out sequentially along the baseline.
+- Fixed tofu hex zero padding appearing as trailing zeroes instead of leading zeroes.
 - Improved tofu glyph rendering.
 
 ## [v1.4.0]
